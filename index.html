@@ -2479,9 +2479,22 @@ function FinanceiroView(){
       {/* POR CLIENTE */}
       {fTab==="clientes" && (
         <div>
+          {/* Year filter */}
+          {anos.length>0 && (
+            <div style={{display:"flex",gap:4,marginBottom:14,alignItems:"center",flexWrap:"wrap"}}>
+              <span style={{fontSize:11,color:T.t3,fontWeight:600,marginRight:6}}>Período:</span>
+              <button onClick={function(){sSelYear("todos");sSelMonth(null)}} style={{padding:"6px 14px",borderRadius:10,fontSize:11,fontWeight:600,cursor:"pointer",border:selYear==="todos"?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.04)",background:selYear==="todos"?T.goldD:"transparent",color:selYear==="todos"?T.gold:T.t3}}>Todos</button>
+              {anos.map(function(yr){return (
+                <button key={yr} onClick={function(){sSelYear(yr);sSelMonth(null)}} style={{padding:"6px 14px",borderRadius:10,fontSize:11,fontWeight:600,cursor:"pointer",border:selYear===yr?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.04)",background:selYear===yr?T.goldD:"transparent",color:selYear===yr?T.gold:T.t3}}>{yr}</button>
+              )})}
+            </div>
+          )}
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-            <h4 style={{margin:0,fontSize:14,fontWeight:700,color:T.gold}}>Receita por Cliente {selYear!=="todos"?"— "+selYear:""}</h4>
-            <span style={{fontSize:12,fontWeight:700,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(totalEntradas)}</span>
+            <h4 style={{margin:0,fontSize:14,fontWeight:700,color:T.gold}}>Receita por Cliente {selYear!=="todos"?"— "+selYear:"— Todos os anos"}</h4>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:16,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(totalEntradas)}</div>
+              <div style={{fontSize:9,color:T.t3}}>{Object.keys(byCliente).length} clientes • {entradasFilt.length} entradas</div>
+            </div>
           </div>
           {Object.keys(byCliente).length===0 ? <Cd style={{padding:20,textAlign:"center"}} hov={false}><div style={{color:T.t3}}>Importe dados primeiro</div></Cd> : (
             <div>
@@ -3294,4 +3307,4 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 
 </script>
 </body>
-</html>
+  </html>
