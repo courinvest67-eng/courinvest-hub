@@ -1984,6 +1984,555 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
 }
 
 /* AGENDA */
+/* FINANCEIRO DA EMPRESA */
+function FinanceiroView(){
+  const[fTab,sFTab]=useState("importar");
+  const fileRef=useRef(null);
+  const[entradas,sEntradas]=useState([]);
+  const[despesas,sDespesas]=useState([]);
+  const[showAddDesp,sShowAddDesp]=useState(false);
+  const[selMonth,sSelMonth]=useState(null);
+  const[selYear,sSelYear]=useState("todos");
+
+  /* Import spreadsheet */
+  var importPlanilha=function(file){
+    if(!file)return;
+    var isExcel=file.name.match(/\.(xlsx|xls)$/i);
+    var reader=new FileReader();
+    reader.onload=function(e){
+      try{
+        var rows=[];var sheetUsed="";
+        if(isExcel){
+          var wb=XLSX.read(e.target.result,{type:"array",raw:false});
+          var bestSheet="";var bestCount=0;
+          wb.SheetNames.forEach(function(name){
+            var ws=wb.Sheets[name];
+            var r=XLSX.utils.sheet_to_json(ws,{defval:"",raw:false});
+            if(r.length>bestCount){bestCount=r.length;bestSheet=name}
+          });
+          sheetUsed=bestSheet;
+          var ws=wb.Sheets[bestSheet];
+          rows=XLSX.utils.sheet_to_json(ws,{defval:"",raw:false});
+        }else{
+          var text=e.target.result;
+          var lines=text.split(/\r?\n/).filter(function(l){return l.trim()});
+          if(lines.length<2)return;
+          var sep=lines[0].includes(";")?";":lines[0].includes("\t")?"\t":",";
+          var headers=lines[0].split(sep).map(function(x){return x.replace(/"/g,"").trim()});
+          rows=lines.slice(1).map(function(line){var vals=line.split(sep).map(function(v){return v.replace(/"/g,"").trim()});var obj={};headers.forEach(function(h,i){obj[h]=vals[i]||""});return obj});
+        }
+        if(rows.length===0){alert("Planilha vazia");return}
+        var rawKeys=Object.keys(rows[0]);
+        var findCol=function(patterns){
+          return rawKeys.find(function(k){
+            var kl=k.toLowerCase().trim();
+            for(var i=0;i<patterns.length;i++){if(kl.indexOf(patterns[i])>=0)return true}
+            return false;
+          });
+        };
+        var colData=findCol(["data","date"]);
+        var colServico=findCol(["servic","serviç"]);
+        var colMeio=findCol(["meio","recebimento","pagamento"]);
+        var colCliente=rawKeys.find(function(k){return k.trim().toLowerCase()==="cliente"}) || findCol(["cliente"]);
+        var colValor=findCol(["valor","value"]);
+        var colNF=findCol(["nf","nota"]);
+        var colPct=findCol(["fat","percent","%"]);
+        var parseVal=function(v){
+          if(typeof v==="number")return v;
+          var s=String(v||"0").trim().replace(/R\$\s*/g,"").replace(/\s/g,"");
+          if(s.match(/,\d{3}\./)){s=s.replace(/,/g,"")}
+          else if(s.match(/\.\d{3},/)){s=s.replace(/\./g,"").replace(",",".")}
+          else if(s.match(/,\d{1,2}$/)){s=s.replace(",",".")}
+          return parseFloat(s)||0;
+        };
+        var parseDate=function(v){
+          if(!v)return"";var s=String(v).trim();
+          if(s.match(/^\d{1,2}\/\d{1,2}\/\d{2}$/)){var p=s.split("/");var yr=+p[2];yr=yr<50?2000+yr:1900+yr;return yr+"-"+(p[0].length<2?"0"+p[0]:p[0])+"-"+(p[1].length<2?"0"+p[1]:p[1])}
+          if(s.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)){var p=s.split("/");return p[2]+"-"+(p[1].length<2?"0"+p[1]:p[1])+"-"+(p[0].length<2?"0"+p[0]:p[0])}
+          if(s.match(/^\d{4}-\d{2}-\d{2}/))return s.substring(0,10);
+          var num=parseFloat(s);if(num>40000&&num<60000){var d=new Date((num-25569)*86400*1000);return d.toISOString().split("T")[0]}
+          return s;
+        };
+        var parsed=rows.map(function(r,i){
+          var val=parseVal(colValor?r[colValor]:0);
+          if(val<=0)return null;
+          var cli=String(colCliente?r[colCliente]:"").trim();
+          if(!cli||cli.toLowerCase()==="total geral"||cli.toLowerCase()==="cliente")return null;
+          return{id:Date.now()+i,data:parseDate(colData?r[colData]:""),servico:String(colServico?r[colServico]:"").trim(),meio:String(colMeio?r[colMeio]:"").trim(),cliente:cli,valor:val,nf:String(colNF?r[colNF]:"").trim(),pctFat:parseVal(colPct?r[colPct]:0)};
+        }).filter(function(r){return r!==null});
+        if(parsed.length===0){alert("Nenhuma entrada encontrada.\nAba: "+(sheetUsed||"CSV")+"\nColunas: "+rawKeys.join(", ")+"\nValor col: "+(colValor||"?"));return}
+        sEntradas(function(prev){return prev.concat(parsed)});
+        sFTab("resumo");
+      }catch(err){alert("Erro: "+err.message);console.error(err)}
+    };
+    if(isExcel){reader.readAsArrayBuffer(file)}else{reader.readAsText(file,"UTF-8")}
+  };
+
+
+  /* Computed data from entradas */
+  /* Extract available years */
+  var anos=[];entradas.forEach(function(e){if(e.data){var yr=e.data.substring(0,4);if(anos.indexOf(yr)<0)anos.push(yr)}});
+  anos.sort();
+
+  /* Filter by selected year */
+  var entradasFilt=selYear==="todos"?entradas:entradas.filter(function(e){return e.data&&e.data.substring(0,4)===selYear});
+  var despesasFilt=selYear==="todos"?despesas:despesas.filter(function(d){return!d.data||d.data.substring(0,4)===selYear});
+
+  var totalEntradas=entradasFilt.reduce(function(a,e){return a+e.valor},0);
+  var totalDespesas=despesasFilt.reduce(function(a,d){return a+d.valor},0);
+  var lucro=totalEntradas-totalDespesas;
+  var margem=totalEntradas>0?((lucro/totalEntradas)*100):0;
+
+  /* Group by month */
+  var byMonth={};
+  entradasFilt.forEach(function(e){
+    var m=e.data?e.data.substring(0,7):"sem-data";
+    if(!byMonth[m])byMonth[m]={rec:0,entries:[],servicos:{},meios:{}};
+    byMonth[m].rec+=e.valor;
+    byMonth[m].entries.push(e);
+    var svc=e.servico||"Outros";
+    byMonth[m].servicos[svc]=(byMonth[m].servicos[svc]||0)+e.valor;
+    var meio=e.meio||"Outros";
+    byMonth[m].meios[meio]=(byMonth[m].meios[meio]||0)+e.valor;
+  });
+  var mesesOrdenados=Object.keys(byMonth).sort();
+  var mxRec=Math.max.apply(null,mesesOrdenados.map(function(m){return byMonth[m].rec}).concat([1]));
+
+  /* Group by year for summary cards */
+  var byYear={};
+  entradas.forEach(function(e){if(e.data){var yr=e.data.substring(0,4);if(!byYear[yr])byYear[yr]={rec:0,count:0};byYear[yr].rec+=e.valor;byYear[yr].count++}});
+
+  /* Group by servico */
+  var byServico={};
+  entradasFilt.forEach(function(e){var s=e.servico||"Outros";byServico[s]=(byServico[s]||0)+e.valor});
+  var svcColors={"Gestão de Patrimônio":T.gold,"Gestão Financeira":T.cyan,"Couri Mile$":T.purple,"Consultoria Financeira":T.green,"Consultoria":T.green,"Parcerias":T.orange};
+
+  /* Group by meio */
+  var byMeio={};
+  entradasFilt.forEach(function(e){var m=e.meio||"Outros";byMeio[m]=(byMeio[m]||0)+e.valor});
+  var meioColors={Genial:T.gold,Vindi:T.green,Stripe:T.purple,PIX:T.cyan,Boleto:T.orange,Dinheiro:T.t2};
+
+  /* Group by cliente */
+  var byCliente={};
+  entradasFilt.forEach(function(e){var c=e.cliente||"Desconhecido";if(!byCliente[c])byCliente[c]={total:0,count:0,servico:"",meio:"",meses:{}};byCliente[c].total+=e.valor;byCliente[c].count++;byCliente[c].servico=e.servico;byCliente[c].meio=e.meio;var mm=e.data?e.data.substring(0,7):"";if(mm){byCliente[c].meses[mm]=(byCliente[c].meses[mm]||0)+e.valor}});
+
+  /* Despesas by category */
+  var byDespCat={};
+  despesas.forEach(function(d){var c=d.cat||"Outros";byDespCat[c]=(byDespCat[c]||0)+d.valor});
+  var despCatColors={Aluguel:T.red,Software:T.cyan,Contabilidade:T.orange,Marketing:T.purple,Telefonia:T.green,Impostos:T.gold,Outros:T.t3};
+
+  var fmtMonth=function(m){var p=m.split("-");return(["","Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"][+p[1]]||p[1])+"/"+p[0].slice(2)};
+
+  return (
+    <div>
+      <div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap"}}>
+        {[{id:"importar",l:"📥 Importar"},{id:"resumo",l:"📊 Resumo"},{id:"entradas",l:"💰 Entradas"},{id:"despesas",l:"💸 Despesas"},{id:"dre",l:"📋 DRE"},{id:"clientes",l:"👥 Por Cliente"}].map(function(t){return (
+          <button key={t.id} onClick={function(){sFTab(t.id)}} style={{padding:"8px 16px",borderRadius:12,fontSize:11,fontWeight:600,cursor:"pointer",border:fTab===t.id?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.04)",background:fTab===t.id?T.goldD:"transparent",color:fTab===t.id?T.gold:T.t3}}>{t.l}</button>
+        )})}
+      </div>
+
+      {/* IMPORTAR */}
+      {fTab==="importar" && (
+        <div>
+          <Cd style={{padding:30,textAlign:"center"}} hov={false}>
+            <input ref={fileRef} type="file" accept=".csv,.txt,.tsv,.xlsx,.xls" onChange={function(e){if(e.target.files[0])importPlanilha(e.target.files[0])}} style={{display:"none"}}/>
+            <div style={{fontSize:42,marginBottom:14,animation:"float 4s ease infinite"}}>📊</div>
+            <div style={{fontSize:18,fontWeight:700,color:T.gold,marginBottom:6}}>Importar Planilha de Entradas</div>
+            <div style={{fontSize:13,color:T.t3,marginBottom:18,lineHeight:1.7}}>Envie sua planilha com as colunas:<br/><strong style={{color:T.t2}}>Data | Serviço | Meio de Recebimento | Cliente | Valor | NF | % Faturamento</strong></div>
+            <Bt onClick={function(){fileRef.current&&fileRef.current.click()}} style={{fontSize:14,padding:"14px 32px"}}>📥 Selecionar Planilha (CSV ou Excel)</Bt>
+            {entradas.length>0 && <div style={{marginTop:16,padding:10,background:T.greenD,borderRadius:10,fontSize:12,color:T.green,fontWeight:600}}>✅ {entradas.length} entradas carregadas • Total: {fm(totalEntradas)}</div>}
+          </Cd>
+          {entradas.length>0 && (
+            <Cd style={{padding:18,marginTop:14}} hov={false}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <h4 style={{margin:0,fontSize:13,fontWeight:700,color:T.gold}}>Preview ({Math.min(entradas.length,20)} de {entradas.length})</h4>
+                <Bt v="secondary" onClick={function(){sEntradas([]);sFTab("importar")}} style={{fontSize:10,padding:"5px 10px"}}>🗑 Limpar</Bt>
+              </div>
+              <div style={{overflowX:"auto",borderRadius:12,border:"1px solid rgba(255,255,255,0.04)"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:600}}>
+                  <thead><tr style={{background:"rgba(255,255,255,0.02)"}}>
+                    {["Data","Serviço","Meio","Cliente","Valor","NF","%"].map(function(h,i){return <th key={i} style={{padding:"8px 10px",textAlign:i>=4?"right":"left",fontWeight:700,color:T.gold,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)"}}>{h}</th>})}
+                  </tr></thead>
+                  <tbody>{entradas.slice(0,20).map(function(e,i){return (
+                    <tr key={e.id} style={{background:i%2===0?"transparent":"rgba(255,255,255,0.015)"}}>
+                      <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",whiteSpace:"nowrap"}}>{e.data?e.data.split("-").reverse().join("/"):""}</td>
+                      <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)"}}><Bg c={e.servico.indexOf("Patrimônio")>=0?"gold":e.servico.indexOf("Financeira")>=0?"cyan":"purple"}>{e.servico}</Bg></td>
+                      <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",color:T.t2}}>{e.meio}</td>
+                      <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",fontWeight:600}}>{e.cliente}</td>
+                      <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",textAlign:"right",fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(e.valor)}</td>
+                      <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",textAlign:"right",color:e.nf==="OK"?T.green:T.t3}}>{e.nf}</td>
+                      <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",textAlign:"right",color:T.t3,fontFamily:"'JetBrains Mono'"}}>{e.pctFat?e.pctFat.toFixed(2)+"%":""}</td>
+                    </tr>
+                  )})}</tbody>
+                </table>
+              </div>
+            </Cd>
+          )}
+        </div>
+      )}
+
+      {/* RESUMO */}
+      {fTab==="resumo" && (
+        <div>
+          {entradas.length===0 ? <Cd style={{padding:30,textAlign:"center"}} hov={false}><div style={{fontSize:28,marginBottom:10}}>📊</div><div style={{fontSize:14,color:T.t3}}>Importe sua planilha primeiro na aba "📥 Importar"</div></Cd> : (
+            <div>
+              {/* Year filter */}
+              {anos.length>0 && (
+                <div style={{display:"flex",gap:4,marginBottom:14,alignItems:"center",flexWrap:"wrap"}}>
+                  <span style={{fontSize:11,color:T.t3,fontWeight:600,marginRight:6}}>Período:</span>
+                  <button onClick={function(){sSelYear("todos");sSelMonth(null)}} style={{padding:"6px 14px",borderRadius:10,fontSize:11,fontWeight:600,cursor:"pointer",border:selYear==="todos"?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.04)",background:selYear==="todos"?T.goldD:"transparent",color:selYear==="todos"?T.gold:T.t3}}>Todos</button>
+                  {anos.map(function(yr){return (
+                    <button key={yr} onClick={function(){sSelYear(yr);sSelMonth(null)}} style={{padding:"6px 14px",borderRadius:10,fontSize:11,fontWeight:600,cursor:"pointer",border:selYear===yr?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.04)",background:selYear===yr?T.goldD:"transparent",color:selYear===yr?T.gold:T.t3}}>{yr}</button>
+                  )})}
+                </div>
+              )}
+
+              {/* Year summary cards */}
+              {selYear==="todos" && anos.length>1 && (
+                <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:14}}>
+                  {anos.map(function(yr){var d=byYear[yr]||{rec:0,count:0};var prevYr=String(+yr-1);var prevRec=byYear[prevYr]?byYear[prevYr].rec:0;var evolYr=prevRec>0?(((d.rec/prevRec)-1)*100):0;return (
+                    <Cd key={yr} onClick={function(){sSelYear(yr);sSelMonth(null)}} style={{padding:"14px 18px",flex:1,minWidth:160,cursor:"pointer"}} glow={true}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                        <span style={{fontSize:18,fontWeight:800,color:T.gold}}>{yr}</span>
+                        {prevRec>0 && <span style={{fontSize:11,fontWeight:700,color:evolYr>=0?T.green:T.red,background:evolYr>=0?T.greenD:T.redD,padding:"2px 8px",borderRadius:6}}>{evolYr>=0?"▲ +":"▼ "}{evolYr.toFixed(1)}%</span>}
+                      </div>
+                      <div style={{fontSize:20,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(d.rec)}</div>
+                      <div style={{display:"flex",justifyContent:"space-between",marginTop:4,fontSize:10,color:T.t3}}>
+                        <span>{d.count} entradas</span>
+                        <span>Média {fm(d.rec/(Object.keys(byMonth).filter(function(m){return m.startsWith(yr)}).length||1))}/mês</span>
+                      </div>
+                    </Cd>
+                  )})}
+                </div>
+              )}
+
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
+                {[
+                  {l:"RECEITA "+(selYear==="todos"?"TOTAL":selYear),v:fm(totalEntradas),c:T.green},
+                  {l:"DESPESA "+(selYear==="todos"?"TOTAL":selYear),v:fm(totalDespesas),c:T.red},
+                  {l:"LUCRO "+(selYear==="todos"?"":""+selYear),v:fm(lucro),c:lucro>=0?T.green:T.red},
+                  {l:"MARGEM",v:margem.toFixed(0)+"%",c:margem>=50?T.green:T.gold},
+                  {l:"ENTRADAS",v:String(entradasFilt.length),c:T.cyan},
+                  {l:"MESES",v:String(mesesOrdenados.length),c:T.purple},
+                ].map(function(k,i){return (
+                  <Cd key={i} style={{padding:"12px 16px",flex:1,minWidth:120}} hov={false} glow={i===2}>
+                    <div style={{fontSize:7,color:T.t3,fontWeight:600,letterSpacing:1}}>{k.l}</div>
+                    <div style={{fontSize:17,fontWeight:800,color:k.c,marginTop:2,fontFamily:"'JetBrains Mono'"}}>{k.v}</div>
+                  </Cd>
+                )})}
+              </div>
+              {/* Chart */}
+              <Cd style={{padding:20}} hov={false}>
+                <h4 style={{margin:"0 0 16px",fontSize:14,fontWeight:700,color:T.gold}}>Receita por Mês <span style={{fontSize:10,fontWeight:400,color:T.t3}}>(clique para detalhar)</span></h4>
+                <div style={{display:"flex",alignItems:"flex-end",gap:4,height:140,marginBottom:8}}>
+                  {mesesOrdenados.map(function(m,i){
+                    var prevRec=i>0?byMonth[mesesOrdenados[i-1]].rec:0;
+                    var curRec=byMonth[m].rec;
+                    var evolPct=prevRec>0?(((curRec/prevRec)-1)*100):0;
+                    var isSel=selMonth===m;
+                    return (
+                      <div key={i} onClick={function(){sSelMonth(isSel?null:m)}} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer"}}>
+                        {i>0 && <div style={{fontSize:8,fontWeight:700,color:evolPct>=0?T.green:T.red,marginBottom:2}}>{evolPct>=0?"+":""}{evolPct.toFixed(1)}%</div>}
+                        {i===0 && <div style={{fontSize:8,color:"transparent",marginBottom:2}}>—</div>}
+                        <div style={{fontSize:8,fontWeight:700,color:isSel?T.gold:T.t2,fontFamily:"'JetBrains Mono'"}}>{fm(curRec).replace("R$","").trim()}</div>
+                        <div style={{width:"100%",height:(curRec/mxRec*100)*0.7+"%",background:isSel?"linear-gradient(180deg,"+T.gold+","+T.goldL+")":T.green,borderRadius:"4px 4px 0 0",opacity:isSel?1:.5,minHeight:6,border:isSel?"1px solid "+T.gold:"none",transition:"all 0.25s"}}/>
+                        <span style={{fontSize:8,color:isSel?T.gold:T.t3,fontWeight:isSel?700:400,whiteSpace:"nowrap"}}>{fmtMonth(m)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                {/* Evolution summary */}
+                {mesesOrdenados.length>=2 && (function(){
+                  var first=byMonth[mesesOrdenados[0]].rec;
+                  var last=byMonth[mesesOrdenados[mesesOrdenados.length-1]].rec;
+                  var evol=first>0?(((last/first)-1)*100):0;
+                  return <div style={{display:"flex",justifyContent:"center",gap:16,fontSize:10,marginTop:4}}>
+                    <span style={{color:T.t3}}>Evolução total: <strong style={{color:evol>=0?T.green:T.red}}>{evol>=0?"+":""}{evol.toFixed(1)}%</strong></span>
+                    <span style={{color:T.t3}}>Média: <strong style={{color:T.gold}}>{fm(totalEntradas/mesesOrdenados.length)}/mês</strong></span>
+                  </div>;
+                })()}
+              </Cd>
+
+              {/* Month drill-down */}
+              {selMonth && byMonth[selMonth] && (
+                <Cd style={{padding:18,marginTop:12}} hov={false} glow>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                    <h4 style={{margin:0,fontSize:14,fontWeight:700,color:T.gold}}>📅 {fmtMonth(selMonth)} — Detalhamento</h4>
+                    <button onClick={function(){sSelMonth(null)}} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:8,color:T.t3,padding:"4px 10px",cursor:"pointer",fontSize:12}}>✕</button>
+                  </div>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
+                    <Cd style={{padding:"10px 14px",flex:1,minWidth:100}} hov={false}><div style={{fontSize:7,color:T.t3,fontWeight:600}}>RECEITA</div><div style={{fontSize:16,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(byMonth[selMonth].rec)}</div></Cd>
+                    <Cd style={{padding:"10px 14px",flex:1,minWidth:100}} hov={false}><div style={{fontSize:7,color:T.t3,fontWeight:600}}>ENTRADAS</div><div style={{fontSize:16,fontWeight:800,color:T.cyan}}>{byMonth[selMonth].entries.length}</div></Cd>
+                    <Cd style={{padding:"10px 14px",flex:1,minWidth:100}} hov={false}><div style={{fontSize:7,color:T.t3,fontWeight:600}}>TICKET MÉDIO</div><div style={{fontSize:16,fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(byMonth[selMonth].rec/byMonth[selMonth].entries.length)}</div></Cd>
+                  </div>
+                  {/* By service this month */}
+                  <div style={{marginBottom:14}}>
+                    <div style={{fontSize:11,fontWeight:700,color:T.t2,marginBottom:8}}>Por Serviço</div>
+                    {Object.entries(byMonth[selMonth].servicos).sort(function(a,b){return b[1]-a[1]}).map(function(e,i){var s=e[0],v=e[1];return (
+                      <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}>
+                        <span style={{fontSize:12,fontWeight:600}}>{s}</span>
+                        <span style={{fontSize:12,fontWeight:700,color:svcColors[s]||T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(v)}</span>
+                      </div>
+                    )})}
+                  </div>
+                  {/* By meio this month */}
+                  <div style={{marginBottom:14}}>
+                    <div style={{fontSize:11,fontWeight:700,color:T.t2,marginBottom:8}}>Por Meio de Recebimento</div>
+                    {Object.entries(byMonth[selMonth].meios).sort(function(a,b){return b[1]-a[1]}).map(function(e,i){var m=e[0],v=e[1];return (
+                      <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}>
+                        <span style={{fontSize:12,color:T.t2}}>{m}</span>
+                        <span style={{fontSize:12,fontWeight:700,color:meioColors[m]||T.t2,fontFamily:"'JetBrains Mono'"}}>{fm(v)}</span>
+                      </div>
+                    )})}
+                  </div>
+                  {/* Faturamento por Cliente this month */}
+                  <div style={{marginBottom:14}}>
+                    <div style={{fontSize:11,fontWeight:700,color:T.gold,marginBottom:8}}>👤 Faturamento por Cliente</div>
+                    {(function(){
+                      var cliMonth={};
+                      byMonth[selMonth].entries.forEach(function(e){
+                        if(!cliMonth[e.cliente])cliMonth[e.cliente]={total:0,servico:"",meio:""};
+                        cliMonth[e.cliente].total+=e.valor;
+                        cliMonth[e.cliente].servico=e.servico;
+                        cliMonth[e.cliente].meio=e.meio;
+                      });
+                      var mxCli=Math.max.apply(null,Object.values(cliMonth).map(function(c){return c.total}).concat([1]));
+                      return Object.entries(cliMonth).sort(function(a,b){return b[1].total-a[1].total}).map(function(e,i){
+                        var nome=e[0],d=e[1];
+                        var pct=byMonth[selMonth].rec>0?((d.total/byMonth[selMonth].rec)*100):0;
+                        return (
+                          <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid rgba(255,255,255,0.02)"}}>
+                            <div style={{width:22,height:22,borderRadius:7,background:i<3?T.goldD:"rgba(255,255,255,0.02)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:800,color:i<3?T.gold:T.t3,flexShrink:0}}>{i+1}</div>
+                            <Av name={nome} sz={26}/>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{nome}</div>
+                              <div style={{height:3,background:"rgba(255,255,255,0.03)",borderRadius:2,marginTop:3,overflow:"hidden"}}><div style={{height:"100%",width:(d.total/mxCli*100)+"%",background:svcColors[d.servico]||T.gold,borderRadius:2,opacity:.6}}/></div>
+                            </div>
+                            <div style={{textAlign:"right",flexShrink:0}}>
+                              <div style={{fontSize:12,fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(d.total)}</div>
+                              <div style={{fontSize:9,color:T.t3}}>{pct.toFixed(1)}%</div>
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
+                  {/* Entries this month */}
+                  <div style={{fontSize:11,fontWeight:700,color:T.t2,marginBottom:8}}>Lançamentos</div>
+                  <div style={{maxHeight:200,overflow:"auto"}}>
+                    {byMonth[selMonth].entries.sort(function(a,b){return b.valor-a.valor}).map(function(e,i){return (
+                      <div key={e.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.02)"}}>
+                        <span style={{fontSize:11,fontWeight:600,flex:1}}>{e.cliente}</span>
+                        <Bg c={e.servico.indexOf("Patrimônio")>=0?"gold":e.servico.indexOf("Financeira")>=0?"cyan":"purple"}>{e.servico.replace("Gestão de ","")}</Bg>
+                        <span style={{fontSize:10,color:T.t3}}>{e.meio}</span>
+                        <span style={{fontSize:12,fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(e.valor)}</span>
+                      </div>
+                    )})}
+                  </div>
+                </Cd>
+              )}
+              {/* Breakdown */}
+              <div style={{display:"flex",gap:14,flexWrap:"wrap",marginTop:14}}>
+                <Cd style={{padding:18,flex:1,minWidth:240}} hov={false}>
+                  <h4 style={{margin:"0 0 12px",fontSize:13,fontWeight:700,color:T.gold}}>Por Serviço</h4>
+                  {Object.entries(byServico).sort(function(a,b){return b[1]-a[1]}).map(function(e,i){var s=e[0],v=e[1];var pct=totalEntradas>0?(v/totalEntradas*100):0;return (
+                    <div key={i} style={{marginBottom:10}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:11,fontWeight:600}}>{s}</span><span style={{fontSize:12,fontWeight:700,color:svcColors[s]||T.t2,fontFamily:"'JetBrains Mono'"}}>{fm(v)}</span></div>
+                      <div style={{height:5,background:"rgba(255,255,255,0.03)",borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",width:pct+"%",background:svcColors[s]||T.t2,borderRadius:3,opacity:.7}}/></div>
+                      <div style={{fontSize:9,color:T.t3,textAlign:"right",marginTop:1}}>{pct.toFixed(1)}%</div>
+                    </div>
+                  )})}
+                </Cd>
+                <Cd style={{padding:18,flex:1,minWidth:240}} hov={false}>
+                  <h4 style={{margin:"0 0 12px",fontSize:13,fontWeight:700,color:T.gold}}>Por Meio de Recebimento</h4>
+                  {Object.entries(byMeio).sort(function(a,b){return b[1]-a[1]}).map(function(e,i){var m=e[0],v=e[1];var pct=totalEntradas>0?(v/totalEntradas*100):0;return (
+                    <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:i<Object.keys(byMeio).length-1?"1px solid rgba(255,255,255,0.03)":"none"}}>
+                      <div style={{width:8,height:8,borderRadius:3,background:meioColors[m]||T.t3}}/>
+                      <span style={{flex:1,fontSize:12,fontWeight:600}}>{m}</span>
+                      <span style={{fontSize:10,color:T.t3}}>{pct.toFixed(0)}%</span>
+                      <span style={{fontSize:12,fontWeight:700,color:meioColors[m]||T.t2,fontFamily:"'JetBrains Mono'"}}>{fm(v)}</span>
+                    </div>
+                  )})}
+                </Cd>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ENTRADAS */}
+      {fTab==="entradas" && (
+        <Cd style={{padding:18}} hov={false}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <h4 style={{margin:0,fontSize:14,fontWeight:700,color:T.green}}>Entradas ({entradas.length})</h4>
+            <span style={{fontSize:14,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(totalEntradas)}</span>
+          </div>
+          {entradas.length===0 ? <div style={{padding:20,textAlign:"center",color:T.t3}}>Importe sua planilha primeiro</div> : (
+            <div style={{overflowX:"auto",borderRadius:12,border:"1px solid rgba(255,255,255,0.04)"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:650}}>
+                <thead><tr style={{background:"rgba(255,255,255,0.02)"}}>
+                  {["Data","Serviço","Meio","Cliente","Valor","NF"].map(function(h,i){return <th key={i} style={{padding:"8px 10px",textAlign:i===4?"right":"left",fontWeight:700,color:T.gold,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)"}}>{h}</th>})}
+                </tr></thead>
+                <tbody>{entradas.map(function(e,i){return (
+                  <tr key={e.id} style={{background:i%2===0?"transparent":"rgba(255,255,255,0.015)"}}>
+                    <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",whiteSpace:"nowrap"}}>{e.data?e.data.split("-").reverse().join("/"):""}</td>
+                    <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)"}}>{e.servico}</td>
+                    <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",color:T.t2}}>{e.meio}</td>
+                    <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",fontWeight:600}}>{e.cliente}</td>
+                    <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",textAlign:"right",fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(e.valor)}</td>
+                    <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",color:e.nf==="OK"?T.green:T.t3}}>{e.nf}</td>
+                  </tr>
+                )})}</tbody>
+              </table>
+            </div>
+          )}
+        </Cd>
+      )}
+
+      {/* DESPESAS */}
+      {fTab==="despesas" && (
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <h4 style={{margin:0,fontSize:14,fontWeight:700,color:T.red}}>Despesas ({despesas.length})</h4>
+            <Bt onClick={function(){sShowAddDesp(true)}} style={{fontSize:11,padding:"8px 14px"}}>＋ Despesa</Bt>
+          </div>
+          {despesas.length===0 ? (
+            <Cd style={{padding:30,textAlign:"center"}} hov={false}>
+              <div style={{fontSize:28,marginBottom:10}}>💸</div>
+              <div style={{fontSize:14,color:T.t3,marginBottom:12}}>Nenhuma despesa cadastrada</div>
+              <Bt onClick={function(){sShowAddDesp(true)}}>＋ Adicionar Despesa</Bt>
+            </Cd>
+          ) : (
+            <Cd style={{padding:18}} hov={false}>
+              {despesas.map(function(d,i){return (
+                <div key={d.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:i<despesas.length-1?"1px solid rgba(255,255,255,0.03)":"none"}}>
+                  <div style={{width:8,height:8,borderRadius:3,background:despCatColors[d.cat]||T.t3}}/>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:13,fontWeight:600}}>{d.desc}</div>
+                    <div style={{fontSize:10,color:T.t3}}>{d.cat} • {d.data?d.data.split("-").reverse().join("/"):""} {d.recorrente?"• 🔄 Mensal":""}</div>
+                  </div>
+                  <span style={{fontSize:14,fontWeight:700,color:T.red,fontFamily:"'JetBrains Mono'"}}>{fm(d.valor)}</span>
+                  <button onClick={function(){sDespesas(function(p){return p.filter(function(x){return x.id!==d.id})})}} style={{background:"none",border:"none",color:T.t3,cursor:"pointer"}}>✕</button>
+                </div>
+              )})}
+              <div style={{marginTop:12,paddingTop:12,borderTop:"2px solid rgba(239,100,97,0.15)",display:"flex",justifyContent:"space-between"}}>
+                <span style={{fontSize:13,fontWeight:800,color:T.t2}}>TOTAL</span>
+                <span style={{fontSize:16,fontWeight:800,color:T.red,fontFamily:"'JetBrains Mono'"}}>{fm(totalDespesas)}</span>
+              </div>
+            </Cd>
+          )}
+          <Mo open={showAddDesp} onClose={function(){sShowAddDesp(false)}} title="＋ Nova Despesa">
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <div><div style={{fontSize:10,fontWeight:700,color:T.t3,marginBottom:3}}>DESCRIÇÃO</div><input id="fd-desc" placeholder="Ex: Aluguel escritório" style={inpS}/></div>
+                <div><div style={{fontSize:10,fontWeight:700,color:T.t3,marginBottom:3}}>CATEGORIA</div>
+                  <select id="fd-cat" style={inpS}><option>Aluguel</option><option>Software</option><option>Contabilidade</option><option>Marketing</option><option>Telefonia</option><option>Impostos</option><option>Salários</option><option>Outros</option></select></div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <div><div style={{fontSize:10,fontWeight:700,color:T.t3,marginBottom:3}}>VALOR (R$)</div><input type="number" id="fd-val" placeholder="0" style={{...inpS,fontFamily:"'JetBrains Mono'"}}/></div>
+                <div><div style={{fontSize:10,fontWeight:700,color:T.t3,marginBottom:3}}>DATA</div><input type="date" id="fd-data" defaultValue={new Date().toISOString().split("T")[0]} style={inpS}/></div>
+              </div>
+              <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:T.t2,cursor:"pointer"}}><input type="checkbox" id="fd-rec"/>Despesa recorrente (mensal)</label>
+              <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Bt v="secondary" onClick={function(){sShowAddDesp(false)}}>Cancelar</Bt><Bt onClick={function(){
+                var desc=document.getElementById("fd-desc").value;if(!desc)return;
+                sDespesas(function(p){return[...p,{id:Date.now(),desc:desc,cat:document.getElementById("fd-cat").value,valor:+(document.getElementById("fd-val").value)||0,data:document.getElementById("fd-data").value,recorrente:document.getElementById("fd-rec").checked}]});
+                sShowAddDesp(false);
+              }}>Salvar</Bt></div>
+            </div>
+          </Mo>
+        </div>
+      )}
+
+      {/* DRE */}
+      {fTab==="dre" && (
+        <Cd style={{padding:18}} hov={false}>
+          <h4 style={{margin:"0 0 14px",fontSize:14,fontWeight:700,color:T.gold}}>DRE — Resultado por Mês</h4>
+          {mesesOrdenados.length===0 ? <div style={{padding:20,textAlign:"center",color:T.t3}}>Importe dados primeiro</div> : (
+            <div style={{overflowX:"auto",borderRadius:12,border:"1px solid rgba(255,255,255,0.04)"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:10,minWidth:500}}>
+                <thead><tr style={{background:"rgba(255,255,255,0.02)"}}>
+                  <th style={{padding:"8px 10px",textAlign:"left",color:T.gold,fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)",position:"sticky",left:0,background:"rgba(12,24,48,0.95)",zIndex:1}}>MÊS</th>
+                  <th style={{padding:"8px 10px",textAlign:"right",color:T.green,fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)"}}>RECEITA</th>
+                  <th style={{padding:"8px 10px",textAlign:"right",color:T.t3,fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)"}}>ENTRADAS</th>
+                  {Object.keys(byServico).map(function(s){return <th key={s} style={{padding:"8px 6px",textAlign:"right",color:svcColors[s]||T.t3,fontWeight:600,fontSize:8,borderBottom:"1px solid rgba(212,163,40,0.1)",whiteSpace:"nowrap"}}>{s.replace("Gestão de ","").replace("Financeira","Fin.")}</th>})}
+                </tr></thead>
+                <tbody>{mesesOrdenados.map(function(m,i){var d=byMonth[m];return (
+                  <tr key={m} style={{background:i%2===0?"transparent":"rgba(255,255,255,0.015)"}}>
+                    <td style={{padding:"8px 10px",fontWeight:600,borderBottom:"1px solid rgba(255,255,255,0.02)",position:"sticky",left:0,background:"rgba(12,24,48,0.95)",zIndex:1}}>{fmtMonth(m)}</td>
+                    <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:T.green,fontFamily:"'JetBrains Mono'",borderBottom:"1px solid rgba(255,255,255,0.02)"}}>{fm(d.rec)}</td>
+                    <td style={{padding:"8px 10px",textAlign:"right",color:T.t3,borderBottom:"1px solid rgba(255,255,255,0.02)"}}>{d.entries.length}</td>
+                    {Object.keys(byServico).map(function(s){return <td key={s} style={{padding:"8px 6px",textAlign:"right",color:T.t2,fontFamily:"'JetBrains Mono'",fontSize:10,borderBottom:"1px solid rgba(255,255,255,0.02)"}}>{d.servicos[s]?fm(d.servicos[s]):"—"}</td>})}
+                  </tr>
+                )})}</tbody>
+                <tfoot><tr style={{borderTop:"2px solid rgba(212,163,40,0.15)"}}>
+                  <td style={{padding:"10px",fontWeight:800,color:T.gold,position:"sticky",left:0,background:"rgba(12,24,48,0.95)",zIndex:1}}>TOTAL</td>
+                  <td style={{padding:"10px",textAlign:"right",fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(totalEntradas)}</td>
+                  <td style={{padding:"10px",textAlign:"right",color:T.t3}}>{entradas.length}</td>
+                  {Object.keys(byServico).map(function(s){return <td key={s} style={{padding:"10px 6px",textAlign:"right",fontWeight:700,color:svcColors[s]||T.t2,fontFamily:"'JetBrains Mono'",fontSize:10}}>{fm(byServico[s])}</td>})}
+                </tr></tfoot>
+              </table>
+            </div>
+          )}
+        </Cd>
+      )}
+
+      {/* POR CLIENTE */}
+      {fTab==="clientes" && (
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <h4 style={{margin:0,fontSize:14,fontWeight:700,color:T.gold}}>Receita por Cliente {selYear!=="todos"?"— "+selYear:""}</h4>
+            <span style={{fontSize:12,fontWeight:700,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(totalEntradas)}</span>
+          </div>
+          {Object.keys(byCliente).length===0 ? <Cd style={{padding:20,textAlign:"center"}} hov={false}><div style={{color:T.t3}}>Importe dados primeiro</div></Cd> : (
+            <div>
+              {(function(){
+                var mxCli=Math.max.apply(null,Object.values(byCliente).map(function(c){return c.total}).concat([1]));
+                return Object.entries(byCliente).sort(function(a,b){return b[1].total-a[1].total}).map(function(e,i){
+                  var nome=e[0],d=e[1];
+                  var pct=totalEntradas>0?(d.total/totalEntradas*100):0;
+                  var ticketMedio=d.count>0?(d.total/d.count):0;
+                  var sparkData=mesesOrdenados.map(function(m){return d.meses[m]||0});
+                  return (
+                    <Cd key={i} style={{padding:16,marginBottom:8}} hov={false}>
+                      <div style={{display:"flex",alignItems:"center",gap:12}}>
+                        <div style={{width:28,height:28,borderRadius:8,background:i<3?"linear-gradient(135deg,"+T.gold+","+T.goldL+")":T.w3,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,color:i<3?"#0A1628":T.t3,flexShrink:0}}>{i+1}</div>
+                        <Av name={nome} sz={36}/>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                            <div style={{fontSize:14,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{nome}</div>
+                            <div style={{fontSize:16,fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'",flexShrink:0,marginLeft:8}}>{fm(d.total)}</div>
+                          </div>
+                          <div style={{display:"flex",gap:6,marginTop:4,alignItems:"center",flexWrap:"wrap"}}>
+                            <Bg c={d.servico.indexOf("Patrimônio")>=0?"gold":d.servico.indexOf("Financeira")>=0?"cyan":"purple"}>{d.servico.replace("Gestão de ","")}</Bg>
+                            <span style={{fontSize:9,color:T.t3}}>{d.meio}</span>
+                            <span style={{fontSize:9,color:T.t3}}>•</span>
+                            <span style={{fontSize:9,color:T.t3}}>{d.count} pgtos</span>
+                            <span style={{fontSize:9,color:T.t3}}>•</span>
+                            <span style={{fontSize:9,color:T.cyan}}>ticket {fm(ticketMedio)}</span>
+                            <span style={{fontSize:9,color:T.t3}}>•</span>
+                            <span style={{fontSize:9,fontWeight:700,color:pct>=5?T.gold:T.t3}}>{pct.toFixed(1)}%</span>
+                          </div>
+                          {/* Bar + sparkline */}
+                          <div style={{display:"flex",alignItems:"center",gap:8,marginTop:6}}>
+                            <div style={{flex:1,height:4,background:"rgba(255,255,255,0.03)",borderRadius:2,overflow:"hidden"}}>
+                              <div style={{height:"100%",width:(d.total/mxCli*100)+"%",background:svcColors[d.servico]||T.gold,borderRadius:2,opacity:.6}}/>
+                            </div>
+                            {sparkData.length>1 && <Spark data={sparkData} color={svcColors[d.servico]||T.gold} w={80} h={18}/>}
+                          </div>
+                        </div>
+                      </div>
+                    </Cd>
+                  );
+                });
+              })()}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* PIPELINE COMERCIAL */
 function PipelineView(){
   const stages=[
@@ -2598,7 +3147,7 @@ function NewsView(){
 }
 
 /* NAV */
-const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"pipeline",l:"Pipeline",i:"◈"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"import",l:"Importar",i:"↑"}];
+const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"pipeline",l:"Pipeline",i:"◈"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"import",l:"Importar",i:"↑"}];
 
 /* APP */
 function App(){
@@ -2610,7 +3159,7 @@ function App(){
   const[showMenu,sShowMenu]=useState(false);
   const nL=nots.filter(function(n){return !n.lido}).length;
   const go=function(p){sPg(p);sSel(null);sShowMenu(false)};
-  const titles={dashboard:"Dashboard",clients:sel?sel.nome:"Clientes",pipeline:"Pipeline Comercial",agenda:"Agenda",news:"Notícias & Mercado",import:"Importar"};
+  const titles={dashboard:"Dashboard",clients:sel?sel.nome:"Clientes",financeiro:"Financeiro da Empresa",pipeline:"Pipeline Comercial",agenda:"Agenda",news:"Notícias & Mercado",import:"Importar"};
 
   /* Detect mobile */
   const[isMobile,setMobile]=useState(window.innerWidth<768);
@@ -2730,6 +3279,7 @@ function App(){
           {pg==="dashboard" && <Dash data={d}/>}
           {pg==="clients" && !sel && <CL data={d} onSel={function(c){sSel(c)}} dispatch={dp}/>}
           {pg==="clients" && sel && <CD client={sel} data={d} dispatch={dp} onBack={function(){sSel(null)}}/>}
+          {pg==="financeiro" && <FinanceiroView/>}
           {pg==="pipeline" && <PipelineView/>}
           {pg==="agenda" && <Ag/>}
           {pg==="news" && <NewsView/>}
