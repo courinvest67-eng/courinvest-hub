@@ -1,0 +1,55 @@
+{
+  "name": "Courinvest Hub",
+  "short_name": "Courinvest",
+  "description": "Hub de gestão de clientes e patrimônio — Courinvest Consultoria",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0A1628",
+  "theme_color": "#D4A328",
+  "lang": "pt-BR",
+  "categories": ["finance", "business", "productivity"],
+  "icons": [
+    {
+      "src": "icon-96.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "description": "Visão geral dos clientes",
+      "url": "./?page=dashboard",
+      "icons": [{ "src": "icon-96.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Pipeline",
+      "short_name": "Leads",
+      "description": "Funil comercial",
+      "url": "./?page=comercial",
+      "icons": [{ "src": "icon-96.png", "sizes": "96x96" }]
+    }
+  ]
+}
