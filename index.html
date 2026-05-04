@@ -5895,13 +5895,27 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
 
       /* ===== RESUMO DE MERCADO (overview salvo) — só relatório mensal =====
          Aparece antes do Resumo Executivo. Usa o overview salvo do mês corrente.
-         Se o template tem overview=false ou não tem overview salvo: pula. */
+         Busca o mais recente disponível se não achar o mês exato. */
       if(tipo==="mensal" && secAtiva("overview")){
-        /* Busca overview: primeiro mês anterior (referência do relatório), depois mês atual (se gerado agora) */
+        /* Busca overview: mês anterior, mês atual, ou qualquer chave disponível */
         var _ovRef=new Date();_ovRef.setDate(1);_ovRef.setMonth(_ovRef.getMonth()-1);
         var chaveOvRel=_ovRef.getFullYear()+"-"+String(_ovRef.getMonth()+1).padStart(2,"0");
         var chaveOvAtual=new Date().getFullYear()+"-"+String(new Date().getMonth()+1).padStart(2,"0");
-        var ovDataRel=(d&&d.overviewMercado&&(d.overviewMercado[chaveOvRel]||d.overviewMercado[chaveOvAtual]))||null;
+        var ovDataRel=null;
+        if(d&&d.overviewMercado){
+          /* Tenta mês anterior e mês atual primeiro */
+          ovDataRel=d.overviewMercado[chaveOvRel]||d.overviewMercado[chaveOvAtual]||null;
+          /* Se não achou, pega o mais recente disponível */
+          if(!ovDataRel){
+            var todasChaves=Object.keys(d.overviewMercado).sort().reverse();
+            for(var _ki=0;_ki<todasChaves.length;_ki++){
+              if(d.overviewMercado[todasChaves[_ki]]&&d.overviewMercado[todasChaves[_ki]].texto){
+                ovDataRel=d.overviewMercado[todasChaves[_ki]];
+                break;
+              }
+            }
+          }
+        }
         if(ovDataRel && ovDataRel.texto){
           body+=secTitle('📰','Resumo do Mercado Financeiro');
 
@@ -22539,7 +22553,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '214';
+  var SW_VERSION = '215';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
