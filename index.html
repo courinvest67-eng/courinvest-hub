@@ -1396,7 +1396,7 @@ function Dash({data:d,onSel:os,goTo}){
   },0)+milhasEstimado;
 
   
-  var normI=function(n){if(!n)return"Sem instituição";if(n.match(/xp\b|xp investimentos/i))return"Rico";if(n.match(/rico/i))return"Rico";if(n.match(/sproutfi|passfolio/i))return"Vest";if(n.match(/j\.\s*safra/i))return"Safra";return n};
+  var normI=function(n){if(!n)return"Sem instituição";if(n.match(/xp\b|xp investimentos/i))return"Rico";if(n.match(/rico/i))return"Rico";if(n.match(/sproutfi|passfolio|passfólio|PASSFOLIO/i))return"Vest";if(n.match(/j\.\s*safra/i))return"Safra";return n};
   
   const aumByInst={};
   const aumByCliente={};
@@ -5430,7 +5430,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       html+='<thead><tr><th>Ticker</th><th>Nome / Empresa</th><th class="num">Qtd</th><th class="num">PM (R$)</th><th class="num">Saldo 31/12/'+anoBase+' (R$)</th><th>Corretora</th></tr></thead><tbody>';
       ativos.forEach(function(a){
         var saldo=(a.cT||a.qtd*a.pm||0);
-        html+='<tr><td class="tk">'+(a.tk||"-")+'</td><td>'+(a.nm||"-")+'</td><td class="num">'+(a.qtd||0).toLocaleString("pt-BR",{maximumFractionDigits:2})+'</td><td class="num">'+(a.pm||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+'</td><td class="num">'+saldo.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+'</td><td style="font-size:9px;color:#8B94A7">'+(a.inst||"-")+'</td></tr>';
+        html+='<tr><td class="tk">'+(a.tk||"-")+'</td><td>'+(a.nm||"-")+'</td><td class="num">'+(a.qtd||0).toLocaleString("pt-BR",{maximumFractionDigits:2})+'</td><td class="num">'+(a.pm||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+'</td><td class="num">'+saldo.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+'</td><td style="font-size:9px;color:#8B94A7">'+(normI(a.inst)||"-")+'</td></tr>';
       });
       html+='<tr class="total"><td colspan="4">TOTAL '+info.nome.toUpperCase()+'</td><td class="num">'+fmR(totalGrupo)+'</td><td></td></tr>';
       html+='</tbody></table>';
@@ -5477,7 +5477,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
         html+='<thead><tr><th>Ticker</th><th>Nome / Empresa</th><th class="num">Qtd</th><th class="num">PM (R$)</th><th class="num">Saldo 31/12/'+anoBase+' (R$)</th><th>Corretora</th></tr></thead><tbody>';
         ativos.forEach(function(a){
           var saldo=(a.cT||a.qtd*a.pm||0);
-          html+='<tr><td class="tk" style="color:#A78BFA">'+(a.tk||"-")+'</td><td>'+(a.nm||"-")+'</td><td class="num">'+(a.qtd||0).toLocaleString("pt-BR",{maximumFractionDigits:4})+'</td><td class="num">'+(a.pm||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+'</td><td class="num">'+saldo.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+'</td><td style="font-size:9px;color:#8B94A7">'+(a.inst||"-")+'</td></tr>';
+          html+='<tr><td class="tk" style="color:#A78BFA">'+(a.tk||"-")+'</td><td>'+(a.nm||"-")+'</td><td class="num">'+(a.qtd||0).toLocaleString("pt-BR",{maximumFractionDigits:4})+'</td><td class="num">'+(a.pm||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+'</td><td class="num">'+saldo.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+'</td><td style="font-size:9px;color:#8B94A7">'+(normI(a.inst)||"-")+'</td></tr>';
         });
         html+='<tr class="total" style="background:rgba(167,139,250,0.08)"><td colspan="4">TOTAL '+info.nome.toUpperCase()+'</td><td class="num" style="color:#A78BFA">'+fmR(totalGrupo)+'</td><td></td></tr>';
         html+='</tbody></table>';
@@ -6174,6 +6174,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       }
 
       /* === FASE 4: PULL QUOTE — destaque editorial sobre composição da carteira === */
+      var usdRateRelatorio=usdRateGlobal||5.70; /* Taxa USD disponível globalmente para toda a seção */
       var temExt=enr.some(function(a){return ['stock_us','etf_int','etf_eu','reit','bdr'].indexOf(a.tp)>=0});
       var temRV=enr.some(function(a){return ['acao','fii','fiagro','etf_br','fundo_acoes'].indexOf(a.tp)>=0});
       var temRF=enr.some(function(a){return ['cdb','lci','lca','tesouro','fundo_rf','fundo_mm'].indexOf(a.tp)>=0});
@@ -6256,8 +6257,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
         if(ativosUSD.length>0){
           var totalUSD_brl=ativosUSD.reduce(function(s,a){return s+(a.vA||0);},0);
           var pesoUSD=totalCart>0?(totalUSD_brl/totalCart*100).toFixed(1):0;
-          var usdRate=usdRateRelatorio||0;
-          var totalUSD_usd=usdRate>0?totalUSD_brl/usdRate:null;
+          var usdRate=usdRateRelatorio||5.70;
+          var totalUSD_usd=usdRate>0?totalUSD_brl/usdRate:totalUSD_brl/5.70;
           var corRentUSD=rentUSDpct!==null?(rentUSDpct>=0?'#0F9D58':'#D93025'):'#374151';
           body+='<div style="background:#EFF6FF;border:1.5px solid #2563EB55;border-left:4px solid #2563EB;border-radius:10px;padding:16px 20px;margin-bottom:14px">';
           body+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
@@ -6265,10 +6266,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
           body+='<div style="font-size:11px;color:#9CA3AF">'+pesoUSD+'% do portfólio · '+ativosUSD.length+' ativos</div></div>';
           body+='<div style="display:flex;gap:32px;flex-wrap:wrap">';
           body+='<div><div style="'+labelS+'">Patrimônio (BRL)</div><div style="'+valS+'">'+fmBRL(totalUSD_brl)+'</div></div>';
-          if(totalUSD_usd!==null){
-            body+='<div><div style="'+labelS+'">Patrimônio (USD)</div><div style="font-size:17px;font-weight:800;color:#1D4ED8">US$ '+totalUSD_usd.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+'</div></div>';
-            body+='<div><div style="'+labelS+'">Câmbio</div><div style="font-size:13px;font-weight:700;color:#6B7480">R$ '+usdRate.toFixed(2)+'/US$</div></div>';
-          }
+          body+='<div><div style="'+labelS+'">Patrimônio (USD)</div><div style="font-size:17px;font-weight:800;color:#1D4ED8">US$ '+totalUSD_usd.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+'</div></div>';
+          body+='<div><div style="'+labelS+'">Câmbio</div><div style="font-size:13px;font-weight:700;color:#6B7480">R$ '+usdRate.toFixed(2)+'/US$</div></div>';
           if(rentUSDpct!==null){
             body+='<div><div style="'+labelS+'">Rentabilidade em USD</div><div style="font-size:17px;font-weight:800;color:'+corRentUSD+'">'+(rentUSDpct>=0?'+':'')+rentUSDpct.toFixed(2)+'%</div></div>';
           }
@@ -7039,18 +7038,24 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       /* ===== RENTABILIDADE POR INSTITUIÇÃO — ranking ===== */
       var byInst={};
       enr.forEach(function(a){
-        var inst=a.inst||"Sem instituição";
-        if(!byInst[inst])byInst[inst]={ativos:0,valor:0,custo:0,ganho:0,ganhoPer:0};
-        byInst[inst].ativos++;byInst[inst].valor+=a.vA;byInst[inst].custo+=a.cT;
-        byInst[inst].ganho+=a.ganho;byInst[inst].ganhoPer+=getRentAtivoPer(a).rs;
+        var inst=normI(a.inst)||"Sem instituição";
+        if(!byInst[inst])byInst[inst]={ativos:0,valor:0,valorIni:0,ganhoMes:0};
+        byInst[inst].ativos++;
+        byInst[inst].valor+=a.vA;
+        /* Valor início do período = valor atual - ganho do mês (estimado pelo rentPeriodo) */
+        var rentAt=getRentAtivoPer(a);
+        var ganhoMesAt=rentAt&&rentAt.rs?rentAt.rs:0;
+        byInst[inst].valorIni+=(a.vA-ganhoMesAt);
+        byInst[inst].ganhoMes+=ganhoMesAt;
       });
       var instList=Object.entries(byInst).map(function(e){
         var d=e[1];var pctCart=tCV>0?(d.valor/tCV*100):0;
-        var gPer=d.ganhoPer;var rentPctPer;
-        if(pctCart>=99.9&&rentPeriodo!==null){rentPctPer=rentPeriodo;gPer=d.valor*rentPeriodo/100;}
-        else{var bIni=d.valor-gPer;rentPctPer=bIni>0?(gPer/bIni*100):0;}
-        return {nome:e[0],ativos:d.ativos,valor:d.valor,custo:d.custo,ganho:gPer,rentPct:rentPctPer,pctCarteira:pctCart};
-      }).sort(function(a,b){return b.rentPct-a.rentPct});
+        /* Rentabilidade = ganho do mês / valor início do período */
+        var rentPctPer=d.valorIni>0?(d.ganhoMes/d.valorIni*100):0;
+        /* Se instituição tem quase 100% da carteira, usa rentPeriodo diretamente */
+        if(pctCart>=99.9&&rentPeriodo!==null)rentPctPer=rentPeriodo;
+        return {nome:e[0],ativos:d.ativos,valor:d.valor,ganho:d.ganhoMes,rentPct:rentPctPer,pctCarteira:pctCart};
+      }).sort(function(a,b){return b.valor-a.valor});
       if(secAtiva("instituicao") && instList.length>0){
         body+=secTitle('🏦','Rentabilidade por Instituição');
         instList.forEach(function(it,i){
@@ -10427,7 +10432,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
           {}
           {cTab==="inst" && (()=>{
             var byInst={};
-            enr.forEach(function(a){var inst=a.inst||"Sem instituição";if(!byInst[inst])byInst[inst]={ativos:[],total:0,custo:0};byInst[inst].ativos.push(a);byInst[inst].total+=a.vA;byInst[inst].custo+=a.cT});
+            enr.forEach(function(a){var inst=normI(a.inst)||"Sem instituição";if(!byInst[inst])byInst[inst]={ativos:[],total:0,custo:0};byInst[inst].ativos.push(a);byInst[inst].total+=a.vA;byInst[inst].custo+=a.cT});
             var instColors={"Genial":T.gold,"BTG Pactual":T.cyan,"XP":T.purple,"Inter":T.orange,"Itaú":T.green,"Bradesco":T.red,"Nubank":T.purple,"Rico":T.orange,"Clear":T.cyan,"C6 Bank":T.t2,"Safra":T.gold,"Modal":T.green,"Órama":T.cyan,"Vest":T.green,"Avenue":T.purple,"Interactive Brokers":T.red,"Charles Schwab":T.cyan,"Saxo":T.orange,"DEGIRO":T.green,"Binance":T.orange};
             var instList=Object.entries(byInst).sort(function(a,b){return b[1].total-a[1].total});
 
@@ -22553,7 +22558,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '216';
+  var SW_VERSION = '219';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
