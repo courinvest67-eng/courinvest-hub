@@ -7153,9 +7153,10 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       /* ===== COMPOSIÇÃO DETALHADA — ordenada por Macro-Classe > Subclasse > Valor ===== */
       
       if(secAtiva("carteira")){
+      body+='<!-- PAGE_BREAK -->';
       
       var grouped={};
-      enr.forEach(function(a){
+      enr.filter(function(a){return a.vA>0}).forEach(function(a){
         var mk=TP_MACRO[a.tp]||"outros";
         var sub=tipoAtivoLabel(a);
         if(!grouped[mk])grouped[mk]={_total:0,_subs:{}};
@@ -7186,7 +7187,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
           
           body+='<tr style="background:rgba(10,22,40,0.04)"><td colspan="6" style="padding:6px 12px;font-size:9px;font-weight:700;color:#6B7489;letter-spacing:1px;text-transform:uppercase">↳ '+subLabel+' <span style="color:#6B7489;font-weight:500;margin-left:8px">'+subData.ativos.length+' '+(subData.ativos.length===1?"ativo":"ativos")+' · '+fmF(subTotal)+'</span></td></tr>';
           
-          subData.ativos.sort(function(a,b){return b.vA-a.vA}).forEach(function(a){
+          subData.ativos.sort(function(a,b){return b.vA-a.vA}).filter(function(a){return a.vA>0}).forEach(function(a){
             var rp=getRentAtivoPer(a);
             var corR=rp.pct>=0?"#2DD4A0":"#EF6461";
             var vIni=a.vA-rp.rs;
@@ -22583,7 +22584,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '224';
+  var SW_VERSION = '225';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
