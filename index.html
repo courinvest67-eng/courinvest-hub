@@ -5516,6 +5516,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
   };
 
   var gerarRelatorio=function(tipo){
+    var normI=function(n){if(!n)return"Sem instituição";if(n.match(/xp\b|xp investimentos/i))return"Rico";if(n.match(/rico/i))return"Rico";if(n.match(/sproutfi|passfolio|PASSFOLIO|passfólio/i))return"Vest";if(n.match(/j\.?\s*safra/i))return"Safra";return n;};
     var hoje=new Date().toLocaleDateString("pt-BR");
     var MESES_NOMES=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
     var dataRef=new Date();dataRef.setDate(1);dataRef.setMonth(dataRef.getMonth()-1);
@@ -22558,7 +22559,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '219';
+  var SW_VERSION = '220';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
