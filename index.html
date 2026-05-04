@@ -1491,7 +1491,7 @@ function Dash({data:d,onSel:os,goTo}){
     <div>
 
       {/* ===== BANNER: RELATÓRIOS MENSAIS PENDENTES ===== */}
-      {ehPeriodoRelatorio && clRelatorio.length>0 && !relModal && (function(){
+      {clRelatorio.length>0 && !relModal && (function(){
         var jaEnviados=clRelatorio.filter(function(c){return relEnviados[c.id+"-"+mesRefKey]});
         var pendentes=clRelatorio.length-jaEnviados.length;
         if(pendentes===0)return null;
@@ -22459,7 +22459,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '207';
+  var SW_VERSION = '208';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
