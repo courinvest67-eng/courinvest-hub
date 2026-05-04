@@ -4113,6 +4113,8 @@ function NewClientForm({onSave,onClose}){
 }
 
 function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
+  /* Salva d globalmente para acesso em closures como gerarRelatorio */
+  window._courinvestData=d;
   const[tab,sTab]=useState("geral");
   /* === FIRE: único estado objeto para evitar problemas de inicialização === */
   const[fireParams,sFireParams]=useState({
@@ -5516,8 +5518,11 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
     return html;
   };
 
-  var gerarRelatorio=function(tipo){
+  var gerarRelatorio=function(tipo, _dadosGlobais){
+    var d=_dadosGlobais; /* dados do estado React passado como parâmetro */
     var normI=function(n){if(!n)return"Sem instituição";if(n.match(/xp\b|xp investimentos/i))return"Rico";if(n.match(/rico/i))return"Rico";if(n.match(/sproutfi|passfolio|PASSFOLIO|passfólio/i))return"Vest";if(n.match(/j\.?\s*safra/i))return"Safra";return n;};
+    /* Garante acesso ao estado global d — usa window._courinvestData como fallback */
+    var _d=d||(window._courinvestData)||{};
     var hoje=new Date().toLocaleDateString("pt-BR");
     var MESES_NOMES=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
     var dataRef=new Date();dataRef.setDate(1);dataRef.setMonth(dataRef.getMonth()-1);
@@ -5900,22 +5905,18 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
          Busca o mais recente disponível se não achar o mês exato. */
       if(tipo==="mensal" && secAtiva("overview")){
         /* DEBUG: log do overviewMercado */
-        console.log("[Overview Debug] d.overviewMercado:", d&&d.overviewMercado);
-        console.log("[Overview Debug] chaveOvRel:", chaveOvRel, "chaveOvAtual:", chaveOvAtual);
         /* Busca overview: mês anterior, mês atual, ou qualquer chave disponível */
         var _ovRef=new Date();_ovRef.setDate(1);_ovRef.setMonth(_ovRef.getMonth()-1);
         var chaveOvRel=_ovRef.getFullYear()+"-"+String(_ovRef.getMonth()+1).padStart(2,"0");
         var chaveOvAtual=new Date().getFullYear()+"-"+String(new Date().getMonth()+1).padStart(2,"0");
         var ovDataRel=null;
-        if(d&&d.overviewMercado){
-          /* Tenta mês anterior e mês atual primeiro */
-          ovDataRel=d.overviewMercado[chaveOvRel]||d.overviewMercado[chaveOvAtual]||null;
-          /* Se não achou, pega o mais recente disponível */
+        if(_d&&_d.overviewMercado){
+          ovDataRel=_d.overviewMercado[chaveOvRel]||_d.overviewMercado[chaveOvAtual]||null;
           if(!ovDataRel){
-            var todasChaves=Object.keys(d.overviewMercado).sort().reverse();
+            var todasChaves=Object.keys(_d.overviewMercado).sort().reverse();
             for(var _ki=0;_ki<todasChaves.length;_ki++){
-              if(d.overviewMercado[todasChaves[_ki]]&&d.overviewMercado[todasChaves[_ki]].texto){
-                ovDataRel=d.overviewMercado[todasChaves[_ki]];
+              if(_d.overviewMercado[todasChaves[_ki]]&&_d.overviewMercado[todasChaves[_ki]].texto){
+                ovDataRel=_d.overviewMercado[todasChaves[_ki]];
                 break;
               }
             }
@@ -14860,7 +14861,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
           {autoRelatorio && !reportHtml && (function(){
             sAutoRelatorio(false);
             try{
-              var html=gerarRelatorio("mensal");
+              var html=gerarRelatorio("mensal",d);
               if(html)sReportHtml(html);
             }catch(e){console.error("Auto relatório:",e);}
             return null;
@@ -15288,7 +15289,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
                         })
                         .catch(function(){sUsdRelatorio(usdRateGlobal||5.70);})
                         .finally(function(){
-                          try{sReportHtml(gerarRelatorio("mensal"))}catch(e){alert("Erro ao gerar relatório:\n"+e.message+"\n\nLinha: "+e.stack.split("\n")[1])}
+                          try{sReportHtml(gerarRelatorio("mensal",d))}catch(e){alert("Erro ao gerar relatório:\n"+e.message+"\n\nLinha: "+e.stack.split("\n")[1])}
                         });
                     }} style={{padding:20,cursor:"pointer",background:"linear-gradient(145deg,"+T.goldD+",rgba(212,163,40,0.04))",border:"1px solid "+T.gold+"33"}}>
                       <div style={{display:"flex",alignItems:"center",gap:12}}>
@@ -15299,7 +15300,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
                         </div>
                       </div>
                     </Cd>
-                    <Cd onClick={function(){sReportHtml(gerarRelatorio("anual"))}} style={{padding:20,cursor:"pointer",background:"linear-gradient(145deg,"+T.goldD+",rgba(212,163,40,0.04))",border:"1px solid "+T.gold+"33"}}>
+                    <Cd onClick={function(){sReportHtml(gerarRelatorio("anual",d))}} style={{padding:20,cursor:"pointer",background:"linear-gradient(145deg,"+T.goldD+",rgba(212,163,40,0.04))",border:"1px solid "+T.gold+"33"}}>
                       <div style={{display:"flex",alignItems:"center",gap:12}}>
                         <div style={{fontSize:32}}>📈</div>
                         <div style={{flex:1}}>
@@ -15440,7 +15441,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
                     </div>
                   </div>
                 </Cd>
-                <Cd onClick={function(){sReportHtml(gerarRelatorio("irpf_light"))}} style={{padding:16,cursor:"pointer"}}>
+                <Cd onClick={function(){sReportHtml(gerarRelatorio("irpf_light",d))}} style={{padding:16,cursor:"pointer"}}>
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
                     <div style={{fontSize:24}}>📄</div>
                     <div style={{flex:1}}>
@@ -15454,7 +15455,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
               {}
               <div style={{fontSize:10,color:T.t3,fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>💰 Tabela de Aportes</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10,marginBottom:22}}>
-                <Cd onClick={function(){sReportHtml(gerarRelatorio("aporte"))}} style={{padding:16,cursor:"pointer"}}>
+                <Cd onClick={function(){sReportHtml(gerarRelatorio("aporte",d))}} style={{padding:16,cursor:"pointer"}}>
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
                     <div style={{fontSize:24}}>🌙</div>
                     <div style={{flex:1}}>
@@ -15463,7 +15464,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
                     </div>
                   </div>
                 </Cd>
-                <Cd onClick={function(){sReportHtml(gerarRelatorio("aporte_light"))}} style={{padding:16,cursor:"pointer"}}>
+                <Cd onClick={function(){sReportHtml(gerarRelatorio("aporte_light",d))}} style={{padding:16,cursor:"pointer"}}>
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
                     <div style={{fontSize:24}}>☀️</div>
                     <div style={{flex:1}}>
@@ -22582,7 +22583,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '223';
+  var SW_VERSION = '224';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
