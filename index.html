@@ -5899,6 +5899,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
          Aparece antes do Resumo Executivo. Usa o overview salvo do mês corrente.
          Busca o mais recente disponível se não achar o mês exato. */
       if(tipo==="mensal" && secAtiva("overview")){
+        /* DEBUG: log do overviewMercado */
+        console.log("[Overview Debug] d.overviewMercado:", d&&d.overviewMercado);
+        console.log("[Overview Debug] chaveOvRel:", chaveOvRel, "chaveOvAtual:", chaveOvAtual);
         /* Busca overview: mês anterior, mês atual, ou qualquer chave disponível */
         var _ovRef=new Date();_ovRef.setDate(1);_ovRef.setMonth(_ovRef.getMonth()-1);
         var chaveOvRel=_ovRef.getFullYear()+"-"+String(_ovRef.getMonth()+1).padStart(2,"0");
@@ -22579,7 +22582,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '222';
+  var SW_VERSION = '223';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
