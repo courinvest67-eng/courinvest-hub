@@ -7154,7 +7154,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       
       if(secAtiva("carteira")){
       body+='<!-- PAGE_BREAK -->';
-      body+=secTitle('📋','Composição Detalhada');
+      body+='<div style="margin:0 0 12px"><span style="font-size:22px;margin-right:8px">📋</span><span style="font-size:26px;font-weight:900;color:#0A1628;letter-spacing:-0.5px">Composição <span style="color:#D4A328;font-style:italic">Detalhada</span></span></div>';
       var grouped={};
       var labelInicioCol=tipo==="mensal"?"Início Mês":tipo==="anual"?"Início Ano":"Início";
       var labelFimCol=tipo==="mensal"?"Fim Mês":"Valor Atual";
@@ -22583,7 +22583,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '226';
+  var SW_VERSION = '227';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
