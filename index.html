@@ -7154,8 +7154,12 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       
       if(secAtiva("carteira")){
       body+='<!-- PAGE_BREAK -->';
-      
+      body+=secTitle('📋','Composição Detalhada');
       var grouped={};
+      var labelInicioCol=tipo==="mensal"?"Início Mês":tipo==="anual"?"Início Ano":"Início";
+      var labelFimCol=tipo==="mensal"?"Fim Mês":"Valor Atual";
+      var labelRentCol=tipo==="mensal"?"Rent. Mês":tipo==="anual"?"Rent. 12M":"Rent. Total";
+      var labelGanhoCol=tipo==="mensal"?"Ganho Mês":tipo==="anual"?"Ganho 12M":"Ganho Total";
       enr.filter(function(a){return a.vA>0}).forEach(function(a){
         var mk=TP_MACRO[a.tp]||"outros";
         var sub=tipoAtivoLabel(a);
@@ -7165,11 +7169,6 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
         grouped[mk]._subs[sub]._total+=a.vA;
         grouped[mk]._subs[sub].ativos.push(a);
       });
-      body+=secTitle('📋','Composição Detalhada');
-      var labelInicioCol=tipo==="mensal"?"Início Mês":tipo==="anual"?"Início Ano":"Início";
-      var labelFimCol=tipo==="mensal"?"Fim Mês":"Valor Atual";
-      var labelRentCol=tipo==="mensal"?"Rent. Mês":tipo==="anual"?"Rent. 12M":"Rent. Total";
-      var labelGanhoCol=tipo==="mensal"?"Ganho Mês":tipo==="anual"?"Ganho 12M":"Ganho Total";
       body+='<table><tr><th>Ativo</th><th style="text-align:right">'+labelInicioCol+'</th><th style="text-align:right">'+labelFimCol+'</th><th style="text-align:right">'+labelRentCol+'</th><th style="text-align:right">'+labelGanhoCol+'</th></tr>';
       MACRO_ORDEM.forEach(function(mk){
         if(!grouped[mk])return;
@@ -22584,7 +22583,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '225';
+  var SW_VERSION = '226';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
