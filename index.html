@@ -6211,51 +6211,74 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
         var ativosBR=enr.filter(function(a){return !TIPOS_EXT_USD[a.tp]&&!TIPOS_EXT_EUR[a.tp];});
         if(ativosUSD.length===0&&ativosEUR.length===0)return;
         var totalCart=enr.reduce(function(s,a){return s+(a.vA||0);},0);
+        /* Rentabilidade USD do Gorila — busca período mensal */
+        var rentUSDpct=null;
+        if(temGorila&&c._gorilaRent&&c._gorilaRent.periods){
+          var pUSD=findRentMesAtual(c._gorilaRent.periods);
+          if(pUSD&&pUSD.ext!=null)rentUSDpct=parseFloat(pUSD.ext)*100;
+        }
+        var labelC='color:#374151';
+        var labelS='font-size:9px;color:#6B7480;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px';
+        var valS='font-size:17px;font-weight:800;color:#111827';
         body+='<!-- PAGE_BREAK -->';
         body+=secTitle('🌎','Rentabilidade por Moeda');
-        body+='<div style="font-size:10px;color:#6B7489;margin:-10px 0 16px;font-style:italic">Separação da performance por moeda de referência dos ativos.</div>';
+        body+='<div style="font-size:10px;color:#6B7480;margin:-10px 0 18px;font-style:italic">Separação da performance por moeda de referência dos ativos.</div>';
+        /* --- Brasil BRL --- */
         if(ativosBR.length>0){
           var totalBR=ativosBR.reduce(function(s,a){return s+(a.vA||0);},0);
-          var pesoBR=totalCart>0?totalBR/totalCart:0;
-          body+='<div style="background:rgba(212,163,40,0.06);border:1px solid rgba(212,163,40,0.2);border-radius:10px;padding:14px 18px;margin-bottom:12px">';
-          body+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:13px;font-weight:700;color:#D4A328">🇧🇷 Carteira Brasil (BRL)</div><div style="font-size:11px;color:#6B7489">'+(pesoBR*100).toFixed(1)+'% do portfólio · '+ativosBR.length+' ativos</div></div>';
-          body+='<div style="display:flex;gap:24px;flex-wrap:wrap">';
-          body+='<div><div style="font-size:9px;color:#6B7489;text-transform:uppercase;letter-spacing:.5px">Patrimônio</div><div style="font-size:16px;font-weight:700;color:#E8ECF5">'+fmBRL(totalBR)+'</div></div>';
-          if(rentPeriodo!==null)body+='<div><div style="font-size:9px;color:#6B7489;text-transform:uppercase;letter-spacing:.5px">Rentabilidade (mês)</div><div style="font-size:16px;font-weight:700;color:'+(rentPeriodo>=0?'#2DD4A0':'#EF6461')+'">'+(rentPeriodo>=0?'+':'')+rentPeriodo.toFixed(2)+'%</div></div>';
-          body+='<div><div style="font-size:9px;color:#6B7489;text-transform:uppercase;letter-spacing:.5px">Benchmark</div><div style="font-size:14px;font-weight:600;color:#38BDF8">CDI · IBOV · IPCA</div></div>';
+          var pesoBR=totalCart>0?(totalBR/totalCart*100).toFixed(1):0;
+          var corRentBR=rentPeriodo>=0?'#0F9D58':'#D93025';
+          body+='<div style="background:#FFFBEB;border:1.5px solid #D4A32855;border-left:4px solid #D4A328;border-radius:10px;padding:16px 20px;margin-bottom:14px">';
+          body+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
+          body+='<div style="font-size:14px;font-weight:800;'+labelC+'">🇧🇷 Carteira Brasil <span style="color:#D4A328">(BRL)</span></div>';
+          body+='<div style="font-size:11px;color:#9CA3AF">'+pesoBR+'% do portfólio · '+ativosBR.length+' ativos</div></div>';
+          body+='<div style="display:flex;gap:32px;flex-wrap:wrap">';
+          body+='<div><div style="'+labelS+'">Patrimônio</div><div style="'+valS+'">'+fmBRL(totalBR)+'</div></div>';
+          if(rentPeriodo!==null)body+='<div><div style="'+labelS+'">Rentabilidade no mês</div><div style="font-size:17px;font-weight:800;color:'+corRentBR+'">'+(rentPeriodo>=0?'+':'')+rentPeriodo.toFixed(2)+'%</div></div>';
+          body+='<div><div style="'+labelS+'">Benchmark</div><div style="font-size:13px;font-weight:700;color:#2563EB">CDI · IBOV · IPCA</div></div>';
           body+='</div></div>';
         }
+        /* --- EUA USD --- */
         if(ativosUSD.length>0){
           var totalUSD_brl=ativosUSD.reduce(function(s,a){return s+(a.vA||0);},0);
-          var pesoUSD=totalCart>0?totalUSD_brl/totalCart:0;
+          var pesoUSD=totalCart>0?(totalUSD_brl/totalCart*100).toFixed(1):0;
           var usdRate=usdRateRelatorio||0;
           var totalUSD_usd=usdRate>0?totalUSD_brl/usdRate:null;
-          body+='<div style="background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);border-radius:10px;padding:14px 18px;margin-bottom:12px">';
-          body+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:13px;font-weight:700;color:#38BDF8">🇺🇸 Investimentos EUA (USD)</div><div style="font-size:11px;color:#6B7489">'+(pesoUSD*100).toFixed(1)+'% do portfólio · '+ativosUSD.length+' ativos</div></div>';
-          body+='<div style="display:flex;gap:24px;flex-wrap:wrap">';
-          body+='<div><div style="font-size:9px;color:#6B7489;text-transform:uppercase;letter-spacing:.5px">Patrimônio (BRL)</div><div style="font-size:16px;font-weight:700;color:#E8ECF5">'+fmBRL(totalUSD_brl)+'</div></div>';
+          var corRentUSD=rentUSDpct!==null?(rentUSDpct>=0?'#0F9D58':'#D93025'):'#374151';
+          body+='<div style="background:#EFF6FF;border:1.5px solid #2563EB55;border-left:4px solid #2563EB;border-radius:10px;padding:16px 20px;margin-bottom:14px">';
+          body+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
+          body+='<div style="font-size:14px;font-weight:800;'+labelC+'">🇺🇸 Investimentos EUA <span style="color:#2563EB">(USD)</span></div>';
+          body+='<div style="font-size:11px;color:#9CA3AF">'+pesoUSD+'% do portfólio · '+ativosUSD.length+' ativos</div></div>';
+          body+='<div style="display:flex;gap:32px;flex-wrap:wrap">';
+          body+='<div><div style="'+labelS+'">Patrimônio (BRL)</div><div style="'+valS+'">'+fmBRL(totalUSD_brl)+'</div></div>';
           if(totalUSD_usd!==null){
-            body+='<div><div style="font-size:9px;color:#6B7489;text-transform:uppercase;letter-spacing:.5px">Patrimônio (USD)</div><div style="font-size:16px;font-weight:700;color:#38BDF8">US$ '+totalUSD_usd.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+'</div></div>';
-            body+='<div><div style="font-size:9px;color:#6B7489;text-transform:uppercase;letter-spacing:.5px">Câmbio referência</div><div style="font-size:14px;font-weight:600;color:#6B7489">R$ '+usdRate.toFixed(2)+'/US$</div></div>';
+            body+='<div><div style="'+labelS+'">Patrimônio (USD)</div><div style="font-size:17px;font-weight:800;color:#1D4ED8">US$ '+totalUSD_usd.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+'</div></div>';
+            body+='<div><div style="'+labelS+'">Câmbio</div><div style="font-size:13px;font-weight:700;color:#6B7480">R$ '+usdRate.toFixed(2)+'/US$</div></div>';
           }
-          body+='<div><div style="font-size:9px;color:#6B7489;text-transform:uppercase;letter-spacing:.5px">Benchmark</div><div style="font-size:14px;font-weight:600;color:#38BDF8">S&amp;P 500 · Nasdaq</div></div>';
+          if(rentUSDpct!==null){
+            body+='<div><div style="'+labelS+'">Rentabilidade em USD</div><div style="font-size:17px;font-weight:800;color:'+corRentUSD+'">'+(rentUSDpct>=0?'+':'')+rentUSDpct.toFixed(2)+'%</div></div>';
+          }
+          body+='<div><div style="'+labelS+'">Benchmark</div><div style="font-size:13px;font-weight:700;color:#2563EB">S&amp;P 500 · Nasdaq</div></div>';
           body+='</div>';
-          body+='<div style="margin-top:10px;font-size:9px;color:#6B7489;font-style:italic">Ativos: '+ativosUSD.map(function(a){return a.tk||(a.nm||"").split(" ")[0];}).slice(0,8).join(", ")+(ativosUSD.length>8?"...":"")+'</div>';
+          body+='<div style="margin-top:10px;font-size:9px;color:#9CA3AF;font-style:italic">Ativos: '+ativosUSD.map(function(a){return a.tk||(a.nm||"").split(" ")[0];}).slice(0,10).join(", ")+(ativosUSD.length>10?"...":"")+'</div>';
           body+='</div>';
         }
+        /* --- Europa EUR --- */
         if(ativosEUR.length>0){
           var totalEUR_brl=ativosEUR.reduce(function(s,a){return s+(a.vA||0);},0);
-          var pesoEUR=totalCart>0?totalEUR_brl/totalCart:0;
-          body+='<div style="background:rgba(167,139,250,0.06);border:1px solid rgba(167,139,250,0.2);border-radius:10px;padding:14px 18px;margin-bottom:12px">';
-          body+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:13px;font-weight:700;color:#A78BFA">🇪🇺 Investimentos Europa (EUR)</div><div style="font-size:11px;color:#6B7489">'+(pesoEUR*100).toFixed(1)+'% do portfólio · '+ativosEUR.length+' ativos</div></div>';
-          body+='<div style="display:flex;gap:24px;flex-wrap:wrap">';
-          body+='<div><div style="font-size:9px;color:#6B7489;text-transform:uppercase;letter-spacing:.5px">Patrimônio (BRL)</div><div style="font-size:16px;font-weight:700;color:#E8ECF5">'+fmBRL(totalEUR_brl)+'</div></div>';
-          body+='<div><div style="font-size:9px;color:#6B7489;text-transform:uppercase;letter-spacing:.5px">Benchmark</div><div style="font-size:14px;font-weight:600;color:#A78BFA">Euro Stoxx · MSCI Europe</div></div>';
+          var pesoEUR=totalCart>0?(totalEUR_brl/totalCart*100).toFixed(1):0;
+          body+='<div style="background:#F5F3FF;border:1.5px solid #7C3AED55;border-left:4px solid #7C3AED;border-radius:10px;padding:16px 20px;margin-bottom:14px">';
+          body+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
+          body+='<div style="font-size:14px;font-weight:800;'+labelC+'">🇪🇺 Investimentos Europa <span style="color:#7C3AED">(EUR)</span></div>';
+          body+='<div style="font-size:11px;color:#9CA3AF">'+pesoEUR+'% do portfólio · '+ativosEUR.length+' ativos</div></div>';
+          body+='<div style="display:flex;gap:32px;flex-wrap:wrap">';
+          body+='<div><div style="'+labelS+'">Patrimônio (BRL)</div><div style="'+valS+'">'+fmBRL(totalEUR_brl)+'</div></div>';
+          body+='<div><div style="'+labelS+'">Benchmark</div><div style="font-size:13px;font-weight:700;color:#7C3AED">Euro Stoxx · MSCI Europe</div></div>';
           body+='</div>';
-          body+='<div style="margin-top:10px;font-size:9px;color:#6B7489;font-style:italic">Ativos: '+ativosEUR.map(function(a){return a.tk||(a.nm||"").split(" ")[0];}).slice(0,8).join(", ")+(ativosEUR.length>8?"...":"")+'</div>';
+          body+='<div style="margin-top:10px;font-size:9px;color:#9CA3AF;font-style:italic">Ativos: '+ativosEUR.map(function(a){return a.tk||(a.nm||"").split(" ")[0];}).slice(0,10).join(", ")+(ativosEUR.length>10?"...":"")+'</div>';
           body+='</div>';
         }
-        body+='<div class="nota-inline" style="margin-top:8px">💡 A rentabilidade total em BRL inclui o efeito cambial. Para avaliar o desempenho real dos ativos internacionais, considere a variação na moeda original (USD/EUR).</div>';
+        body+='<div class="nota-inline" style="margin-top:8px">💡 A rentabilidade total em BRL inclui o efeito cambial. Para avaliar o desempenho real dos ativos no exterior, considere a rentabilidade na moeda original (USD/EUR).</div>';
       })();
 
       /* ===== ATRIBUIÇÃO POR CLASSE — calculada para o período do relatório =====
@@ -22516,7 +22539,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '213';
+  var SW_VERSION = '214';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
