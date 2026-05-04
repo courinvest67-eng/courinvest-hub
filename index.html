@@ -7154,7 +7154,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       
       if(secAtiva("carteira")){
       body+='<!-- PAGE_BREAK -->';
-      body+='<div style="margin:0 0 12px"><span style="font-size:22px;margin-right:8px">📋</span><span style="font-size:26px;font-weight:900;color:#0A1628;letter-spacing:-0.5px">Composição <span style="color:#D4A328;font-style:italic">Detalhada</span></span></div>';
+      body+='<div style="margin:-4mm 0 8px"><span style="font-size:20px;margin-right:6px">📋</span><span style="font-size:22px;font-weight:900;color:#0A1628;letter-spacing:-0.5px">Composição <span style="color:#D4A328;font-style:italic">Detalhada</span></span></div>';
       var grouped={};
       var labelInicioCol=tipo==="mensal"?"Início Mês":tipo==="anual"?"Início Ano":"Início";
       var labelFimCol=tipo==="mensal"?"Fim Mês":"Valor Atual";
@@ -7696,7 +7696,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       
       var bodyPages=body.split('<!-- PAGE_BREAK -->');
       var pagesHtml='';
-      bodyPages.forEach(function(pg,i){        pagesHtml+='<div class="cv-page cv-page-light">'          +miniHdr          +pg          +miniFtr(3+i,totalPgs)          +'</div>';      });
+      bodyPages.forEach(function(pg,i){
+        var isComposicao=pg.indexOf('Composição')>=0&&pg.indexOf('Detalhada')>=0;
+        var pgStyle=isComposicao?'padding:10mm 14mm 8mm':'';
+        pagesHtml+='<div class="cv-page cv-page-light" style="'+pgStyle+'">'
+          +miniHdr
+          +pg
+          +miniFtr(3+i,totalPgs)
+          +'</div>';
+      });
       
       pagesHtml=pagesHtml.replace(/<\/div>$/,         '<div class="footer" style="margin-top:24px">'        +'<strong>Courinvest Consultoria em Investimentos</strong>'        +'<div class="disclaimer">Este relatório é informativo e não constitui recomendação de investimento. '        +'Rentabilidades passadas não garantem resultados futuros.</div>'        +'</div></div>');
       return '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Relatório — '+c.nome+' | Courinvest</title>'+css+'<\/head><body>'+capaFinal+tocPagina+pagesHtml+'<\/body><\/html>';
@@ -22583,7 +22591,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '227';
+  var SW_VERSION = '228';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
