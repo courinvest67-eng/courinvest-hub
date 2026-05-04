@@ -4182,6 +4182,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
   const[aportesManual,sAportesManual]=useState(false); 
   const[showAddAp,sShowAddAp]=useState(false);
   const[reportHtml,sReportHtml]=useState(null);
+  const[usdRelatorio,sUsdRelatorio]=useState(null); /* Câmbio do fechamento do mês de referência */
 
   /* === MOVIMENTAÇÕES (Aportes + Resgates) ===
      Estrutura: [{id, data: "YYYY-MM-DD", tipo: "aporte"|"resgate", valor, descricao, ativo?, fonte?: "manual"|"gorila"}]
@@ -6175,7 +6176,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       }
 
       /* === FASE 4: PULL QUOTE — destaque editorial sobre composição da carteira === */
-      var usdRateRelatorio=usdRateGlobal||5.70; /* Taxa USD disponível globalmente para toda a seção */
+      var usdRateRelatorio=usdRelatorio||usdRateGlobal||5.70; /* Câmbio do fechamento do mês de referência */
       var temExt=enr.some(function(a){return ['stock_us','etf_int','etf_eu','reit','bdr'].indexOf(a.tp)>=0});
       var temRV=enr.some(function(a){return ['acao','fii','fiagro','etf_br','fundo_acoes'].indexOf(a.tp)>=0});
       var temRF=enr.some(function(a){return ['cdb','lci','lca','tesouro','fundo_rf','fundo_mm'].indexOf(a.tp)>=0});
@@ -7040,21 +7041,18 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       var byInst={};
       enr.forEach(function(a){
         var inst=normI(a.inst)||"Sem instituição";
-        if(!byInst[inst])byInst[inst]={ativos:0,valor:0,valorIni:0,ganhoMes:0};
+        if(!byInst[inst])byInst[inst]={ativos:0,valor:0,ganhoMes:0};
         byInst[inst].ativos++;
         byInst[inst].valor+=a.vA;
-        /* Valor início do período = valor atual - ganho do mês (estimado pelo rentPeriodo) */
+        /* Tenta pegar ganho do mês do Gorila */
         var rentAt=getRentAtivoPer(a);
-        var ganhoMesAt=rentAt&&rentAt.rs?rentAt.rs:0;
-        byInst[inst].valorIni+=(a.vA-ganhoMesAt);
-        byInst[inst].ganhoMes+=ganhoMesAt;
+        byInst[inst].ganhoMes+=rentAt.doPeriodo?rentAt.rs:(a.vA*(rentPeriodo||0)/100);
       });
+      var totalValor=enr.reduce(function(s,a){return s+a.vA;},0);
       var instList=Object.entries(byInst).map(function(e){
         var d=e[1];var pctCart=tCV>0?(d.valor/tCV*100):0;
-        /* Rentabilidade = ganho do mês / valor início do período */
-        var rentPctPer=d.valorIni>0?(d.ganhoMes/d.valorIni*100):0;
-        /* Se instituição tem quase 100% da carteira, usa rentPeriodo diretamente */
-        if(pctCart>=99.9&&rentPeriodo!==null)rentPctPer=rentPeriodo;
+        /* Se instituição = carteira toda, usa rentPeriodo direto */
+        var rentPctPer=pctCart>=99.9&&rentPeriodo!==null?rentPeriodo:(d.valor>0?(d.ganhoMes/(d.valor-d.ganhoMes)*100):0);
         return {nome:e[0],ativos:d.ativos,valor:d.valor,ganho:d.ganhoMes,rentPct:rentPctPer,pctCarteira:pctCart};
       }).sort(function(a,b){return b.valor-a.valor});
       if(secAtiva("instituicao") && instList.length>0){
@@ -15267,7 +15265,29 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
                 <>
                   <div style={{fontSize:10,color:T.t3,fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>📊 Performance da Carteira</div>
                   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:12,marginBottom:20}}>
-                    <Cd onClick={function(){try{sReportHtml(gerarRelatorio("mensal"))}catch(e){alert("Erro ao gerar relatório:\n"+e.message+"\n\nLinha: "+e.stack.split("\n")[1])}}} style={{padding:20,cursor:"pointer",background:"linear-gradient(145deg,"+T.goldD+",rgba(212,163,40,0.04))",border:"1px solid "+T.gold+"33"}}>
+                    <Cd onClick={function(){
+                      /* Busca câmbio do último dia útil do mês de referência (mês anterior) */
+                      var refDate=new Date();refDate.setDate(1);refDate.setMonth(refDate.getMonth()-1);
+                      var anoRef=refDate.getFullYear();var mesRef=String(refDate.getMonth()+1).padStart(2,"0");
+                      /* Último dia do mês de referência */
+                      var ultimoDia=new Date(anoRef,refDate.getMonth()+1,0);
+                      var diaStr=String(ultimoDia.getDate()).padStart(2,"0");
+                      var dataFmt=anoRef+""+mesRef+""+diaStr; /* formato YYYYMMDD para AwesomeAPI */
+                      fetch("https://economia.awesomeapi.com.br/json/daily/USD-BRL/5?start_date="+dataFmt+"&end_date="+dataFmt)
+                        .then(function(r){return r.json()})
+                        .then(function(data){
+                          if(Array.isArray(data)&&data.length>0&&data[0].bid){
+                            sUsdRelatorio(parseFloat(data[0].bid));
+                          } else {
+                            /* Fallback: câmbio atual */
+                            sUsdRelatorio(usdRateGlobal||5.70);
+                          }
+                        })
+                        .catch(function(){sUsdRelatorio(usdRateGlobal||5.70);})
+                        .finally(function(){
+                          try{sReportHtml(gerarRelatorio("mensal"))}catch(e){alert("Erro ao gerar relatório:\n"+e.message+"\n\nLinha: "+e.stack.split("\n")[1])}
+                        });
+                    }} style={{padding:20,cursor:"pointer",background:"linear-gradient(145deg,"+T.goldD+",rgba(212,163,40,0.04))",border:"1px solid "+T.gold+"33"}}>
                       <div style={{display:"flex",alignItems:"center",gap:12}}>
                         <div style={{fontSize:32}}>📊</div>
                         <div style={{flex:1}}>
@@ -22559,7 +22579,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '220';
+  var SW_VERSION = '222';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
