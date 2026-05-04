@@ -5773,7 +5773,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       var _tpl=_rel.template||"premium";
       var _TEMPLATE_DEFAULTS={
         premium:  {capa:true, overview:true,  resumoExec:true, rentabilidade:true, carteira:true, proventos:true,  instituicao:true,  metas:true,  objetivos:true, analise:true},
-        simples:  {capa:true, overview:false, resumoExec:true, rentabilidade:true, carteira:true, proventos:false, instituicao:false, metas:false, objetivos:false,analise:false},
+        simples:  {capa:true, overview:true,  resumoExec:true, rentabilidade:true, carteira:true, proventos:false, instituicao:false, metas:false, objetivos:false,analise:false},
         completo: {capa:true, overview:true,  resumoExec:true, rentabilidade:true, carteira:true, proventos:true,  instituicao:true,  metas:true,  objetivos:true, analise:true},
         custom:   _rel.secoes||{capa:true, overview:true, resumoExec:true, rentabilidade:false,carteira:true, proventos:false, instituicao:false, metas:false, objetivos:false,analise:false}
       };
@@ -15217,9 +15217,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
               /* === DEFAULTS POR TEMPLATE — devem bater com _TEMPLATE_DEFAULTS no gerarRelatorio === */
               var TEMPLATE_DEFAULTS={
                 premium:  {capa:true, overview:true,  resumoExec:true, rentabilidade:true,  carteira:true, proventos:true,  instituicao:true,  metas:true,  objetivos:true, analise:true},
-                simples:  {capa:true, overview:false, resumoExec:true, rentabilidade:true,  carteira:true, proventos:false, instituicao:false, metas:false, objetivos:false,analise:false},
+                simples:  {capa:true, overview:true,  resumoExec:true, rentabilidade:true,  carteira:true, proventos:false, instituicao:false, metas:false, objetivos:false,analise:false},
                 completo: {capa:true, overview:true,  resumoExec:true, rentabilidade:true,  carteira:true, proventos:true,  instituicao:true,  metas:true,  objetivos:true, analise:true},
-                custom:   {capa:true, overview:false, resumoExec:true, rentabilidade:false, carteira:true, proventos:false, instituicao:false, metas:false, objetivos:false,analise:false}
+                custom:   {capa:true, overview:true,  resumoExec:true, rentabilidade:false, carteira:true, proventos:false, instituicao:false, metas:false, objetivos:false,analise:false}
               };
               /* Resolve seções ativas — se template != custom, usa default; se custom, usa rel.secoes salvo */
               var secoes=tpl==="custom" ? (rel.secoes||TEMPLATE_DEFAULTS.custom) : TEMPLATE_DEFAULTS[tpl];
@@ -22460,7 +22460,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '209';
+  var SW_VERSION = '211';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
