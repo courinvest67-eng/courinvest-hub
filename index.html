@@ -1364,9 +1364,10 @@ function Dash({data:d,onSel:os,goTo}){
 
   /* Clientes com GP que têm dados para gerar relatório */
   const clRelatorio=(d.cl||[]).filter(function(c){
-    var temGP=c.sv&&c.sv.includes("patrimonio")&&(c.patGorila||c.pat||0)>0;
-    var temFin=c.sv&&c.sv.includes("planejamento")&&c.orcamento&&c.orcamento.mensais&&Object.keys(c.orcamento.mensais).length>0;
-    return temGP||temFin;
+    var ativo=c.status!=="encerrado"&&c.status!=="inativo";
+    var temGP=c.sv&&c.sv.includes("patrimonio");
+    var temFin=c.sv&&c.sv.includes("planejamento");
+    return ativo&&(temGP||temFin);
   });
 
   const MES_NOMES=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
@@ -22459,7 +22460,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '208';
+  var SW_VERSION = '209';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
