@@ -7770,8 +7770,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       /* ===== COMPOSIÇÃO DETALHADA — ordenada por Macro-Classe > Subclasse > Valor ===== */
       
       if(secAtiva("carteira")){
-      body+='<!-- PAGE_BREAK -->';
       body+='<div style="margin:-4mm 0 8px"><span style="font-size:20px;margin-right:6px">📋</span><span style="font-size:22px;font-weight:900;color:#0A1628;letter-spacing:-0.5px">Composição <span style="color:#D4A328;font-style:italic">Detalhada</span></span></div>';
+      body+='<!-- PAGE_BREAK -->';
       var grouped={};
       var labelInicioCol=tipo==="mensal"?"Início Mês":tipo==="anual"?"Início Ano":"Início";
       var labelFimCol=tipo==="mensal"?"Fim Mês":"Valor Atual";
