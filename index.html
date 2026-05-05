@@ -6615,26 +6615,6 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       })();
       } /* fim secAtiva("evolucao") */
 
-      /* === NOTA IMPACTO CAMBIAL === */
-      if(pesoExtCambial>0.05&&rentPeriodo!==null){
-        var extPctFmt=(pesoExtCambial*100).toFixed(0);
-        var notaCambial='<div style="background:linear-gradient(145deg,#f0f9ff,#e0f2fe);border:1px solid rgba(56,189,248,0.35);border-left:4px solid #38BDF8;border-radius:10px;padding:14px 18px;margin:14px 0;font-size:12px;color:#1a1a2e;line-height:1.7">';
-        notaCambial+='<div style="font-size:10px;color:#38BDF8;font-weight:800;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">🌐 NOTA SOBRE IMPACTO CAMBIAL</div>';
-        notaCambial+='A carteira possui <strong>'+extPctFmt+'% de exposição ao exterior</strong> (ativos em USD). ';
-        if(rentPeriodo<0){
-          notaCambial+='A <strong>desvalorização do dólar frente ao real</strong> no período contribuiu negativamente para a rentabilidade total em reais. ';
-        }else{
-          notaCambial+='A variação cambial do dólar frente ao real influenciou a rentabilidade total em reais. ';
-        }
-        if(rentSemCambial!==null){
-          var diffC=rentSemCambial-rentPeriodo;
-          notaCambial+='Excluindo o efeito cambial estimado, a rentabilidade seria de aproximadamente <strong style="color:'+(rentSemCambial>=0?"#0F9D58":"#D93025")+'">'+(rentSemCambial>=0?"+":"")+rentSemCambial.toFixed(2)+'%</strong> (diferença de '+(diffC>=0?"+":"")+diffC.toFixed(2)+'pp). ';
-        }
-        notaCambial+='<em style="font-size:11px">Os ativos internacionais mantêm seu valor em USD — a variação em R$ reflete a conversão cambial, não perda real dos ativos.</em>';
-        notaCambial+='</div>';
-        body+=notaCambial;
-      }
-
       /* === FASE 4: PULL QUOTE — destaque editorial sobre composição da carteira === */
       var usdRateRelatorio=usdRelatorio||usdRateGlobal||5.70; /* Câmbio do fechamento do mês de referência */
       var temExt=enr.some(function(a){return ['stock_us','etf_int','etf_eu','reit','bdr'].indexOf(a.tp)>=0});
@@ -23728,7 +23708,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '245';
+  var SW_VERSION = '246';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
