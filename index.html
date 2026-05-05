@@ -12899,8 +12899,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
               if(!obj.ativosVinculados||obj.ativosVinculados.length===0)return 0;
               var soma=0;
               obj.ativosVinculados.forEach(function(tk){
-                var a=enr.find(function(x){return x.tk===tk});
-                if(a)soma+=a.vA||0; 
+                /* === FIX BUG: SOMA TODOS os ativos com aquele tk ===
+                   Antes: .find() pegava só o PRIMEIRO ativo. Mas o parser do XLSX trunca nomes
+                   longos (>20 chars) pra 3 palavras como tk, causando colisões:
+                   - "NTNB PRINCIPAL - 15/05/2029" e "NTNB PRINCIPAL - 15/05/2045" e "NTNB PRINCIPAL - 15/08/2032"
+                     todos viram tk="NTNB PRINCIPAL -" → no .find() só somava o 1º (perdia R$ 46k+).
+                   Solução: filter+reduce pra somar TODOS os ativos com aquele tk.
+                   Bonus: também tenta match por nm (nome completo) — útil pra ativos que vêm com tk diferente. */
+                var matches=enr.filter(function(x){return x.tk===tk||x.nm===tk});
+                matches.forEach(function(a){soma+=a.vA||0;});
               });
               /* Se objetivo é em USD, converte BRL → USD (só pra cliente BR — pra exterior já tá na moeda dele) */
               if(obj.moeda==="USD" && usdRateGlobal>0 && moedaCli(c).code==="BRL")return soma/usdRateGlobal;
@@ -13014,6 +13021,93 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
                     <Bt onClick={function(){sObjModal({modo:"ativos",ativosVinculados:[],dataAlvo:new Date(hojeObj.getFullYear()+1,hojeObj.getMonth(),1).toISOString().split("T")[0]})}} style={{fontSize:11}}>+ Novo Objetivo</Bt>
                   </div>
                 </Cd>
+
+                {/* === PAINEL DE CONFERÊNCIA — soma dos vinculados vs patrimônio total ===
+                    Aparece só quando há objetivos cadastrados. Ajuda a identificar:
+                    1. Se há ativos não-vinculados (sobra)
+                    2. Se há ativos vinculados em mais de um objetivo (overlap — soma > patrimônio)
+                    3. Lista os ativos não-vinculados pra facilitar correção. */}
+                {objetivos.length>0 && (function(){
+                  /* Calcula patrimônio total (só ativos brasileiros se cliente é BR — exterior fora) */
+                  var patTotal=enr.reduce(function(s,a){return s+(a.vA||0)},0);
+                  /* Soma todos os atingidos com modo "ativos" + manuais */
+                  var somaVinc=0;
+                  var manualSum=0;
+                  /* Coleta tickers vinculados em CADA objetivo (pra detectar overlap) */
+                  var tkUsages={}; /* tk -> count */
+                  objetivos.forEach(function(obj){
+                    if(obj.modo==="manual"){
+                      manualSum+=obj.acumuladoManual||0;
+                    } else if(obj.ativosVinculados){
+                      /* Soma SEM duplicação dentro do mesmo objetivo (já fica certo no calcAcumulado) */
+                      somaVinc+=calcAcumulado(obj);
+                      obj.ativosVinculados.forEach(function(tk){
+                        tkUsages[tk]=(tkUsages[tk]||0)+1;
+                      });
+                    }
+                  });
+                  /* Identifica ativos NÃO-VINCULADOS a nenhum objetivo */
+                  var todosTks={};
+                  enr.forEach(function(a){todosTks[a.tk]=a});
+                  var tksVinculados={};
+                  Object.keys(tkUsages).forEach(function(tk){tksVinculados[tk]=true});
+                  var naoVinculados=Object.keys(todosTks).filter(function(tk){
+                    return !tksVinculados[tk]&&todosTks[tk].nm!==tk?(!tksVinculados[todosTks[tk].nm]):!tksVinculados[tk];
+                  }).map(function(tk){return todosTks[tk]});
+                  var somaNaoVinc=naoVinculados.reduce(function(s,a){return s+(a.vA||0)},0);
+                  /* Detecta overlaps (tickers vinculados em mais de 1 objetivo) */
+                  var overlaps=Object.keys(tkUsages).filter(function(tk){return tkUsages[tk]>1});
+                  /* Diferença esperada: patTotal - (somaVinc - overlaps_extra) - manualSum_não_é_da_carteira */
+                  var diff=patTotal-somaVinc;
+                  var corDiff=Math.abs(diff)<10?T.green:(diff>0?T.orange:T.red);
+                  var statusTxt=Math.abs(diff)<10?"✅ Tudo vinculado":(diff>0?"⚠ Faltam ativos":"⚠ Há overlap (ativo em vários objetivos)");
+                  
+                  return (
+                    <Cd style={{padding:14,marginBottom:14,background:"rgba(43,90,255,0.04)",border:"1px solid rgba(139,157,195,0.15)"}} hov={false}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+                        <div style={{display:"flex",gap:24,flexWrap:"wrap",flex:1}}>
+                          <div>
+                            <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:1,marginBottom:3}}>PATRIMÔNIO TOTAL</div>
+                            <div style={{fontSize:14,fontWeight:800,color:T.t1,fontFamily:"'JetBrains Mono'"}}>{fmF(patTotal)}</div>
+                          </div>
+                          <div>
+                            <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:1,marginBottom:3}}>VINCULADO EM OBJETIVOS</div>
+                            <div style={{fontSize:14,fontWeight:800,color:T.t2,fontFamily:"'JetBrains Mono'"}}>{fmF(somaVinc)}</div>
+                          </div>
+                          <div>
+                            <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:1,marginBottom:3}}>DIFERENÇA</div>
+                            <div style={{fontSize:14,fontWeight:800,color:corDiff,fontFamily:"'JetBrains Mono'"}}>{diff>0?"+":""}{fmF(diff)}</div>
+                          </div>
+                          <div style={{minWidth:180}}>
+                            <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:1,marginBottom:3}}>STATUS</div>
+                            <div style={{fontSize:11,fontWeight:700,color:corDiff}}>{statusTxt}</div>
+                          </div>
+                        </div>
+                      </div>
+                      {naoVinculados.length>0 && (
+                        <details style={{marginTop:12,fontSize:11}}>
+                          <summary style={{cursor:"pointer",color:T.orange,fontWeight:700,padding:"6px 0"}}>📋 {naoVinculados.length} ativo{naoVinculados.length>1?"s":""} não vinculado{naoVinculados.length>1?"s":""} ({fmF(somaNaoVinc)}) — clique para ver</summary>
+                          <div style={{marginTop:8,maxHeight:200,overflowY:"auto",padding:"4px 0"}}>
+                            {naoVinculados.sort(function(a,b){return (b.vA||0)-(a.vA||0)}).map(function(a,i){return (
+                              <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"4px 8px",borderRadius:6,background:i%2===0?"rgba(255,255,255,0.02)":"transparent",fontSize:11}}>
+                                <span style={{color:T.t2,maxWidth:"60%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.nm||a.tk}</span>
+                                <span style={{color:T.t1,fontWeight:700,fontFamily:"'JetBrains Mono'"}}>{fmF(a.vA||0)}</span>
+                              </div>
+                            )})}
+                          </div>
+                        </details>
+                      )}
+                      {overlaps.length>0 && (
+                        <details style={{marginTop:8,fontSize:11}}>
+                          <summary style={{cursor:"pointer",color:T.red,fontWeight:700,padding:"6px 0"}}>⚠ {overlaps.length} ativo{overlaps.length>1?"s":""} vinculado{overlaps.length>1?"s":""} em MAIS DE UM objetivo (causa overlap) — clique</summary>
+                          <div style={{marginTop:8,fontSize:10,color:T.t3,padding:"4px 8px"}}>
+                            {overlaps.map(function(tk){return tk+" ("+tkUsages[tk]+"x)"}).join(" · ")}
+                          </div>
+                        </details>
+                      )}
+                    </Cd>
+                  );
+                })()}
 
                 {}
                 {objetivos.length===0 ? (
@@ -23807,7 +23901,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '251';
+  var SW_VERSION = '252';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
