@@ -6510,45 +6510,60 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
          Retorna {pct, rs, doPeriodo, fonte} pra um ativo no período do relatório.
          Declarada AQUI (antes da Atribuição) porque é usada tanto na Atribuição quanto em Destaques. */
       var getRentAtivoPer=function(a){
-        if(a._gRentPct){
-          var rp=a._gRentPct;var keys=Object.keys(rp);
-          var cleanKey=function(k){return String(k).toLowerCase().trim().replace(/^'+|'+$/g,"");};
-          /* === Helper: pega valor em R$ correspondente, se existir, da mesma coluna === */
-          var getRsForKey=function(targetClean){
-            if(!a._gRentRs)return null;
-            var krs=Object.keys(a._gRentRs).find(function(k){return cleanKey(k)===targetClean});
-            if(krs!==undefined&&typeof a._gRentRs[krs]==="number")return a._gRentRs[krs];
-            return null;
-          };
-          if(tipo==="mensal"){
-            /* === PRIORIDADE 1: coluna "Periodo"/"Período" do Gorila ===
-               Se o usuário exportou um relatório mensal (período <=45 dias), essa coluna É a rent. do mês.
-               O Gorila exporta SEMPRE essa coluna pra cada ativo na aba Posição, e ela representa
-               o desempenho do ativo no período exportado. Pra relatórios mensais, é a fonte mais precisa.
-               Determina se o período é mensal pelo grDias do _gorilaRent (data inicial até final). */
-            var grDias=c._gorilaRent&&c._gorilaRent.dataIni&&c._gorilaRent.dataFim?Math.round((new Date(c._gorilaRent.dataFim)-new Date(c._gorilaRent.dataIni))/86400000):9999;
-            if(grDias<=45){
-              var kp=keys.find(function(k){var cl=cleanKey(k);return cl==="periodo"||cl==="período";});
-              if(kp&&typeof rp[kp]==="number"){
-                var pctP=rp[kp]*100;
-                /* Prefere o R$ exato vindo do Gorila (mais preciso que a.vA*pct) */
-                var rsP=getRsForKey("periodo");if(rsP===null)rsP=getRsForKey("período");
-                return {pct:pctP,rs:rsP!==null?rsP:a.vA*rp[kp],doPeriodo:true,fonte:"gorila_periodo"};
-              }
+        /* Helper: encontra valor numérico no objeto pela chave normalizada (ignora caso, espaços, acentos) */
+        var pickKey=function(obj,targets){
+          if(!obj)return null;
+          var norm=function(s){return String(s||"").toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/^'+|'+$/g,"")};
+          var keys=Object.keys(obj);
+          for(var t=0;t<targets.length;t++){
+            var tNorm=norm(targets[t]);
+            for(var k=0;k<keys.length;k++){
+              if(norm(keys[k])===tNorm && typeof obj[keys[k]]==="number")return obj[keys[k]];
             }
-            /* === PRIORIDADE 2: chave "Último Mês" (versões antigas do Gorila) === */
-            var ordemMes=["ultimo mês","último mês","ultimo mes","último mes","1m"];
-            for(var oi=0;oi<ordemMes.length;oi++){var kk=keys.find(function(k){return cleanKey(k)===ordemMes[oi]});if(kk!==undefined&&typeof rp[kk]==="number"){var rsM=getRsForKey(ordemMes[oi]);return {pct:rp[kk]*100,rs:rsM!==null?rsM:a.vA*rp[kk],doPeriodo:true,fonte:"gorila_mes"};}}
-            /* === PRIORIDADE 3: estima do anual (último recurso, menos preciso) === */
-            var vAno=(typeof rp["ano"]==="number"?rp["ano"]:(typeof rp["Ano"]==="number"?rp["Ano"]:null));
-            if(vAno!==null){var pctM=(Math.pow(1+vAno,1/12)-1)*100;return {pct:pctM,rs:a.vA*(pctM/100),doPeriodo:true,fonte:"estimado"};}
+          }
+          return null;
+        };
+        if(a._gRentPct||a._gRentRs){
+          var rp=a._gRentPct||{};
+          var rs=a._gRentRs||{};
+          if(tipo==="mensal"){
+            /* === PRIORIDADE 1: ganho R$ EXATO do Gorila pra coluna "Periodo".
+               É a fonte mais confiável — Gorila exporta esse valor diretamente, sem cálculo nosso. */
+            var rsPeriodo=pickKey(rs,["Periodo","periodo","Período","período","PERIODO","Ultimo Mês","Último Mês","ultimo mes","ultimo mês","1m"]);
+            var pctPeriodo=pickKey(rp,["Periodo","periodo","Período","período","PERIODO","Ultimo Mês","Último Mês","ultimo mes","ultimo mês","1m"]);
+            /* Se temos pelo menos um dos dois, usa */
+            if(rsPeriodo!==null && pctPeriodo!==null){
+              return {pct:pctPeriodo*100,rs:rsPeriodo,doPeriodo:true,fonte:"gorila_periodo"};
+            }
+            if(rsPeriodo!==null){
+              /* Tem R$ mas não tem %: deriva % do R$ */
+              var posIni=a.vA-rsPeriodo;
+              var pctDerivado=posIni>0?(rsPeriodo/posIni)*100:0;
+              return {pct:pctDerivado,rs:rsPeriodo,doPeriodo:true,fonte:"gorila_periodo_rs"};
+            }
+            if(pctPeriodo!==null){
+              /* Tem % mas não tem R$: aproxima R$ */
+              return {pct:pctPeriodo*100,rs:a.vA*pctPeriodo/(1+pctPeriodo),doPeriodo:true,fonte:"gorila_periodo_pct"};
+            }
+            /* === PRIORIDADE 2 (último recurso): estima do anual === */
+            var vAno=pickKey(rp,["ano","Ano","ANO"]);
+            if(vAno!==null){
+              var pctM=(Math.pow(1+vAno,1/12)-1)*100;
+              return {pct:pctM,rs:a.vA*(pctM/100),doPeriodo:true,fonte:"estimado"};
+            }
           }else if(tipo==="anual"){
-            var v12=rp["12m"]||rp["12M"];if(typeof v12==="number"){var rs12=getRsForKey("12m");return {pct:v12*100,rs:rs12!==null?rs12:a.vA*v12,doPeriodo:true,fonte:"gorila_12m"};}
+            var rs12=pickKey(rs,["12m","12M"]);
+            var v12=pickKey(rp,["12m","12M"]);
+            if(rs12!==null && v12!==null)return {pct:v12*100,rs:rs12,doPeriodo:true,fonte:"gorila_12m"};
+            if(v12!==null)return {pct:v12*100,rs:a.vA*v12,doPeriodo:true,fonte:"gorila_12m"};
           }else{
-            var kT=keys.find(function(k){var cl=cleanKey(k);return cl.indexOf("início")>=0||cl.indexOf("inicio")>=0;});
-            if(kT&&typeof rp[kT]==="number"){var rsT=getRsForKey(cleanKey(kT));return {pct:rp[kT]*100,rs:rsT!==null?rsT:a.vA*rp[kT],doPeriodo:true,fonte:"gorila_total"};}
+            var rsT=pickKey(rs,["Início da Carteira","inicio da carteira","Inicio da Carteira"]);
+            var vT=pickKey(rp,["Início da Carteira","inicio da carteira","Inicio da Carteira"]);
+            if(rsT!==null && vT!==null)return {pct:vT*100,rs:rsT,doPeriodo:true,fonte:"gorila_total"};
+            if(vT!==null)return {pct:vT*100,rs:a.vA*vT,doPeriodo:true,fonte:"gorila_total"};
           }
         }
+        /* Fallback final: usa cálculo histórico (vA/cT-1) se não tem dados Gorila */
         return {pct:a.gPct,rs:a.ganho,doPeriodo:false,fonte:"historico"};
       };
 
@@ -23426,7 +23441,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '236';
+  var SW_VERSION = '238';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
