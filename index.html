@@ -7128,23 +7128,29 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       
       var totalBRRel=0,totalEXTRel=0,totalUSDRel=0;
       var byClasseBR={},byClasseEXT={};
+      var mesesBRSet={},mesesEXTSet={}; /* meses únicos com proventos por região */
       provs12mRel.forEach(function(p){
         var cls=classeRel(p);
         var vBRL=proventoEmBRLRel(p);
+        var mesKey=p.dataPagamento?p.dataPagamento.slice(0,7):"";
         if(cls.grupo==="BR"){
           totalBRRel+=vBRL;
+          if(mesKey)mesesBRSet[mesKey]=true;
           if(!byClasseBR[cls.k])byClasseBR[cls.k]={info:cls,total:0,ativos:{}};
           byClasseBR[cls.k].total+=vBRL;
           byClasseBR[cls.k].ativos[p.ativo]=true;
         }else{
           totalEXTRel+=vBRL;
           totalUSDRel+=proventoEmUSDRel(p);
+          if(mesKey)mesesEXTSet[mesKey]=true;
           if(!byClasseEXT[cls.k])byClasseEXT[cls.k]={info:cls,total:0,ativos:{}};
           byClasseEXT[cls.k].total+=vBRL;
           byClasseEXT[cls.k].ativos[p.ativo]=true;
         }
       });
-      var totalAnualGeral=totalBRRel+totalEXTRel; 
+      var totalAnualGeral=totalBRRel+totalEXTRel;
+      var mesesBR=Object.keys(mesesBRSet).length;
+      var mesesEXT=Object.keys(mesesEXTSet).length;
 
       
       var TP_RV_TODOS_REL=["fii","acao","etf_br","fundo_infra","fiagro","bdr","reit","stock_us","etf_int","etf_eu"];
@@ -7195,11 +7201,12 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
         body+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
           +'<span style="font-size:16px">🇧🇷</span>'
           +'<span style="font-size:13px;font-weight:800;color:#2DD4A0;letter-spacing:.3px">BRASIL</span>'
-          +'<span style="font-size:9px;color:#8B94A7;margin-left:auto">recebido em 12 meses</span>'
+          +'<span style="font-size:9px;color:#8B94A7;margin-left:auto">recebido em '+(mesesBR>0?(mesesBR+" "+(mesesBR===1?"mês":"meses")):"12 meses")+'</span>'
           +'</div>';
         if(totalBRRel>0){
           body+='<div style="font-size:22px;font-weight:800;color:#2DD4A0;font-family:\'JetBrains Mono\',monospace;line-height:1.1">R$ '+totalBRRel.toLocaleString("pt-BR",{maximumFractionDigits:0})+'</div>';
-          body+='<div style="font-size:10px;color:#6B7489;margin-bottom:14px">média de R$ '+(totalBRRel/12).toLocaleString("pt-BR",{maximumFractionDigits:0})+'/mês</div>';
+          var mediaBRMes=mesesBR>0?(totalBRRel/mesesBR):0;
+          body+='<div style="font-size:10px;color:#6B7489;margin-bottom:14px">média de R$ '+mediaBRMes.toLocaleString("pt-BR",{maximumFractionDigits:0})+'/mês</div>';
           var subBR=Object.values(byClasseBR).sort(function(a,b){return b.total-a.total});
           subBR.forEach(function(d){
             var pctTop=totalBRRel>0?d.total/totalBRRel*100:0;
@@ -7223,13 +7230,14 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
         body+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
           +'<span style="font-size:16px">🌎</span>'
           +'<span style="font-size:13px;font-weight:800;color:#A78BFA;letter-spacing:.3px">EXTERIOR</span>'
-          +'<span style="font-size:9px;color:#8B94A7;margin-left:auto">recebido em 12 meses</span>'
+          +'<span style="font-size:9px;color:#8B94A7;margin-left:auto">recebido em '+(mesesEXT>0?(mesesEXT+" "+(mesesEXT===1?"mês":"meses")):"12 meses")+'</span>'
           +'</div>';
         if(totalEXTRel>0){
           var totalUSDRelStr=totalUSDRel.toLocaleString("en-US",{maximumFractionDigits:2});
           body+='<div style="font-size:22px;font-weight:800;color:#A78BFA;font-family:\'JetBrains Mono\',monospace;line-height:1.1">US$ '+totalUSDRelStr+'</div>';
           body+='<div style="font-size:10px;color:#6B7489;margin-bottom:4px">≈ R$ '+totalEXTRel.toLocaleString("pt-BR",{maximumFractionDigits:0})+' (câmbio médio R$ '+usdRateRel.toFixed(2)+')</div>';
-          body+='<div style="font-size:9px;color:#6B7489;margin-bottom:14px">média de US$ '+(totalUSDRel/12).toLocaleString("en-US",{maximumFractionDigits:2})+'/mês</div>';
+          var mediaEXTMes=mesesEXT>0?(totalUSDRel/mesesEXT):0;
+          body+='<div style="font-size:9px;color:#6B7489;margin-bottom:14px">média de US$ '+mediaEXTMes.toLocaleString("en-US",{maximumFractionDigits:2})+'/mês</div>';
           var subEXT=Object.values(byClasseEXT).sort(function(a,b){return b.total-a.total});
           subEXT.forEach(function(d){
             var pctTop=totalEXTRel>0?d.total/totalEXTRel*100:0;
@@ -7533,7 +7541,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
           
           var desdeTxt=MN_CURTO_PROV[dtGraphIni.getMonth()]+"/"+dtGraphIni.getFullYear();
           var ateTxt=MN_CURTO_PROV[dtGraphFim.getMonth()]+"/"+dtGraphFim.getFullYear();
-          body+='<div class="nota-inline" style="margin-top:10px"><strong>📊 Período:</strong> '+desdeTxt+' até '+ateTxt+' · <strong>12 meses rolling</strong>. <strong>Valores reais</strong> baseados nos proventos cadastrados — barras empilhadas por classe. A linha tracejada mostra a média mensal do período.</div>';
+          body+='<div class="nota-inline" style="margin-top:10px"><strong>📊 Período:</strong> '+desdeTxt+' até '+ateTxt+' · <strong>Valores reais</strong> baseados nos proventos cadastrados, com barras empilhadas por classe.</div>';
         }
       }
 
@@ -23907,7 +23915,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '254';
+  var SW_VERSION = '255';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
