@@ -3154,10 +3154,11 @@ function CL({data:d,onSel:os,dispatch:dp}){
           tpEsperado="fundo_rf";
           motivo="Fundo classificado como Tesouro Direto (deveria ser Fundo RF)";
         }
-        /* Regra 3: fundo de infraestrutura classificado como Fundo RF ou Ação */
-        else if(cl.match(/incentivado.*infr|investimento em infr|fi-infra|fundo.*infra|infraestrutura/) && !["fundo_infra","debi"].includes(tpAtual)){
-          tpEsperado="fundo_infra";
-          motivo="FI-Infra classificado como "+tpAtual.toUpperCase()+" (deveria ser FI-Infra, isento de IR)";
+        /* Regra 3: FI-Infra aberto (classe=Renda Fixa + nome com 'Incentivado/Infra') classificado errado.
+           Não confundir com FII-Infra (BODB11/KDIF11 etc) que tem sub-classe='FIIs'. */
+        else if(classe.match(/renda fixa/) && cl.match(/incentivado.*infr|investimento em infr|fi-infra/) && !["fundo_infra","debi","fundo_rf"].includes(tpAtual)){
+          tpEsperado="fundo_rf";
+          motivo="Fundo de Renda Fixa Incentivado classificado como "+tpAtual.toUpperCase();
         }
         /* Regra 4: FII (subclasse "FIIs") classificado como ação */
         else if(subcl.match(/fii/) && tpAtual==="acao"){
@@ -3384,11 +3385,21 @@ function CL({data:d,onSel:os,dispatch:dp}){
             else if(cl.match(/exterior/)&&isEtf&&isUcits)tp="etf_eu"; 
             else if(cl.match(/exterior/)&&isEtf)tp="etf_int"; 
             else if(cl.match(/exterior/))tp="stock_us";
-            /* Fundos especiais — ANTES de Tesouro normal porque podem ter "tesouro" no nome (PLURAL TESOURO SELIC FI RF) */
+            /* === FUNDOS — respeita classificação Gorila (Sub-Classe + Classe) ANTES de adivinhar pelo nome ===
+               Quando Gorila marca Sub-Classe='Fundos' + Classe='Renda Fixa', classificamos como fundo_rf,
+               mesmo que o nome tenha 'Infra'/'Incentivado' (caso INTER HEDGE FIF Incentivado RF CP — CVM trata como Renda Fixa).
+               FI-Infra só vai pra fundo_infra se o Gorila marcar explicitamente OU ticker conhecido. */
             else if(cl.match(/fi rf simples|fundo.*tesouro selic|tesouro selic.*fi/))tp="fundo_rf";
-            else if(cl.match(/fi-infra|fundo.*infra|infra.*fundo|infraestrutura|investimento em infr/))tp="fundo_infra";
+            /* REGRA EXPLÍCITA: qualquer fundo com 'INCENTIVADO' no nome → Fundo RF.
+               Cobre INTER HEDGE FIF Incentivado, demais FI-Infra adquiridos como cota de fundo. */
+            else if(cl.match(/incentivado/))tp="fundo_rf";
+            else if(subcl.toLowerCase()==="fundos" && classe.toLowerCase().match(/renda fixa/))tp="fundo_rf";
             else if(cl.match(/multimercado/))tp="fundo_mm";
-            else if(cl.match(/(fundos|fundo).*(renda fixa|rf)|rf.*cred|incentivado/))tp="fundo_rf";
+            else if(cl.match(/(fundos|fundo).*(renda fixa|rf)|rf.*cred/))tp="fundo_rf";
+            /* FII (sub-classe FIIs) ANTES de FI-Infra — CPTI11/BODB11/KDIF11 etc são FIIs com tese infra, não FI-Infra abertos */
+            else if(subcl.toLowerCase().match(/fii/))tp="fii";
+            /* FI-Infra: só quando Gorila marca explicitamente OU ticker FI-Infra conhecido (raro em XLSX) */
+            else if(cl.match(/fi-infra/))tp="fundo_infra";
             /* Tesouro Direto — detecta por ticker/nome ANTES de cair em CDB.
                Cobre: RENDA+, EDUCA+, RESERVA+, LFT, LTN, NTN-B, NTNB, "Tesouro X" */
             else if(ativoUp.match(/^(RENDA\+|EDUCA\+|RESERVA\+|LFT|LTN|NTN-?B|NTNB)/)||cl.match(/ntn-?b|tesouro\s/))tp="tesouro";
@@ -3835,12 +3846,20 @@ function CL({data:d,onSel:os,dispatch:dp}){
             else if(cl.match(/cdb/))tp="cdb";
             else if(cl.match(/lci/))tp="lci";else if(cl.match(/lca/))tp="lca";
             else if(cl.match(/cri(?!pto)/))tp="cri";else if(cl.match(/cra(?!ft)/))tp="cra";
-            /* Fundos especiais — ANTES de Tesouro pra não capturar fundos com 'tesouro' no nome (PLURAL TESOURO SELIC FI RF SIMPLES) */
+            /* === FUNDOS — respeita Sub-Classe + Classe do Gorila ANTES de adivinhar pelo nome ===
+               Quando Sub-Classe='Fundos' + Classe='Renda Fixa', vai pra fundo_rf mesmo se tiver
+               'Infra'/'Incentivado' no nome (caso INTER HEDGE FIF Incentivado RF CP — CVM = Renda Fixa). */
             else if(cl.match(/fi rf simples|fundo.*tesouro selic|tesouro selic.*fi/))tp="fundo_rf";
-            else if(cl.match(/fi-infra|fundo.*infra|infra.*fundo|infraestrutura|investimento em infr/))tp="fundo_infra";
+            /* REGRA EXPLÍCITA: qualquer fundo com 'INCENTIVADO' no nome → Fundo RF */
+            else if(cl.match(/incentivado/))tp="fundo_rf";
+            else if(subcl.toLowerCase()==="fundos" && classe.toLowerCase().match(/renda fixa/))tp="fundo_rf";
             else if(cl.match(/multimercado/))tp="fundo_mm";
-            else if(cl.match(/(fundos|fundo).*(renda fixa|rf)|rf.*cred|top crédito|top credito|incentivado/))tp="fundo_rf";
+            else if(cl.match(/(fundos|fundo).*(renda fixa|rf)|rf.*cred|top crédito|top credito/))tp="fundo_rf";
             else if(cl.match(/fundos\b/)&&cl.match(/renda fixa/))tp="fundo_rf";
+            /* FII (sub-classe FIIs) ANTES de FI-Infra — CPTI11/BODB11/KDIF11 etc são FIIs com tese infra */
+            else if(subcl.toLowerCase().match(/fii/))tp="fii";
+            /* FI-Infra: só Gorila explícito */
+            else if(cl.match(/fi-infra/))tp="fundo_infra";
             /* Tesouro Direto */
             else if(cl.match(/ntn-b|ntnb/)||ativo.match(/NTNB/i))tp="tesouro";
             else if(cl.match(/lft|ltn|tesouro/)||ativo.match(/^(LFT|LTN|NTN|RENDA\+|EDUCA\+|RESERVA\+)/i))tp="tesouro";
@@ -4644,7 +4663,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       g=0;
     }
     /* Ativo liquidado (Will Financeira, Pleno, etc): vA=0 mas teve resultado.
-       Não computar como "prejuízo histórico" — esses entram na seção "Eventos do Período" do PDF. */
+       Não computar como "prejuízo histórico" — ganho/gPct ficam zerados pra não poluir Top Melhores/Piores. */
     if(a._liquidado){
       g=0;
       gPct=0;
@@ -6555,21 +6574,6 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
             byClasse[cls].temRentReal=true;
           }
         });
-        /* Adiciona ativos liquidados como classe "Eventos do Período" pra soma fechar com rent. carteira */
-        var ativosLiquidadosAtr=(c._ativosImport||[]).filter(function(a){return a._liquidado});
-        if(ativosLiquidadosAtr.length>0){
-          var ganhoLiq=0;
-          ativosLiquidadosAtr.forEach(function(a){
-            if(a._gRentRs){
-              var keys=Object.keys(a._gRentRs);
-              var kPer=keys.find(function(k){var clk=String(k).toLowerCase().trim();return clk==="periodo"||clk==="período"});
-              if(kPer&&typeof a._gRentRs[kPer]==="number")ganhoLiq+=a._gRentRs[kPer];
-            }
-          });
-          if(Math.abs(ganhoLiq)>1){
-            byClasse["Eventos do Período"]={v:0,ganhoMes:ganhoLiq,temRentReal:true,_liquidado:true};
-          }
-        }
         if(totalV>0 && rentPeriodo!==null){
           
           var classesOrdenadas=Object.keys(byClasse).sort(function(a,b){return byClasse[b].v-byClasse[a].v});
@@ -6978,50 +6982,6 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
           body+='</div>';
         }
         }} 
-
-      /* ===== EVENTOS DO PERÍODO — ativos liquidados (FGC, vencimento, baixa) =====
-         Mostra apenas se houver ativos com flag _liquidado (posição zero + resultado R$ no período).
-         Ex: CDB Will Financeira, CDB Banco Pleno (liquidação extrajudicial Bacen, ressarcimento FGC). */
-      if(tipo==="mensal" && secAtiva("movimentacao")){
-        var ativosLiquidados=(c._ativosImport||[]).filter(function(a){return a._liquidado});
-        if(ativosLiquidados.length>0){
-          var totalLiquidacao=0;
-          ativosLiquidados.forEach(function(a){
-            if(a._gRentRs){
-              var keys=Object.keys(a._gRentRs);
-              var kPer=keys.find(function(k){var cl=String(k).toLowerCase().trim();return cl==="periodo"||cl==="período"});
-              if(kPer&&typeof a._gRentRs[kPer]==="number")totalLiquidacao+=a._gRentRs[kPer];
-            }
-          });
-          body+='<!-- PAGE_BREAK -->';
-          body+=secTitle('⚖️','Eventos do Período');
-          body+='<div style="font-size:11px;color:#6B7489;line-height:1.6;margin-bottom:14px">Ativos liquidados, vencidos ou ressarcidos no período. Esses eventos não fazem mais parte da carteira atual mas geraram resultado em '+rentLabel+'.</div>';
-          body+='<table><tr><th>Ativo</th><th>Tipo de Evento</th><th style="text-align:right">Resultado</th></tr>';
-          ativosLiquidados.forEach(function(a){
-            var rsPer=0;
-            if(a._gRentRs){
-              var keys=Object.keys(a._gRentRs);
-              var kPer=keys.find(function(k){var cl=String(k).toLowerCase().trim();return cl==="periodo"||cl==="período"});
-              if(kPer&&typeof a._gRentRs[kPer]==="number")rsPer=a._gRentRs[kPer];
-            }
-            var nm=a.nm||a.tk||"";
-            /* Tenta classificar tipo de evento pelo nome do ativo */
-            var tipoEv="Liquidação";
-            if(/will\s*financeira|banco\s*pleno|banco\s*master|máster/i.test(nm))tipoEv="Ressarcimento FGC";
-            else if(/cdb|lci|lca|cri|cra/i.test(nm) && rsPer>0)tipoEv="Vencimento / Baixa";
-            else if(rsPer<0)tipoEv="Baixa / Prejuízo";
-            var cor=rsPer>=0?"#0F9D58":"#EF6461";
-            var sinal=rsPer>=0?"+":"";
-            body+='<tr><td>'+nm+'</td>';
-            body+='<td><span style="color:#8B6FBE;font-weight:700;font-size:10px">'+tipoEv+'</span></td>';
-            body+='<td style="text-align:right;color:'+cor+';font-weight:700;font-family:JetBrains Mono,monospace">'+sinal+fmF(rsPer)+'</td></tr>';
-          });
-          body+='<tr style="background:rgba(212,163,40,0.04);border-top:2px solid rgba(212,163,40,0.25)"><td colspan="2" style="font-weight:700">TOTAL EVENTOS</td>';
-          body+='<td style="text-align:right;font-weight:800;color:'+(totalLiquidacao>=0?"#0F9D58":"#EF6461")+';font-family:JetBrains Mono,monospace;font-size:13px">'+(totalLiquidacao>=0?"+":"")+fmF(totalLiquidacao)+'</td></tr>';
-          body+='</table>';
-          body+='<div class="nota-inline" style="margin-top:14px">'+(totalLiquidacao>0?'💡 ':'⚠️ ')+'Esses valores entram no <strong>Resultado Período</strong> total da carteira mas não aparecem mais como posições ativas. '+(ativosLiquidados.length>1?'Foram ':'Foi ')+ativosLiquidados.length+' '+(ativosLiquidados.length>1?'ativos liquidados':'ativo liquidado')+' no período.</div>';
-        }
-      }
 
       /* ===== EVOLUÇÃO MENSAL REAL — 12 meses rolling, valores históricos =====
          Substitui o gráfico antigo de barras uniformes. */
@@ -23466,7 +23426,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '233';
+  var SW_VERSION = '236';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
