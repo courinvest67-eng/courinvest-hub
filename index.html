@@ -3289,13 +3289,20 @@ function CL({data:d,onSel:os,dispatch:dp}){
             var existing=d.cl.find(function(c){return c.nome.toLowerCase()===nomeCliente.toLowerCase()});
             var newId=existing?existing.id:("c"+Date.now()+Math.random().toString(36).substr(2,5));
             var patReal=patBruto>0?patBruto:Object.values(instData).reduce(function(a,v){return a+v},0);
+            /* Backup automático antes de reimportar */
+            var backup=null;
+            if(existing){
+              var cleanCopy=Object.assign({},existing);delete cleanCopy._backupAntesImport;
+              backup={timestamp:Date.now(),data:cleanCopy,stats:{proventos:(existing.proventos||[]).length,notasFiscais:(existing.notasFiscais||[]).length,interacoes:(existing.interacoes||[]).length,objetivos:(existing.objetivos||[]).length,ativos:(existing._ativosImport||[]).length}};
+            }
             var newC=Object.assign({},(existing||{}),{
               id:newId,nome:nomeCliente,email:existing?existing.email:"",tel:existing?existing.tel:"",risco:existing?existing.risco:"Moderado",pais:existing?(existing.pais||"BR"):"BR",investExterior:existing?!!existing.investExterior:false,
               sv:existing?existing.sv:["patrimonio"],pat:patReal,patGorila:patReal,
               rend:existing&&existing.rend?existing.rend:0,notas:existing?existing.notas:("Importado em massa em "+new Date().toLocaleDateString("pt-BR")),
               txGestao:existing?existing.txGestao:0.80,feeFixo:existing?existing.feeFixo:0,feeBase:existing?existing.feeBase:"",
               _ativosImport:existing&&existing._ativosImport&&existing._ativosImport.length>ativos.length?existing._ativosImport:ativos,
-              _ativosTs:Date.now()
+              _ativosTs:Date.now(),
+              _backupAntesImport:backup
             });
             dp({t:"RC",p:newC});
             callback(true,nomeCliente,patReal);
@@ -3448,13 +3455,20 @@ function CL({data:d,onSel:os,dispatch:dp}){
         var newId=existing?existing.id:("c"+Date.now()+Math.random().toString(36).substr(2,5));
         var sumPosR=ativos.reduce(function(a,at){return a+parseFloat(at.posR||0)},0);
         var patReal=sumPosR>0?sumPosR:(patBruto>0?patBruto:0);
+        /* Backup automático antes de reimportar */
+        var backup=null;
+        if(existing){
+          var cleanCopy=Object.assign({},existing);delete cleanCopy._backupAntesImport;
+          backup={timestamp:Date.now(),data:cleanCopy,stats:{proventos:(existing.proventos||[]).length,notasFiscais:(existing.notasFiscais||[]).length,interacoes:(existing.interacoes||[]).length,objetivos:(existing.objetivos||[]).length,ativos:(existing._ativosImport||[]).length}};
+        }
         var newC=Object.assign({},(existing||{}),{
           id:newId,nome:nomeCliente,email:existing?existing.email:"",tel:existing?existing.tel:"",risco:existing?existing.risco:"Moderado",pais:existing?(existing.pais||"BR"):"BR",investExterior:existing?!!existing.investExterior:false,
           sv:existing?existing.sv:["patrimonio"],pat:patReal,patGorila:patReal,
           rend:existing&&existing.rend?existing.rend:0,notas:existing?existing.notas:("Importado em massa em "+new Date().toLocaleDateString("pt-BR")),
           txGestao:existing?existing.txGestao:0.80,feeFixo:existing?existing.feeFixo:0,feeBase:existing?existing.feeBase:"",
           _ativosImport:ativos,
-          _ativosTs:Date.now()
+          _ativosTs:Date.now(),
+          _backupAntesImport:backup
         });
         dp({t:"RC",p:newC});
         callback(true,nomeCliente,patReal);
@@ -3680,6 +3694,12 @@ function CL({data:d,onSel:os,dispatch:dp}){
             var existing=d.cl.find(function(c){return c.nome.toLowerCase()===nomeCliente.toLowerCase()});
             var newId=existing?existing.id:("c"+Date.now());
             var patReal=patBruto>0?patBruto:Object.values(instData).reduce(function(a,v){return a+v},0);
+            /* Backup automático antes de reimportar */
+            var backup=null;
+            if(existing){
+              var cleanCopy=Object.assign({},existing);delete cleanCopy._backupAntesImport;
+              backup={timestamp:Date.now(),data:cleanCopy,stats:{proventos:(existing.proventos||[]).length,notasFiscais:(existing.notasFiscais||[]).length,interacoes:(existing.interacoes||[]).length,objetivos:(existing.objetivos||[]).length,ativos:(existing._ativosImport||[]).length}};
+            }
             
             var newC=Object.assign({},(existing||{}),{
               id:newId,nome:nomeCliente,email:existing?existing.email:"",tel:existing?existing.tel:"",risco:existing?existing.risco:"Moderado",pais:existing?(existing.pais||"BR"):"BR",investExterior:existing?!!existing.investExterior:false,
@@ -3687,7 +3707,8 @@ function CL({data:d,onSel:os,dispatch:dp}){
               rend:existing&&existing.rend?existing.rend:0,notas:existing?existing.notas:("Importado do Gorila PDF em "+new Date().toLocaleDateString("pt-BR")),
               txGestao:existing?existing.txGestao:0.80,feeFixo:existing?existing.feeFixo:0,feeBase:existing?existing.feeBase:"",
               _ativosImport:existing&&existing._ativosImport&&existing._ativosImport.length>ativos.length?existing._ativosImport:ativos,
-              _ativosTs:Date.now()
+              _ativosTs:Date.now(),
+              _backupAntesImport:backup
             });
             dp({t:"RC",p:newC});
             sGMsg("✅ "+nomeCliente+(existing?" atualizado":" criado")+" via PDF! Patrimônio: "+fm(patReal)+" | "+Object.keys(instData).length+" instituições");
@@ -4068,6 +4089,25 @@ function CL({data:d,onSel:os,dispatch:dp}){
           if(existing && existingVal!==undefined && existingVal!=="")return existingVal;
           return defVal;
         };
+        /* === BACKUP AUTOMÁTICO antes de reimportar ===
+           Snapshot do cliente atual fica salvo em _backupAntesImport pra recuperação manual se algo der errado.
+           Mantém apenas o ÚLTIMO backup pra não inflar o Firebase. */
+        var backup=null;
+        if(existing){
+          var cleanCopy=Object.assign({},existing);
+          delete cleanCopy._backupAntesImport; /* evita recursão de backup */
+          backup={
+            timestamp:Date.now(),
+            data:cleanCopy,
+            stats:{
+              proventos:(existing.proventos||[]).length,
+              notasFiscais:(existing.notasFiscais||[]).length,
+              interacoes:(existing.interacoes||[]).length,
+              objetivos:(existing.objetivos||[]).length,
+              ativos:(existing._ativosImport||[]).length
+            }
+          };
+        }
         /* === MERGE SEGURO === Preserva TODOS os campos do cliente existente (proventos, NFs,
            interações, objetivos, sucessório, aposentadoria, contratos, particularidades, etc)
            e sobrescreve só o que vem da planilha do Gorila. Sem esse spread, o reducer "RC"
@@ -4095,6 +4135,7 @@ function CL({data:d,onSel:os,dispatch:dp}){
           _ativosImport:ativos,
           _ativosTs:Date.now(),
           _gorilaRent:gorilaRent,
+          _backupAntesImport:backup,
           
           waGrupo:(existing&&existing.waGrupo)?existing.waGrupo:"",
           dtNascimento:(existing&&existing.dtNascimento)?existing.dtNascimento:"",
@@ -4105,6 +4146,19 @@ function CL({data:d,onSel:os,dispatch:dp}){
         dp({t:"RC",p:newC});
         var msg="✅ "+nomeCliente+(existing?" atualizado":" criado")+" • "+ativos.length+" ativos • "+fm(patReal);
         if(gorilaRent){msg+=" • Rentabilidade importada"}
+        /* === Mensagem com contagem de dados preservados (tranquiliza que nada foi perdido) === */
+        if(existing){
+          var preservados=[];
+          var nProv=(existing.proventos||[]).length;
+          var nNF=(existing.notasFiscais||[]).length;
+          var nInt=(existing.interacoes||[]).length;
+          var nObj=(existing.objetivos||[]).length;
+          if(nProv>0)preservados.push(nProv+" provento"+(nProv>1?"s":""));
+          if(nNF>0)preservados.push(nNF+" NF"+(nNF>1?"s":""));
+          if(nInt>0)preservados.push(nInt+" interaç"+(nInt>1?"ões":"ão"));
+          if(nObj>0)preservados.push(nObj+" objetivo"+(nObj>1?"s":""));
+          if(preservados.length>0)msg+=" • 🔒 Preservados: "+preservados.join(", ");
+        }
         
         var cfgsLidas=[];
         if(cfgPais)cfgsLidas.push("País="+cfgPais);
@@ -4571,6 +4625,14 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
   const[showAddAp,sShowAddAp]=useState(false);
   const[reportHtml,sReportHtml]=useState(null);
   const[usdRelatorio,sUsdRelatorio]=useState(null); /* Câmbio do fechamento do mês de referência */
+
+  /* === Invalida o cache do relatório quando dados-chave do cliente mudam ===
+     Sem isso, o reportHtml fica em state com dados velhos (ex: perfil "Moderado" depois de mudar pra "Arrojado").
+     Lista de campos que devem disparar regeração: risco, ativos importados, proventos, gorilaRent, vestRent, particularidades. */
+  React.useEffect(function(){
+    if(reportHtml)sReportHtml(null);
+  // eslint-disable-next-line
+  },[c.risco,c.pais,c.investExterior,c._ativosTs,(c._gorilaRent&&c._gorilaRent.dataFim),(c._vestRent&&c._vestRent.dataFim),(c.proventos||[]).length,(c.particularidades&&JSON.stringify(c.particularidades.relatorio||{}))]);
 
   /* === MOVIMENTAÇÕES (Aportes + Resgates) ===
      Estrutura: [{id, data: "YYYY-MM-DD", tipo: "aporte"|"resgate", valor, descricao, ativo?, fonte?: "manual"|"gorila"}]
@@ -7443,10 +7505,16 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
             svg+='<defs><linearGradient id="lgMedia" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#D4A328" stop-opacity="0.2"/><stop offset="20%" stop-color="#D4A328" stop-opacity="0.8"/><stop offset="80%" stop-color="#D4A328" stop-opacity="0.8"/><stop offset="100%" stop-color="#D4A328" stop-opacity="0.2"/></linearGradient></defs>';
             svg+='<line x1="'+padL+'" y1="'+mediaY.toFixed(1)+'" x2="'+(svgW-padR)+'" y2="'+mediaY.toFixed(1)+'" stroke="url(#lgMedia)" stroke-width="1.5" stroke-dasharray="6,3"/>';
             
+            /* Badge "μ R$ X" — posicionado à DIREITA do gráfico pra não sobrepor a primeira barra.
+               Se a média estiver muito perto do topo (< 20px), coloca abaixo da linha; senão, em cima. */
             var mediaLbl="R$ "+(mediaGraf>=1000?(mediaGraf/1000).toFixed(1)+"k":mediaGraf.toFixed(0));
             var badgeW=mediaLbl.length*7+24;
-            svg+='<rect x="'+(padL+8)+'" y="'+(mediaY-13).toFixed(1)+'" width="'+badgeW+'" height="16" rx="8" fill="#D4A328" opacity="0.15" stroke="#D4A328" stroke-width="1" stroke-opacity="0.5"/>';
-            svg+='<text x="'+(padL+8+badgeW/2)+'" y="'+(mediaY-2).toFixed(1)+'" text-anchor="middle" fill="#D4A328" font-size="9" font-weight="800" font-family="\'JetBrains Mono\',monospace">μ '+mediaLbl+'</text>';
+            var badgeX=svgW-padR-badgeW-8;
+            var perto_do_topo=mediaY<padT+20;
+            var badgeY=perto_do_topo?(mediaY+4):(mediaY-13);
+            var textY=perto_do_topo?(mediaY+15):(mediaY-2);
+            svg+='<rect x="'+badgeX.toFixed(1)+'" y="'+badgeY.toFixed(1)+'" width="'+badgeW+'" height="16" rx="8" fill="#D4A328" opacity="0.15" stroke="#D4A328" stroke-width="1" stroke-opacity="0.5"/>';
+            svg+='<text x="'+(badgeX+badgeW/2).toFixed(1)+'" y="'+textY.toFixed(1)+'" text-anchor="middle" fill="#D4A328" font-size="9" font-weight="800" font-family="\'JetBrains Mono\',monospace">μ '+mediaLbl+'</text>';
           }
 
           svg+='</svg>';
@@ -10564,6 +10632,28 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
         </div>
         );
       })()}
+
+      {/* === Botão de Restaurar Último Backup === Aparece apenas se houver backup automático
+           gerado por uma reimportação anterior. Permite voltar ao estado pré-importação se necessário. */}
+      {tab==="geral" && c._backupAntesImport && c._backupAntesImport.data && (
+        <div style={{marginTop:18,background:"rgba(212,163,40,0.06)",border:"1px solid "+T.gold+"33",borderRadius:12,padding:14,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+          <div style={{flex:1,minWidth:240}}>
+            <div style={{fontSize:11,color:T.gold,fontWeight:700,letterSpacing:0.5,marginBottom:4}}>🔒 BACKUP DISPONÍVEL</div>
+            <div style={{fontSize:11,color:T.t2,lineHeight:1.5}}>
+              Snapshot automático da última reimportação ({new Date(c._backupAntesImport.timestamp).toLocaleString("pt-BR")}).
+              {c._backupAntesImport.stats && (
+                <span style={{color:T.t3}}> Continha: {c._backupAntesImport.stats.proventos||0} proventos · {c._backupAntesImport.stats.notasFiscais||0} NFs · {c._backupAntesImport.stats.interacoes||0} interações · {c._backupAntesImport.stats.objetivos||0} objetivos · {c._backupAntesImport.stats.ativos||0} ativos.</span>
+              )}
+            </div>
+          </div>
+          <Bt v="ghost" onClick={function(){
+            if(!confirm("Restaurar o cliente "+c.nome+" para o estado antes da última reimportação?\n\nIsso vai SOBRESCREVER os dados atuais com o backup de "+new Date(c._backupAntesImport.timestamp).toLocaleString("pt-BR")+".\n\nEssa ação não pode ser desfeita.")) return;
+            var bData=Object.assign({},c._backupAntesImport.data,{id:c.id});
+            dp({t:"RC",p:bData});
+            alert("✅ Backup restaurado com sucesso.\n\nO cliente foi revertido ao estado de "+new Date(c._backupAntesImport.timestamp).toLocaleString("pt-BR")+".");
+          }} style={{fontSize:11,padding:"8px 14px",border:"1px solid "+T.gold+"55",color:T.gold}}>↺ Restaurar Backup</Bt>
+        </div>
+      )}
 
       {}
       {tab==="hist" && (
@@ -23717,7 +23807,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '248';
+  var SW_VERSION = '251';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
