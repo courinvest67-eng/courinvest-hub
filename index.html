@@ -3339,13 +3339,14 @@ function CL({data:d,onSel:os,dispatch:dp}){
           if(iCl<0)iCl=ci(["classe"]);
           if(iCl===iSC){for(var hi=0;hi<hdr.length;hi++){if(hdr[hi]==="classe"&&hi!==iSC){iCl=hi;break}}}
           var iQ=ci(["quantidade"]),iP=ci(["posição","posicao"]),iPr=ci(["preço (r","cotação"]),iPM=ci(["preço médio","preco medio"]),iV=ci(["vencimento"]);
-          /* Captura colunas de rentabilidade (Periodo/Ano/12m/24m/Início) — Gorila exporta ambas em % e em R$ */
-          var rentColsM1=[];
-          for(var hi=0;hi<hdr.length;hi++){
-            if(hdr[hi]==="periodo"||hdr[hi]==="período"||hdr[hi]==="ano"||hdr[hi]==="12m"||hdr[hi]==="24m"||hdr[hi]==="início da carteira"||hdr[hi]==="inicio da carteira")rentColsM1.push({l:hdr[hi],i:hi});
-          }
-          var rentPctColsM1=rentColsM1.slice(0,5);
-          var rentRsColsM1=rentColsM1.slice(5,10);
+          /* Captura colunas de rentabilidade (Periodo/Ano/12m/24m/Início) — Gorila exporta ambas em % e em R$ 
+             Estrutura: 5 cols % seguidas de 5 cols R$, ambas com mesmos nomes de cabeçalho.
+             Usamos os ÍNDICES da primeira e segunda ocorrência de "periodo" pra descobrir os blocos. */
+          var idxsPeriodo=[];
+          for(var hi=0;hi<hdr.length;hi++){if(hdr[hi]==="periodo"||hdr[hi]==="período")idxsPeriodo.push(hi);}
+          var pctStart=idxsPeriodo[0]>=0?idxsPeriodo[0]:-1;
+          var rsStart=idxsPeriodo.length>=2?idxsPeriodo[1]:-1;
+          var COL_LABELS=["periodo","ano","12m","24m","início da carteira"];
           for(var i=headerRow+1;i<aoa.length;i++){
             var r=aoa[i];if(!r||r.length<4)continue;
             var ativo=String(r[iA]||"").trim();if(!ativo||ativo.toLowerCase()==="total")continue;
@@ -3353,10 +3354,10 @@ function CL({data:d,onSel:os,dispatch:dp}){
             var subcl=iSC>=0?String(r[iSC]||"").trim():"";
             var classe=iCl>=0?String(r[iCl]||"").trim():"";
             var qtd=pv(r[iQ]);var pos=pv(r[iP]);var preco=iPr>=0?pv(r[iPr]):0;var pm=iPM>=0?pv(r[iPM]):0;
-            /* Detecta ativo liquidado: posição zero MAS teve resultado no período (ressarcimento FGC, vencimento, baixa) */
+            /* Detecta ativo liquidado: posição zero MAS teve resultado no período */
             var foiLiquidadoM1=false;
-            if(pos<=0 && rentRsColsM1.length>0){
-              var firstRsM1=r[rentRsColsM1[0].i];
+            if(pos<=0 && rsStart>=0){
+              var firstRsM1=r[rsStart];
               var rentRsM1=typeof firstRsM1==="number"?firstRsM1:pv(firstRsM1);
               if(Math.abs(rentRsM1)>1)foiLiquidadoM1=true;
             }
@@ -3364,11 +3365,27 @@ function CL({data:d,onSel:os,dispatch:dp}){
             if(preco===0&&qtd>0&&pos>0)preco=pos/qtd;
             if(pm===0&&preco>0)pm=preco;
             var venc=iV>=0?String(r[iV]||"").trim():"";
-            /* Lê rentabilidade por período (Periodo/Ano/12m/24m/Início) — em % e em R$ */
+            /* Lê 5 cols de % e 5 cols de R$ POR POSIÇÃO (índices numéricos) — evita problema de chave duplicada */
             var rentAtivoM1={};
-            rentPctColsM1.forEach(function(rc){rentAtivoM1[rc.l]=typeof r[rc.i]==="number"?r[rc.i]:pv(r[rc.i])});
             var rentAtivoRsM1={};
-            rentRsColsM1.forEach(function(rc){rentAtivoRsM1[rc.l]=typeof r[rc.i]==="number"?r[rc.i]:pv(r[rc.i])});
+            if(pctStart>=0){
+              for(var k=0;k<5;k++){
+                var idxPct=pctStart+k;
+                if(idxPct<r.length){
+                  var v=r[idxPct];
+                  rentAtivoM1[COL_LABELS[k]]=typeof v==="number"?v:pv(v);
+                }
+              }
+            }
+            if(rsStart>=0){
+              for(var k=0;k<5;k++){
+                var idxRs=rsStart+k;
+                if(idxRs<r.length){
+                  var v=r[idxRs];
+                  rentAtivoRsM1[COL_LABELS[k]]=typeof v==="number"?v:pv(v);
+                }
+              }
+            }
             var cl=(classe+" "+subcl+" "+ativo).toLowerCase();
             var ativoUp=ativo.toUpperCase();
             var tp="acao";
@@ -3775,13 +3792,13 @@ function CL({data:d,onSel:os,dispatch:dp}){
           var iYieldA=ci(["yield anual","yield (a.a.)","yield a.a.","taxa anual","rendimento anual","yield"]);
           var iYieldDt=ci(["yield início","yield inicio","yield desde","data início yield","data inicio yield","data início rendimento","data inicio rendimento","início rendimento"]);
           
-          var rentCols=[];
-          for(var hi=0;hi<hdr.length;hi++){
-            if(hdr[hi]==="periodo"||hdr[hi]==="período"||hdr[hi]==="ano"||hdr[hi]==="12m"||hdr[hi]==="24m"||hdr[hi]==="início da carteira"||hdr[hi]==="inicio da carteira")rentCols.push({l:hdr[hi],i:hi});
-          }
-          
-          var rentPctCols=rentCols.slice(0,5);
-          var rentRsCols=rentCols.slice(5,10);
+          /* Captura colunas de rentabilidade POR POSIÇÃO — Gorila tem 5 cols % seguidas de 5 cols R$
+             com mesmos cabeçalhos (Periodo/Ano/12m/24m/Início). Usar índices garante que % e R$ não confundam. */
+          var idxsPeriodo=[];
+          for(var hi=0;hi<hdr.length;hi++){if(hdr[hi]==="periodo"||hdr[hi]==="período")idxsPeriodo.push(hi);}
+          var pctStart=idxsPeriodo[0]>=0?idxsPeriodo[0]:-1;
+          var rsStart=idxsPeriodo.length>=2?idxsPeriodo[1]:-1;
+          var COL_LABELS=["periodo","ano","12m","24m","início da carteira"];
           
           var iDiv=ci(["dividendos"]),iJSCP=ci(["jscp"]),iBon=ci(["bonificação","bonificacao"]),iRend=ci(["rendimentos"]),iAmo=ci(["amortiza"]);
 
@@ -3795,8 +3812,8 @@ function CL({data:d,onSel:os,dispatch:dp}){
             
             /* Lê primeiro a coluna de rent. R$ período pra detectar liquidações (Will Financeira, Pleno, etc) */
             var rentPeriodoRs=0;
-            if(rentRsCols.length>0){
-              var firstRs=r[rentRsCols[0].i];
+            if(rsStart>=0){
+              var firstRs=r[rsStart];
               rentPeriodoRs=typeof firstRs==="number"?firstRs:pv(firstRs);
             }
             var temEvento=false;
@@ -3813,10 +3830,27 @@ function CL({data:d,onSel:os,dispatch:dp}){
             if(pm===0&&preco>0){pm=preco}
             var venc=iV>=0?String(r[iV]||"").trim():"";
             
+            /* Lê 5 cols de % e 5 cols de R$ POR POSIÇÃO numérica — evita conflito de chave */
             var rentAtivo={};
-            rentPctCols.forEach(function(rc,idx){rentAtivo[rc.l]=typeof r[rc.i]==="number"?r[rc.i]:pv(r[rc.i])});
             var rentAtivoRs={};
-            rentRsCols.forEach(function(rc,idx){rentAtivoRs[rc.l]=typeof r[rc.i]==="number"?r[rc.i]:pv(r[rc.i])});
+            if(pctStart>=0){
+              for(var k=0;k<5;k++){
+                var idxPct=pctStart+k;
+                if(idxPct<r.length){
+                  var v=r[idxPct];
+                  rentAtivo[COL_LABELS[k]]=typeof v==="number"?v:pv(v);
+                }
+              }
+            }
+            if(rsStart>=0){
+              for(var k=0;k<5;k++){
+                var idxRs=rsStart+k;
+                if(idxRs<r.length){
+                  var v=r[idxRs];
+                  rentAtivoRs[COL_LABELS[k]]=typeof v==="number"?v:pv(v);
+                }
+              }
+            }
             
             var eventos={div:iDiv>=0?pv(r[iDiv]):0,jscp:iJSCP>=0?pv(r[iJSCP]):0,bon:iBon>=0?pv(r[iBon]):0,rend:iRend>=0?pv(r[iRend]):0,amo:iAmo>=0?pv(r[iAmo]):0};
             var totalEventos=(eventos.div||0)+(eventos.jscp||0)+(eventos.bon||0)+(eventos.rend||0)+(eventos.amo||0);
@@ -3978,6 +4012,7 @@ function CL({data:d,onSel:os,dispatch:dp}){
         <Bt v="secondary" onClick={function(){
           var yara=(d.cl||[]).find(function(c){return (c.nome||'').toLowerCase().includes('yara')});
           if(!yara){alert('Yara não encontrada');return}
+          window.__yara=yara;
           var lines=[];
           lines.push('=== YARA ===');
           lines.push('_gorilaRent.dataIni: '+(yara._gorilaRent&&yara._gorilaRent.dataIni));
@@ -3990,15 +4025,31 @@ function CL({data:d,onSel:os,dispatch:dp}){
             lines.push('--- '+n+' ---');
             lines.push('  nm: '+a.nm);
             lines.push('  tp: '+a.tp);
+            lines.push('  posR: '+a.posR);
             lines.push('  _gClasse: '+a._gClasse);
             lines.push('  _gSubCl: '+a._gSubCl);
-            lines.push('  _gRentPct: '+JSON.stringify(a._gRentPct));
-            lines.push('  _gRentRs: '+JSON.stringify(a._gRentRs));
+            lines.push('  _gRentPct (cada chave em linha):');
+            if(a._gRentPct){
+              Object.keys(a._gRentPct).forEach(function(k){
+                lines.push('    ['+k+'] = '+a._gRentPct[k]);
+              });
+            }else{
+              lines.push('    (vazio)');
+            }
+            lines.push('  _gRentRs (cada chave em linha):');
+            if(a._gRentRs){
+              Object.keys(a._gRentRs).forEach(function(k){
+                lines.push('    ['+k+'] = '+a._gRentRs[k]);
+              });
+            }else{
+              lines.push('    (vazio)');
+            }
             lines.push('');
           });
           var txt=lines.join('\n');
-          var w=window.open('','_blank','width=800,height=600');
-          w.document.write('<pre style="font-family:monospace;font-size:11px;padding:20px;background:#0a1628;color:#fff;">'+txt.replace(/</g,'&lt;')+'</pre>');
+          var w=window.open('','_blank','width=900,height=700');
+          w.document.write('<pre style="font-family:monospace;font-size:12px;padding:20px;background:#0a1628;color:#fff;line-height:1.6;">'+txt.replace(/</g,'&lt;')+'</pre>');
+          console.log('window.__yara salvo');
         }} style={{fontSize:11,padding:"10px 14px",background:"rgba(239,100,97,0.08)",color:T.red,border:"1px solid rgba(239,100,97,0.25)"}}>🐛 Debug Yara</Bt>
       </div>
 
@@ -23466,7 +23517,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '239';
+  var SW_VERSION = '240';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
