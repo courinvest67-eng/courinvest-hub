@@ -3975,6 +3975,31 @@ function CL({data:d,onSel:os,dispatch:dp}){
         <input ref={bulkRef} type="file" accept=".xlsx,.xls,.csv,.pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf,text/csv,text/plain,*/*" multiple onChange={function(e){if(e.target.files.length>0)importGorilaBulk(e.target.files);e.target.value=""}} style={{display:"none"}}/>
         <Bt v="secondary" onClick={function(){bulkRef.current&&bulkRef.current.click()}} style={{fontSize:11,padding:"10px 14px",background:"rgba(167,139,250,0.08)",color:T.purple,border:"1px solid rgba(167,139,250,0.2)"}}>📦 Importar em Massa</Bt>
         <Bt v="secondary" onClick={function(){sShowAuditoria(true)}} style={{fontSize:11,padding:"10px 14px",background:"rgba(212,163,40,0.08)",color:T.gold,border:"1px solid rgba(212,163,40,0.25)"}}>🔍 Auditar Classificações</Bt>
+        <Bt v="secondary" onClick={function(){
+          var yara=(d.cl||[]).find(function(c){return (c.nome||'').toLowerCase().includes('yara')});
+          if(!yara){alert('Yara não encontrada');return}
+          var lines=[];
+          lines.push('=== YARA ===');
+          lines.push('_gorilaRent.dataIni: '+(yara._gorilaRent&&yara._gorilaRent.dataIni));
+          lines.push('_gorilaRent.dataFim: '+(yara._gorilaRent&&yara._gorilaRent.dataFim));
+          lines.push('_gorilaRent.resultado: '+(yara._gorilaRent&&yara._gorilaRent.resultado));
+          lines.push('');
+          ['PLURAL','RENDA+','LFT','NTNB','INTER HEDGE'].forEach(function(n){
+            var a=(yara._ativosImport||[]).find(function(x){return ((x.nm||x.tk||'').toUpperCase().includes(n))});
+            if(!a){lines.push('--- '+n+' NÃO ENCONTRADO ---');return}
+            lines.push('--- '+n+' ---');
+            lines.push('  nm: '+a.nm);
+            lines.push('  tp: '+a.tp);
+            lines.push('  _gClasse: '+a._gClasse);
+            lines.push('  _gSubCl: '+a._gSubCl);
+            lines.push('  _gRentPct: '+JSON.stringify(a._gRentPct));
+            lines.push('  _gRentRs: '+JSON.stringify(a._gRentRs));
+            lines.push('');
+          });
+          var txt=lines.join('\n');
+          var w=window.open('','_blank','width=800,height=600');
+          w.document.write('<pre style="font-family:monospace;font-size:11px;padding:20px;background:#0a1628;color:#fff;">'+txt.replace(/</g,'&lt;')+'</pre>');
+        }} style={{fontSize:11,padding:"10px 14px",background:"rgba(239,100,97,0.08)",color:T.red,border:"1px solid rgba(239,100,97,0.25)"}}>🐛 Debug Yara</Bt>
       </div>
 
       {}
@@ -23441,7 +23466,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '238';
+  var SW_VERSION = '239';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
