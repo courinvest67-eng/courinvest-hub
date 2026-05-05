@@ -3125,6 +3125,60 @@ function CL({data:d,onSel:os,dispatch:dp}){
   const bulkRef=React.useRef(null);
   const[gMsg,sGMsg]=useState("");
   const[bulkProgress,sBulkProgress]=useState(null);
+  const[showAuditoria,sShowAuditoria]=useState(false);
+
+  /* === FERRAMENTA DE AUDITORIA — detecta clientes com ativos potencialmente mal classificados ===
+     Roda as regras de classificação ATUALIZADAS contra os ativos importados e mostra divergências.
+     Útil pra saber quais clientes precisam ser reimportados após corrigir bugs do parser. */
+  var auditarClassificacoes=function(){
+    var problemas=[];
+    (d.cl||[]).forEach(function(c){
+      if(!c._ativosImport||c._ativosImport.length===0)return;
+      var problemasCli=[];
+      c._ativosImport.forEach(function(a){
+        var nm=(a.nm||a.tk||"").toString();
+        var nmUp=nm.toUpperCase();
+        var classe=(a._gClasse||"").toString().toLowerCase();
+        var subcl=(a._gSubCl||"").toString().toLowerCase();
+        var cl=(classe+" "+subcl+" "+nm).toLowerCase();
+        var tpAtual=a.tp||"";
+        var tpEsperado=null;
+        var motivo="";
+        /* Regra 1: ativo Tesouro classificado como CDB ou outra coisa */
+        if(nmUp.match(/^(RENDA\+|EDUCA\+|RESERVA\+|LFT|LTN|NTN-?B|NTNB)/)){
+          tpEsperado="tesouro";
+          if(tpAtual!=="tesouro")motivo="Título do Tesouro Direto classificado como "+tpAtual.toUpperCase();
+        }
+        /* Regra 2: fundos com "tesouro selic" no nome devem ser Fundo RF, não Tesouro */
+        else if(cl.match(/tesouro selic.*fi|fi rf simples|fundo.*tesouro selic/) && tpAtual==="tesouro"){
+          tpEsperado="fundo_rf";
+          motivo="Fundo classificado como Tesouro Direto (deveria ser Fundo RF)";
+        }
+        /* Regra 3: fundo de infraestrutura classificado como Fundo RF ou Ação */
+        else if(cl.match(/incentivado.*infr|investimento em infr|fi-infra|fundo.*infra|infraestrutura/) && !["fundo_infra","debi"].includes(tpAtual)){
+          tpEsperado="fundo_infra";
+          motivo="FI-Infra classificado como "+tpAtual.toUpperCase()+" (deveria ser FI-Infra, isento de IR)";
+        }
+        /* Regra 4: FII (subclasse "FIIs") classificado como ação */
+        else if(subcl.match(/fii/) && tpAtual==="acao"){
+          tpEsperado="fii";
+          motivo="FII classificado como Ação";
+        }
+        /* Regra 5: ticker ##11 sem ser FII (exceto exterior) */
+        else if(nmUp.match(/^[A-Z]{4}11$/) && tpAtual==="acao" && !cl.match(/exterior/)){
+          tpEsperado="fii";
+          motivo="Ticker terminando em 11 (FII/FIAGRO) classificado como Ação";
+        }
+        if(tpEsperado && tpEsperado!==tpAtual){
+          problemasCli.push({ativo:nm,tpAtual:tpAtual,tpEsperado:tpEsperado,motivo:motivo,posR:a.posR||0});
+        }
+      });
+      if(problemasCli.length>0){
+        problemas.push({cliente:c,problemas:problemasCli});
+      }
+    });
+    return problemas;
+  };
 
   
   var importGorilaBulk=function(files){
@@ -3233,14 +3287,14 @@ function CL({data:d,onSel:os,dispatch:dp}){
             var existing=d.cl.find(function(c){return c.nome.toLowerCase()===nomeCliente.toLowerCase()});
             var newId=existing?existing.id:("c"+Date.now()+Math.random().toString(36).substr(2,5));
             var patReal=patBruto>0?patBruto:Object.values(instData).reduce(function(a,v){return a+v},0);
-            var newC={
+            var newC=Object.assign({},(existing||{}),{
               id:newId,nome:nomeCliente,email:existing?existing.email:"",tel:existing?existing.tel:"",risco:existing?existing.risco:"Moderado",pais:existing?(existing.pais||"BR"):"BR",investExterior:existing?!!existing.investExterior:false,
               sv:existing?existing.sv:["patrimonio"],pat:patReal,patGorila:patReal,
-              rend:0,notas:existing?existing.notas:("Importado em massa em "+new Date().toLocaleDateString("pt-BR")),
+              rend:existing&&existing.rend?existing.rend:0,notas:existing?existing.notas:("Importado em massa em "+new Date().toLocaleDateString("pt-BR")),
               txGestao:existing?existing.txGestao:0.80,feeFixo:existing?existing.feeFixo:0,feeBase:existing?existing.feeBase:"",
               _ativosImport:existing&&existing._ativosImport&&existing._ativosImport.length>ativos.length?existing._ativosImport:ativos,
               _ativosTs:Date.now()
-            };
+            });
             dp({t:"RC",p:newC});
             callback(true,nomeCliente,patReal);
           }).catch(function(err){callback(false,"erro PDF: "+err.message)});
@@ -3284,6 +3338,13 @@ function CL({data:d,onSel:os,dispatch:dp}){
           if(iCl<0)iCl=ci(["classe"]);
           if(iCl===iSC){for(var hi=0;hi<hdr.length;hi++){if(hdr[hi]==="classe"&&hi!==iSC){iCl=hi;break}}}
           var iQ=ci(["quantidade"]),iP=ci(["posição","posicao"]),iPr=ci(["preço (r","cotação"]),iPM=ci(["preço médio","preco medio"]),iV=ci(["vencimento"]);
+          /* Captura colunas de rentabilidade (Periodo/Ano/12m/24m/Início) — Gorila exporta ambas em % e em R$ */
+          var rentColsM1=[];
+          for(var hi=0;hi<hdr.length;hi++){
+            if(hdr[hi]==="periodo"||hdr[hi]==="período"||hdr[hi]==="ano"||hdr[hi]==="12m"||hdr[hi]==="24m"||hdr[hi]==="início da carteira"||hdr[hi]==="inicio da carteira")rentColsM1.push({l:hdr[hi],i:hi});
+          }
+          var rentPctColsM1=rentColsM1.slice(0,5);
+          var rentRsColsM1=rentColsM1.slice(5,10);
           for(var i=headerRow+1;i<aoa.length;i++){
             var r=aoa[i];if(!r||r.length<4)continue;
             var ativo=String(r[iA]||"").trim();if(!ativo||ativo.toLowerCase()==="total")continue;
@@ -3291,11 +3352,24 @@ function CL({data:d,onSel:os,dispatch:dp}){
             var subcl=iSC>=0?String(r[iSC]||"").trim():"";
             var classe=iCl>=0?String(r[iCl]||"").trim():"";
             var qtd=pv(r[iQ]);var pos=pv(r[iP]);var preco=iPr>=0?pv(r[iPr]):0;var pm=iPM>=0?pv(r[iPM]):0;
-            if(pos<=0)continue;
+            /* Detecta ativo liquidado: posição zero MAS teve resultado no período (ressarcimento FGC, vencimento, baixa) */
+            var foiLiquidadoM1=false;
+            if(pos<=0 && rentRsColsM1.length>0){
+              var firstRsM1=r[rentRsColsM1[0].i];
+              var rentRsM1=typeof firstRsM1==="number"?firstRsM1:pv(firstRsM1);
+              if(Math.abs(rentRsM1)>1)foiLiquidadoM1=true;
+            }
+            if(pos<=0 && !foiLiquidadoM1)continue;
             if(preco===0&&qtd>0&&pos>0)preco=pos/qtd;
             if(pm===0&&preco>0)pm=preco;
             var venc=iV>=0?String(r[iV]||"").trim():"";
+            /* Lê rentabilidade por período (Periodo/Ano/12m/24m/Início) — em % e em R$ */
+            var rentAtivoM1={};
+            rentPctColsM1.forEach(function(rc){rentAtivoM1[rc.l]=typeof r[rc.i]==="number"?r[rc.i]:pv(r[rc.i])});
+            var rentAtivoRsM1={};
+            rentRsColsM1.forEach(function(rc){rentAtivoRsM1[rc.l]=typeof r[rc.i]==="number"?r[rc.i]:pv(r[rc.i])});
             var cl=(classe+" "+subcl+" "+ativo).toLowerCase();
+            var ativoUp=ativo.toUpperCase();
             var tp="acao";
             var reitTks="O,NNN,STAG,AMT,PLD,SPG,PSA,DLR,CCI,EQIX,AVB,EQR,IRM,WPC,VICI,WELL,ARE,MPW,KIM,REG,FRT,BXP,SLG,HPP,PEAK,DOC,OHI,LTC,NHI,AGNC,NLY,STWD,BXMT,LADR,ABR,ARI,RWT,STORE,EPR,GTY,ADC,IIPR,SBRA,HR,VER,GOOD,LAND,GLPI";
             var etfTks="SPY,VOO,VTI,QQQ,IVV,VGT,VNQ,SCHH,RQI,VT,VXUS,VEA,VWO,BND,AGG,TLT,IEF,SHY,TFLO,BOXX,QLTA,VTWO,IWM,DIA,RSP,ARKK,XLK,XLF,XLE,XLV,XLI,XLP,XLY,XLU,XLC,XLRE,XLB,VIG,VYM,SCHD,HDV,DVY,JEPI,JEPQ,NOBL,GLD,IAU,SLV,USO,TIP,VTIP,IBIT,BITO,EMB,HYG,LQD,MUB,IGSB,VCSH,VCIT,VCLT,BSV,BIV,BLV,SGOV,SHV,MINT,FLOT,PFF,SPHD,SPLV";
@@ -3310,17 +3384,23 @@ function CL({data:d,onSel:os,dispatch:dp}){
             else if(cl.match(/exterior/)&&isEtf&&isUcits)tp="etf_eu"; 
             else if(cl.match(/exterior/)&&isEtf)tp="etf_int"; 
             else if(cl.match(/exterior/))tp="stock_us";
+            /* Fundos especiais — ANTES de Tesouro normal porque podem ter "tesouro" no nome (PLURAL TESOURO SELIC FI RF) */
+            else if(cl.match(/fi rf simples|fundo.*tesouro selic|tesouro selic.*fi/))tp="fundo_rf";
+            else if(cl.match(/fi-infra|fundo.*infra|infra.*fundo|infraestrutura|investimento em infr/))tp="fundo_infra";
+            else if(cl.match(/multimercado/))tp="fundo_mm";
+            else if(cl.match(/(fundos|fundo).*(renda fixa|rf)|rf.*cred|incentivado/))tp="fundo_rf";
+            /* Tesouro Direto — detecta por ticker/nome ANTES de cair em CDB.
+               Cobre: RENDA+, EDUCA+, RESERVA+, LFT, LTN, NTN-B, NTNB, "Tesouro X" */
+            else if(ativoUp.match(/^(RENDA\+|EDUCA\+|RESERVA\+|LFT|LTN|NTN-?B|NTNB)/)||cl.match(/ntn-?b|tesouro\s/))tp="tesouro";
             else if(cl.match(/cdb/))tp="cdb";else if(cl.match(/lci/))tp="lci";else if(cl.match(/lca/))tp="lca";
             else if(cl.match(/cri(?!pto)/))tp="cri";else if(cl.match(/cra(?!ft)/))tp="cra";
-            else if(cl.match(/fi rf simples|fundo.*tesouro selic|tesouro selic.*fi/))tp="fundo_rf";
- else if(cl.match(/ntnb|ntn-b|tesouro/))tp="tesouro";
             else if(cl.match(/debenture|debênture/))tp=cl.match(/incent/)?"debi":"deb";
-            else if(cl.match(/infra.*fund|fi-infra|fund.*infra/))tp="fundo_infra";
-            else if(cl.match(/multimercado|multi/))tp="fundo_mm";
-            else if(cl.match(/(fundos|fundo).*(renda fixa|rf)|rf.*cred/))tp="fundo_rf";
+            /* Indexado a Inflação/Juros + Renda Fixa — pode ser CDB OU Tesouro.
+               Se chegou aqui sem ser detectado como Tesouro acima, é CDB privado. */
             else if(cl.match(/indexado|prefixado/)&&cl.match(/renda fixa/))tp="cdb";
             else if(cl.match(/caixa/))tp="caixa";
-            else if(cl.match(/fii\b|fiagro|imobiliário|imobiliario|fundo.*imob/))tp="fii";
+            else if(cl.match(/fii[s]?\b|fiagro|imobiliário|imobiliario|fundo.*imob/))tp="fii";
+            else if(ativoUp.match(/11$/)&&!cl.match(/exterior/))tp="fii";
             var vD="";if(venc.match(/^\d{2}\/\d{2}\/\d{4}$/)){var vp=venc.split("/");vD=vp[2]+"-"+vp[1]+"-"+vp[0]}else{vD=venc}
             var tk=ativo.length>20?ativo.split(/\s+/).slice(0,3).join(" "):ativo;
             if(tk.length>25)tk=ativo.split(/\s+/).slice(0,2).join(" ");
@@ -3332,21 +3412,21 @@ function CL({data:d,onSel:os,dispatch:dp}){
             else if(inst.match(/xp\b/i))inst="Rico";
             else if(inst.match(/rico/i))inst="Rico";
             else if(inst.match(/inter\b/i))inst="Inter";
-            ativos.push({tk:tk,nm:ativo,tp:tp,qtd:qtd,pm:pm,pa:preco,inst:inst,venc:vD,posR:pos});
+            ativos.push({tk:tk,nm:ativo,tp:tp,qtd:qtd,pm:pm,pa:preco,inst:inst,venc:vD,posR:pos,_gClasse:classe,_gSubCl:subcl,_gRentPct:rentAtivoM1,_gRentRs:rentAtivoRsM1,_liquidado:foiLiquidadoM1});
           }
         }
         var existing=d.cl.find(function(c){return c.nome.toLowerCase()===nomeCliente.toLowerCase()});
         var newId=existing?existing.id:("c"+Date.now()+Math.random().toString(36).substr(2,5));
         var sumPosR=ativos.reduce(function(a,at){return a+parseFloat(at.posR||0)},0);
         var patReal=sumPosR>0?sumPosR:(patBruto>0?patBruto:0);
-        var newC={
+        var newC=Object.assign({},(existing||{}),{
           id:newId,nome:nomeCliente,email:existing?existing.email:"",tel:existing?existing.tel:"",risco:existing?existing.risco:"Moderado",pais:existing?(existing.pais||"BR"):"BR",investExterior:existing?!!existing.investExterior:false,
           sv:existing?existing.sv:["patrimonio"],pat:patReal,patGorila:patReal,
-          rend:0,notas:existing?existing.notas:("Importado em massa em "+new Date().toLocaleDateString("pt-BR")),
+          rend:existing&&existing.rend?existing.rend:0,notas:existing?existing.notas:("Importado em massa em "+new Date().toLocaleDateString("pt-BR")),
           txGestao:existing?existing.txGestao:0.80,feeFixo:existing?existing.feeFixo:0,feeBase:existing?existing.feeBase:"",
           _ativosImport:ativos,
           _ativosTs:Date.now()
-        };
+        });
         dp({t:"RC",p:newC});
         callback(true,nomeCliente,patReal);
       }catch(err){callback(false,"erro Excel: "+err.message)}
@@ -3450,14 +3530,14 @@ function CL({data:d,onSel:os,dispatch:dp}){
             var newId=existing?existing.id:("c"+Date.now());
             var patReal=patBruto>0?patBruto:Object.values(instData).reduce(function(a,v){return a+v},0);
             
-            var newC={
+            var newC=Object.assign({},(existing||{}),{
               id:newId,nome:nomeCliente,email:existing?existing.email:"",tel:existing?existing.tel:"",risco:existing?existing.risco:"Moderado",pais:existing?(existing.pais||"BR"):"BR",investExterior:existing?!!existing.investExterior:false,
               sv:existing?existing.sv:["patrimonio"],pat:patReal,patGorila:patReal,
-              rend:0,notas:existing?existing.notas:("Importado do Gorila PDF em "+new Date().toLocaleDateString("pt-BR")),
+              rend:existing&&existing.rend?existing.rend:0,notas:existing?existing.notas:("Importado do Gorila PDF em "+new Date().toLocaleDateString("pt-BR")),
               txGestao:existing?existing.txGestao:0.80,feeFixo:existing?existing.feeFixo:0,feeBase:existing?existing.feeBase:"",
               _ativosImport:existing&&existing._ativosImport&&existing._ativosImport.length>ativos.length?existing._ativosImport:ativos,
               _ativosTs:Date.now()
-            };
+            });
             dp({t:"RC",p:newC});
             sGMsg("✅ "+nomeCliente+(existing?" atualizado":" criado")+" via PDF! Patrimônio: "+fm(patReal)+" | "+Object.keys(instData).length+" instituições");
             setTimeout(function(){sGMsg("");os(newC)},2500);
@@ -3702,9 +3782,21 @@ function CL({data:d,onSel:os,dispatch:dp}){
             var classe=iCl>=0?String(r[iCl]||"").trim():"";
             var qtd=pv(r[iQ]);var pos=pv(r[iP]);var preco=iPr>=0?pv(r[iPr]):0;var pm=iPM>=0?pv(r[iPM]):0;
             
+            /* Lê primeiro a coluna de rent. R$ período pra detectar liquidações (Will Financeira, Pleno, etc) */
+            var rentPeriodoRs=0;
+            if(rentRsCols.length>0){
+              var firstRs=r[rentRsCols[0].i];
+              rentPeriodoRs=typeof firstRs==="number"?firstRs:pv(firstRs);
+            }
             var temEvento=false;
             if(iDiv>=0&&pv(r[iDiv])>0)temEvento=true;
             if(iRend>=0&&pv(r[iRend])>0)temEvento=true;
+            /* Liquidação: posição zero MAS teve resultado no período (ressarcimento FGC, vencimento, baixa) */
+            var foiLiquidado=false;
+            if(pos<=0&&Math.abs(rentPeriodoRs)>1){
+              temEvento=true;
+              foiLiquidado=true;
+            }
             if(pos<=0&&!temEvento)continue;
             if(preco===0&&qtd>0&&pos>0){preco=pos/qtd}
             if(pm===0&&preco>0){pm=preco}
@@ -3743,16 +3835,19 @@ function CL({data:d,onSel:os,dispatch:dp}){
             else if(cl.match(/cdb/))tp="cdb";
             else if(cl.match(/lci/))tp="lci";else if(cl.match(/lca/))tp="lca";
             else if(cl.match(/cri(?!pto)/))tp="cri";else if(cl.match(/cra(?!ft)/))tp="cra";
+            /* Fundos especiais — ANTES de Tesouro pra não capturar fundos com 'tesouro' no nome (PLURAL TESOURO SELIC FI RF SIMPLES) */
+            else if(cl.match(/fi rf simples|fundo.*tesouro selic|tesouro selic.*fi/))tp="fundo_rf";
+            else if(cl.match(/fi-infra|fundo.*infra|infra.*fundo|infraestrutura|investimento em infr/))tp="fundo_infra";
+            else if(cl.match(/multimercado/))tp="fundo_mm";
+            else if(cl.match(/(fundos|fundo).*(renda fixa|rf)|rf.*cred|top crédito|top credito|incentivado/))tp="fundo_rf";
+            else if(cl.match(/fundos\b/)&&cl.match(/renda fixa/))tp="fundo_rf";
+            /* Tesouro Direto */
             else if(cl.match(/ntn-b|ntnb/)||ativo.match(/NTNB/i))tp="tesouro";
-            else if(cl.match(/lft|ltn|tesouro/)||ativo.match(/^(LFT|LTN|NTN)/i))tp="tesouro";
+            else if(cl.match(/lft|ltn|tesouro/)||ativo.match(/^(LFT|LTN|NTN|RENDA\+|EDUCA\+|RESERVA\+)/i))tp="tesouro";
             else if(cl.match(/prefixado/)&&cl.match(/renda fixa/))tp="tesouro";
             else if(cl.match(/indexado a juros/)&&cl.match(/renda fixa/))tp="cdb";
             else if(cl.match(/indexado a inflação|indexado a inflacao/)&&cl.match(/renda fixa/))tp="cdb";
             else if(cl.match(/debenture|debênture/))tp=cl.match(/incent/)?"debi":"deb";
-            else if(cl.match(/infra.*fund|fi-infra|fund.*infra/))tp="fundo_infra";
-            else if(cl.match(/multimercado|multi/))tp="fundo_mm";
-            else if(cl.match(/(fundos|fundo).*(renda fixa|rf)|rf.*cred|top crédito|top credito/))tp="fundo_rf";
-            else if(cl.match(/fundos\b/)&&cl.match(/renda fixa/))tp="fundo_rf";
             else if(cl.match(/fii[s]?\b|fiagro|imobiliário|imobiliario|fundo.*imob/))tp="fii";
             else if(cl.match(/etf/))tp=cl.match(/exterior/)?"etf_int":"etf_br";
             else if(tkUp.match(/11$/)&&!cl.match(/exterior/))tp="fii";
@@ -3773,7 +3868,7 @@ function CL({data:d,onSel:os,dispatch:dp}){
                 else if(ydStr.match(/^\d{4}-\d{2}-\d{2}/))yieldDt=ydStr.substring(0,10);
               }
             }
-            var ativoEntry={tk:tk,nm:ativo,tp:tp,qtd:qtd,pm:pm,pa:preco,inst:inst,venc:vD,posR:pos,_gClasse:classe,_gSubCl:subcl,_gRentPct:rentAtivo,_gRentRs:rentAtivoRs,_gEventos:eventos,_gEventosTot:totalEventos};
+            var ativoEntry={tk:tk,nm:ativo,tp:tp,qtd:qtd,pm:pm,pa:preco,inst:inst,venc:vD,posR:pos,_gClasse:classe,_gSubCl:subcl,_gRentPct:rentAtivo,_gRentRs:rentAtivoRs,_gEventos:eventos,_gEventosTot:totalEventos,_liquidado:foiLiquidado};
             if(yieldA>0){
               ativoEntry._yieldAnual=yieldA;
               ativoEntry._yieldDataInicio=yieldDt||(new Date().toISOString().split("T")[0]); 
@@ -3797,7 +3892,11 @@ function CL({data:d,onSel:os,dispatch:dp}){
           if(existing && existingVal!==undefined && existingVal!=="")return existingVal;
           return defVal;
         };
-        var newC={
+        /* === MERGE SEGURO === Preserva TODOS os campos do cliente existente (proventos, NFs,
+           interações, objetivos, sucessório, aposentadoria, contratos, particularidades, etc)
+           e sobrescreve só o que vem da planilha do Gorila. Sem esse spread, o reducer "RC"
+           remove o cliente antigo e coloca o novo no lugar, apagando dados manuais. */
+        var newC=Object.assign({},(existing||{}),{
           id:newId,
           nome:nomeCliente,
           email:pickCfg(cfgEmail,existing?existing.email:"",""),
@@ -3808,7 +3907,7 @@ function CL({data:d,onSel:os,dispatch:dp}){
           sv:cfgSv!==null?cfgSv:(existing?existing.sv:["patrimonio"]),
           pat:patReal,
           patGorila:patReal,
-          rend:0,
+          rend:existing&&existing.rend?existing.rend:0,
           notas:(existing&&existing.notas&&existing.notas!=="")?existing.notas:("Importado do Gorila em "+new Date().toLocaleDateString("pt-BR")),
           txGestao:(existing&&existing.txGestao!=null)?existing.txGestao:(cfgTxGestao!==null?cfgTxGestao:0.80),
           feeFixo:(existing&&existing.feeFixo!=null)?existing.feeFixo:(cfgFeeFixo!==null?cfgFeeFixo:0),
@@ -3822,11 +3921,11 @@ function CL({data:d,onSel:os,dispatch:dp}){
           _gorilaRent:gorilaRent,
           
           waGrupo:(existing&&existing.waGrupo)?existing.waGrupo:"",
- dtNascimento:(existing&&existing.dtNascimento)?existing.dtNascimento:"",
- particularidades:(existing&&existing.particularidades)?existing.particularidades:"",
- dtCaptacao:existing&&existing.dtCaptacao?existing.dtCaptacao:(dataFim||new Date().toISOString().split("T")[0]),
+          dtNascimento:(existing&&existing.dtNascimento)?existing.dtNascimento:"",
+          particularidades:(existing&&existing.particularidades)?existing.particularidades:"",
+          dtCaptacao:existing&&existing.dtCaptacao?existing.dtCaptacao:(dataFim||new Date().toISOString().split("T")[0]),
           status:existing&&existing.status?existing.status:"ativo"
-        };
+        });
         dp({t:"RC",p:newC});
         var msg="✅ "+nomeCliente+(existing?" atualizado":" criado")+" • "+ativos.length+" ativos • "+fm(patReal);
         if(gorilaRent){msg+=" • Rentabilidade importada"}
@@ -3856,6 +3955,7 @@ function CL({data:d,onSel:os,dispatch:dp}){
 
         <input ref={bulkRef} type="file" accept=".xlsx,.xls,.csv,.pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf,text/csv,text/plain,*/*" multiple onChange={function(e){if(e.target.files.length>0)importGorilaBulk(e.target.files);e.target.value=""}} style={{display:"none"}}/>
         <Bt v="secondary" onClick={function(){bulkRef.current&&bulkRef.current.click()}} style={{fontSize:11,padding:"10px 14px",background:"rgba(167,139,250,0.08)",color:T.purple,border:"1px solid rgba(167,139,250,0.2)"}}>📦 Importar em Massa</Bt>
+        <Bt v="secondary" onClick={function(){sShowAuditoria(true)}} style={{fontSize:11,padding:"10px 14px",background:"rgba(212,163,40,0.08)",color:T.gold,border:"1px solid rgba(212,163,40,0.25)"}}>🔍 Auditar Classificações</Bt>
       </div>
 
       {}
@@ -3890,6 +3990,72 @@ function CL({data:d,onSel:os,dispatch:dp}){
         </Cd>
       )}
       {gMsg && <div style={{padding:10,marginBottom:12,borderRadius:10,fontSize:12,fontWeight:600,background:gMsg.indexOf("✅")>=0?T.greenD:T.orangeD,color:gMsg.indexOf("✅")>=0?T.green:T.orange,textAlign:"center"}}>{gMsg}</div>}
+
+      {/* === MODAL AUDITORIA DE CLASSIFICAÇÕES === */}
+      <Mo open={showAuditoria} onClose={function(){sShowAuditoria(false)}} title="🔍 Auditoria de Classificações" wide>
+        {(function(){
+          var problemas=auditarClassificacoes();
+          var totalClientes=problemas.length;
+          var totalAtivos=problemas.reduce(function(s,p){return s+p.problemas.length},0);
+          var tpLabel={tesouro:"Tesouro",cdb:"CDB",lci:"LCI",lca:"LCA",fii:"FII",fundo_rf:"Fundo RF",fundo_infra:"FI-Infra",fundo_mm:"Fundo MM",acao:"Ação",debi:"Deb. Inc.",caixa:"Caixa"};
+          if(totalClientes===0){
+            return (
+              <div style={{padding:30,textAlign:"center"}}>
+                <div style={{fontSize:48,marginBottom:12}}>✅</div>
+                <div style={{fontSize:16,fontWeight:700,color:T.green,marginBottom:6}}>Tudo certo!</div>
+                <div style={{fontSize:12,color:T.t3,lineHeight:1.6,maxWidth:400,margin:"0 auto"}}>
+                  Nenhum ativo com classificação suspeita encontrado em todos os clientes importados.
+                </div>
+              </div>
+            );
+          }
+          return (
+            <div style={{minWidth:Math.min(640,window.innerWidth-40)}}>
+              <div style={{padding:14,background:T.orangeD,border:"1px solid "+T.orange+"33",borderRadius:10,marginBottom:14,fontSize:12,color:T.t1,lineHeight:1.5}}>
+                ⚠️ <b>{totalClientes} cliente{totalClientes>1?"s":""} com {totalAtivos} ativo{totalAtivos>1?"s":""}</b> classificado{totalAtivos>1?"s":""} potencialmente errado. Reimporte cada cliente abaixo via "📥 Importar Gorila" pra atualizar com as regras corrigidas (v230+).
+              </div>
+
+              <div style={{maxHeight:480,overflowY:"auto",border:"1px solid "+T.bdrL,borderRadius:10}}>
+                {problemas.map(function(p,i){return (
+                  <div key={p.cliente.id} style={{borderBottom:i<problemas.length-1?"1px solid "+T.w3:"none",padding:"12px 14px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10}}>
+                        <span style={{fontSize:13,fontWeight:800,color:T.gold}}>{p.cliente.nome}</span>
+                        <span style={{fontSize:9,padding:"2px 7px",borderRadius:5,background:T.red+"18",color:T.red,fontWeight:700}}>{p.problemas.length} ativo{p.problemas.length>1?"s":""}</span>
+                      </div>
+                      <button onClick={function(){os(p.cliente)}}
+                        style={{padding:"5px 12px",background:T.cyanD,border:"1px solid "+T.cyan+"55",borderRadius:6,color:T.cyan,fontSize:10,cursor:"pointer",fontWeight:700}}>
+                        Abrir cliente →
+                      </button>
+                    </div>
+                    {p.problemas.map(function(pr,j){return (
+                      <div key={j} style={{padding:"6px 0 6px 8px",borderLeft:"2px solid "+T.orange+"55",marginLeft:4,marginBottom:j<p.problemas.length-1?6:0}}>
+                        <div style={{fontSize:11,color:T.t1,fontWeight:600,marginBottom:2}}>{pr.ativo}</div>
+                        <div style={{display:"flex",gap:8,alignItems:"center",fontSize:10,color:T.t3}}>
+                          <span style={{padding:"1px 6px",borderRadius:4,background:T.red+"15",color:T.red,fontWeight:700}}>{tpLabel[pr.tpAtual]||pr.tpAtual}</span>
+                          <span>→</span>
+                          <span style={{padding:"1px 6px",borderRadius:4,background:T.green+"15",color:T.green,fontWeight:700}}>{tpLabel[pr.tpEsperado]||pr.tpEsperado}</span>
+                          {pr.posR>0&&<span style={{marginLeft:"auto",fontFamily:"'JetBrains Mono'",color:T.gold,fontWeight:700}}>{fm(pr.posR)}</span>}
+                        </div>
+                        <div style={{fontSize:9,color:T.t3,fontStyle:"italic",marginTop:2}}>{pr.motivo}</div>
+                      </div>
+                    )})}
+                  </div>
+                )})}
+              </div>
+
+              <div style={{padding:12,marginTop:14,background:T.cyanD,border:"1px solid "+T.cyan+"33",borderRadius:8,fontSize:10,color:T.t2,lineHeight:1.6}}>
+                💡 <b>Como reimportar:</b> Clica em "Abrir cliente" → na tela do cliente clica em "📥 Importar Gorila" → escolhe o XLSX mais recente do Gorila daquele cliente. Os ativos vão ser reclassificados automaticamente com as regras atualizadas. <b>Os dados manuais (proventos, notas, fee) são preservados.</b>
+              </div>
+
+              <div style={{display:"flex",gap:8,marginTop:14,paddingTop:10,borderTop:"1px solid "+T.bdrL}}>
+                <Bt v="secondary" onClick={function(){sShowAuditoria(false)}} style={{flex:1}}>Fechar</Bt>
+              </div>
+            </div>
+          );
+        })()}
+      </Mo>
+
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>
         {fl.map(c=>(
           <Cd key={c.id} onClick={()=>os(c)} style={{padding:22,position:"relative"}}>
@@ -4477,6 +4643,12 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       gPct=0;
       g=0;
     }
+    /* Ativo liquidado (Will Financeira, Pleno, etc): vA=0 mas teve resultado.
+       Não computar como "prejuízo histórico" — esses entram na seção "Eventos do Período" do PDF. */
+    if(a._liquidado){
+      g=0;
+      gPct=0;
+    }
     var ni=normInst(a.inst);
     return{...a,inst:ni,col:["#D4A328","#2DD4A0","#38BDF8","#A78BFA","#F59E0B","#F472B6","#6EE7B7","#93C5FD","#FCA5A1","#FBBF24","#818CF8","#34D399"][i%12],vA:vA,cT:cT,ganho:g,gPct:gPct,gPctValido:gPctValido,ehUSD:ehUSD,_rendYield:rendimentoYield};
   });
@@ -4852,14 +5024,14 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
             else if(cl.match(/lca/))tp="lca";
             else if(cl.match(/cri(?!pto)/))tp="cri";
             else if(cl.match(/cra(?!ft)/))tp="cra";
-            else if(cl.match(/ntnb|ntn-b|tesouro.*ipca|tesouro.*selic|tesouro.*pre|lft|ltn/))tp="tesouro";
+            else if(cl.match(/ntnb|ntn-b|tesouro.*ipca|tesouro.*selic|tesouro.*pre|lft|ltn/)||tkUp2.match(/^(RENDA\+|EDUCA\+|RESERVA\+|LFT|LTN|NTN-?B|NTNB)/))tp="tesouro";
             else if(cl.match(/debenture|debênture/))tp=cl.match(/incent/)?"debi":"deb";
             else if(cl.match(/fundo.*infra|fi-infra|infra.*fundo/))tp="fundo_infra";
             else if(cl.match(/multimercado|multi/))tp="fundo_mm";
             else if(cl.match(/fundos.*renda.*fixa|fundo.*rf|rf.*cred/)||((cl.match(/fundos/)||cl.match(/fundo/))&&cl.match(/renda fixa/)))tp="fundo_rf";
             else if(cl.match(/fundo.*ac|fia\b/))tp="fundo_acoes";
             else if(cl.match(/indexado|prefixado/)&&(cl.match(/renda fixa/)))tp="cdb";
-            else if(cl.match(/fii\b|fiagro|imobiliário|imobiliario|fundo.*imob/))tp="fii";
+            else if(cl.match(/fii[s]?\b|fiagro|imobiliário|imobiliario|fundo.*imob/))tp="fii";
             else if(cl.match(/etf|bova|ivvb/))tp="etf_br";
             else if(cl.match(/bdr|34$/))tp="bdr";
             else if(cl.match(/cripto|bitcoin|btc/))tp="cripto";
@@ -5984,7 +6156,22 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       if(tipo==="mensal"||tipo==="trimestral"||tipo==="anual"){
         
         var fmRel=function(v){return fmF(v);};
-        var ganhoPeriodo=tCV*(rentPeriodo/100);
+        /* Ganho do período: usa Resultado Período EXATO do Gorila quando importado (mais preciso),
+           senão estima como pat × rent% (aprox). Antes: tCV × rent% multiplicava o pat FINAL,
+           gerando valor R$ ligeiramente inflado vs o "Resultado Período" exato exportado pelo Gorila. */
+        var ganhoPeriodo;
+        if(tipo==="mensal" && c._gorilaRent && typeof c._gorilaRent.resultado==="number" && c._gorilaRent.resultado!==0){
+          /* Usa o valor exato do Gorila (já considera valorização + rendimentos − aportes/resgates) */
+          ganhoPeriodo=c._gorilaRent.resultado;
+        }else{
+          /* Fallback: estima usando patrimônio. Usa pat inicial se conhecido (mais correto matematicamente). */
+          var patBaseGanho=tCV;
+          if(c._gorilaRent && typeof c._gorilaRent.captacao==="number" && c._gorilaRent.captacao!==0){
+            /* Pat inicial ≈ pat final − captação líquida */
+            patBaseGanho=tCV-c._gorilaRent.captacao;
+          }
+          ganhoPeriodo=patBaseGanho*(rentPeriodo/100);
+        }
         var labelPeriodo=tipo==="mensal"?"do mês":(tipo==="anual"?"em 12 meses":"do trimestre");
         body+='<div class="kpi-grid">';
         (function(){var txt=fmF(tCV);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value gold" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">posição atual</div></div>';})();
@@ -6301,10 +6488,10 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       })();
 
       /* ===== ATRIBUIÇÃO POR CLASSE — calculada para o período do relatório =====
-         Usa rentPeriodo (rent% do mês/período selecionado) distribuída por classe
-         proporcional ao peso de cada classe na carteira atual.
-         Isso garante que o relatório mensal mostre contribuição do MÊS, não histórica.
-         Fallback: se não tiver ativos, usa atribuição do Gorila com aviso. */
+         Fórmula correta: contrib_classe = peso_classe × rent_classe
+         Onde rent_classe = soma(ganho_R$_ativo) / soma(valor_ativo) — agregada por classe.
+         Antes: contrib = peso × rentCarteira → mostrava só proporção do peso, ignorando
+         que classes diferentes têm rentabilidades diferentes (RENDA+ +4,4% vs LFT +0,06%). */
       (function(){
         
         var macroMap={cdb:"Renda Fixa",lci:"Renda Fixa",lca:"Renda Fixa",lc:"Renda Fixa",cri:"Renda Fixa",cra:"Renda Fixa",tesouro:"Renda Fixa",deb:"Renda Fixa",debi:"Renda Fixa",fundo_rf:"Renda Fixa",fundo_mm:"Renda Fixa",fundo_camb:"Renda Fixa",coe:"Renda Fixa",poupanca:"Renda Fixa",acao:"Renda Variável",fii:"Renda Variável",fiagro:"Renda Variável",fip:"Renda Variável",etf_br:"Renda Variável",bdr:"Renda Variável",fundo_acoes:"Renda Variável",ouro:"Renda Variável",fundo_infra:"Renda Variável",stock_us:"Investimento no Exterior",etf_int:"Investimento no Exterior",etf_eu:"Investimento no Exterior",reit:"Investimento no Exterior",prev:"Previdência",cripto:"Cripto",caixa:"Caixa"};
@@ -6312,18 +6499,48 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
         var totalV=0;
         enr.forEach(function(a){
           var cls=macroMap[a.tp]||"Outros";
-          if(!byClasse[cls])byClasse[cls]={v:0};
+          if(!byClasse[cls])byClasse[cls]={v:0,ganhoMes:0,temRentReal:false};
           byClasse[cls].v+=a.vA;
           totalV+=a.vA;
+          /* Tenta pegar ganho do mês REAL do ativo via Gorila (mesma função usada em Destaques) */
+          var rentAt=getRentAtivoPer(a);
+          if(rentAt.doPeriodo){
+            byClasse[cls].ganhoMes+=rentAt.rs;
+            byClasse[cls].temRentReal=true;
+          }
         });
+        /* Adiciona ativos liquidados como classe "Eventos do Período" pra soma fechar com rent. carteira */
+        var ativosLiquidadosAtr=(c._ativosImport||[]).filter(function(a){return a._liquidado});
+        if(ativosLiquidadosAtr.length>0){
+          var ganhoLiq=0;
+          ativosLiquidadosAtr.forEach(function(a){
+            if(a._gRentRs){
+              var keys=Object.keys(a._gRentRs);
+              var kPer=keys.find(function(k){var clk=String(k).toLowerCase().trim();return clk==="periodo"||clk==="período"});
+              if(kPer&&typeof a._gRentRs[kPer]==="number")ganhoLiq+=a._gRentRs[kPer];
+            }
+          });
+          if(Math.abs(ganhoLiq)>1){
+            byClasse["Eventos do Período"]={v:0,ganhoMes:ganhoLiq,temRentReal:true,_liquidado:true};
+          }
+        }
         if(totalV>0 && rentPeriodo!==null){
           
           var classesOrdenadas=Object.keys(byClasse).sort(function(a,b){return byClasse[b].v-byClasse[a].v});
           body+=secTitle('🧩','Atribuição de Performance por Classe');
+          /* Decide se usa rent. real de cada classe (Gorila) ou aproximação peso × rentCarteira */
+          var temDadosReais=classesOrdenadas.some(function(cls){return byClasse[cls].temRentReal});
           var maxContrib=0;
           var contributions=classesOrdenadas.map(function(cls){
             var peso=byClasse[cls].v/totalV;
-            var contrib=peso*rentPeriodo;
+            var contrib;
+            if(temDadosReais){
+              /* Contribuição = ganho R$ da classe / patrimônio total × 100 */
+              contrib=totalV>0?(byClasse[cls].ganhoMes/totalV)*100:0;
+            }else{
+              /* Fallback: peso × rent. carteira (assume rent. uniforme entre classes) */
+              contrib=peso*rentPeriodo;
+            }
             if(Math.abs(contrib)>maxContrib)maxContrib=Math.abs(contrib);
             return {classe:cls,peso:peso,contrib:contrib};
           });
@@ -6336,7 +6553,20 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
               +'<div class="attrib-value" style="color:'+barColor+'">'+(item.contrib>=0?"+":"")+item.contrib.toFixed(2)+'%</div>'
               +'</div>';
           });
-          body+='<div class="nota-inline" style="margin-top:14px">Contribuição estimada de cada classe para a rentabilidade de '+(rentPeriodo>=0?"+":"")+rentPeriodo.toFixed(2)+'% '+rentLabel+'. Calculada pelo peso de cada classe na carteira atual.</div>';
+          var notaTexto;
+          if(temDadosReais){
+            /* Compara soma das contribuições com rent. carteira pra detectar discrepância (ex: ativos liquidados, eventos não-posicionais) */
+            var somaContrib=contributions.reduce(function(s,it){return s+it.contrib},0);
+            var diff=rentPeriodo-somaContrib;
+            notaTexto='Contribuição real de cada classe — calculada como (ganho da classe ÷ patrimônio total). Usa rentabilidades exatas do Gorila por ativo.';
+            if(Math.abs(diff)>0.05){
+              /* Diferença > 0,05pp: provavelmente proventos/eventos ou ativos liquidados no período */
+              notaTexto+=' A soma das contribuições ('+(somaContrib>=0?"+":"")+somaContrib.toFixed(2)+'%) difere da rent. da carteira ('+(rentPeriodo>=0?"+":"")+rentPeriodo.toFixed(2)+'%) em '+(diff>=0?"+":"")+diff.toFixed(2)+'pp por causa de eventos do período (proventos pagos, ativos liquidados, etc).';
+            }
+          }else{
+            notaTexto='Contribuição estimada de cada classe para a rentabilidade de '+(rentPeriodo>=0?"+":"")+rentPeriodo.toFixed(2)+'% '+rentLabel+'. Calculada pelo peso de cada classe na carteira atual.';
+          }
+          body+='<div class="nota-inline" style="margin-top:14px">'+notaTexto+'</div>';
         } else if(temGorila && c._gorilaRent.atribuicao && c._gorilaRent.atribuicao.length>0){
           
           body+=secTitle('🧩','Atribuição de Performance por Classe');
@@ -6403,18 +6633,40 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
         if(a._gRentPct){
           var rp=a._gRentPct;var keys=Object.keys(rp);
           var cleanKey=function(k){return String(k).toLowerCase().trim().replace(/^'+|'+$/g,"");};
+          /* === Helper: pega valor em R$ correspondente, se existir, da mesma coluna === */
+          var getRsForKey=function(targetClean){
+            if(!a._gRentRs)return null;
+            var krs=Object.keys(a._gRentRs).find(function(k){return cleanKey(k)===targetClean});
+            if(krs!==undefined&&typeof a._gRentRs[krs]==="number")return a._gRentRs[krs];
+            return null;
+          };
           if(tipo==="mensal"){
-            var ordemMes=["ultimo mês","último mês","ultimo mes","último mes","1m"];
-            for(var oi=0;oi<ordemMes.length;oi++){var kk=keys.find(function(k){return cleanKey(k)===ordemMes[oi]});if(kk!==undefined&&typeof rp[kk]==="number")return {pct:rp[kk]*100,rs:a.vA*rp[kk],doPeriodo:true,fonte:"gorila_mes"};}
+            /* === PRIORIDADE 1: coluna "Periodo"/"Período" do Gorila ===
+               Se o usuário exportou um relatório mensal (período <=45 dias), essa coluna É a rent. do mês.
+               O Gorila exporta SEMPRE essa coluna pra cada ativo na aba Posição, e ela representa
+               o desempenho do ativo no período exportado. Pra relatórios mensais, é a fonte mais precisa.
+               Determina se o período é mensal pelo grDias do _gorilaRent (data inicial até final). */
             var grDias=c._gorilaRent&&c._gorilaRent.dataIni&&c._gorilaRent.dataFim?Math.round((new Date(c._gorilaRent.dataFim)-new Date(c._gorilaRent.dataIni))/86400000):9999;
-            if(grDias<=60){var kp=keys.find(function(k){var cl=cleanKey(k);return cl==="periodo"||cl==="período";});if(kp&&typeof rp[kp]==="number")return {pct:rp[kp]*100,rs:a.vA*rp[kp],doPeriodo:true,fonte:"gorila_mes"};}
+            if(grDias<=45){
+              var kp=keys.find(function(k){var cl=cleanKey(k);return cl==="periodo"||cl==="período";});
+              if(kp&&typeof rp[kp]==="number"){
+                var pctP=rp[kp]*100;
+                /* Prefere o R$ exato vindo do Gorila (mais preciso que a.vA*pct) */
+                var rsP=getRsForKey("periodo");if(rsP===null)rsP=getRsForKey("período");
+                return {pct:pctP,rs:rsP!==null?rsP:a.vA*rp[kp],doPeriodo:true,fonte:"gorila_periodo"};
+              }
+            }
+            /* === PRIORIDADE 2: chave "Último Mês" (versões antigas do Gorila) === */
+            var ordemMes=["ultimo mês","último mês","ultimo mes","último mes","1m"];
+            for(var oi=0;oi<ordemMes.length;oi++){var kk=keys.find(function(k){return cleanKey(k)===ordemMes[oi]});if(kk!==undefined&&typeof rp[kk]==="number"){var rsM=getRsForKey(ordemMes[oi]);return {pct:rp[kk]*100,rs:rsM!==null?rsM:a.vA*rp[kk],doPeriodo:true,fonte:"gorila_mes"};}}
+            /* === PRIORIDADE 3: estima do anual (último recurso, menos preciso) === */
             var vAno=(typeof rp["ano"]==="number"?rp["ano"]:(typeof rp["Ano"]==="number"?rp["Ano"]:null));
             if(vAno!==null){var pctM=(Math.pow(1+vAno,1/12)-1)*100;return {pct:pctM,rs:a.vA*(pctM/100),doPeriodo:true,fonte:"estimado"};}
           }else if(tipo==="anual"){
-            var v12=rp["12m"]||rp["12M"];if(typeof v12==="number")return {pct:v12*100,rs:a.vA*v12,doPeriodo:true,fonte:"gorila_12m"};
+            var v12=rp["12m"]||rp["12M"];if(typeof v12==="number"){var rs12=getRsForKey("12m");return {pct:v12*100,rs:rs12!==null?rs12:a.vA*v12,doPeriodo:true,fonte:"gorila_12m"};}
           }else{
             var kT=keys.find(function(k){var cl=cleanKey(k);return cl.indexOf("início")>=0||cl.indexOf("inicio")>=0;});
-            if(kT&&typeof rp[kT]==="number")return {pct:rp[kT]*100,rs:a.vA*rp[kT],doPeriodo:true,fonte:"gorila_total"};
+            if(kT&&typeof rp[kT]==="number"){var rsT=getRsForKey(cleanKey(kT));return {pct:rp[kT]*100,rs:rsT!==null?rsT:a.vA*rp[kT],doPeriodo:true,fonte:"gorila_total"};}
           }
         }
         return {pct:a.gPct,rs:a.ganho,doPeriodo:false,fonte:"historico"};
@@ -6723,6 +6975,50 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
           body+='</div>';
         }
         }} 
+
+      /* ===== EVENTOS DO PERÍODO — ativos liquidados (FGC, vencimento, baixa) =====
+         Mostra apenas se houver ativos com flag _liquidado (posição zero + resultado R$ no período).
+         Ex: CDB Will Financeira, CDB Banco Pleno (liquidação extrajudicial Bacen, ressarcimento FGC). */
+      if(tipo==="mensal" && secAtiva("movimentacao")){
+        var ativosLiquidados=(c._ativosImport||[]).filter(function(a){return a._liquidado});
+        if(ativosLiquidados.length>0){
+          var totalLiquidacao=0;
+          ativosLiquidados.forEach(function(a){
+            if(a._gRentRs){
+              var keys=Object.keys(a._gRentRs);
+              var kPer=keys.find(function(k){var cl=String(k).toLowerCase().trim();return cl==="periodo"||cl==="período"});
+              if(kPer&&typeof a._gRentRs[kPer]==="number")totalLiquidacao+=a._gRentRs[kPer];
+            }
+          });
+          body+='<!-- PAGE_BREAK -->';
+          body+=secTitle('⚖️','Eventos do Período');
+          body+='<div style="font-size:11px;color:#6B7489;line-height:1.6;margin-bottom:14px">Ativos liquidados, vencidos ou ressarcidos no período. Esses eventos não fazem mais parte da carteira atual mas geraram resultado em '+rentLabel+'.</div>';
+          body+='<table><tr><th>Ativo</th><th>Tipo de Evento</th><th style="text-align:right">Resultado</th></tr>';
+          ativosLiquidados.forEach(function(a){
+            var rsPer=0;
+            if(a._gRentRs){
+              var keys=Object.keys(a._gRentRs);
+              var kPer=keys.find(function(k){var cl=String(k).toLowerCase().trim();return cl==="periodo"||cl==="período"});
+              if(kPer&&typeof a._gRentRs[kPer]==="number")rsPer=a._gRentRs[kPer];
+            }
+            var nm=a.nm||a.tk||"";
+            /* Tenta classificar tipo de evento pelo nome do ativo */
+            var tipoEv="Liquidação";
+            if(/will\s*financeira|banco\s*pleno|banco\s*master|máster/i.test(nm))tipoEv="Ressarcimento FGC";
+            else if(/cdb|lci|lca|cri|cra/i.test(nm) && rsPer>0)tipoEv="Vencimento / Baixa";
+            else if(rsPer<0)tipoEv="Baixa / Prejuízo";
+            var cor=rsPer>=0?"#0F9D58":"#EF6461";
+            var sinal=rsPer>=0?"+":"";
+            body+='<tr><td>'+nm+'</td>';
+            body+='<td><span style="color:#8B6FBE;font-weight:700;font-size:10px">'+tipoEv+'</span></td>';
+            body+='<td style="text-align:right;color:'+cor+';font-weight:700;font-family:JetBrains Mono,monospace">'+sinal+fmF(rsPer)+'</td></tr>';
+          });
+          body+='<tr style="background:rgba(212,163,40,0.04);border-top:2px solid rgba(212,163,40,0.25)"><td colspan="2" style="font-weight:700">TOTAL EVENTOS</td>';
+          body+='<td style="text-align:right;font-weight:800;color:'+(totalLiquidacao>=0?"#0F9D58":"#EF6461")+';font-family:JetBrains Mono,monospace;font-size:13px">'+(totalLiquidacao>=0?"+":"")+fmF(totalLiquidacao)+'</td></tr>';
+          body+='</table>';
+          body+='<div class="nota-inline" style="margin-top:14px">'+(totalLiquidacao>0?'💡 ':'⚠️ ')+'Esses valores entram no <strong>Resultado Período</strong> total da carteira mas não aparecem mais como posições ativas. '+(ativosLiquidados.length>1?'Foram ':'Foi ')+ativosLiquidados.length+' '+(ativosLiquidados.length>1?'ativos liquidados':'ativo liquidado')+' no período.</div>';
+        }
+      }
 
       /* ===== EVOLUÇÃO MENSAL REAL — 12 meses rolling, valores históricos =====
          Substitui o gráfico antigo de barras uniformes. */
@@ -23167,7 +23463,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '229';
+  var SW_VERSION = '232';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
