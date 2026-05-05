@@ -21520,20 +21520,31 @@ function FiscalView({data:d,dispatch:dp}){
   var mesKey=mesRef.getFullYear()+"-"+String(mesRef.getMonth()+1).padStart(2,"0");
   var mesNome=MES_NOMES[mesRef.getMonth()]+"/"+mesRef.getFullYear();
 
+  /* ===================== CONFIGURAÇÕES PADRÃO PREFEITURA JF ===================== */
+  /* Defaults baseados no perfil da Courinvest (consultoria em investimentos, optante Simples Nacional, sede em Juiz de Fora). Todos editáveis por NF. */
+  const URL_PREFEITURA="https://issnetonline.com.br/online/Login/Login.aspx?cidade=170";
+  const SERVICOS_LC116=[
+    {cod:"17.19",nome:"Consultoria em investimentos"},
+    {cod:"17.20",nome:"Auxílio na elaboração de plano de investimentos"},
+    {cod:"17.01",nome:"Assessoria ou consultoria de qualquer natureza"},
+    {cod:"10.05",nome:"Agenciamento, corretagem ou interm. de títulos"},
+    {cod:"17.02",nome:"Datilografia, digitação, secretaria, expediente"}
+  ];
+  const EXIGIBILIDADES=["Exigível","Não incidência","Isenção","Exportação","Imunidade","Susp. judicial","Susp. administrativa"];
+  const ESTADOS=["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"];
+
   const[filtroMes,sFiltroMes]=useState(mesKey);
   const[filtroStatus,sFiltroStatus]=useState("todos");
   const[modal,sModal]=useState(false);
   const[editNf,sEditNf]=useState(null);
-  const[nfValor,sNfValor]=useState("");
-  const[nfDesc,sNfDesc]=useState("");
-  const[nfTomador,sNfTomador]=useState("");
-  const[nfDoc,sNfDoc]=useState("");
-  const[nfEmail,sNfEmail]=useState("");
-  const[nfStatus,sNfStatus]=useState("pendente");
-  const[nfObs,sNfObs]=useState("");
-  const[nfClienteId,sNfClienteId]=useState("");
   const[copiado,sCopiado]=useState("");
   const[emitindoLote,sEmitindoLote]=useState(false);
+  const[loteRevisao,sLoteRevisao]=useState(null); // null ou array de NFs pré-preenchidas pra revisar
+  const[painelEnvio,sPainelEnvio]=useState(null); // NF que acabou de ser salva, pra mostrar painel de envio à prefeitura
+  const[secaoAberta,sSecaoAberta]=useState("cabecalho"); // accordion no modal: cabecalho|tomador|servico|tributacao
+
+  /* Estado completo do formulário — espelha campos da prefeitura */
+  const[fNf,sFNf]=useState({});
 
   var STATUS_COLOR={"pendente":T.orange,"emitida":T.cyan,"paga":T.green,"cancelada":T.red};
   var STATUS_LABEL={"pendente":"Pendente","emitida":"Emitida","paga":"Paga","cancelada":"Cancelada"};
@@ -21550,7 +21561,7 @@ function FiscalView({data:d,dispatch:dp}){
     return total;
   };
 
-  /* Descrição padrão */
+  /* Descrição padrão (mín 15 chars exigido pela prefeitura) */
   var descPadrao=function(c,mes){
     var parts=[];
     if(c.sv.includes("patrimonio"))parts.push("Gestão de Patrimônio");
@@ -21559,6 +21570,53 @@ function FiscalView({data:d,dispatch:dp}){
     var mn=MES_NOMES[+p[1]-1]+"/"+p[0];
     return "Consultoria em Investimentos — "+parts.join(" + ")+" — Competência "+mn;
   };
+
+  /* Gera objeto NF completo com TODOS os campos da prefeitura, pré-preenchido */
+  var nfCompleta=function(c,mes,sobrescreve){
+    var p=mes.split("-");
+    var compMM=p[1]+"/"+p[0];
+    var fee=calcFee(c);
+    var doc=(c.cnpj||c.cpf||"").replace(/\D/g,"");
+    var tipoTomador=doc.length===14?"PJ":(doc.length===11?"PF":"diversos");
+    var base={
+      // Cabeçalho
+      dataEmissao:hoje.toISOString().slice(0,10),
+      competencia:mes,
+      competenciaDisplay:compMM,
+      observacao:"",
+      temRPS:false,
+      rpsNumero:"",
+      rpsSerie:"",
+      rpsData:"",
+      // Tomador
+      tipoTomador:tipoTomador, // PJ | PF | diversos | exterior | naoIdentificado
+      clienteNome:c.nome||"",
+      clienteDoc:c.cnpj||c.cpf||"",
+      clienteEmail:c.email||"",
+      clienteEnd:c.endereco||"",
+      // Serviço
+      codigoServico:"17.19",
+      descricao:descPadrao(c,mes),
+      valorServico:fee,
+      descCondicionado:0,
+      descIncondicionado:0,
+      deducoes:0,
+      // Tributação
+      exigibilidadeISS:"Exigível",
+      responsavel:"Prestador",
+      localUF:"MG",
+      localMunicipio:"Juiz de Fora",
+      issUF:"MG",
+      issMunicipio:"Juiz de Fora",
+      aliquota:"", // editável (Simples Nacional varia por RBT12)
+    };
+    if(sobrescreve)Object.assign(base,sobrescreve);
+    return base;
+  };
+
+  /* Calcula base de cálculo e ISS automaticamente */
+  var calcBase=function(f){return Math.max(0,(parseFloat(f.valorServico)||0)-(parseFloat(f.descIncondicionado)||0)-(parseFloat(f.deducoes)||0))};
+  var calcISS=function(f){return calcBase(f)*((parseFloat(f.aliquota)||0)/100)};
 
   /* Coleta todas as NFs de todos os clientes */
   var todasNfs=[];
@@ -21581,44 +21639,123 @@ function FiscalView({data:d,dispatch:dp}){
   }):[];
 
   /* Totais */
-  var totalEmitido=nfsFiltradas.reduce(function(s,n){return s+n.valor},0);
-  var totalPago=nfsFiltradas.filter(function(n){return n.status==="paga"}).reduce(function(s,n){return s+n.valor},0);
-  var totalPendente=nfsFiltradas.filter(function(n){return n.status==="pendente"}).reduce(function(s,n){return s+n.valor},0);
+  var totalEmitido=nfsFiltradas.reduce(function(s,n){return s+(n.valor||n.valorServico||0)},0);
+  var totalPago=nfsFiltradas.filter(function(n){return n.status==="paga"}).reduce(function(s,n){return s+(n.valor||n.valorServico||0)},0);
+  var totalPendente=nfsFiltradas.filter(function(n){return n.status==="pendente"}).reduce(function(s,n){return s+(n.valor||n.valorServico||0)},0);
 
   var abrirModal=function(nf,clientePresel){
+    var mesUsar=filtroMes!=="todos"?filtroMes:mesKey;
     if(nf){
-      sEditNf(nf);sNfValor(String(nf.valor));sNfDesc(nf.descricao||"");
-      sNfTomador(nf.tomador||"");sNfDoc(nf.documento||"");
-      sNfEmail(nf.email||"");sNfStatus(nf.status);sNfObs(nf.obs||"");
-      sNfClienteId(nf._clienteId||"");
+      sEditNf(nf);
+      var cli=clientes.find(function(c){return c.id===nf._clienteId});
+      // Reconstrói objeto completo: usa campos novos se existirem, senão preenche com defaults
+      var base=cli?nfCompleta(cli,nf.competencia||mesUsar):{};
+      sFNf(Object.assign({},base,{
+        dataEmissao:nf.emitidaEm||hoje.toISOString().slice(0,10),
+        competencia:nf.competencia||mesUsar,
+        observacao:nf.obs||"",
+        clienteNome:nf.tomador||base.clienteNome||"",
+        clienteDoc:nf.documento||base.clienteDoc||"",
+        clienteEmail:nf.email||base.clienteEmail||"",
+        descricao:nf.descricao||base.descricao||"",
+        valorServico:nf.valor||nf.valorServico||base.valorServico||0,
+        // Sobrescreve com campos novos se a NF já tiver sido salva nesse formato
+        codigoServico:nf.codigoServico||base.codigoServico,
+        exigibilidadeISS:nf.exigibilidadeISS||base.exigibilidadeISS,
+        responsavel:nf.responsavel||base.responsavel,
+        aliquota:nf.aliquota!==undefined?nf.aliquota:base.aliquota,
+        descCondicionado:nf.descCondicionado||0,
+        descIncondicionado:nf.descIncondicionado||0,
+        deducoes:nf.deducoes||0,
+        temRPS:nf.temRPS||false,
+        rpsNumero:nf.rpsNumero||"",
+        rpsSerie:nf.rpsSerie||"",
+        rpsData:nf.rpsData||"",
+        tipoTomador:nf.tipoTomador||base.tipoTomador,
+        localUF:nf.localUF||base.localUF,
+        localMunicipio:nf.localMunicipio||base.localMunicipio,
+        issUF:nf.issUF||base.issUF,
+        issMunicipio:nf.issMunicipio||base.issMunicipio,
+        _clienteId:nf._clienteId
+      }));
     }else{
       var cl=clientePresel||(clientes.length===1?clientes[0]:null);
       sEditNf(null);
-      sNfValor(cl?String(calcFee(cl).toFixed(2)):"");
-      sNfDesc(cl?descPadrao(cl,filtroMes!=="todos"?filtroMes:mesKey):"");
-      sNfTomador(cl?cl.nome:"");sNfDoc(cl?(cl.cpf||cl.cnpj||""):"");
-      sNfEmail(cl?(cl.email||""):"");sNfStatus("pendente");sNfObs("");
-      sNfClienteId(cl?cl.id:"");
+      if(cl){
+        sFNf(Object.assign({},nfCompleta(cl,mesUsar),{_clienteId:cl.id}));
+      }else{
+        sFNf({_clienteId:"",competencia:mesUsar,dataEmissao:hoje.toISOString().slice(0,10),codigoServico:"17.19",exigibilidadeISS:"Exigível",responsavel:"Prestador",localUF:"MG",localMunicipio:"Juiz de Fora",issUF:"MG",issMunicipio:"Juiz de Fora",aliquota:"",valorServico:0,descCondicionado:0,descIncondicionado:0,deducoes:0,tipoTomador:"PJ",temRPS:false});
+      }
     }
+    sSecaoAberta("cabecalho");
     sModal(true);
   };
 
+  var atualizaCampo=function(k,v){sFNf(function(prev){var nx=Object.assign({},prev);nx[k]=v;return nx})};
+
+  /* Quando troca o cliente no modal, repreenche tudo */
+  var trocarCliente=function(idCliente){
+    var cli=clientes.find(function(c){return c.id===idCliente});
+    if(!cli){atualizaCampo("_clienteId","");return}
+    var mesUsar=fNf.competencia||filtroMes||mesKey;
+    sFNf(Object.assign({},nfCompleta(cli,mesUsar),{
+      _clienteId:cli.id,
+      // preserva valores que o usuário possa ter ajustado no cabeçalho
+      observacao:fNf.observacao||"",
+      temRPS:fNf.temRPS||false,
+      rpsNumero:fNf.rpsNumero||"",
+      rpsSerie:fNf.rpsSerie||"",
+      rpsData:fNf.rpsData||""
+    }));
+  };
+
   var salvarNf=function(){
-    var cliId=editNf?editNf._clienteId:nfClienteId;
+    var cliId=fNf._clienteId;
     var cli=clientes.find(function(c){return c.id===cliId});
-    if(!cli){alert("Selecione um cliente.");return;}
+    if(!cli){alert("Selecione um cliente.");return}
+    if(!fNf.descricao||fNf.descricao.length<15){alert("A descrição do serviço precisa ter no mínimo 15 caracteres (exigência da prefeitura).");return}
+    if(!fNf.valorServico||parseFloat(fNf.valorServico)<=0){alert("O valor do serviço deve ser maior que zero.");return}
     var nova={
       id:editNf?editNf.id:("nf_"+Date.now()),
-      competencia:filtroMes!=="todos"?filtroMes:mesKey,
-      emitidaEm:new Date().toISOString().slice(0,10),
-      valor:parseFloat(nfValor)||0,descricao:nfDesc,
-      tomador:nfTomador,documento:nfDoc,email:nfEmail,
-      status:nfStatus,obs:nfObs
+      competencia:fNf.competencia,
+      emitidaEm:fNf.dataEmissao,
+      // Campos legados (compatibilidade com NFs antigas)
+      valor:parseFloat(fNf.valorServico)||0,
+      descricao:fNf.descricao,
+      tomador:fNf.clienteNome,
+      documento:fNf.clienteDoc,
+      email:fNf.clienteEmail,
+      status:editNf?editNf.status:"pendente",
+      obs:fNf.observacao,
+      // Campos novos (espelho da prefeitura)
+      codigoServico:fNf.codigoServico,
+      valorServico:parseFloat(fNf.valorServico)||0,
+      descCondicionado:parseFloat(fNf.descCondicionado)||0,
+      descIncondicionado:parseFloat(fNf.descIncondicionado)||0,
+      deducoes:parseFloat(fNf.deducoes)||0,
+      baseCalculo:calcBase(fNf),
+      exigibilidadeISS:fNf.exigibilidadeISS,
+      responsavel:fNf.responsavel,
+      localUF:fNf.localUF,
+      localMunicipio:fNf.localMunicipio,
+      issUF:fNf.issUF,
+      issMunicipio:fNf.issMunicipio,
+      aliquota:parseFloat(fNf.aliquota)||0,
+      valorISS:calcISS(fNf),
+      tipoTomador:fNf.tipoTomador,
+      temRPS:!!fNf.temRPS,
+      rpsNumero:fNf.rpsNumero||"",
+      rpsSerie:fNf.rpsSerie||"",
+      rpsData:fNf.rpsData||""
     };
     var lista=editNf?(cli.notasFiscais||[]).map(function(n){return n.id===editNf.id?nova:n}):
       [...(cli.notasFiscais||[]),nova];
     dp({t:"UC",p:{id:cli.id,notasFiscais:lista}});
     sModal(false);
+    // Abre painel de envio à prefeitura se for NF nova e status pendente
+    if(!editNf){
+      sPainelEnvio(Object.assign({},nova,{_clienteNome:cli.nome,_clienteId:cli.id}));
+    }
   };
 
   var excluirNf=function(nf){
@@ -21637,36 +21774,155 @@ function FiscalView({data:d,dispatch:dp}){
     dp({t:"UC",p:{id:cli.id,notasFiscais:lista}});
   };
 
-  var copiarDados=function(nf){
-    var txt="=== NF PARA EMISSÃO ===\n"+
-      "Tomador: "+nf.tomador+"\n"+
-      (nf.documento?"CPF/CNPJ: "+nf.documento+"\n":"")+
-      (nf.email?"E-mail: "+nf.email+"\n":"")+
-      "Valor: R$ "+nf.valor.toFixed(2).replace(".",",")+"\n"+
-      "Descrição: "+nf.descricao+"\n"+
-      "Competência: "+(nf.competencia||"")+"\n";
-    navigator.clipboard&&navigator.clipboard.writeText(txt).then(function(){
-      sCopiado(nf.id);setTimeout(function(){sCopiado("")},2000);
+  /* Helper: copia texto pra clipboard com feedback visual */
+  var cpTxt=function(txt,key){
+    if(!navigator.clipboard)return;
+    navigator.clipboard.writeText(txt).then(function(){
+      sCopiado(key);setTimeout(function(){sCopiado("")},1800);
     });
   };
 
-  /* Emissão em lote — gera todas as NFs pendentes do mês */
-  var emitirLote=function(){
-    if(!window.confirm("Criar NFs para todos os "+clientesSemNf.length+" clientes sem NF neste mês?"))return;
+  /* Bloco completo formatado pra colar (campo por campo, etiquetado) */
+  var blocoCompleto=function(nf){
+    var l=[];
+    l.push("=== NFS-e — DADOS PARA EMISSÃO ===");
+    l.push("");
+    l.push("[CABEÇALHO]");
+    l.push("Data Emissão: "+(nf.emitidaEm?fD(nf.emitidaEm):""));
+    l.push("Competência: "+((nf.competencia||"").split("-").reverse().join("/")));
+    if(nf.obs)l.push("Observação: "+nf.obs);
+    if(nf.temRPS){
+      l.push("RPS: Sim");
+      if(nf.rpsNumero)l.push("RPS nº: "+nf.rpsNumero);
+      if(nf.rpsSerie)l.push("RPS série: "+nf.rpsSerie);
+      if(nf.rpsData)l.push("RPS data: "+fD(nf.rpsData));
+    }else{l.push("RPS: Não")}
+    l.push("");
+    l.push("[TOMADOR]");
+    l.push("Nome: "+nf.tomador);
+    if(nf.documento)l.push("CNPJ/CPF: "+nf.documento);
+    if(nf.email)l.push("E-mail: "+nf.email);
+    l.push("");
+    l.push("[SERVIÇO]");
+    if(nf.codigoServico)l.push("Código: "+nf.codigoServico);
+    l.push("Descrição: "+nf.descricao);
+    l.push("Valor Serviço: R$ "+(nf.valorServico||nf.valor||0).toFixed(2).replace(".",","));
+    if((nf.descCondicionado||0)>0)l.push("Desc. Condicionado: R$ "+nf.descCondicionado.toFixed(2).replace(".",","));
+    if((nf.descIncondicionado||0)>0)l.push("Desc. Incondicionado: R$ "+nf.descIncondicionado.toFixed(2).replace(".",","));
+    if((nf.deducoes||0)>0)l.push("Deduções: R$ "+nf.deducoes.toFixed(2).replace(".",","));
+    if(nf.baseCalculo!==undefined)l.push("Base de Cálculo: R$ "+nf.baseCalculo.toFixed(2).replace(".",","));
+    l.push("");
+    l.push("[TRIBUTAÇÃO]");
+    if(nf.exigibilidadeISS)l.push("Exigibilidade ISS: "+nf.exigibilidadeISS);
+    if(nf.responsavel)l.push("Responsável: "+nf.responsavel);
+    if(nf.localMunicipio)l.push("Local: "+(nf.localUF||"")+"/"+nf.localMunicipio);
+    if(nf.issMunicipio)l.push("Município ISS: "+(nf.issUF||"")+"/"+nf.issMunicipio);
+    l.push("Alíquota: "+(nf.aliquota||0)+"%");
+    if(nf.valorISS!==undefined)l.push("Valor ISS: R$ "+nf.valorISS.toFixed(2).replace(".",","));
+    return l.join("\n");
+  };
+
+  /* Gera PDF/recibo interno via window.print de uma nova janela */
+  var gerarRecibo=function(nf){
+    var cli=clientes.find(function(c){return c.id===nf._clienteId});
+    var w=window.open("","_blank","width=800,height=900");
+    if(!w){alert("Permita pop-ups pra gerar o recibo.");return}
+    var hex=function(s){return s.replace(/[^0-9a-fA-F#]/g,"")};
+    var rs=function(v){return"R$ "+(v||0).toFixed(2).replace(".",",").replace(/\B(?=(\d{3})+(?!\d))/g,".")};
+    var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Recibo NF — '+nf._clienteNome+'</title>'+
+      '<style>body{font-family:"Outfit",Arial,sans-serif;background:#fff;color:#222;padding:40px;max-width:780px;margin:0 auto;line-height:1.5}'+
+      'h1{color:#B8891A;margin:0 0 4px;font-size:24px;letter-spacing:1px}'+
+      '.sub{color:#888;font-size:11px;margin-bottom:30px;letter-spacing:2px;text-transform:uppercase}'+
+      '.box{border:1px solid #ddd;border-radius:8px;padding:18px;margin-bottom:14px}'+
+      '.box h3{margin:0 0 10px;color:#B8891A;font-size:13px;letter-spacing:1px;border-bottom:1px solid #f0e0c0;padding-bottom:6px}'+
+      '.row{display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px}'+
+      '.row b{color:#444}.row span{color:#666}'+
+      '.total{background:#f8efd6;border-color:#e0c078}.total .row b{color:#7a5a10}.total .v{font-size:20px;font-weight:800;color:#B8891A}'+
+      '.foot{font-size:9px;color:#aaa;text-align:center;margin-top:30px;border-top:1px solid #eee;padding-top:14px;letter-spacing:1px}'+
+      '@media print{body{padding:20px}}</style></head><body>'+
+      '<h1>COURINVEST</h1><div class="sub">RECIBO INTERNO — CONSULTORIA EM INVESTIMENTOS</div>'+
+      '<div class="box"><h3>📅 CABEÇALHO</h3>'+
+      '<div class="row"><b>Data emissão</b><span>'+fD(nf.emitidaEm||"")+'</span></div>'+
+      '<div class="row"><b>Competência</b><span>'+((nf.competencia||"").split("-").reverse().join("/"))+'</span></div>'+
+      '<div class="row"><b>Status</b><span>'+(STATUS_LABEL[nf.status]||nf.status)+'</span></div>'+
+      (nf.obs?'<div class="row"><b>Observação</b><span>'+nf.obs+'</span></div>':'')+
+      '</div>'+
+      '<div class="box"><h3>👤 TOMADOR</h3>'+
+      '<div class="row"><b>Nome</b><span>'+nf.tomador+'</span></div>'+
+      (nf.documento?'<div class="row"><b>CNPJ/CPF</b><span>'+nf.documento+'</span></div>':'')+
+      (nf.email?'<div class="row"><b>E-mail</b><span>'+nf.email+'</span></div>':'')+
+      '</div>'+
+      '<div class="box"><h3>🛠 SERVIÇO</h3>'+
+      (nf.codigoServico?'<div class="row"><b>Código LC 116</b><span>'+nf.codigoServico+'</span></div>':'')+
+      '<div class="row"><b>Descrição</b><span style="text-align:right;max-width:60%">'+nf.descricao+'</span></div>'+
+      '<div class="row"><b>Valor do serviço</b><span>'+rs(nf.valorServico||nf.valor)+'</span></div>'+
+      ((nf.descIncondicionado||0)>0?'<div class="row"><b>Desc. incondicionado</b><span>− '+rs(nf.descIncondicionado)+'</span></div>':'')+
+      ((nf.deducoes||0)>0?'<div class="row"><b>Deduções</b><span>− '+rs(nf.deducoes)+'</span></div>':'')+
+      '<div class="row"><b>Base de cálculo</b><span>'+rs(nf.baseCalculo||nf.valor||nf.valorServico)+'</span></div>'+
+      '</div>'+
+      '<div class="box"><h3>💰 TRIBUTAÇÃO</h3>'+
+      '<div class="row"><b>Exigibilidade ISS</b><span>'+(nf.exigibilidadeISS||"Exigível")+'</span></div>'+
+      '<div class="row"><b>Responsável</b><span>'+(nf.responsavel||"Prestador")+'</span></div>'+
+      '<div class="row"><b>Local prestação</b><span>'+(nf.localUF||"MG")+" / "+(nf.localMunicipio||"Juiz de Fora")+'</span></div>'+
+      '<div class="row"><b>Município ISS</b><span>'+(nf.issUF||"MG")+" / "+(nf.issMunicipio||"Juiz de Fora")+'</span></div>'+
+      '<div class="row"><b>Alíquota</b><span>'+(nf.aliquota||0)+'%</span></div>'+
+      '<div class="row"><b>Valor ISS</b><span>'+rs(nf.valorISS||0)+'</span></div>'+
+      '</div>'+
+      '<div class="box total"><h3>💵 TOTAL</h3>'+
+      '<div class="row"><b>Valor total da nota</b><span class="v">'+rs(nf.valorServico||nf.valor)+'</span></div>'+
+      '</div>'+
+      '<div class="foot">Documento gerado em '+new Date().toLocaleString("pt-BR")+' · Courinvest Consultoria em Investimentos · Recibo interno (não substitui a NFS-e oficial)</div>'+
+      '<script>setTimeout(function(){window.print()},400);<\/script>'+
+      '</body></html>';
+    w.document.write(html);
+    w.document.close();
+  };
+
+  /* Lote inteligente — gera array de NFs pré-preenchidas pra revisão */
+  var prepararLote=function(){
+    if(clientesSemNf.length===0)return;
+    var nfs=clientesSemNf.map(function(cli){
+      return Object.assign({},nfCompleta(cli,filtroMes),{_clienteId:cli.id,_clienteNome:cli.nome,_incluir:true});
+    });
+    sLoteRevisao(nfs);
+  };
+
+  var confirmarLote=function(){
+    var aSalvar=loteRevisao.filter(function(n){return n._incluir});
+    if(aSalvar.length===0){sLoteRevisao(null);return}
+    if(!window.confirm("Confirmar criação de "+aSalvar.length+" NFs?"))return;
     sEmitindoLote(true);
     var idx=0;
     var next=function(){
-      if(idx>=clientesSemNf.length){sEmitindoLote(false);return;}
-      var cli=clientesSemNf[idx++];
+      if(idx>=aSalvar.length){sEmitindoLote(false);sLoteRevisao(null);return}
+      var f=aSalvar[idx++];
+      var cli=clientes.find(function(c){return c.id===f._clienteId});
+      if(!cli){setTimeout(next,50);return}
       var nova={
         id:"nf_"+Date.now()+"_"+idx,
-        competencia:filtroMes,emitidaEm:new Date().toISOString().slice(0,10),
-        valor:calcFee(cli),descricao:descPadrao(cli,filtroMes),
-        tomador:cli.nome,documento:cli.cpf||cli.cnpj||"",
-        email:cli.email||"",status:"pendente",obs:""
+        competencia:f.competencia,
+        emitidaEm:f.dataEmissao,
+        valor:f.valorServico,
+        valorServico:f.valorServico,
+        descricao:f.descricao,
+        tomador:f.clienteNome,
+        documento:f.clienteDoc,
+        email:f.clienteEmail,
+        status:"pendente",
+        obs:"",
+        codigoServico:f.codigoServico,
+        descCondicionado:0,descIncondicionado:0,deducoes:0,
+        baseCalculo:f.valorServico,
+        exigibilidadeISS:f.exigibilidadeISS,
+        responsavel:f.responsavel,
+        localUF:f.localUF,localMunicipio:f.localMunicipio,
+        issUF:f.issUF,issMunicipio:f.issMunicipio,
+        aliquota:0,valorISS:0,
+        tipoTomador:f.tipoTomador,
+        temRPS:false
       };
       dp({t:"UC",p:{id:cli.id,notasFiscais:[...(cli.notasFiscais||[]),nova]}});
-      setTimeout(next,300);
+      setTimeout(next,250);
     };
     next();
   };
@@ -21679,100 +21935,408 @@ function FiscalView({data:d,dispatch:dp}){
     mesesOpcoes.push({ym:ym,l:MES_NOMES[d2.getMonth()].slice(0,3)+"/"+d2.getFullYear()});
   }
 
+  /* ========== Componentes auxiliares de UI ========== */
+  var Lbl=function(props){return <div style={{fontSize:9,color:T.t3,fontWeight:700,marginBottom:4,letterSpacing:.5,textTransform:"uppercase"}}>{props.children}</div>};
+
+  var inputBase={width:"100%",padding:"9px 12px",background:T.w3,border:"1px solid "+T.bdrL,borderRadius:8,color:T.t1,fontSize:12,outline:"none",fontFamily:"'Outfit'"};
+
+  /* Campo com botão de copiar ao lado */
+  var CampoCopy=function(props){
+    var k=props.k;
+    var v=props.value;
+    var on=props.onChange;
+    var ph=props.placeholder;
+    var type=props.type||"text";
+    var disabled=props.disabled;
+    return (
+      <div style={{display:"flex",gap:6}}>
+        <input type={type} value={v||""} onChange={function(e){on&&on(e.target.value)}} placeholder={ph} disabled={disabled}
+          style={Object.assign({},inputBase,{flex:1,opacity:disabled?0.6:1})}/>
+        <button type="button" onClick={function(){cpTxt(String(v||""),"f_"+k)}}
+          title="Copiar este campo"
+          style={{padding:"0 10px",background:copiado==="f_"+k?T.green+"22":T.w3,border:"1px solid "+(copiado==="f_"+k?T.green+"55":T.bdrL),borderRadius:8,color:copiado==="f_"+k?T.green:T.t3,fontSize:12,cursor:"pointer",whiteSpace:"nowrap",fontWeight:700}}>
+          {copiado==="f_"+k?"✓":"📋"}
+        </button>
+      </div>
+    );
+  };
+
+  /* Header de seção do modal (accordion) */
+  var SecH=function(props){
+    var aberto=secaoAberta===props.id;
+    return (
+      <button type="button" onClick={function(){sSecaoAberta(aberto?"":props.id)}}
+        style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",padding:"10px 14px",background:aberto?T.goldD:T.w3,border:"1px solid "+(aberto?T.gold+"44":T.bdrL),borderRadius:10,cursor:"pointer",marginBottom:aberto?10:6}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:13}}>{props.icon}</span>
+          <span style={{fontSize:11,fontWeight:800,color:aberto?T.gold:T.t2,letterSpacing:.5,textTransform:"uppercase"}}>{props.label}</span>
+        </div>
+        <span style={{fontSize:10,color:T.t3,transform:aberto?"rotate(90deg)":"rotate(0deg)",transition:"transform .2s"}}>▶</span>
+      </button>
+    );
+  };
+
+  /* Tipo de tomador (toggle Diversos / Exterior / Não Identificado / PF / PJ) */
+  var tomadorBtns=[
+    {id:"PJ",l:"PJ"},{id:"PF",l:"PF"},{id:"diversos",l:"Diversos"},{id:"exterior",l:"Exterior"},{id:"naoIdentificado",l:"Não Identificado"}
+  ];
+
   return (
     <div>
-      {/* MODAL */}
+      {/* ============================ MODAL DE NOVA / EDITAR NF ============================ */}
       <Mo open={modal} onClose={function(){sModal(false)}} title={editNf?"✏️ Editar NF":"🧾 Nova Nota Fiscal"} wide>
-        <div style={{display:"flex",flexDirection:"column",gap:12,minWidth:Math.min(480,window.innerWidth-40)}}>
+        <div style={{display:"flex",flexDirection:"column",gap:6,minWidth:Math.min(560,window.innerWidth-40)}}>
 
-          {/* Cliente selector */}
+          {/* CLIENTE — fora dos accordions, sempre visível */}
           {!editNf&&(
-            <div>
-              <div style={{fontSize:9,color:T.t3,fontWeight:700,marginBottom:4}}>CLIENTE</div>
-              <select value={nfClienteId} onChange={function(e){
-                sNfClienteId(e.target.value);
-                var cli=clientes.find(function(c){return c.id===e.target.value});
-                if(cli){
-                  sNfValor(String(calcFee(cli).toFixed(2)));
-                  sNfDesc(descPadrao(cli,filtroMes!=="todos"?filtroMes:mesKey));
-                  sNfTomador(cli.nome);sNfDoc(cli.cpf||cli.cnpj||"");sNfEmail(cli.email||"");
-                }
-              }} style={{width:"100%",padding:"8px 12px",background:T.w3,border:"1px solid "+T.bdrL,borderRadius:8,color:T.t1,fontSize:12,fontWeight:600,outline:"none"}}>
+            <div style={{marginBottom:8}}>
+              <Lbl>Cliente</Lbl>
+              <select value={fNf._clienteId||""} onChange={function(e){trocarCliente(e.target.value)}}
+                style={Object.assign({},inputBase,{fontWeight:600,cursor:"pointer"})}>
                 <option value="">Selecionar cliente...</option>
                 {clientes.map(function(c){return <option key={c.id} value={c.id}>{c.nome} · {fm(calcFee(c))}/mês</option>})}
               </select>
             </div>
           )}
 
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <div>
-              <div style={{fontSize:9,color:T.t3,fontWeight:700,marginBottom:4}}>VALOR (R$)</div>
-              <div style={{display:"flex",alignItems:"center",gap:6,background:T.w3,border:"1px solid "+T.bdrL,borderRadius:8,padding:"8px 12px"}}>
-                <span style={{fontSize:11,color:T.t3}}>R$</span>
-                <input value={nfValor} onChange={function(e){sNfValor(e.target.value)}} type="number" step="0.01"
-                  style={{flex:1,background:"transparent",border:"none",color:T.gold,fontSize:16,fontWeight:800,fontFamily:"'JetBrains Mono'",outline:"none"}}/>
+          {/* ============ SEÇÃO 1: CABEÇALHO ============ */}
+          <SecH id="cabecalho" icon="📅" label="1. Cabeçalho NF"/>
+          {secaoAberta==="cabecalho"&&(
+            <div style={{padding:"4px 4px 14px"}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                <div>
+                  <Lbl>Data de Emissão</Lbl>
+                  <input type="date" value={fNf.dataEmissao||""} onChange={function(e){atualizaCampo("dataEmissao",e.target.value)}} style={inputBase}/>
+                </div>
+                <div>
+                  <Lbl>Competência (mês/ano)</Lbl>
+                  <input type="month" value={fNf.competencia||""} onChange={function(e){atualizaCampo("competencia",e.target.value)}} style={inputBase}/>
+                </div>
+              </div>
+              <div style={{marginBottom:10}}>
+                <Lbl>Observação (texto a ser inserido no rodapé)</Lbl>
+                <textarea value={fNf.observacao||""} onChange={function(e){atualizaCampo("observacao",e.target.value)}} rows={2} placeholder="Opcional"
+                  style={Object.assign({},inputBase,{resize:"vertical",fontSize:11})}/>
+              </div>
+              <div style={{marginBottom:6}}>
+                <Lbl>Existe um RPS para esta nota?</Lbl>
+                <div style={{display:"flex",gap:8}}>
+                  {[{v:false,l:"Não"},{v:true,l:"Sim"}].map(function(o){
+                    var sel=!!fNf.temRPS===!!o.v;
+                    return <button key={String(o.v)} type="button" onClick={function(){atualizaCampo("temRPS",o.v)}}
+                      style={{padding:"6px 16px",borderRadius:7,border:"1px solid "+(sel?T.gold:T.bdrL),background:sel?T.goldD:"transparent",color:sel?T.gold:T.t3,fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                      {sel?"●":"○"} {o.l}
+                    </button>
+                  })}
+                </div>
+              </div>
+              {fNf.temRPS&&(
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginTop:10,padding:10,background:T.w3,border:"1px dashed "+T.bdrL,borderRadius:8}}>
+                  <div><Lbl>RPS Nº</Lbl><input value={fNf.rpsNumero||""} onChange={function(e){atualizaCampo("rpsNumero",e.target.value)}} style={inputBase}/></div>
+                  <div><Lbl>Série</Lbl><input value={fNf.rpsSerie||""} onChange={function(e){atualizaCampo("rpsSerie",e.target.value)}} style={inputBase}/></div>
+                  <div><Lbl>Data RPS</Lbl><input type="date" value={fNf.rpsData||""} onChange={function(e){atualizaCampo("rpsData",e.target.value)}} style={inputBase}/></div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ============ SEÇÃO 2: TOMADOR ============ */}
+          <SecH id="tomador" icon="👤" label="2. Tomador"/>
+          {secaoAberta==="tomador"&&(
+            <div style={{padding:"4px 4px 14px"}}>
+              <div style={{marginBottom:10}}>
+                <Lbl>Tipo de Tomador</Lbl>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {tomadorBtns.map(function(t){
+                    var sel=fNf.tipoTomador===t.id;
+                    return <button key={t.id} type="button" onClick={function(){atualizaCampo("tipoTomador",t.id)}}
+                      style={{padding:"5px 12px",borderRadius:7,border:"1px solid "+(sel?T.gold:T.bdrL),background:sel?T.goldD:"transparent",color:sel?T.gold:T.t3,fontSize:10,fontWeight:700,cursor:"pointer"}}>
+                      {t.l}
+                    </button>
+                  })}
+                </div>
+              </div>
+              {fNf.tipoTomador!=="naoIdentificado"&&(
+                <>
+                  <div style={{marginBottom:10}}>
+                    <Lbl>Nome / Razão Social</Lbl>
+                    <CampoCopy k="nome" value={fNf.clienteNome} onChange={function(v){atualizaCampo("clienteNome",v)}}/>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                    <div>
+                      <Lbl>CNPJ / CPF</Lbl>
+                      <CampoCopy k="doc" value={fNf.clienteDoc} onChange={function(v){atualizaCampo("clienteDoc",v)}} placeholder="000.000.000-00"/>
+                    </div>
+                    <div>
+                      <Lbl>E-mail (use ; pra múltiplos)</Lbl>
+                      <CampoCopy k="email" value={fNf.clienteEmail} onChange={function(v){atualizaCampo("clienteEmail",v)}}/>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ============ SEÇÃO 3: SERVIÇO ============ */}
+          <SecH id="servico" icon="🛠" label="3. Serviço"/>
+          {secaoAberta==="servico"&&(
+            <div style={{padding:"4px 4px 14px"}}>
+              <div style={{marginBottom:10}}>
+                <Lbl>Código do Serviço (LC 116)</Lbl>
+                <select value={fNf.codigoServico||"17.19"} onChange={function(e){atualizaCampo("codigoServico",e.target.value)}}
+                  style={Object.assign({},inputBase,{cursor:"pointer"})}>
+                  {SERVICOS_LC116.map(function(s){return <option key={s.cod} value={s.cod}>{s.cod} — {s.nome}</option>})}
+                </select>
+              </div>
+              <div style={{marginBottom:10}}>
+                <Lbl>Descrição do Serviço (mín. 15 caracteres)</Lbl>
+                <textarea value={fNf.descricao||""} onChange={function(e){atualizaCampo("descricao",e.target.value)}} rows={4}
+                  style={Object.assign({},inputBase,{resize:"vertical",fontSize:11,fontFamily:"'Outfit'"})}/>
+                <div style={{fontSize:9,color:(fNf.descricao||"").length<15?T.red:T.t3,marginTop:4}}>
+                  {(fNf.descricao||"").length} caracteres {(fNf.descricao||"").length<15?"(mínimo 15)":"✓"}
+                  <button type="button" onClick={function(){cpTxt(fNf.descricao||"","f_desc")}} style={{marginLeft:8,padding:"2px 8px",background:"transparent",border:"1px solid "+T.bdrL,borderRadius:5,color:copiado==="f_desc"?T.green:T.t3,fontSize:9,cursor:"pointer"}}>
+                    {copiado==="f_desc"?"✓ Copiado":"📋 Copiar"}
+                  </button>
+                </div>
+              </div>
+              <div style={{marginBottom:10}}>
+                <Lbl>Valor do Serviço (R$)</Lbl>
+                <div style={{display:"flex",gap:6}}>
+                  <input type="number" step="0.01" value={fNf.valorServico||0} onChange={function(e){atualizaCampo("valorServico",e.target.value)}}
+                    style={Object.assign({},inputBase,{flex:1,color:T.gold,fontWeight:800,fontFamily:"'JetBrains Mono'",fontSize:14})}/>
+                  <button type="button" onClick={function(){cpTxt(String(parseFloat(fNf.valorServico||0).toFixed(2)).replace(".",","),"f_val")}}
+                    style={{padding:"0 10px",background:copiado==="f_val"?T.green+"22":T.w3,border:"1px solid "+(copiado==="f_val"?T.green+"55":T.bdrL),borderRadius:8,color:copiado==="f_val"?T.green:T.t3,fontSize:12,cursor:"pointer",fontWeight:700}}>
+                    {copiado==="f_val"?"✓":"📋"}
+                  </button>
+                </div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+                <div>
+                  <Lbl>Desc. Condicionado</Lbl>
+                  <input type="number" step="0.01" value={fNf.descCondicionado||0} onChange={function(e){atualizaCampo("descCondicionado",e.target.value)}} style={inputBase}/>
+                </div>
+                <div>
+                  <Lbl>Desc. Incondicionado</Lbl>
+                  <input type="number" step="0.01" value={fNf.descIncondicionado||0} onChange={function(e){atualizaCampo("descIncondicionado",e.target.value)}} style={inputBase}/>
+                </div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                <div>
+                  <Lbl>Deduções da Base</Lbl>
+                  <input type="number" step="0.01" value={fNf.deducoes||0} onChange={function(e){atualizaCampo("deducoes",e.target.value)}} style={inputBase}/>
+                </div>
+                <div>
+                  <Lbl>Base de Cálculo (auto)</Lbl>
+                  <div style={Object.assign({},inputBase,{background:T.goldD,color:T.gold,fontWeight:800,fontFamily:"'JetBrains Mono'"})}>
+                    {fm(calcBase(fNf))}
+                  </div>
+                </div>
               </div>
             </div>
-            <div>
-              <div style={{fontSize:9,color:T.t3,fontWeight:700,marginBottom:4}}>STATUS</div>
-              <select value={nfStatus} onChange={function(e){sNfStatus(e.target.value)}}
-                style={{width:"100%",padding:"8px 12px",background:T.w3,border:"1px solid "+T.bdrL,borderRadius:8,color:STATUS_COLOR[nfStatus]||T.t1,fontSize:12,fontWeight:700,outline:"none"}}>
-                {Object.keys(STATUS_LABEL).map(function(s){return <option key={s} value={s}>{STATUS_IC[s]} {STATUS_LABEL[s]}</option>})}
-              </select>
+          )}
+
+          {/* ============ SEÇÃO 4: TRIBUTAÇÃO ============ */}
+          <SecH id="tributacao" icon="💰" label="4. Tributação"/>
+          {secaoAberta==="tributacao"&&(
+            <div style={{padding:"4px 4px 14px"}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                <div>
+                  <Lbl>Exigibilidade ISS</Lbl>
+                  <select value={fNf.exigibilidadeISS||"Exigível"} onChange={function(e){atualizaCampo("exigibilidadeISS",e.target.value)}}
+                    style={Object.assign({},inputBase,{cursor:"pointer"})}>
+                    {EXIGIBILIDADES.map(function(x){return <option key={x} value={x}>{x}</option>})}
+                  </select>
+                </div>
+                <div>
+                  <Lbl>Responsável Recolhimento</Lbl>
+                  <div style={{display:"flex",gap:6}}>
+                    {["Prestador","Tomador"].map(function(r){
+                      var sel=fNf.responsavel===r;
+                      return <button key={r} type="button" onClick={function(){atualizaCampo("responsavel",r)}}
+                        style={{flex:1,padding:"8px",borderRadius:7,border:"1px solid "+(sel?T.gold:T.bdrL),background:sel?T.goldD:"transparent",color:sel?T.gold:T.t3,fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                        {sel?"●":"○"} {r}
+                      </button>
+                    })}
+                  </div>
+                </div>
+              </div>
+              <div style={{marginBottom:10}}>
+                <Lbl>Local da Prestação do Serviço</Lbl>
+                <div style={{display:"grid",gridTemplateColumns:"100px 1fr",gap:6}}>
+                  <select value={fNf.localUF||"MG"} onChange={function(e){atualizaCampo("localUF",e.target.value)}} style={Object.assign({},inputBase,{cursor:"pointer"})}>
+                    {ESTADOS.map(function(uf){return <option key={uf} value={uf}>{uf}</option>})}
+                  </select>
+                  <input value={fNf.localMunicipio||""} onChange={function(e){atualizaCampo("localMunicipio",e.target.value)}} placeholder="Município" style={inputBase}/>
+                </div>
+              </div>
+              <div style={{marginBottom:10}}>
+                <Lbl>Município onde o ISS é Devido</Lbl>
+                <div style={{display:"grid",gridTemplateColumns:"100px 1fr",gap:6}}>
+                  <select value={fNf.issUF||"MG"} onChange={function(e){atualizaCampo("issUF",e.target.value)}} style={Object.assign({},inputBase,{cursor:"pointer"})}>
+                    {ESTADOS.map(function(uf){return <option key={uf} value={uf}>{uf}</option>})}
+                  </select>
+                  <input value={fNf.issMunicipio||""} onChange={function(e){atualizaCampo("issMunicipio",e.target.value)}} placeholder="Município" style={inputBase}/>
+                </div>
+              </div>
+              <div style={{padding:10,background:T.cyanD,border:"1px solid "+T.cyan+"33",borderRadius:8,marginBottom:10,fontSize:10,color:T.t2,lineHeight:1.5}}>
+                ℹ️ Cadastro como <b>optante do Simples Nacional</b>: caso o responsável seja o tomador, a alíquota do ISS deve ser apurada conforme RBT12 do PGDAS-D.
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <div>
+                  <Lbl>Alíquota (%)</Lbl>
+                  <input type="number" step="0.01" value={fNf.aliquota===""?"":(fNf.aliquota||"")} onChange={function(e){atualizaCampo("aliquota",e.target.value)}} placeholder="0" style={inputBase}/>
+                </div>
+                <div>
+                  <Lbl>Valor ISS (auto)</Lbl>
+                  <div style={Object.assign({},inputBase,{background:T.w6,color:T.t2,fontWeight:700,fontFamily:"'JetBrains Mono'"})}>
+                    {fm(calcISS(fNf))}
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
+          )}
 
-          <div>
-            <div style={{fontSize:9,color:T.t3,fontWeight:700,marginBottom:4}}>TOMADOR</div>
-            <input value={nfTomador} onChange={function(e){sNfTomador(e.target.value)}}
-              style={{width:"100%",padding:"8px 12px",background:T.w3,border:"1px solid "+T.bdrL,borderRadius:8,color:T.t1,fontSize:12,fontWeight:600,outline:"none"}}/>
-          </div>
-
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <div>
-              <div style={{fontSize:9,color:T.t3,fontWeight:700,marginBottom:4}}>CPF / CNPJ</div>
-              <input value={nfDoc} onChange={function(e){sNfDoc(e.target.value)}} placeholder="000.000.000-00"
-                style={{width:"100%",padding:"8px 12px",background:T.w3,border:"1px solid "+T.bdrL,borderRadius:8,color:T.t1,fontSize:12,outline:"none"}}/>
-            </div>
-            <div>
-              <div style={{fontSize:9,color:T.t3,fontWeight:700,marginBottom:4}}>E-MAIL</div>
-              <input value={nfEmail} onChange={function(e){sNfEmail(e.target.value)}}
-                style={{width:"100%",padding:"8px 12px",background:T.w3,border:"1px solid "+T.bdrL,borderRadius:8,color:T.t1,fontSize:12,outline:"none"}}/>
-            </div>
-          </div>
-
-          <div>
-            <div style={{fontSize:9,color:T.t3,fontWeight:700,marginBottom:4}}>DESCRIÇÃO DO SERVIÇO</div>
-            <textarea value={nfDesc} onChange={function(e){sNfDesc(e.target.value)}} rows={3}
-              style={{width:"100%",padding:"8px 12px",background:T.w3,border:"1px solid "+T.bdrL,borderRadius:8,color:T.t1,fontSize:11,outline:"none",resize:"vertical",fontFamily:"'Outfit'"}}/>
-          </div>
-
-          <div>
-            <div style={{fontSize:9,color:T.t3,fontWeight:700,marginBottom:4}}>OBSERVAÇÃO (ex: NFS-e nº)</div>
-            <input value={nfObs} onChange={function(e){sNfObs(e.target.value)}} placeholder="Opcional"
-              style={{width:"100%",padding:"8px 12px",background:T.w3,border:"1px solid "+T.bdrL,borderRadius:8,color:T.t1,fontSize:12,outline:"none"}}/>
-          </div>
-
-          <div style={{display:"flex",gap:8,marginTop:4}}>
+          {/* ============ AÇÕES DO MODAL ============ */}
+          <div style={{display:"flex",gap:8,marginTop:14,paddingTop:14,borderTop:"1px solid "+T.bdrL}}>
             <Bt v="secondary" onClick={function(){sModal(false)}} style={{flex:1}}>Cancelar</Bt>
             <Bt onClick={salvarNf} style={{flex:2,background:T.gold,color:"#0A1628",fontWeight:800}}>
-              {editNf?"💾 Salvar":"🧾 Registrar NF"}
+              {editNf?"💾 Salvar alterações":"🧾 Registrar NF e abrir painel"}
             </Bt>
           </div>
         </div>
+      </Mo>
+
+      {/* ============================ PAINEL DE ENVIO À PREFEITURA ============================ */}
+      <Mo open={!!painelEnvio} onClose={function(){sPainelEnvio(null)}} title={"🚀 Painel de Envio — "+(painelEnvio?painelEnvio._clienteNome:"")} wide>
+        {painelEnvio&&(
+          <div style={{display:"flex",flexDirection:"column",gap:12,minWidth:Math.min(560,window.innerWidth-40)}}>
+            <div style={{padding:12,background:T.green+"10",border:"1px solid "+T.green+"44",borderRadius:10,fontSize:12,color:T.t1,lineHeight:1.5}}>
+              ✅ <b>NF salva no sistema.</b> Agora siga o fluxo abaixo pra emitir oficialmente na prefeitura:
+            </div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <a href={URL_PREFEITURA} target="_blank" rel="noopener noreferrer"
+                style={{padding:"11px 18px",background:T.grd,color:"#0A1628",border:"none",borderRadius:10,fontSize:12,fontWeight:800,cursor:"pointer",textDecoration:"none",display:"inline-flex",alignItems:"center",gap:6}}>
+                🌐 Abrir site da prefeitura
+              </a>
+              <button onClick={function(){cpTxt(blocoCompleto(painelEnvio),"bloco_pe")}}
+                style={{padding:"11px 18px",background:copiado==="bloco_pe"?T.green+"22":T.w3,border:"1px solid "+(copiado==="bloco_pe"?T.green+"55":T.bdrL),borderRadius:10,color:copiado==="bloco_pe"?T.green:T.t1,fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                {copiado==="bloco_pe"?"✓ Copiado":"📋 Copiar bloco completo"}
+              </button>
+              <button onClick={function(){gerarRecibo(painelEnvio)}}
+                style={{padding:"11px 18px",background:T.cyanD,border:"1px solid "+T.cyan+"55",borderRadius:10,color:T.cyan,fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                📄 Gerar recibo PDF
+              </button>
+            </div>
+
+            <div style={{fontSize:10,color:T.t3,marginTop:6}}>Ou copie campo a campo:</div>
+            <div style={{maxHeight:340,overflowY:"auto",padding:"4px",border:"1px solid "+T.bdrL,borderRadius:10,background:T.w3}}>
+              {[
+                {l:"Tomador",v:painelEnvio.tomador,k:"pe_tom"},
+                {l:"CNPJ/CPF",v:painelEnvio.documento,k:"pe_doc"},
+                {l:"E-mail",v:painelEnvio.email,k:"pe_em"},
+                {l:"Código serviço",v:painelEnvio.codigoServico,k:"pe_cs"},
+                {l:"Descrição",v:painelEnvio.descricao,k:"pe_dc"},
+                {l:"Valor serviço",v:String(painelEnvio.valorServico||painelEnvio.valor||0).replace(".",","),k:"pe_v"},
+                {l:"Desc. incondicionado",v:String(painelEnvio.descIncondicionado||0).replace(".",","),k:"pe_di"},
+                {l:"Deduções",v:String(painelEnvio.deducoes||0).replace(".",","),k:"pe_dd"},
+                {l:"Alíquota %",v:String(painelEnvio.aliquota||0),k:"pe_al"},
+                {l:"Observação",v:painelEnvio.obs||"",k:"pe_ob"}
+              ].filter(function(c){return c.v}).map(function(c){return (
+                <div key={c.k} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",borderBottom:"1px solid "+T.w3}}>
+                  <div style={{minWidth:130,fontSize:9,color:T.t3,fontWeight:700,textTransform:"uppercase",letterSpacing:.5}}>{c.l}</div>
+                  <div style={{flex:1,fontSize:11,color:T.t1,wordBreak:"break-word",fontFamily:"'JetBrains Mono'"}}>{c.v}</div>
+                  <button onClick={function(){cpTxt(String(c.v),c.k)}}
+                    style={{padding:"4px 10px",background:copiado===c.k?T.green+"22":"transparent",border:"1px solid "+(copiado===c.k?T.green+"55":T.bdrL),borderRadius:6,color:copiado===c.k?T.green:T.t3,fontSize:10,cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
+                    {copiado===c.k?"✓":"📋"}
+                  </button>
+                </div>
+              )})}
+            </div>
+
+            <div style={{display:"flex",gap:8,paddingTop:10,borderTop:"1px solid "+T.bdrL}}>
+              <Bt v="secondary" onClick={function(){sPainelEnvio(null)}} style={{flex:1}}>Fechar</Bt>
+              <Bt onClick={function(){
+                // Ao clicar emitida, atualiza status pra emitida
+                var cli=clientes.find(function(c){return c.id===painelEnvio._clienteId});
+                if(cli){
+                  var lista=(cli.notasFiscais||[]).map(function(n){return n.id===painelEnvio.id?Object.assign({},n,{status:"emitida"}):n});
+                  dp({t:"UC",p:{id:cli.id,notasFiscais:lista}});
+                }
+                sPainelEnvio(null);
+              }} style={{flex:2,background:T.cyan,color:"#0A1628",fontWeight:800}}>
+                ✅ Já emiti — marcar como emitida
+              </Bt>
+            </div>
+          </div>
+        )}
+      </Mo>
+
+      {/* ============================ MODAL DE LOTE — REVISÃO ============================ */}
+      <Mo open={!!loteRevisao} onClose={function(){sLoteRevisao(null)}} title={"⚡ Revisão do Lote — "+(loteRevisao?loteRevisao.length:0)+" NFs"} wide>
+        {loteRevisao&&(
+          <div style={{display:"flex",flexDirection:"column",gap:10,minWidth:Math.min(620,window.innerWidth-40)}}>
+            <div style={{fontSize:11,color:T.t2,lineHeight:1.5,padding:10,background:T.cyanD,border:"1px solid "+T.cyan+"33",borderRadius:8}}>
+              Revise os valores antes de criar. Desmarque clientes que você não quer incluir.
+              Os campos completos da prefeitura serão preenchidos com defaults — você pode editar cada NF depois.
+            </div>
+            <div style={{maxHeight:380,overflowY:"auto",border:"1px solid "+T.bdrL,borderRadius:10}}>
+              {loteRevisao.map(function(f,i){return (
+                <div key={f._clienteId} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderBottom:i<loteRevisao.length-1?"1px solid "+T.w3:"none",background:f._incluir?"transparent":T.w3+"55",opacity:f._incluir?1:0.5}}>
+                  <input type="checkbox" checked={f._incluir} onChange={function(e){
+                    var v=e.target.checked;
+                    sLoteRevisao(function(prev){return prev.map(function(x,j){return j===i?Object.assign({},x,{_incluir:v}):x})});
+                  }} style={{width:16,height:16,accentColor:T.gold,cursor:"pointer"}}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:700,color:T.t1}}>{f._clienteNome}</div>
+                    <div style={{fontSize:9,color:T.t3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.descricao}</div>
+                  </div>
+                  <input type="number" step="0.01" value={f.valorServico} onChange={function(e){
+                    var v=parseFloat(e.target.value)||0;
+                    sLoteRevisao(function(prev){return prev.map(function(x,j){return j===i?Object.assign({},x,{valorServico:v}):x})});
+                  }} style={{width:110,padding:"6px 8px",background:T.w3,border:"1px solid "+T.bdrL,borderRadius:6,color:T.gold,fontWeight:800,fontSize:12,fontFamily:"'JetBrains Mono'",textAlign:"right",outline:"none"}}/>
+                </div>
+              )})}
+            </div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:11,color:T.t2,padding:"6px 4px"}}>
+              <span>{loteRevisao.filter(function(n){return n._incluir}).length} NFs serão criadas</span>
+              <span style={{color:T.gold,fontWeight:800,fontFamily:"'JetBrains Mono'"}}>
+                Total: {fm(loteRevisao.filter(function(n){return n._incluir}).reduce(function(s,n){return s+(parseFloat(n.valorServico)||0)},0))}
+              </span>
+            </div>
+            <div style={{display:"flex",gap:8,paddingTop:8,borderTop:"1px solid "+T.bdrL}}>
+              <Bt v="secondary" onClick={function(){sLoteRevisao(null)}} style={{flex:1}}>Cancelar</Bt>
+              <Bt onClick={function(){
+                // copia bloco com todos os tomadores em sequência (útil pra preencher campos repetitivos)
+                var t=loteRevisao.filter(function(n){return n._incluir}).map(function(n){
+                  return n._clienteNome+" — "+(n.clienteDoc||"")+" — "+fm(n.valorServico)
+                }).join("\n");
+                cpTxt(t,"lote_lst");
+              }} style={{flex:1,background:T.w3,color:T.t2}}>
+                {copiado==="lote_lst"?"✓ Copiado":"📋 Copiar lista"}
+              </Bt>
+              <Bt onClick={confirmarLote} style={{flex:2,background:T.gold,color:"#0A1628",fontWeight:800}} disabled={emitindoLote}>
+                {emitindoLote?"⏳ Criando...":"⚡ Confirmar e criar"}
+              </Bt>
+            </div>
+          </div>
+        )}
       </Mo>
 
       {/* HEADER */}
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:10}}>
         <div>
           <div style={{fontSize:22,fontWeight:900,color:T.gold}}>🧾 Fiscal</div>
-          <div style={{fontSize:11,color:T.t3}}>Controle de emissão de notas fiscais de serviços</div>
+          <div style={{fontSize:11,color:T.t3}}>Controle de emissão de notas fiscais de serviços · Prefeitura de Juiz de Fora</div>
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <a href={URL_PREFEITURA} target="_blank" rel="noopener noreferrer"
+            style={{padding:"8px 14px",background:T.cyanD,border:"1px solid "+T.cyan+"44",borderRadius:8,color:T.cyan,fontSize:11,fontWeight:700,cursor:"pointer",textDecoration:"none",display:"inline-flex",alignItems:"center",gap:5}}>
+            🌐 Abrir prefeitura
+          </a>
           {clientesSemNf.length>0&&filtroMes!=="todos"&&(
-            <button onClick={emitirLote} disabled={emitindoLote}
+            <button onClick={prepararLote} disabled={emitindoLote}
               style={{padding:"8px 14px",background:T.goldD,border:"1px solid "+T.gold+"55",borderRadius:8,color:T.gold,fontSize:11,fontWeight:700,cursor:"pointer"}}>
-              {emitindoLote?"⏳ Criando...":"⚡ Criar "+clientesSemNf.length+" NFs em lote"}
+              ⚡ Criar {clientesSemNf.length} NFs em lote
             </button>
           )}
           <Bt onClick={function(){abrirModal(null)}} style={{background:T.gold,color:"#0A1628",fontWeight:800}}>
@@ -21847,8 +22411,9 @@ function FiscalView({data:d,dispatch:dp}){
             var corSt=STATUS_COLOR[nf.status]||T.t3;
             var temProximo={"pendente":true,"emitida":true}[nf.status];
             var proxLabel={"pendente":"📤 Marcar emitida","emitida":"✅ Marcar paga"}[nf.status];
+            var nfValor=nf.valor||nf.valorServico||0;
             return(
-              <div key={nf.id} style={{display:"flex",alignItems:"center",gap:12,padding:"13px 16px",borderBottom:"1px solid "+T.w3,flexWrap:"wrap",background:idx%2===0?"transparent":T.w2+"44"}}>
+              <div key={nf.id} style={{display:"flex",alignItems:"center",gap:12,padding:"13px 16px",borderBottom:"1px solid "+T.w3,flexWrap:"wrap",background:idx%2===0?"transparent":T.w3+"44"}}>
 
                 {/* Status ícone */}
                 <div style={{width:36,height:36,borderRadius:9,background:corSt+"15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>
@@ -21858,11 +22423,12 @@ function FiscalView({data:d,dispatch:dp}){
                 {/* Info principal */}
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:2}}>
-                    <span style={{fontSize:13,fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'"}}>R$ {nf.valor.toFixed(2).replace(".",",")}</span>
+                    <span style={{fontSize:13,fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'"}}>R$ {nfValor.toFixed(2).replace(".",",")}</span>
                     <span style={{fontSize:9,padding:"2px 7px",borderRadius:4,background:corSt+"18",color:corSt,fontWeight:700}}>{STATUS_LABEL[nf.status]}</span>
                     <span style={{fontSize:10,fontWeight:700,color:T.t2}}>{nf._clienteNome}</span>
                     <span style={{fontSize:9,color:T.t3}}>·</span>
                     <span style={{fontSize:9,color:T.t3}}>{(nf.competencia||"").slice(0,7).split("-").reverse().join("/")}</span>
+                    {nf.codigoServico&&<span style={{fontSize:8,padding:"1px 6px",background:T.w3,border:"1px solid "+T.bdrL,borderRadius:3,color:T.t3,fontWeight:600}}>{nf.codigoServico}</span>}
                   </div>
                   <div style={{fontSize:10,color:T.t3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:500}}>{nf.descricao}</div>
                   {nf.obs&&<div style={{fontSize:9,color:T.t3,marginTop:1}}>📝 {nf.obs}</div>}
@@ -21872,17 +22438,27 @@ function FiscalView({data:d,dispatch:dp}){
                 <div style={{display:"flex",gap:4,flexShrink:0,flexWrap:"wrap"}}>
                   {temProximo&&(
                     <button onClick={function(){avancarStatus(nf)}}
+                      title={proxLabel}
                       style={{padding:"5px 10px",background:T.green+"15",border:"1px solid "+T.green+"44",borderRadius:6,color:T.green,fontSize:10,cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
                       {proxLabel}
                     </button>
                   )}
-                  <button onClick={function(){copiarDados(nf)}}
+                  <button onClick={function(){sPainelEnvio(nf)}}
+                    title="Painel de envio à prefeitura"
+                    style={{padding:"5px 10px",background:T.cyanD,border:"1px solid "+T.cyan+"44",borderRadius:6,color:T.cyan,fontSize:10,cursor:"pointer",fontWeight:700}}>🚀 Enviar</button>
+                  <button onClick={function(){cpTxt(blocoCompleto(nf),nf.id)}}
+                    title="Copiar bloco completo"
                     style={{padding:"5px 10px",background:copiado===nf.id?T.green+"15":"transparent",border:"1px solid "+(copiado===nf.id?T.green:T.bdrL),borderRadius:6,color:copiado===nf.id?T.green:T.t3,fontSize:10,cursor:"pointer",fontWeight:700}}>
-                    {copiado===nf.id?"✓ Copiado":"📋 Copiar"}
+                    {copiado===nf.id?"✓":"📋"}
                   </button>
+                  <button onClick={function(){gerarRecibo(nf)}}
+                    title="Gerar recibo PDF"
+                    style={{padding:"5px 8px",background:"transparent",border:"1px solid "+T.bdrL,borderRadius:6,color:T.t3,fontSize:10,cursor:"pointer"}}>📄</button>
                   <button onClick={function(){abrirModal(nf)}}
+                    title="Editar"
                     style={{padding:"5px 8px",background:"transparent",border:"1px solid "+T.bdrL,borderRadius:6,color:T.t3,fontSize:10,cursor:"pointer"}}>✏️</button>
                   <button onClick={function(){excluirNf(nf)}}
+                    title="Excluir"
                     style={{padding:"5px 8px",background:"transparent",border:"1px solid "+T.red+"33",borderRadius:6,color:T.red,fontSize:10,cursor:"pointer"}}>🗑️</button>
                 </div>
               </div>
@@ -22591,7 +23167,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '228';
+  var SW_VERSION = '229';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
