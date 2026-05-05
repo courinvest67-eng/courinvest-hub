@@ -6725,7 +6725,23 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
         if(ativosUSD.length>0){
           var totalUSD_brl=ativosUSD.reduce(function(s,a){return s+(a.vA||0);},0);
           var pesoUSD=totalCart>0?(totalUSD_brl/totalCart*100).toFixed(1):0;
-          var usdRate=usdRateRelatorio||5.70;
+          /* === Câmbio do FECHAMENTO do mês de referência ===
+             PRIORIDADE 1: derivado do extrato Vest (patBRL ÷ patUSD) — mais preciso, é o câmbio que fechou o mês
+             PRIORIDADE 2: usdRateRelatorio (cotação do último dia do mês via AwesomeAPI)
+             PRIORIDADE 3: fallback 5.70 */
+          var usdRate, fonteUsdRate="";
+          if(c._vestRent && c._vestRent.ending && c._vestRent.ending>0 && totalUSD_brl>0){
+            /* Câmbio derivado: BRL do Gorila / USD do Vest */
+            var rateDerived=totalUSD_brl/c._vestRent.ending;
+            if(rateDerived>3 && rateDerived<10){
+              usdRate=rateDerived;
+              fonteUsdRate="extrato Vest";
+            }
+          }
+          if(!usdRate){
+            usdRate=usdRateRelatorio||5.70;
+            fonteUsdRate=usdRelatorio?"fechamento do mês":"câmbio atual";
+          }
           var totalUSD_usd=usdRate>0?totalUSD_brl/usdRate:totalUSD_brl/5.70;
           var corRentUSD=rentUSDpct!==null?(rentUSDpct>=0?'#0F9D58':'#D93025'):'#374151';
           body+='<div style="background:#EFF6FF;border:1.5px solid #2563EB55;border-left:4px solid #2563EB;border-radius:10px;padding:16px 20px;margin-bottom:14px">';
@@ -6735,7 +6751,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
           body+='<div style="display:flex;gap:32px;flex-wrap:wrap">';
           body+='<div><div style="'+labelS+'">Patrimônio (BRL)</div><div style="'+valS+'">'+fmBRL(totalUSD_brl)+'</div></div>';
           body+='<div><div style="'+labelS+'">Patrimônio (USD)</div><div style="font-size:17px;font-weight:800;color:#1D4ED8">US$ '+totalUSD_usd.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+'</div></div>';
-          body+='<div><div style="'+labelS+'">Câmbio</div><div style="font-size:13px;font-weight:700;color:#6B7480">R$ '+usdRate.toFixed(2)+'/US$</div></div>';
+          body+='<div><div style="'+labelS+'">Câmbio'+(fonteUsdRate?' <span style="color:#9CA3AF;font-weight:400;text-transform:none;letter-spacing:0">· '+fonteUsdRate+'</span>':'')+'</div><div style="font-size:13px;font-weight:700;color:#6B7480">R$ '+usdRate.toFixed(2)+'/US$</div></div>';
           if(rentUSDpct!==null){
             body+='<div><div style="'+labelS+'">Rentabilidade em USD'+(fonteRentUSD?' <span style="color:#9CA3AF;font-weight:400;text-transform:none;letter-spacing:0">· '+fonteRentUSD+'</span>':'')+'</div><div style="font-size:17px;font-weight:800;color:'+corRentUSD+'">'+(rentUSDpct>=0?'+':'')+rentUSDpct.toFixed(2)+'%';
             if(rentUSDvalor!==null){
@@ -15812,13 +15828,23 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
                   <div style={{fontSize:10,color:T.t3,fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>📊 Performance da Carteira</div>
                   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:12,marginBottom:20}}>
                     <Cd onClick={function(){
-                      /* Busca câmbio do último dia útil do mês de referência (mês anterior) */
-                      var refDate=new Date();refDate.setDate(1);refDate.setMonth(refDate.getMonth()-1);
-                      var anoRef=refDate.getFullYear();var mesRef=String(refDate.getMonth()+1).padStart(2,"0");
-                      /* Último dia do mês de referência */
-                      var ultimoDia=new Date(anoRef,refDate.getMonth()+1,0);
-                      var diaStr=String(ultimoDia.getDate()).padStart(2,"0");
-                      var dataFmt=anoRef+""+mesRef+""+diaStr; /* formato YYYYMMDD para AwesomeAPI */
+                      /* Busca câmbio do último dia útil do mês do RELATÓRIO.
+                         Prioridade: dataFim do _vestRent (extrato Vest) > dataFim do _gorilaRent > último dia do mês anterior à data atual. */
+                      var dataRefStr=null;
+                      if(c._vestRent && c._vestRent.dataFim) dataRefStr=c._vestRent.dataFim; /* formato YYYY-MM-DD */
+                      else if(c._gorilaRent && c._gorilaRent.dataFim) dataRefStr=c._gorilaRent.dataFim;
+                      var dataFmt;
+                      if(dataRefStr){
+                        /* Já vem no formato "2026-04-30" → vira "20260430" */
+                        dataFmt=dataRefStr.replace(/-/g,"").substring(0,8);
+                      } else {
+                        /* Fallback: último dia do mês anterior à data atual */
+                        var refDate=new Date();refDate.setDate(1);refDate.setMonth(refDate.getMonth()-1);
+                        var anoRef=refDate.getFullYear();var mesRef=String(refDate.getMonth()+1).padStart(2,"0");
+                        var ultimoDia=new Date(anoRef,refDate.getMonth()+1,0);
+                        var diaStr=String(ultimoDia.getDate()).padStart(2,"0");
+                        dataFmt=anoRef+""+mesRef+""+diaStr;
+                      }
                       fetch("https://economia.awesomeapi.com.br/json/daily/USD-BRL/5?start_date="+dataFmt+"&end_date="+dataFmt)
                         .then(function(r){return r.json()})
                         .then(function(data){
@@ -23702,7 +23728,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '244';
+  var SW_VERSION = '245';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
