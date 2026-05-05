@@ -6690,14 +6690,30 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
         if(ativosBR.length>0){
           var totalBR=ativosBR.reduce(function(s,a){return s+(a.vA||0);},0);
           var pesoBR=totalCart>0?(totalBR/totalCart*100).toFixed(1):0;
-          var corRentBR=rentPeriodo>=0?'#0F9D58':'#D93025';
+          /* === Rentabilidade BRASIL PURA (sem exterior) ===
+             Soma os ganhos R$ dos ativos BR (vindo do Gorila via getRentAtivoPer) e divide pela posição inicial.
+             Antes usava rentPeriodo que é a rent. da carteira inteira (BR+Ext) — distorcida pelo câmbio. */
+          var ganhoBR_RS=0,patIniBR=0;
+          ativosBR.forEach(function(a){
+            var rp=getRentAtivoPer(a);
+            if(rp && typeof rp.rs==="number"){
+              ganhoBR_RS+=rp.rs;
+              patIniBR+=(a.vA||0)-rp.rs;
+            }
+          });
+          var rentBR=patIniBR>0?(ganhoBR_RS/patIniBR*100):null;
+          var corRentBR=rentBR!==null && rentBR>=0?'#0F9D58':'#D93025';
           body+='<div style="background:#FFFBEB;border:1.5px solid #D4A32855;border-left:4px solid #D4A328;border-radius:10px;padding:16px 20px;margin-bottom:14px">';
           body+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
           body+='<div style="font-size:14px;font-weight:800;'+labelC+'">🇧🇷 Carteira Brasil <span style="color:#D4A328">(BRL)</span></div>';
           body+='<div style="font-size:11px;color:#9CA3AF">'+pesoBR+'% do portfólio · '+ativosBR.length+' ativos</div></div>';
           body+='<div style="display:flex;gap:32px;flex-wrap:wrap">';
           body+='<div><div style="'+labelS+'">Patrimônio</div><div style="'+valS+'">'+fmBRL(totalBR)+'</div></div>';
-          if(rentPeriodo!==null)body+='<div><div style="'+labelS+'">Rentabilidade no mês</div><div style="font-size:17px;font-weight:800;color:'+corRentBR+'">'+(rentPeriodo>=0?'+':'')+rentPeriodo.toFixed(2)+'%</div></div>';
+          if(rentBR!==null){
+            body+='<div><div style="'+labelS+'">Rentabilidade no mês</div><div style="font-size:17px;font-weight:800;color:'+corRentBR+'">'+(rentBR>=0?'+':'')+rentBR.toFixed(2)+'%';
+            body+=' <span style="font-size:12px;font-weight:700;color:'+corRentBR+';opacity:.85">('+(ganhoBR_RS>=0?'+':'')+fmBRL(ganhoBR_RS)+')</span>';
+            body+='</div></div>';
+          }
           body+='<div><div style="'+labelS+'">Benchmark</div><div style="font-size:13px;font-weight:700;color:#2563EB">CDI · IBOV · IPCA</div></div>';
           body+='</div></div>';
         }
@@ -23708,7 +23724,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '246';
+  var SW_VERSION = '247';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
