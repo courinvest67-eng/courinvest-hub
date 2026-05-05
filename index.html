@@ -3123,6 +3123,7 @@ function CL({data:d,onSel:os,dispatch:dp}){
   const[se,sSe]=useState("");const[fi,sFi]=useState("todos");const[showAdd,sShowAdd]=useState(false);
   const gorilaRef=React.useRef(null);
   const bulkRef=React.useRef(null);
+  const vestRef=React.useRef(null);
   const[gMsg,sGMsg]=useState("");
   const[bulkProgress,sBulkProgress]=useState(null);
   const[showAuditoria,sShowAuditoria]=useState(false);
@@ -3458,6 +3459,128 @@ function CL({data:d,onSel:os,dispatch:dp}){
         dp({t:"RC",p:newC});
         callback(true,nomeCliente,patReal);
       }catch(err){callback(false,"erro Excel: "+err.message)}
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  /* === IMPORTADOR DE EXTRATO PDF DA VEST (corretora americana) ===
+     Lê o PDF Account Statement do DriveWealth/Vest e extrai:
+     - Account Name (pra casar com cliente)
+     - Período (Data inicial e final)
+     - Beginning Account Value, Ending Account Value
+     - Deposits, Withdrawals, Dividend & Interest, Other Activity
+     Calcula: rentMes USD = (Ending − Beginning − Deposits + Withdrawals − Other) / Beginning
+     Salva em c._vestRent = {dataIni, dataFim, beginning, ending, dividends, deposits, withdrawals, other, rentPct, rentUSD} */
+  var importVestPDF=function(file){
+    if(!file)return;
+    if(!file.name.match(/\.pdf$/i)){sGMsg("⚠ Selecione um arquivo PDF da Vest");return}
+    var reader=new FileReader();
+    reader.onload=function(e){
+      var data=new Uint8Array(e.target.result);
+      if(typeof pdfjsLib==="undefined"){sGMsg("⚠ PDF.js não carregado");return}
+      pdfjsLib.getDocument({data:data}).promise.then(function(pdf){
+        var promises=[];
+        for(var p=1;p<=pdf.numPages;p++){
+          promises.push(pdf.getPage(p).then(function(page){
+            return page.getTextContent().then(function(tc){
+              return tc.items.map(function(it){return it.str}).join(" ");
+            });
+          }));
+        }
+        return Promise.all(promises);
+      }).then(function(pages){
+        var fullText=pages.join("\n");
+        /* Extrai Account Name */
+        var nameMatch=fullText.match(/Account Name[:\s]+([^\n]+?)(?:\s{2,}|\n|Account Number|Account Statement|$)/i);
+        var accountName=nameMatch?nameMatch[1].trim():"";
+        /* Extrai período (ex: "April 01, 2026 - April 30, 2026") */
+        var periodMatch=fullText.match(/(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}\s*[-–]\s*(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}/i);
+        var periodoStr=periodMatch?periodMatch[0]:"";
+        /* Mapeia mês inglês -> número */
+        var monthMap={january:1,february:2,march:3,april:4,may:5,june:6,july:7,august:8,september:9,october:10,november:11,december:12};
+        var dataIni="",dataFim="";
+        if(periodMatch){
+          var parts=periodoStr.split(/[-–]/);
+          var parseUSDate=function(s){
+            var m=s.trim().match(/(\w+)\s+(\d{1,2}),?\s+(\d{4})/);
+            if(!m)return "";
+            var mo=monthMap[m[1].toLowerCase()];
+            return m[3]+"-"+String(mo).padStart(2,"0")+"-"+String(parseInt(m[2])).padStart(2,"0");
+          };
+          dataIni=parseUSDate(parts[0]);
+          dataFim=parseUSDate(parts[1]);
+        }
+        /* Extrai valores do Valuation Summary */
+        var parseUSD=function(str){
+          if(str==null||str==="")return 0;
+          var s=String(str).replace(/[\s$,]/g,"");
+          var neg=s.match(/^\(.+\)$/)||s.charAt(0)==="-";
+          s=s.replace(/[()-]/g,"");
+          var v=parseFloat(s);
+          if(isNaN(v))return 0;
+          return neg?-v:v;
+        };
+        /* Padrões pra extrair valores. PDF tem 2 colunas (This Period, This Year) — pegamos a primeira (This Period). */
+        var grab=function(label){
+          /* Captura o valor após a label. Aceita: $1.234,56  $(123,45)  ($123.45)  -123.45  */
+          var fullM=fullText.match(new RegExp(label+"\\s*(\\(?\\$?\\(?-?[\\d,\\.]+\\)?\\)?)","i"));
+          return fullM?parseUSD(fullM[1]):0;
+        };
+        var beginning=grab("Beginning Account Value");
+        var ending=grab("Ending Account Value");
+        var dividends=grab("(?:Dividend\\s*&\\s*Interest|Dividend and Interest)");
+        var deposits=grab("Deposits");
+        var withdrawals=grab("Withdrawals");
+        var other=grab("Other Activity");
+        var netChange=grab("Net Change in Portfolio Value");
+        if(!accountName){
+          /* Fallback: tenta pegar antes de "Account Statement" */
+          var altMatch=fullText.match(/([A-Z][a-zà-ÿ]+(?:\s+[A-Z][a-zà-ÿ]+){1,4})\s+Account Statement/);
+          if(altMatch)accountName=altMatch[1].trim();
+        }
+        if(!accountName){sGMsg("⚠ Não consegui ler o Account Name do PDF Vest");return}
+        /* Cálculo da rentabilidade USD do mês.
+           Fórmula: rent = (Ending − Beginning − Deposits + Withdrawals − Other) / Beginning
+           "Other" no extrato Vest costuma ser saídas (negativo), então subtrai pra isolar performance. */
+        var rentUSD=ending-beginning-deposits+Math.abs(withdrawals)-other;
+        var rentPct=beginning>0?(rentUSD/beginning):null;
+        if(beginning<=0||!isFinite(rentPct)){
+          sGMsg("⚠ Não consegui calcular rentabilidade — Beginning Value inválido");
+          return;
+        }
+        /* Procura cliente correspondente. Match: nome do PDF contém ou é contido no nome do cliente */
+        var nameNorm=accountName.toLowerCase().replace(/\s+/g," ").trim();
+        var nameWords=nameNorm.split(/\s+/);
+        var match=(d.cl||[]).find(function(c){
+          var cn=(c.nome||"").toLowerCase().replace(/\s+/g," ").trim();
+          /* Match se pelo menos 2 palavras do PDF aparecem no nome do cliente, ou vice-versa */
+          var hits=nameWords.filter(function(w){return w.length>2&&cn.indexOf(w)>=0}).length;
+          return hits>=2;
+        });
+        if(!match){
+          sGMsg("⚠ Cliente '"+accountName+"' não encontrado. Verifique o nome cadastrado.");
+          return;
+        }
+        /* Salva no cliente */
+        var vestRent={
+          dataIni:dataIni,
+          dataFim:dataFim,
+          beginning:beginning,
+          ending:ending,
+          dividends:dividends,
+          deposits:deposits,
+          withdrawals:withdrawals,
+          other:other,
+          netChange:netChange,
+          rentPct:rentPct,
+          rentUSD:rentUSD,
+          accountName:accountName,
+          importedAt:new Date().toISOString()
+        };
+        dp({t:"UC",p:{id:match.id,_vestRent:vestRent}});
+        sGMsg("✅ Extrato Vest "+accountName+" importado • "+dataIni+" a "+dataFim+" • "+(rentPct*100).toFixed(2)+"% / US$ "+rentUSD.toFixed(2));
+        setTimeout(function(){sGMsg("")},6000);
+      }).catch(function(err){sGMsg("⚠ Erro PDF Vest: "+err.message);console.error(err)});
     };
     reader.readAsArrayBuffer(file);
   };
@@ -4008,6 +4131,8 @@ function CL({data:d,onSel:os,dispatch:dp}){
 
         <input ref={bulkRef} type="file" accept=".xlsx,.xls,.csv,.pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf,text/csv,text/plain,*/*" multiple onChange={function(e){if(e.target.files.length>0)importGorilaBulk(e.target.files);e.target.value=""}} style={{display:"none"}}/>
         <Bt v="secondary" onClick={function(){bulkRef.current&&bulkRef.current.click()}} style={{fontSize:11,padding:"10px 14px",background:"rgba(167,139,250,0.08)",color:T.purple,border:"1px solid rgba(167,139,250,0.2)"}}>📦 Importar em Massa</Bt>
+        <input ref={vestRef} type="file" accept=".pdf,application/pdf" onChange={function(e){if(e.target.files[0])importVestPDF(e.target.files[0]);e.target.value=""}} style={{display:"none"}}/>
+        <Bt v="secondary" onClick={function(){vestRef.current&&vestRef.current.click()}} style={{fontSize:11,padding:"10px 14px",background:"rgba(37,99,235,0.08)",color:"#2563EB",border:"1px solid rgba(37,99,235,0.25)"}}>🇺🇸 Importar Extrato Vest</Bt>
         <Bt v="secondary" onClick={function(){sShowAuditoria(true)}} style={{fontSize:11,padding:"10px 14px",background:"rgba(212,163,40,0.08)",color:T.gold,border:"1px solid rgba(212,163,40,0.25)"}}>🔍 Auditar Classificações</Bt>
         <Bt v="secondary" onClick={function(){
           var yara=(d.cl||[]).find(function(c){return (c.nome||'').toLowerCase().includes('yara')});
@@ -6397,26 +6522,60 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
         /* Ponto atual */
         var last=hist[hist.length-1];
         var lastX=xPos(hist.length-1),lastY=yPos(last.pat);
-        /* === Cálculo do GANHO ACUMULADO ===
-           Patrimônio atual MENOS custo total dos ativos (preço médio × quantidade somados).
-           Custos no array hist[] são 0 (não temos histórico de aportes), então usamos o custo
-           agregado dos ativos enriquecidos (enr) — que é o custo real de aquisição. */
+        /* === GANHO ACUMULADO — 2 cálculos lado a lado ===
+           1. SIMPLES: patAtual − custoTotalAtivos + proventos. Reflete o ganho de capital + renda passiva.
+              Bom pra cliente entender "quanto entrou no bolso" no agregado.
+           2. TWR: usa o % "Início da Carteira" do Gorila, aplica patAtual × rent / (1+rent).
+              Reflete a performance da carteira ajustada pelo tempo (Time-Weighted Return).
+              Bom pra avaliar a qualidade da gestão (ignora timing de aportes). */
         var custoAtivos=enr.reduce(function(s,a){return s+(a.cT||0)},0);
-        /* Adiciona proventos recebidos (renda passiva) ao ganho */
         var proventosTotais=(c.proventos||[]).reduce(function(s,p){
           var v=parseFloat(p.valor||p.v||0);
-          /* Se é em moeda estrangeira, converte usando câmbio aproximado */
           if(p.moeda==="USD"||p.m==="USD")v=v*(usdRateGlobal||5.70);
           if(p.moeda==="EUR"||p.m==="EUR")v=v*((usdRateGlobal||5.70)*1.08);
           return s+(isNaN(v)?0:v);
         },0);
-        var ganhoTotal=last.pat-custoAtivos+proventosTotais;
-        var ganhoColor=ganhoTotal>=0?"#2DD4A0":"#EF6461";
+        var ganhoSimples=last.pat-custoAtivos+proventosTotais;
+        var ganhoSimplesPct=custoAtivos>0?(ganhoSimples/custoAtivos*100):null;
+        
+        var rentTotalGr=null;
+        if(c._gorilaRent && c._gorilaRent.periods){
+          var ordemBuscaG=["início da carteira","inicio da carteira","carteira","total","desde"];
+          for(var ogi=0;ogi<ordemBuscaG.length&&rentTotalGr===null;ogi++){
+            var ppG=c._gorilaRent.periods.find(function(p){return (p.p||"").toLowerCase().indexOf(ordemBuscaG[ogi])>=0&&typeof p.rent==="number"});
+            if(ppG)rentTotalGr=ppG.rent;
+          }
+        }
+        var ganhoTWR=null,ganhoTWRPct=null;
+        if(rentTotalGr!==null && (1+rentTotalGr)>0){
+          ganhoTWR=last.pat*rentTotalGr/(1+rentTotalGr);
+          ganhoTWRPct=rentTotalGr*100;
+        }
+        var corS=ganhoSimples>=0?"#2DD4A0":"#EF6461";
+        var corT=ganhoTWR!==null && ganhoTWR>=0?"#2DD4A0":"#EF6461";
         body+='<div style="margin:16px 0 24px;padding:20px;background:#fff;border:1px solid rgba(10,22,40,0.08);border-radius:14px;box-shadow:0 2px 12px rgba(10,22,40,0.06)">';
-        body+='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">';
+        body+='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;flex-wrap:wrap;gap:14px">';
         body+='<div><div style="font-size:13px;font-weight:800;color:#0A1628;margin-bottom:2px">Evolução Patrimonial</div><div style="font-size:10px;color:#6B7489">'+hist[0].ym.split("-")[1]+"/"+hist[0].ym.split("-")[0]+" a "+hist[hist.length-1].ym.split("-")[1]+"/"+hist[hist.length-1].ym.split("-")[0]+'</div></div>';
-        body+='<div style="text-align:right"><div style="font-size:18px;font-weight:900;color:#D4A328;font-family:monospace">'+fmF(last.pat)+'</div>';
-        body+='<div style="font-size:10px;color:'+ganhoColor+';font-weight:700">'+(ganhoTotal>=0?"+":"")+fmF(ganhoTotal)+' acumulado'+(proventosTotais>0?' (rentab. + proventos)':'')+'</div></div>';
+        body+='<div style="text-align:right;display:flex;flex-direction:column;gap:6px">';
+        body+='<div style="font-size:18px;font-weight:900;color:#D4A328;font-family:monospace">'+fmF(last.pat)+'</div>';
+        /* Linha 1: Acumulado Simples */
+        body+='<div style="display:flex;align-items:baseline;gap:6px;justify-content:flex-end">';
+        body+='<span style="font-size:9px;color:#6B7489;font-weight:600;letter-spacing:.5px">GANHO LÍQUIDO</span>';
+        body+='<span style="font-size:11px;color:'+corS+';font-weight:800;font-family:monospace">'+(ganhoSimples>=0?"+":"")+fmF(ganhoSimples)+(ganhoSimplesPct!==null?' ('+(ganhoSimplesPct>=0?'+':'')+ganhoSimplesPct.toFixed(1)+'%)':'')+'</span>';
+        body+='</div>';
+        /* Linha 2: TWR */
+        if(ganhoTWR!==null){
+          body+='<div style="display:flex;align-items:baseline;gap:6px;justify-content:flex-end">';
+          body+='<span style="font-size:9px;color:#6B7489;font-weight:600;letter-spacing:.5px">RENTABILIDADE TWR</span>';
+          body+='<span style="font-size:11px;color:'+corT+';font-weight:800;font-family:monospace">'+(ganhoTWR>=0?"+":"")+fmF(ganhoTWR)+' ('+(ganhoTWRPct>=0?'+':'')+ganhoTWRPct.toFixed(2)+'%)</span>';
+          body+='</div>';
+        }
+        body+='</div>';
+        body+='</div>';
+        /* Legenda explicativa */
+        body+='<div style="display:flex;gap:18px;flex-wrap:wrap;font-size:9px;color:#9CA3AF;margin-bottom:14px;padding:8px 12px;background:#F8FAFC;border-radius:6px;border-left:2px solid #E5E7EB">';
+        body+='<div><strong style="color:#6B7489">Ganho Líquido:</strong> patrimônio atual − custo de aquisição + proventos recebidos.</div>';
+        if(ganhoTWR!==null) body+='<div><strong style="color:#6B7489">Rentabilidade TWR:</strong> performance ajustada por tempo (Time-Weighted Return) calculada pelo Gorila.</div>';
         body+='</div>';
         body+='<svg width="100%" viewBox="0 0 '+W+' '+H+'" style="overflow:visible">';
         /* Grid horizontal */
@@ -6529,11 +6688,17 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
         var ativosBR=enr.filter(function(a){return !TIPOS_EXT_USD[a.tp]&&!TIPOS_EXT_EUR[a.tp];});
         if(ativosUSD.length===0&&ativosEUR.length===0)return;
         var totalCart=enr.reduce(function(s,a){return s+(a.vA||0);},0);
-        /* Rentabilidade USD do Gorila — busca período mensal */
-        var rentUSDpct=null;
-        if(temGorila&&c._gorilaRent&&c._gorilaRent.periods){
+        /* === Rentabilidade USD ===
+           PRIORIDADE 1: extrato PDF Vest importado (mais preciso, vem direto do broker americano)
+           PRIORIDADE 2: Gorila (período mensal, coluna "ext") */
+        var rentUSDpct=null,rentUSDvalor=null,fonteRentUSD="";
+        if(c._vestRent && typeof c._vestRent.rentPct==="number"){
+          rentUSDpct=c._vestRent.rentPct*100;
+          rentUSDvalor=c._vestRent.rentUSD;
+          fonteRentUSD="Vest";
+        } else if(temGorila&&c._gorilaRent&&c._gorilaRent.periods){
           var pUSD=findRentMesAtual(c._gorilaRent.periods);
-          if(pUSD&&pUSD.ext!=null)rentUSDpct=parseFloat(pUSD.ext)*100;
+          if(pUSD&&pUSD.ext!=null){rentUSDpct=parseFloat(pUSD.ext)*100;fonteRentUSD="Gorila";}
         }
         var labelC='color:#374151';
         var labelS='font-size:9px;color:#6B7480;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px';
@@ -6572,7 +6737,11 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
           body+='<div><div style="'+labelS+'">Patrimônio (USD)</div><div style="font-size:17px;font-weight:800;color:#1D4ED8">US$ '+totalUSD_usd.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+'</div></div>';
           body+='<div><div style="'+labelS+'">Câmbio</div><div style="font-size:13px;font-weight:700;color:#6B7480">R$ '+usdRate.toFixed(2)+'/US$</div></div>';
           if(rentUSDpct!==null){
-            body+='<div><div style="'+labelS+'">Rentabilidade em USD</div><div style="font-size:17px;font-weight:800;color:'+corRentUSD+'">'+(rentUSDpct>=0?'+':'')+rentUSDpct.toFixed(2)+'%</div></div>';
+            body+='<div><div style="'+labelS+'">Rentabilidade em USD'+(fonteRentUSD?' <span style="color:#9CA3AF;font-weight:400;text-transform:none;letter-spacing:0">· '+fonteRentUSD+'</span>':'')+'</div><div style="font-size:17px;font-weight:800;color:'+corRentUSD+'">'+(rentUSDpct>=0?'+':'')+rentUSDpct.toFixed(2)+'%';
+            if(rentUSDvalor!==null){
+              body+=' <span style="font-size:12px;font-weight:700;color:'+corRentUSD+';opacity:.85">('+(rentUSDvalor>=0?'+':'')+'US$ '+Math.abs(rentUSDvalor).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})+')</span>';
+            }
+            body+='</div></div>';
           }
           body+='<div><div style="'+labelS+'">Benchmark</div><div style="font-size:13px;font-weight:700;color:#2563EB">S&amp;P 500 · Nasdaq</div></div>';
           body+='</div>';
@@ -23533,7 +23702,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '242';
+  var SW_VERSION = '244';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
