@@ -7549,8 +7549,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
           if(!obj.ativosVinculados||obj.ativosVinculados.length===0)return 0;
           var s=0;
           obj.ativosVinculados.forEach(function(tk){
-            var a=enr.find(function(x){return x.tk===tk});
-            if(a)s+=a.vA||0;
+            /* FIX BUG: SOMA todos os ativos com aquele tk (parser trunca nomes longos → tickers colidem). */
+            var matches=enr.filter(function(x){return x.tk===tk||x.nm===tk});
+            matches.forEach(function(a){s+=a.vA||0});
           });
           if(obj.moeda==="USD" && usdRateRelatorio>0)return s/usdRateRelatorio;
           return s;
@@ -7626,7 +7627,11 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
           body+='</div></div>';
           
           if(obj.ativosVinculados && obj.ativosVinculados.length>0){
-            var atvsVinc=obj.ativosVinculados.map(function(tk){return enr.find(function(x){return x.tk===tk})}).filter(Boolean);
+            /* FIX BUG: pega TODOS os ativos que casam com cada tk (parser trunca nomes → tickers colidem) */
+            var atvsVinc=[];
+            obj.ativosVinculados.forEach(function(tk){
+              enr.filter(function(x){return x.tk===tk||x.nm===tk}).forEach(function(a){atvsVinc.push(a)});
+            });
             if(atvsVinc.length>0){
               body+='<div style="margin-top:10px;border-top:1px solid rgba(0,0,0,0.07);padding-top:8px">';
               body+='<div style="font-size:9px;color:#6B7489;font-weight:700;letter-spacing:.8px;text-transform:uppercase;margin-bottom:6px">📎 Investimentos vinculados</div>';
@@ -9253,8 +9258,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       if(!obj.ativosVinculados||obj.ativosVinculados.length===0)return 0;
       var s=0;
       obj.ativosVinculados.forEach(function(tk){
-        var a=carteira.find(function(x){return x.tk===tk});
-        if(a)s+=(a.posR||a.qtd*a.pa||0);
+        /* FIX BUG: SOMA todos os ativos que casam (parser trunca nomes longos → colisões de tk) */
+        var matches=carteira.filter(function(x){return x.tk===tk||x.nm===tk});
+        matches.forEach(function(a){s+=(a.posR||a.qtd*a.pa||0)});
       });
       return s;
     };
@@ -23901,7 +23907,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '252';
+  var SW_VERSION = '253';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
