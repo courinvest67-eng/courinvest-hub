@@ -6487,6 +6487,52 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
         body+='<div class="nota-inline" style="margin-top:8px">💡 A rentabilidade total em BRL inclui o efeito cambial. Para avaliar o desempenho real dos ativos no exterior, considere a rentabilidade na moeda original (USD/EUR).</div>';
       })();
 
+      /* === FUNÇÃO HELPER: getRentAtivoPer ===
+         Retorna {pct, rs, doPeriodo, fonte} pra um ativo no período do relatório.
+         Declarada AQUI (antes da Atribuição) porque é usada tanto na Atribuição quanto em Destaques. */
+      var getRentAtivoPer=function(a){
+        if(a._gRentPct){
+          var rp=a._gRentPct;var keys=Object.keys(rp);
+          var cleanKey=function(k){return String(k).toLowerCase().trim().replace(/^'+|'+$/g,"");};
+          /* === Helper: pega valor em R$ correspondente, se existir, da mesma coluna === */
+          var getRsForKey=function(targetClean){
+            if(!a._gRentRs)return null;
+            var krs=Object.keys(a._gRentRs).find(function(k){return cleanKey(k)===targetClean});
+            if(krs!==undefined&&typeof a._gRentRs[krs]==="number")return a._gRentRs[krs];
+            return null;
+          };
+          if(tipo==="mensal"){
+            /* === PRIORIDADE 1: coluna "Periodo"/"Período" do Gorila ===
+               Se o usuário exportou um relatório mensal (período <=45 dias), essa coluna É a rent. do mês.
+               O Gorila exporta SEMPRE essa coluna pra cada ativo na aba Posição, e ela representa
+               o desempenho do ativo no período exportado. Pra relatórios mensais, é a fonte mais precisa.
+               Determina se o período é mensal pelo grDias do _gorilaRent (data inicial até final). */
+            var grDias=c._gorilaRent&&c._gorilaRent.dataIni&&c._gorilaRent.dataFim?Math.round((new Date(c._gorilaRent.dataFim)-new Date(c._gorilaRent.dataIni))/86400000):9999;
+            if(grDias<=45){
+              var kp=keys.find(function(k){var cl=cleanKey(k);return cl==="periodo"||cl==="período";});
+              if(kp&&typeof rp[kp]==="number"){
+                var pctP=rp[kp]*100;
+                /* Prefere o R$ exato vindo do Gorila (mais preciso que a.vA*pct) */
+                var rsP=getRsForKey("periodo");if(rsP===null)rsP=getRsForKey("período");
+                return {pct:pctP,rs:rsP!==null?rsP:a.vA*rp[kp],doPeriodo:true,fonte:"gorila_periodo"};
+              }
+            }
+            /* === PRIORIDADE 2: chave "Último Mês" (versões antigas do Gorila) === */
+            var ordemMes=["ultimo mês","último mês","ultimo mes","último mes","1m"];
+            for(var oi=0;oi<ordemMes.length;oi++){var kk=keys.find(function(k){return cleanKey(k)===ordemMes[oi]});if(kk!==undefined&&typeof rp[kk]==="number"){var rsM=getRsForKey(ordemMes[oi]);return {pct:rp[kk]*100,rs:rsM!==null?rsM:a.vA*rp[kk],doPeriodo:true,fonte:"gorila_mes"};}}
+            /* === PRIORIDADE 3: estima do anual (último recurso, menos preciso) === */
+            var vAno=(typeof rp["ano"]==="number"?rp["ano"]:(typeof rp["Ano"]==="number"?rp["Ano"]:null));
+            if(vAno!==null){var pctM=(Math.pow(1+vAno,1/12)-1)*100;return {pct:pctM,rs:a.vA*(pctM/100),doPeriodo:true,fonte:"estimado"};}
+          }else if(tipo==="anual"){
+            var v12=rp["12m"]||rp["12M"];if(typeof v12==="number"){var rs12=getRsForKey("12m");return {pct:v12*100,rs:rs12!==null?rs12:a.vA*v12,doPeriodo:true,fonte:"gorila_12m"};}
+          }else{
+            var kT=keys.find(function(k){var cl=cleanKey(k);return cl.indexOf("início")>=0||cl.indexOf("inicio")>=0;});
+            if(kT&&typeof rp[kT]==="number"){var rsT=getRsForKey(cleanKey(kT));return {pct:rp[kT]*100,rs:rsT!==null?rsT:a.vA*rp[kT],doPeriodo:true,fonte:"gorila_total"};}
+          }
+        }
+        return {pct:a.gPct,rs:a.ganho,doPeriodo:false,fonte:"historico"};
+      };
+
       /* ===== ATRIBUIÇÃO POR CLASSE — calculada para o período do relatório =====
          Fórmula correta: contrib_classe = peso_classe × rent_classe
          Onde rent_classe = soma(ganho_R$_ativo) / soma(valor_ativo) — agregada por classe.
@@ -6629,49 +6675,6 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
         body+='<div class="empty">Sem dados de alocação.</div>';
       }
 
-      var getRentAtivoPer=function(a){
-        if(a._gRentPct){
-          var rp=a._gRentPct;var keys=Object.keys(rp);
-          var cleanKey=function(k){return String(k).toLowerCase().trim().replace(/^'+|'+$/g,"");};
-          /* === Helper: pega valor em R$ correspondente, se existir, da mesma coluna === */
-          var getRsForKey=function(targetClean){
-            if(!a._gRentRs)return null;
-            var krs=Object.keys(a._gRentRs).find(function(k){return cleanKey(k)===targetClean});
-            if(krs!==undefined&&typeof a._gRentRs[krs]==="number")return a._gRentRs[krs];
-            return null;
-          };
-          if(tipo==="mensal"){
-            /* === PRIORIDADE 1: coluna "Periodo"/"Período" do Gorila ===
-               Se o usuário exportou um relatório mensal (período <=45 dias), essa coluna É a rent. do mês.
-               O Gorila exporta SEMPRE essa coluna pra cada ativo na aba Posição, e ela representa
-               o desempenho do ativo no período exportado. Pra relatórios mensais, é a fonte mais precisa.
-               Determina se o período é mensal pelo grDias do _gorilaRent (data inicial até final). */
-            var grDias=c._gorilaRent&&c._gorilaRent.dataIni&&c._gorilaRent.dataFim?Math.round((new Date(c._gorilaRent.dataFim)-new Date(c._gorilaRent.dataIni))/86400000):9999;
-            if(grDias<=45){
-              var kp=keys.find(function(k){var cl=cleanKey(k);return cl==="periodo"||cl==="período";});
-              if(kp&&typeof rp[kp]==="number"){
-                var pctP=rp[kp]*100;
-                /* Prefere o R$ exato vindo do Gorila (mais preciso que a.vA*pct) */
-                var rsP=getRsForKey("periodo");if(rsP===null)rsP=getRsForKey("período");
-                return {pct:pctP,rs:rsP!==null?rsP:a.vA*rp[kp],doPeriodo:true,fonte:"gorila_periodo"};
-              }
-            }
-            /* === PRIORIDADE 2: chave "Último Mês" (versões antigas do Gorila) === */
-            var ordemMes=["ultimo mês","último mês","ultimo mes","último mes","1m"];
-            for(var oi=0;oi<ordemMes.length;oi++){var kk=keys.find(function(k){return cleanKey(k)===ordemMes[oi]});if(kk!==undefined&&typeof rp[kk]==="number"){var rsM=getRsForKey(ordemMes[oi]);return {pct:rp[kk]*100,rs:rsM!==null?rsM:a.vA*rp[kk],doPeriodo:true,fonte:"gorila_mes"};}}
-            /* === PRIORIDADE 3: estima do anual (último recurso, menos preciso) === */
-            var vAno=(typeof rp["ano"]==="number"?rp["ano"]:(typeof rp["Ano"]==="number"?rp["Ano"]:null));
-            if(vAno!==null){var pctM=(Math.pow(1+vAno,1/12)-1)*100;return {pct:pctM,rs:a.vA*(pctM/100),doPeriodo:true,fonte:"estimado"};}
-          }else if(tipo==="anual"){
-            var v12=rp["12m"]||rp["12M"];if(typeof v12==="number"){var rs12=getRsForKey("12m");return {pct:v12*100,rs:rs12!==null?rs12:a.vA*v12,doPeriodo:true,fonte:"gorila_12m"};}
-          }else{
-            var kT=keys.find(function(k){var cl=cleanKey(k);return cl.indexOf("início")>=0||cl.indexOf("inicio")>=0;});
-            if(kT&&typeof rp[kT]==="number"){var rsT=getRsForKey(cleanKey(kT));return {pct:rp[kT]*100,rs:rsT!==null?rsT:a.vA*rp[kT],doPeriodo:true,fonte:"gorila_total"};}
-          }
-        }
-        return {pct:a.gPct,rs:a.ganho,doPeriodo:false,fonte:"historico"};
-      };
-      
       var ativosComPos=enr.filter(function(a){return a.vA>0});
       var rankedPer=ativosComPos.slice().sort(function(a,b){
         return getRentAtivoPer(b).pct - getRentAtivoPer(a).pct;
@@ -23463,7 +23466,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '232';
+  var SW_VERSION = '233';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
