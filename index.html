@@ -7770,8 +7770,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       /* ===== COMPOSIÇÃO DETALHADA — ordenada por Macro-Classe > Subclasse > Valor ===== */
       
       if(secAtiva("carteira")){
-      body+='<div style="margin:-4mm 0 8px"><span style="font-size:20px;margin-right:6px">📋</span><span style="font-size:22px;font-weight:900;color:#0A1628;letter-spacing:-0.5px">Composição <span style="color:#D4A328;font-style:italic">Detalhada</span></span></div>';
       body+='<!-- PAGE_BREAK -->';
+      body+='<div style="margin:-4mm 0 8px"><span style="font-size:20px;margin-right:6px">📋</span><span style="font-size:22px;font-weight:900;color:#0A1628;letter-spacing:-0.5px">Composição <span style="color:#D4A328;font-style:italic">Detalhada</span></span></div>';
       var grouped={};
       var labelInicioCol=tipo==="mensal"?"Início Mês":tipo==="anual"?"Início Ano":"Início";
       var labelFimCol=tipo==="mensal"?"Fim Mês":"Valor Atual";
@@ -8315,7 +8315,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       var pagesHtml='';
       bodyPages.forEach(function(pg,i){
         var isComposicao=pg.indexOf('Composição')>=0&&pg.indexOf('Detalhada')>=0;
-        var pgStyle=isComposicao?'padding:10mm 14mm 8mm':'';
+        var isMetricas=pg.indexOf('Métricas Estratégicas')>=0&&!isComposicao;
+        var pgStyle=isComposicao?'padding:10mm 14mm 8mm;min-height:auto':(isMetricas?'min-height:auto':'');
         pagesHtml+='<div class="cv-page cv-page-light" style="'+pgStyle+'">'
           +miniHdr
           +pg
