@@ -6030,7 +6030,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       +'*{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}'
       +'html,body{background:#0A1628;color:#1a1a2e;font-family:"Outfit",sans-serif;-webkit-font-smoothing:antialiased;font-size:12px;line-height:1.55}'
       
-      +'.cv-page{position:relative;width:210mm;min-height:297mm;padding:18mm 18mm 14mm;overflow:hidden;page-break-after:always}'
+      +'.cv-page{position:relative;width:210mm;min-height:297mm;padding:18mm 18mm 14mm;overflow:visible;page-break-after:always}'
       +'.cv-page:last-child{page-break-after:auto}'
       +'.cv-page-light{background:linear-gradient(180deg,#FAFBFD 0%,#F1F3F8 100%);color:#1a1a2e}'
       +'.cv-page-dark{background:radial-gradient(ellipse 80% 60% at 80% 20%,rgba(212,163,40,0.25) 0%,transparent 50%),radial-gradient(ellipse 60% 50% at 10% 90%,rgba(56,128,220,0.12) 0%,transparent 50%),linear-gradient(135deg,#060E1F 0%,#0C1A33 40%,#142B52 100%);color:#fff}'
@@ -6098,8 +6098,6 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
          - Linha fina dourada com fade abaixo
          - Última palavra em italic dourado (igual capa) */
       +'.section-title{margin:38px 0 18px;padding:0 0 8px;border:none;display:block;position:relative;font-size:30px;font-weight:900;color:#0A1628;letter-spacing:-1px;line-height:1.05;font-family:"Outfit",sans-serif;page-break-after:avoid}'
-      +'.cv-page .section-title{margin-top:16px;page-break-after:avoid;break-after:avoid}'
-      +'.cv-page .section-title+*{page-break-before:avoid;break-before:avoid}'
       +'.section-title::before{content:"";display:block;width:48px;height:2px;background:linear-gradient(90deg,#D4A328,transparent);margin-bottom:14px}'
       +'.section-title::after{content:"";display:block;width:100%;height:1px;background:linear-gradient(90deg,rgba(212,163,40,0.3),transparent);margin-top:10px}'
       +'.section-title .ic{display:inline-block;font-size:24px;margin-right:10px;vertical-align:baseline;opacity:0.85;line-height:1}'
