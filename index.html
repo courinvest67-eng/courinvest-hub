@@ -6397,13 +6397,26 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
         /* Ponto atual */
         var last=hist[hist.length-1];
         var lastX=xPos(hist.length-1),lastY=yPos(last.pat);
-        var ganhoTotal=last.pat-(last.custo||0);
+        /* === Cálculo do GANHO ACUMULADO ===
+           Patrimônio atual MENOS custo total dos ativos (preço médio × quantidade somados).
+           Custos no array hist[] são 0 (não temos histórico de aportes), então usamos o custo
+           agregado dos ativos enriquecidos (enr) — que é o custo real de aquisição. */
+        var custoAtivos=enr.reduce(function(s,a){return s+(a.cT||0)},0);
+        /* Adiciona proventos recebidos (renda passiva) ao ganho */
+        var proventosTotais=(c.proventos||[]).reduce(function(s,p){
+          var v=parseFloat(p.valor||p.v||0);
+          /* Se é em moeda estrangeira, converte usando câmbio aproximado */
+          if(p.moeda==="USD"||p.m==="USD")v=v*(usdRateGlobal||5.70);
+          if(p.moeda==="EUR"||p.m==="EUR")v=v*((usdRateGlobal||5.70)*1.08);
+          return s+(isNaN(v)?0:v);
+        },0);
+        var ganhoTotal=last.pat-custoAtivos+proventosTotais;
         var ganhoColor=ganhoTotal>=0?"#2DD4A0":"#EF6461";
         body+='<div style="margin:16px 0 24px;padding:20px;background:#fff;border:1px solid rgba(10,22,40,0.08);border-radius:14px;box-shadow:0 2px 12px rgba(10,22,40,0.06)">';
         body+='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">';
         body+='<div><div style="font-size:13px;font-weight:800;color:#0A1628;margin-bottom:2px">Evolução Patrimonial</div><div style="font-size:10px;color:#6B7489">'+hist[0].ym.split("-")[1]+"/"+hist[0].ym.split("-")[0]+" a "+hist[hist.length-1].ym.split("-")[1]+"/"+hist[hist.length-1].ym.split("-")[0]+'</div></div>';
         body+='<div style="text-align:right"><div style="font-size:18px;font-weight:900;color:#D4A328;font-family:monospace">'+fmF(last.pat)+'</div>';
-        body+='<div style="font-size:10px;color:'+ganhoColor+';font-weight:700">'+(ganhoTotal>=0?"+":"")+fmF(ganhoTotal)+' acumulado</div></div>';
+        body+='<div style="font-size:10px;color:'+ganhoColor+';font-weight:700">'+(ganhoTotal>=0?"+":"")+fmF(ganhoTotal)+' acumulado'+(proventosTotais>0?' (rentab. + proventos)':'')+'</div></div>';
         body+='</div>';
         body+='<svg width="100%" viewBox="0 0 '+W+' '+H+'" style="overflow:visible">';
         /* Grid horizontal */
@@ -23520,7 +23533,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '241';
+  var SW_VERSION = '242';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
