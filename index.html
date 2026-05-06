@@ -3132,9 +3132,11 @@ function CL({data:d,onSel:os,dispatch:dp}){
   const[se,sSe]=useState("");const[fi,sFi]=useState("todos");const[showAdd,sShowAdd]=useState(false);
   const gorilaRef=React.useRef(null);
   const bulkRef=React.useRef(null);
+  const bulkFolderRef=React.useRef(null);
   const vestRef=React.useRef(null);
   const[gMsg,sGMsg]=useState("");
   const[bulkProgress,sBulkProgress]=useState(null);
+  const[showBulkMenu,sShowBulkMenu]=useState(false);
   const[showAuditoria,sShowAuditoria]=useState(false);
 
   /* === FERRAMENTA DE AUDITORIA — detecta clientes com ativos potencialmente mal classificados ===
@@ -3191,30 +3193,63 @@ function CL({data:d,onSel:os,dispatch:dp}){
     return problemas;
   };
 
-  
+  /* === Helper: extrai metadados do nome do arquivo ===
+     Padrão Gorila: "relatorio_Nome-Sobrenome_DD-MM-YYYY_DD-MM-YYYY.xlsx"
+     Retorna {nomeCliente, dataIni, dataFim} ou null se não bate o padrão. */
+  var parseFilenameGorila=function(filename){
+    if(!filename)return null;
+    /* Tira extensão */
+    var base=filename.replace(/\.(xlsx|xls|pdf|csv)$/i,"");
+    /* Padrão: relatorio_Nome-Sobrenome_DD-MM-YYYY_DD-MM-YYYY */
+    var m=base.match(/^relatorio_(.+?)_(\d{2}-\d{2}-\d{4})_(\d{2}-\d{2}-\d{4})$/i);
+    if(!m)return null;
+    /* "Marcus-Goyata" → "Marcus Goyata" */
+    var nome=m[1].replace(/-/g," ").trim();
+    /* "01-04-2026" → "2026-04-01" */
+    var fmtData=function(d){var p=d.split("-");return p[2]+"-"+p[1]+"-"+p[0]};
+    return {nomeCliente:nome,dataIni:fmtData(m[2]),dataFim:fmtData(m[3])};
+  };
+
   var importGorilaBulk=function(files){
     if(!files||files.length===0)return;
     var arr=Array.from(files);
     var total=arr.length;
-    var results={ok:[],fail:[]};
-    sBulkProgress({current:0,total:total,nome:"",results:results});
+    var results={ok:[],fail:[],skipped:[]};
+    var startTime=Date.now();
+    /* Pré-análise: extrai nome e período do filename antes de processar */
+    var preview=arr.map(function(f){
+      var parsed=parseFilenameGorila(f.name);
+      return {file:f,parsed:parsed,filename:f.name};
+    });
+    sBulkProgress({current:0,total:total,nome:"",results:results,preview:preview,startTime:startTime});
 
     var processNext=function(idx){
       if(idx>=arr.length){
-        
-        sBulkProgress({current:total,total:total,nome:"",results:results,done:true});
-        sGMsg("✅ Importação em massa concluída! "+results.ok.length+" sucessos, "+results.fail.length+" falhas");
-        setTimeout(function(){sGMsg("");sBulkProgress(null)},6000);
+        var elapsed=((Date.now()-startTime)/1000).toFixed(0);
+        sBulkProgress({current:total,total:total,nome:"",results:results,done:true,preview:preview,elapsedSec:elapsed});
+        sGMsg("✅ Importação em massa concluída em "+elapsed+"s — "+results.ok.length+" sucessos · "+results.fail.length+" falhas");
+        /* NÃO esconde automaticamente — usuário fecha quando quiser ver o relatório */
         return;
       }
       var file=arr[idx];
-      sBulkProgress({current:idx+1,total:total,nome:file.name,results:results});
+      var parsed=preview[idx].parsed;
+      /* Estima tempo restante baseado no progresso atual */
+      var elapsed=(Date.now()-startTime)/1000;
+      var avgPerFile=idx>0?elapsed/idx:0;
+      var remainingSec=avgPerFile>0?Math.ceil(avgPerFile*(total-idx)):0;
+      sBulkProgress({
+        current:idx+1,total:total,
+        nome:parsed?parsed.nomeCliente:file.name,
+        filename:file.name,
+        results:results,preview:preview,
+        startTime:startTime,
+        remainingSec:remainingSec
+      });
       
-      /* Re-use single import logic by calling importGorilaCliente with a callback-like pattern */
       var done=function(success,name,patVal){
-        if(success){results.ok.push({nome:name||file.name,pat:patVal||0})}
-        else{results.fail.push({nome:file.name,err:name||"erro desconhecido"})}
-        setTimeout(function(){processNext(idx+1)},200);
+        if(success){results.ok.push({nome:name||(parsed?parsed.nomeCliente:file.name),pat:patVal||0,filename:file.name})}
+        else{results.fail.push({nome:(parsed?parsed.nomeCliente:file.name),filename:file.name,err:name||"erro desconhecido"})}
+        setTimeout(function(){processNext(idx+1)},150);
       };
       
       processGorilaFile(file,done);
@@ -4193,7 +4228,41 @@ function CL({data:d,onSel:os,dispatch:dp}){
         <Bt v="secondary" onClick={function(){gorilaRef.current&&gorilaRef.current.click()}} style={{fontSize:11,padding:"10px 14px"}}>📥 Importar Gorila</Bt>
 
         <input ref={bulkRef} type="file" accept=".xlsx,.xls,.csv,.pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf,text/csv,text/plain,*/*" multiple onChange={function(e){if(e.target.files.length>0)importGorilaBulk(e.target.files);e.target.value=""}} style={{display:"none"}}/>
-        <Bt v="secondary" onClick={function(){bulkRef.current&&bulkRef.current.click()}} style={{fontSize:11,padding:"10px 14px",background:"rgba(167,139,250,0.08)",color:T.purple,border:"1px solid rgba(167,139,250,0.2)"}}>📦 Importar em Massa</Bt>
+        {/* Input de PASTA — webkitdirectory + filtro de extensões em runtime já que o atributo não filtra */}
+        <input ref={bulkFolderRef} type="file" webkitdirectory="true" directory="true" multiple onChange={function(e){
+          if(e.target.files.length===0){e.target.value="";return}
+          /* Filtra só arquivos relevantes (XLSX, PDF, CSV) — pasta pode ter outros tipos */
+          var relevant=Array.from(e.target.files).filter(function(f){return /\.(xlsx|xls|pdf|csv)$/i.test(f.name)});
+          if(relevant.length===0){alert("Nenhum arquivo XLSX, PDF ou CSV encontrado na pasta selecionada.");e.target.value="";return}
+          if(relevant.length<e.target.files.length){
+            /* Avisa que filtrou */
+            sGMsg("📂 Pasta selecionada: "+relevant.length+" arquivos relevantes (de "+e.target.files.length+" totais)");
+          }
+          importGorilaBulk(relevant);
+          e.target.value="";
+        }} style={{display:"none"}}/>
+        {/* Dropdown wrapper */}
+        <div style={{position:"relative",display:"inline-block"}}>
+          <Bt v="secondary" onClick={function(){sShowBulkMenu(!showBulkMenu)}} style={{fontSize:11,padding:"10px 14px",background:"rgba(167,139,250,0.08)",color:T.purple,border:"1px solid rgba(167,139,250,0.2)"}}>📦 Importar em Massa ▾</Bt>
+          {showBulkMenu && (
+            <div style={{position:"absolute",top:"100%",left:0,marginTop:4,background:T.w1,border:"1px solid rgba(167,139,250,0.3)",borderRadius:8,boxShadow:"0 6px 20px rgba(0,0,0,0.4)",zIndex:100,minWidth:240,padding:6}}>
+              <div onClick={function(){sShowBulkMenu(false);bulkRef.current&&bulkRef.current.click()}} style={{padding:"10px 14px",cursor:"pointer",borderRadius:6,fontSize:11,color:T.t1,display:"flex",alignItems:"center",gap:10}} onMouseEnter={function(e){e.currentTarget.style.background="rgba(167,139,250,0.1)"}} onMouseLeave={function(e){e.currentTarget.style.background="transparent"}}>
+                <span style={{fontSize:14}}>📄</span>
+                <div>
+                  <div style={{fontWeight:700}}>Selecionar arquivos</div>
+                  <div style={{fontSize:9,color:T.t3,marginTop:2}}>Pega vários XLSX/PDF de uma vez</div>
+                </div>
+              </div>
+              <div onClick={function(){sShowBulkMenu(false);bulkFolderRef.current&&bulkFolderRef.current.click()}} style={{padding:"10px 14px",cursor:"pointer",borderRadius:6,fontSize:11,color:T.t1,display:"flex",alignItems:"center",gap:10}} onMouseEnter={function(e){e.currentTarget.style.background="rgba(167,139,250,0.1)"}} onMouseLeave={function(e){e.currentTarget.style.background="transparent"}}>
+                <span style={{fontSize:14}}>📂</span>
+                <div>
+                  <div style={{fontWeight:700}}>Selecionar pasta inteira</div>
+                  <div style={{fontSize:9,color:T.t3,marginTop:2}}>Importa todos os relatórios da pasta de Downloads</div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
         <input ref={vestRef} type="file" accept=".pdf,application/pdf" onChange={function(e){if(e.target.files[0])importVestPDF(e.target.files[0]);e.target.value=""}} style={{display:"none"}}/>
         <Bt v="secondary" onClick={function(){vestRef.current&&vestRef.current.click()}} style={{fontSize:11,padding:"10px 14px",background:"rgba(37,99,235,0.08)",color:"#2563EB",border:"1px solid rgba(37,99,235,0.25)"}}>🇺🇸 Importar Extrato Vest</Bt>
         <Bt v="secondary" onClick={function(){sShowAuditoria(true)}} style={{fontSize:11,padding:"10px 14px",background:"rgba(212,163,40,0.08)",color:T.gold,border:"1px solid rgba(212,163,40,0.25)"}}>🔍 Auditar Classificações</Bt>
@@ -4245,26 +4314,44 @@ function CL({data:d,onSel:os,dispatch:dp}){
       {bulkProgress && (
         <Cd style={{padding:14,marginBottom:12}} hov={false} glow>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-            <div style={{fontSize:12,fontWeight:700,color:T.purple}}>📦 Importação em Massa {bulkProgress.done?"— Concluída":"— Em andamento..."}</div>
-            <div style={{fontSize:12,fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{bulkProgress.current} / {bulkProgress.total}</div>
+            <div style={{fontSize:12,fontWeight:700,color:T.purple}}>
+              📦 Importação em Massa {bulkProgress.done?"— Concluída em "+bulkProgress.elapsedSec+"s":"— Em andamento..."}
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <div style={{fontSize:12,fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{bulkProgress.current} / {bulkProgress.total}</div>
+              {bulkProgress.done && (
+                <button onClick={function(){sBulkProgress(null)}} style={{background:"transparent",border:"1px solid "+T.t3,color:T.t3,fontSize:10,padding:"4px 10px",borderRadius:6,cursor:"pointer",fontWeight:700}}>Fechar</button>
+              )}
+            </div>
           </div>
           <div style={{height:6,background:"rgba(255,255,255,0.04)",borderRadius:3,marginBottom:10,overflow:"hidden"}}>
-            <div style={{height:"100%",width:(bulkProgress.current/bulkProgress.total*100)+"%",background:"linear-gradient(90deg,"+T.purple+","+T.gold+")",transition:"width 0.3s"}}/>
+            <div style={{height:"100%",width:(bulkProgress.current/bulkProgress.total*100)+"%",background:bulkProgress.done?T.green:"linear-gradient(90deg,"+T.purple+","+T.gold+")",transition:"width 0.3s"}}/>
           </div>
-          {bulkProgress.nome && !bulkProgress.done && <div style={{fontSize:10,color:T.t3,marginBottom:8}}>Processando: <strong style={{color:T.t1}}>{bulkProgress.nome}</strong></div>}
+          {!bulkProgress.done && bulkProgress.nome && (
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,fontSize:10,color:T.t3}}>
+              <div>📋 Processando: <strong style={{color:T.t1}}>{bulkProgress.nome}</strong>{bulkProgress.filename && bulkProgress.filename!==bulkProgress.nome && <span style={{color:T.t3,fontSize:9,marginLeft:6}}>({bulkProgress.filename})</span>}</div>
+              {bulkProgress.remainingSec>0 && <div style={{color:T.gold,fontFamily:"'JetBrains Mono'",fontWeight:700}}>≈ {bulkProgress.remainingSec}s restantes</div>}
+            </div>
+          )}
+          {bulkProgress.done && bulkProgress.results.ok.length>0 && (
+            <div style={{padding:8,background:T.greenD,borderRadius:6,marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{fontSize:11,color:T.green,fontWeight:700}}>💰 Total importado:</div>
+              <div style={{fontSize:13,color:T.green,fontWeight:800,fontFamily:"'JetBrains Mono'"}}>{fm(bulkProgress.results.ok.reduce(function(s,r){return s+(r.pat||0)},0))}</div>
+            </div>
+          )}
           {bulkProgress.results && (bulkProgress.results.ok.length>0||bulkProgress.results.fail.length>0) && (
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:6}}>
+            <div style={{display:"grid",gridTemplateColumns:bulkProgress.results.fail.length>0?"1fr 1fr":"1fr",gap:10,marginTop:6}}>
               <div style={{padding:8,background:T.greenD,borderRadius:6}}>
                 <div style={{fontSize:10,fontWeight:700,color:T.green,marginBottom:4}}>✅ Sucesso ({bulkProgress.results.ok.length})</div>
-                <div style={{maxHeight:120,overflow:"auto"}}>
-                  {bulkProgress.results.ok.map(function(r,i){return <div key={i} style={{fontSize:9,color:T.t2,marginBottom:2,display:"flex",justifyContent:"space-between"}}><span>{r.nome}</span><span style={{color:T.green,fontFamily:"'JetBrains Mono'",fontWeight:700}}>{fm(r.pat)}</span></div>})}
+                <div style={{maxHeight:140,overflow:"auto"}}>
+                  {bulkProgress.results.ok.map(function(r,i){return <div key={i} style={{fontSize:9,color:T.t2,marginBottom:2,display:"flex",justifyContent:"space-between",gap:6}}><span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.nome}</span><span style={{color:T.green,fontFamily:"'JetBrains Mono'",fontWeight:700}}>{fm(r.pat)}</span></div>})}
                 </div>
               </div>
               {bulkProgress.results.fail.length>0 && (
                 <div style={{padding:8,background:T.redD,borderRadius:6}}>
                   <div style={{fontSize:10,fontWeight:700,color:T.red,marginBottom:4}}>⚠ Falhas ({bulkProgress.results.fail.length})</div>
-                  <div style={{maxHeight:120,overflow:"auto"}}>
-                    {bulkProgress.results.fail.map(function(r,i){return <div key={i} style={{fontSize:9,color:T.t2,marginBottom:2}}><span style={{color:T.red,fontWeight:600}}>{r.nome}:</span> {r.err}</div>})}
+                  <div style={{maxHeight:140,overflow:"auto"}}>
+                    {bulkProgress.results.fail.map(function(r,i){return <div key={i} style={{fontSize:9,color:T.t2,marginBottom:3,paddingBottom:3,borderBottom:i<bulkProgress.results.fail.length-1?"1px solid rgba(239,100,97,0.15)":"none"}}><div style={{color:T.red,fontWeight:700}}>{r.nome}</div><div style={{color:T.t3,fontSize:8,marginTop:1}}>{r.filename}</div><div style={{color:T.t2,fontSize:9,marginTop:2}}>{r.err}</div></div>})}
                   </div>
                 </div>
               )}
@@ -6030,8 +6117,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       +'*{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}'
       +'html,body{background:#0A1628;color:#1a1a2e;font-family:"Outfit",sans-serif;-webkit-font-smoothing:antialiased;font-size:12px;line-height:1.55}'
       
-      +'.cv-page{position:relative;width:210mm;min-height:297mm;padding:18mm 18mm 14mm;overflow:visible;page-break-after:always}'
+      +'.cv-page{position:relative;width:210mm;min-height:297mm;padding:18mm 18mm 14mm;overflow:hidden;page-break-after:always}'
       +'.cv-page:last-child{page-break-after:auto}'
+      +'.cv-page-composicao{overflow:visible!important;min-height:unset!important;height:auto!important;page-break-after:auto!important;break-after:auto!important}'
       +'.cv-page-light{background:linear-gradient(180deg,#FAFBFD 0%,#F1F3F8 100%);color:#1a1a2e}'
       +'.cv-page-dark{background:radial-gradient(ellipse 80% 60% at 80% 20%,rgba(212,163,40,0.25) 0%,transparent 50%),radial-gradient(ellipse 60% 50% at 10% 90%,rgba(56,128,220,0.12) 0%,transparent 50%),linear-gradient(135deg,#060E1F 0%,#0C1A33 40%,#142B52 100%);color:#fff}'
       +'.cv-bg-pattern{pointer-events:none;z-index:0;position:absolute}'
@@ -8315,8 +8403,12 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       var pagesHtml='';
       bodyPages.forEach(function(pg,i){
         var isComposicao=pg.indexOf('Composição')>=0&&pg.indexOf('Detalhada')>=0;
-        var pgStyle=isComposicao?'padding:10mm 14mm 8mm':'';
-        pagesHtml+='<div class="cv-page cv-page-light" style="'+pgStyle+'">'
+        /* Composição Detalhada: remove overflow:hidden e min-height fixo para a tabela crescer
+           além de uma página. Usa break-inside:auto para permitir quebra natural entre linhas. */
+        var pgStyle=isComposicao
+          ?'padding:10mm 14mm 8mm;overflow:visible;min-height:unset;height:auto;page-break-after:auto;break-after:auto'
+          :'';
+        pagesHtml+='<div class="cv-page cv-page-light'+(isComposicao?" cv-page-composicao":"")+'" style="'+pgStyle+'">'
           +miniHdr
           +pg
           +miniFtr(3+i,totalPgs)
@@ -9523,7 +9615,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       +'.end-meta-l{font-size:9px;color:#D4A328;font-weight:800;letter-spacing:2.5px;margin-bottom:5px}'
       +'.end-meta-v{font-size:13px;color:#fff;font-weight:600}'
       +'.end-footer{margin-top:auto;padding-top:18px;border-top:1px solid rgba(212,163,40,0.18);font-size:9px;color:#4A5F82;letter-spacing:1.5px;text-align:center}'
-      +'@media print{body{background:#fff}.page{margin:0;box-shadow:none}}';
+      +'@media print{body{background:#fff}.page{margin:0;box-shadow:none}.cv-page-composicao{overflow:visible!important;min-height:unset!important;height:auto!important;page-break-inside:auto!important;break-inside:auto!important}.cv-page-composicao table{page-break-inside:auto!important;break-inside:auto!important}.cv-page-composicao tr{page-break-inside:avoid!important;break-inside:avoid!important}}';
 
     var fontLink='<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">';
 
@@ -23915,7 +24007,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '255';
+  var SW_VERSION = '257';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
