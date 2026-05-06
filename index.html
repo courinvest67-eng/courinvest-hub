@@ -7122,6 +7122,64 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
         body+='<div class="empty">Sem dados de alocação.</div>';
       }
 
+      /* ===== SEGUNDO DONUT — por macro-classe (RF / RV / Exterior / Caixa) ===== */
+      if(totalAlloc>0){
+        var MACRO_COR={rf:'#38BDF8',rv:'#2DD4A0',ext:'#A78BFA',prev:'#F472B6',caixa:'#FBBF24',cripto:'#F59E0B',outros:'#94A3B8'};
+        var MACRO_LBL2={rf:'Renda Fixa',rv:'Renda Variável',ext:'Exterior',prev:'Previdência',caixa:'Caixa',cripto:'Cripto',outros:'Outros'};
+        var macroTot={};
+        enr.forEach(function(a){
+          var mk=TP_MACRO[a.tp]||'outros';
+          if(!macroTot[mk])macroTot[mk]=0;
+          macroTot[mk]+=a.vA;
+        });
+        var macroEntries=Object.entries(macroTot).filter(function(e){return e[1]>0}).sort(function(a,b){return b[1]-a[1]});
+        if(macroEntries.length>0){
+          var d2Sz=180,d2R=d2Sz/2-8,d2IR=d2R*0.58,d2Cx=d2Sz/2;
+          var d2cum=0;
+          var d2svg='<svg width="'+d2Sz+'" height="'+d2Sz+'" viewBox="0 0 '+d2Sz+' '+d2Sz+'" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0">';
+          macroEntries.forEach(function(e){
+            var mk=e[0],v=e[1];
+            var col=MACRO_COR[mk]||'#94A3B8';
+            var p=v/totalAlloc;
+            var sa=d2cum*2*Math.PI-Math.PI/2; d2cum+=p; var ea=d2cum*2*Math.PI-Math.PI/2;
+            var la=p>0.5?1:0;
+            var x1=d2Cx+d2R*Math.cos(sa),y1=d2Cx+d2R*Math.sin(sa);
+            var x2=d2Cx+d2R*Math.cos(ea),y2=d2Cx+d2R*Math.sin(ea);
+            var ix1=d2Cx+d2IR*Math.cos(ea),iy1=d2Cx+d2IR*Math.sin(ea);
+            var ix2=d2Cx+d2IR*Math.cos(sa),iy2=d2Cx+d2IR*Math.sin(sa);
+            if(p>=0.999){d2svg+='<circle cx="'+d2Cx+'" cy="'+d2Cx+'" r="'+d2R+'" fill="'+col+'"/><circle cx="'+d2Cx+'" cy="'+d2Cx+'" r="'+d2IR+'" fill="#fff"/>';}
+            else{d2svg+='<path d="M '+x1+' '+y1+' A '+d2R+' '+d2R+' 0 '+la+' 1 '+x2+' '+y2+' L '+ix1+' '+iy1+' A '+d2IR+' '+d2IR+' 0 '+la+' 0 '+ix2+' '+iy2+' Z" fill="'+col+'" opacity=".92" stroke="#fff" stroke-width="1.5"/>';}
+          });
+          d2svg+='<text x="'+d2Cx+'" y="'+(d2Cx+4)+'" text-anchor="middle" fill="#8B94A7" font-size="8" font-weight="700" letter-spacing="1" font-family="Outfit,sans-serif">'+macroEntries.length+' grupos</text>';
+          d2svg+='</svg>';
+          body+='<div style="margin-top:14px;padding:16px;background:#fff;border:1px solid rgba(212,163,40,0.18);border-radius:14px">';
+          body+='<div style="font-size:10px;color:#D4A328;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px">Distribuição por Macro-Classe</div>';
+          body+='<div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">';
+          body+='<div style="display:flex;justify-content:center;min-width:180px">'+d2svg+'</div>';
+          body+='<div style="flex:1;min-width:200px;display:flex;flex-direction:column;gap:6px">';
+          macroEntries.forEach(function(e){
+            var mk=e[0],v=e[1];
+            var col=MACRO_COR[mk]||'#94A3B8';
+            var lbl=MACRO_LBL2[mk]||mk;
+            var pct=totalAlloc>0?v/totalAlloc*100:0;
+            var barW=Math.max(2,pct);
+            body+='<div style="display:flex;align-items:center;gap:8px">';
+            body+='<div style="width:10px;height:10px;border-radius:3px;background:'+col+';flex-shrink:0"></div>';
+            body+='<div style="flex:1;min-width:0">';
+            body+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">';
+            body+='<span style="font-size:11px;font-weight:700;color:#1a1a2e">'+lbl+'</span>';
+            body+='<span style="font-size:11px;font-family:JetBrains Mono,monospace;font-weight:800;color:'+col+'">'+pct.toFixed(1)+'%</span>';
+            body+='</div>';
+            body+='<div style="height:5px;background:#F1F3F8;border-radius:3px;overflow:hidden">';
+            body+='<div style="width:'+barW+'%;height:100%;background:'+col+';border-radius:3px"></div>';
+            body+='</div>';
+            body+='<div style="font-size:9px;color:#8B94A7;margin-top:2px;font-family:JetBrains Mono,monospace">'+fmF(v)+'</div>';
+            body+='</div></div>';
+          });
+          body+='</div></div></div>';
+        }
+      }
+
       var ativosComPos=enr.filter(function(a){return a.vA>0});
       var rankedPer=ativosComPos.slice().sort(function(a,b){
         return getRentAtivoPer(b).pct - getRentAtivoPer(a).pct;
@@ -24027,7 +24085,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '260';
+  var SW_VERSION = '261';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
