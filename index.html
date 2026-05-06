@@ -460,7 +460,7 @@ const receitaTotalBRL=function(c){
 
 const SL={patrimonio:"Gestão de Patrimônio",planejamento:"Gestão Financeira",milhas:"Couri Mile$"};
 const SC={patrimonio:"gold",planejamento:"cyan",milhas:"purple"};
-const RC=r=>r==="Conservador"?"green":r==="Moderado"?"gold":"red";
+const RC=r=>r==="Conservador"?"green":r==="Conservador/Moderado"?"green":r==="Moderado"?"gold":r==="Moderado/Arrojado"?"orange":"red";
 
 /* === HELPERS DE DETECÇÃO DE DADOS DO CLIENTE ===
    Cards aparecem se há DADOS — não dependem do cadastro burocrático em c.sv.
@@ -2620,7 +2620,9 @@ function Dash({data:d,onSel:os,goTo}){
               {l:"GESTÃO FINANCEIRA",v:String(clFin.length),c:T.cyan},
               {l:"COURI MILE$",v:String(clMiles.length),c:T.purple},
               {l:"CONSERVADOR",v:String(cl.filter(c=>c.risco==="Conservador").length),c:T.green},
+              {l:"CONS/MOD",v:String(cl.filter(c=>c.risco==="Conservador/Moderado").length),c:T.green},
               {l:"MODERADO",v:String(cl.filter(c=>c.risco==="Moderado").length),c:T.gold},
+              {l:"MOD/ARROJ",v:String(cl.filter(c=>c.risco==="Moderado/Arrojado").length),c:T.orange},
               {l:"ARROJADO",v:String(cl.filter(c=>c.risco==="Arrojado").length),c:T.red},
             ].map((k,i)=>(
               <Cd key={i} style={{padding:"12px 14px"}} hov={false}><div style={{fontSize:7,color:T.t3,fontWeight:600,letterSpacing:.8}}>{k.l}</div><div style={{fontSize:18,fontWeight:800,color:k.c,marginTop:3}}>{k.v}</div></Cd>
@@ -3836,7 +3838,9 @@ function CL({data:d,onSel:os,dispatch:dp}){
           }
           else if(label==="risco"||label.indexOf("perfil de risco")>=0||label.indexOf("perfil")>=0){
             var v=String(rawVal||"").trim().toLowerCase();
-            if(v.indexOf("conserv")>=0)cfgRisco="Conservador";
+            if(v.indexOf("conservador/moderado")>=0||v.indexOf("conservador / moderado")>=0)cfgRisco="Conservador/Moderado";
+            else if(v.indexOf("moderado/arrojado")>=0||v.indexOf("moderado / arrojado")>=0)cfgRisco="Moderado/Arrojado";
+            else if(v.indexOf("conserv")>=0)cfgRisco="Conservador";
             else if(v.indexOf("modera")>=0)cfgRisco="Moderado";
             else if(v.indexOf("arroj")>=0||v.indexOf("agressi")>=0)cfgRisco="Arrojado";
           }
@@ -6314,9 +6318,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
     if(isDarkReport){
       
       var logoSvg='<svg class="logo-svg" width="160" height="41" viewBox="0 0 430 110" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="rpGdH" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#F0D060"/><stop offset="50%" stop-color="#D4A328"/><stop offset="100%" stop-color="#B8891A"/></linearGradient></defs><g transform="translate(10,5)"><circle cx="50" cy="50" r="46" stroke="url(#rpGdH)" stroke-width=".5" opacity=".15" fill="none"/><path d="M50 6 C18 6,6 26,6 50 C6 74,18 94,50 94" stroke="url(#rpGdH)" stroke-width="5" stroke-linecap="round" fill="none"/><path d="M50 18 C28 18,18 32,18 50 C18 68,28 82,50 82" stroke="url(#rpGdH)" stroke-width="4" stroke-linecap="round" fill="none" opacity=".7"/><circle cx="58" cy="50" r="4" fill="url(#rpGdH)"/></g><g transform="translate(130,45)"><text x="0" y="0" font-family="Outfit,sans-serif" font-size="32" font-weight="800" fill="#0A1628" letter-spacing="1">COURINVEST</text><text x="0" y="22" font-family="Outfit,sans-serif" font-size="10" font-weight="600" fill="#5a5a6e" letter-spacing="3.5">CONSULTORIA EM INVESTIMENTOS</text></g></svg>';
-      header='<div class="header"><div class="logo-mark">'+logoSvg+'</div><div class="client-info"><div class="client-name">'+c.nome+'</div><div class="client-contact">'+(c.email||"")+(c.tel?" • "+c.tel:"")+'</div><div style="margin-top:6px"><span class="badge badge-'+(c.risco==="Conservador"?"green":c.risco==="Moderado"?"gold":"red")+'">'+c.risco+'</span></div><div class="client-contact" style="margin-top:6px">'+hoje+'</div></div></div>';
+      header='<div class="header"><div class="logo-mark">'+logoSvg+'</div><div class="client-info"><div class="client-name">'+c.nome+'</div><div class="client-contact">'+(c.email||"")+(c.tel?" • "+c.tel:"")+'</div><div style="margin-top:6px"><span class="badge badge-'+(c.risco==="Conservador"?"green":c.risco==="Conservador/Moderado"?"green":c.risco==="Moderado"?"gold":c.risco==="Moderado/Arrojado"?"orange":"red")+'">'+c.risco+'</span></div><div class="client-contact" style="margin-top:6px">'+hoje+'</div></div></div>';
     }else{
-      header='<div class="header"><div class="logo-area"><div class="logo-text">COURINVEST</div><div class="logo-sub">CONSULTORIA EM INVESTIMENTOS</div></div><div class="client-info"><div class="client-name">'+c.nome+'</div><div>'+(c.email||"")+(c.tel?" • "+c.tel:"")+'</div><div>Perfil: <span class="badge badge-'+(c.risco==="Conservador"?"green":c.risco==="Moderado"?"gold":"red")+'">'+c.risco+'</span></div><div style="margin-top:4px">'+hoje+'</div></div></div>';
+      header='<div class="header"><div class="logo-area"><div class="logo-text">COURINVEST</div><div class="logo-sub">CONSULTORIA EM INVESTIMENTOS</div></div><div class="client-info"><div class="client-name">'+c.nome+'</div><div>'+(c.email||"")+(c.tel?" • "+c.tel:"")+'</div><div>Perfil: <span class="badge badge-'+(c.risco==="Conservador"?"green":c.risco==="Conservador/Moderado"?"green":c.risco==="Moderado"?"gold":c.risco==="Moderado/Arrojado"?"orange":"red")+'">'+c.risco+'</span></div><div style="margin-top:4px">'+hoje+'</div></div></div>';
     }
 
     var body='';
@@ -10579,7 +10583,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
               <div>
                 <div style={{fontSize:9,color:T.t3,fontWeight:600,marginBottom:3}}>RISCO</div>
                 <select value={c.risco} onChange={function(e){dp({t:"UC",p:{id:c.id,risco:e.target.value}})}} style={{width:"100%",padding:"6px 8px",background:T.w3,border:"1px solid "+T.bdrL,borderRadius:6,color:T.t1,fontSize:12,outline:"none"}}>
-                  <option>Conservador</option><option>Moderado</option><option>Arrojado</option>
+                  <option>Conservador</option><option>Conservador/Moderado</option><option>Moderado</option><option>Moderado/Arrojado</option><option>Arrojado</option>
                 </select>
               </div>
               <div>
@@ -14095,8 +14099,14 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
                         dp({t:"UC",p:{id:c.id,alvo:{...alvoSalvo,macro:{rf:70,rv:15,ext:5,caixa:5,prev:5}}}});
                       }} style={{fontSize:10,padding:"5px 10px"}}>Conservador</Bt>
                       <Bt v="secondary" onClick={function(){
+                        dp({t:"UC",p:{id:c.id,alvo:{...alvoSalvo,macro:{rf:60,rv:20,ext:10,caixa:5,prev:5}}}});
+                      }} style={{fontSize:10,padding:"5px 10px"}}>Cons/Mod</Bt>
+                      <Bt v="secondary" onClick={function(){
                         dp({t:"UC",p:{id:c.id,alvo:{...alvoSalvo,macro:{rf:50,rv:25,ext:15,caixa:5,prev:5}}}});
                       }} style={{fontSize:10,padding:"5px 10px"}}>Moderado</Bt>
+                      <Bt v="secondary" onClick={function(){
+                        dp({t:"UC",p:{id:c.id,alvo:{...alvoSalvo,macro:{rf:40,rv:30,ext:20,caixa:5,prev:5}}}});
+                      }} style={{fontSize:10,padding:"5px 10px"}}>Mod/Arroj</Bt>
                       <Bt v="secondary" onClick={function(){
                         dp({t:"UC",p:{id:c.id,alvo:{...alvoSalvo,macro:{rf:30,rv:35,ext:25,caixa:5,prev:5}}}});
                       }} style={{fontSize:10,padding:"5px 10px"}}>Arrojado</Bt>
@@ -22102,7 +22112,7 @@ function PropostasView({data,dispatch}){
                 <div>
                   <div style={{fontSize:10,color:T.t3,fontWeight:600,marginBottom:4}}>PERFIL DE RISCO</div>
                   <select value={form.perfilRisco} onChange={function(e){upF("perfilRisco",e.target.value)}} style={inpS}>
-                    <option>Conservador</option><option>Moderado</option><option>Arrojado</option>
+                    <option>Conservador</option><option>Conservador/Moderado</option><option>Moderado</option><option>Moderado/Arrojado</option><option>Arrojado</option>
                   </select>
                 </div>
                 <div>
@@ -24017,7 +24027,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '259';
+  var SW_VERSION = '260';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
