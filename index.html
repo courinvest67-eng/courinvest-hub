@@ -6243,7 +6243,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       +'.alloc-val{display:flex;align-items:center;gap:10px;font-family:"JetBrains Mono",monospace;font-weight:800;color:#D4A328}'
       +'.alloc-pct{color:#5a5a6e;font-size:10px;font-weight:600}'
       
-      +'table{width:100%;border-collapse:collapse;margin:12px 0;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(10,22,40,0.04)}'
+      +'table{width:100%;border-collapse:collapse;margin:12px 0;background:#fff;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}'
       +'th{background:linear-gradient(180deg,#F8F9FB 0%,#EEF1F6 100%);color:#5a5a6e;padding:10px 14px;text-align:left;font-size:9px;letter-spacing:1.2px;text-transform:uppercase;font-weight:800;border-bottom:2px solid rgba(212,163,40,0.18)}'
       +'td{padding:9px 14px;border-bottom:1px solid #F0F0F4;font-size:11px;color:#1a1a2e}'
       +'tr:last-child td{border-bottom:none}'
@@ -6303,7 +6303,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       +'.cv-divider{display:flex;align-items:center;justify-content:center;gap:14px;margin:36px 0;color:#D4A328}'
       +'.cv-divider-line{width:80px;height:1px;background:linear-gradient(90deg,transparent,#D4A328 50%,transparent)}'
       +'.cv-divider-mark{font-family:"Cormorant Garamond",serif;font-size:22px;font-weight:700;font-style:italic;color:#D4A328;opacity:0.7}'
-      +'@media print{html,body{background:#fff !important}.kpi-grid{grid-template-columns:repeat(4,1fr)}.section-title{page-break-after:avoid}table{page-break-inside:avoid}.rank-row,.event-item{page-break-inside:avoid}.cv-pullquote{page-break-inside:avoid}}<\/style>';
+      +'@media print{html,body{background:#fff !important}.kpi-grid{grid-template-columns:repeat(4,1fr)}.section-title{page-break-after:avoid}table{page-break-inside:auto;break-inside:auto}.rank-row,.event-item{page-break-inside:avoid}.cv-pullquote{page-break-inside:avoid}}<\/style>';
 
     var cssLight='<style>@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&display=swap");*{margin:0;padding:0;box-sizing:border-box}body{font-family:"Outfit",sans-serif;color:#1A1A2E;background:#fff;padding:0}@media print{body{padding:0}}.page{max-width:800px;margin:0 auto;padding:40px}.header{display:flex;justify-content:space-between;align-items:center;padding-bottom:20px;border-bottom:3px solid #D4A328;margin-bottom:30px}.logo-area{}.logo-text{font-size:28px;font-weight:900;color:#D4A328;letter-spacing:2px}.logo-sub{font-size:10px;color:#888;letter-spacing:4px}.client-info{text-align:right;font-size:12px;color:#666}.client-name{font-size:18px;font-weight:700;color:#1A1A2E}h2{font-size:18px;color:#D4A328;margin:25px 0 12px;padding-bottom:6px;border-bottom:2px solid #F0D060}.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:15px 0}.kpi{background:#f8f6f0;padding:16px;border-radius:12px;text-align:center}.kpi-label{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:1px}.kpi-value{font-size:24px;font-weight:800;color:#1A1A2E;margin-top:4px}.kpi-value.gold{color:#D4A328}.kpi-value.green{color:#2DD4A0}.kpi-value.red{color:#EF6461}table{width:100%;border-collapse:collapse;margin:12px 0}th{background:#1A1A2E;color:#D4A328;padding:10px 12px;text-align:left;font-size:11px;letter-spacing:.5px}td{padding:10px 12px;border-bottom:1px solid #eee;font-size:12px}.footer{margin-top:40px;padding-top:15px;border-top:2px solid #D4A328;font-size:10px;color:#999;text-align:center}.badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:10px;font-weight:600}.badge-green{background:#e6f9f0;color:#2DD4A0}.badge-gold{background:#fef9e7;color:#D4A328}.badge-red{background:#fde8e8;color:#EF6461}.nota{padding:12px;background:#fef9e7;border-radius:8px;border-left:4px solid #D4A328;font-size:11px;color:#666;margin:12px 0;line-height:1.6}<\/style>';
 
@@ -8409,9 +8409,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
           ?'padding:10mm 14mm 8mm;overflow:visible;min-height:unset;height:auto;page-break-after:auto;break-after:auto'
           :'';
         if(isComposicao){
-          /* Composição Detalhada: NÃO usa cv-page para não herdar overflow:hidden
-             nem page-break-after:always. Flui naturalmente em quantas páginas precisar. */
-          pagesHtml+='<div style="width:210mm;padding:10mm 14mm 8mm;background:linear-gradient(180deg,#FAFBFD 0%,#F1F3F8 100%);color:#1a1a2e;position:relative;page-break-before:always;break-before:page">'
+          /* Composição Detalhada: div totalmente simples, sem gradiente, sem overflow:hidden,
+             sem height fixa. Background branco puro para máxima compatibilidade com Adobe/Chrome print. */
+          pagesHtml+='<div style="width:210mm;padding:10mm 14mm 8mm;background:#ffffff;color:#1a1a2e;page-break-before:always;break-before:page;page-break-after:auto;break-after:auto">'
             +miniHdr
             +pg
             +miniFtr(3+i,totalPgs)
@@ -24017,7 +24017,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '258';
+  var SW_VERSION = '259';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
