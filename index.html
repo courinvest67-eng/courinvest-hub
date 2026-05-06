@@ -8408,11 +8408,21 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
         var pgStyle=isComposicao
           ?'padding:10mm 14mm 8mm;overflow:visible;min-height:unset;height:auto;page-break-after:auto;break-after:auto'
           :'';
-        pagesHtml+='<div class="cv-page cv-page-light'+(isComposicao?" cv-page-composicao":"")+'" style="'+pgStyle+'">'
-          +miniHdr
-          +pg
-          +miniFtr(3+i,totalPgs)
-          +'</div>';
+        if(isComposicao){
+          /* Composição Detalhada: NÃO usa cv-page para não herdar overflow:hidden
+             nem page-break-after:always. Flui naturalmente em quantas páginas precisar. */
+          pagesHtml+='<div style="width:210mm;padding:10mm 14mm 8mm;background:linear-gradient(180deg,#FAFBFD 0%,#F1F3F8 100%);color:#1a1a2e;position:relative;page-break-before:always;break-before:page">'
+            +miniHdr
+            +pg
+            +miniFtr(3+i,totalPgs)
+            +'</div>';
+        }else{
+          pagesHtml+='<div class="cv-page cv-page-light" style="'+pgStyle+'">'
+            +miniHdr
+            +pg
+            +miniFtr(3+i,totalPgs)
+            +'</div>';
+        }
       });
       
       pagesHtml=pagesHtml.replace(/<\/div>$/,         '<div class="footer" style="margin-top:24px">'        +'<strong>Courinvest Consultoria em Investimentos</strong>'        +'<div class="disclaimer">Este relatório é informativo e não constitui recomendação de investimento. '        +'Rentabilidades passadas não garantem resultados futuros.</div>'        +'</div></div>');
@@ -24007,7 +24017,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '257';
+  var SW_VERSION = '258';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
