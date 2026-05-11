@@ -452,9 +452,12 @@ const feeBaseDoCliente=function(c){
 const receitaTotalBRL=function(c){
   if(!c)return 0;
   var total=0;
-  if(c.sv && c.sv.includes("patrimonio")) total+=feeBaseDoCliente(c).fee; 
+  /* Se o fee foi ajustado manualmente (pixValorOverride), ele é o fee real cobrado — usa ele */
+  var override=(c.particularidades&&c.particularidades.relatorio&&c.particularidades.relatorio.pixValorOverride)||0;
+  if(c.sv && c.sv.includes("patrimonio")){
+    total+=override>0?override:feeBaseDoCliente(c).fee;
+  }
   if(c.sv && c.sv.includes("planejamento")) total+=feeMensalBRL(c);
-  
   return total;
 };
 
@@ -3600,9 +3603,10 @@ function CL({data:d,onSel:os,dispatch:dp}){
         }
         if(!accountName){sGMsg("⚠ Não consegui ler o Account Name do PDF Vest");return}
         /* Cálculo da rentabilidade USD do mês.
-           Fórmula: rent = (Ending − Beginning − Deposits + Withdrawals − Other) / Beginning
-           "Other" no extrato Vest costuma ser saídas (negativo), então subtrai pra isolar performance. */
-        var rentUSD=ending-beginning-deposits+Math.abs(withdrawals)-other;
+           Usa diretamente o "Net Change in Portfolio Value" do extrato Vest,
+           que já representa a performance real dos ativos (excluindo aportes/retiradas).
+           Fallback: fórmula manual se netChange não estiver disponível. */
+        var rentUSD=(netChange!==0&&isFinite(netChange))?netChange:(ending-beginning-deposits+Math.abs(withdrawals)-other);
         var rentPct=beginning>0?(rentUSD/beginning):null;
         if(beginning<=0||!isFinite(rentPct)){
           sGMsg("⚠ Não consegui calcular rentabilidade — Beginning Value inválido");
@@ -5715,7 +5719,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
     return patTit; 
   })();
   /* receitaCliente em BRL — converte fee em moeda estrangeira (Sara €100 → R$ 550) */
-  const receitaCliente=(function(){var feeGP=c.sv.includes("patrimonio")?feeBaseDoCliente(c).fee:0;return feeGP+feeMensalBRL(c)+0;})();
+  const receitaCliente=(function(){var _ov=(c.particularidades&&c.particularidades.relatorio&&c.particularidades.relatorio.pixValorOverride)||0;var feeGP=c.sv.includes("patrimonio")?(_ov>0?_ov:feeBaseDoCliente(c).fee):0;return feeGP+feeMensalBRL(c)+0;})();
 
   /* ========================================================================
      gerarRelatorioIRPF — produz HTML completo do Guia de Declaração IRPF
