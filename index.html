@@ -9844,7 +9844,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
                 var ehEstrangeira=moedaFee!=="BRL";
                 
                 var receitaNativa=0;
-                if(c.sv.includes("patrimonio")) receitaNativa+=(c.patGorila||c.pat||0)*(c.txGestao||0)/100; 
+                if(c.sv.includes("patrimonio")) receitaNativa+=receitaCliente;
                 if(c.sv.includes("planejamento")) receitaNativa+=(c.feeFixo||0); 
                 
                 
