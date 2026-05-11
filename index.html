@@ -1004,14 +1004,18 @@ function gerarNotificacoesReais(d){
     if(isNaN(fbMes)||isNaN(fbAno))return;
     if(fbAno<100)fbAno+=2000;
     var dtReaj=new Date(hoje.getFullYear(),fbMes-1,1);
-    if(dtReaj<=hoje)dtReaj=new Date(hoje.getFullYear()+1,fbMes-1,1);
-    var dias=diasEntre(hoje,dtReaj);
-    if(dias>90)return;
+    var atrasado=false;
+    if(dtReaj<=hoje){
+      atrasado=true;
+      /* já passou — notifica como atrasado em vez de empurrar pro próximo ano */
+    }
+    var dias=atrasado?0:diasEntre(hoje,dtReaj);
+    if(!atrasado && dias>90)return;
     var feeNovo=Math.round(c.feeFixo*(1+_ipcaGlobal/100));
     var ganho=feeNovo-c.feeFixo;
     var primeiroNome=String(c.nome||"").split(" ")[0];
-    var ic=dias<=15?"🔴":dias<=30?"🟠":"📈";
-    var labelDias=dias===0?"hoje":dias===1?"amanhã":"em "+dias+"d";
+    var ic=atrasado?"🔴":dias<=15?"🔴":dias<=30?"🟠":"📈";
+    var labelDias=atrasado?"⚠️ ATRASADO":dias===0?"hoje":dias===1?"amanhã":"em "+dias+"d";
     nots.push({
       id:"reaj_"+idCounter++,
       msg:"Reajuste IPCA de "+primeiroNome+" vence "+labelDias+" · "+
