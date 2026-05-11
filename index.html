@@ -999,6 +999,10 @@ function gerarNotificacoesReais(d){
   var _ipcaGlobal=(d&&d.config&&d.config.ipcaAcum12m)||4.31;
   d.cl.forEach(function(c){
     if(!c.sv||!c.sv.includes("planejamento")||!c.feeBase||!c.feeFixo||c.feeFixo<=0)return;
+    /* Se já foi marcado como feito este ano/ciclo, não notifica */
+    var reajFeito=(c.particularidades&&c.particularidades.reajusteStatus==="feito");
+    var reajData=c.particularidades&&c.particularidades.reajusteData;
+    if(reajFeito&&reajData){var rdAnno=new Date(reajData).getFullYear();if(rdAnno>=hoje.getFullYear())return;}
     var fb=String(c.feeBase||"").trim().split("/");
     var fbMes=parseInt(fb[0]),fbAno=parseInt(fb[1]);
     if(isNaN(fbMes)||isNaN(fbAno))return;
@@ -24008,7 +24012,7 @@ function App({authUser}){
                     )}
                     {n.tipo==="reajuste_ipca"&&reajCli&&(
                       <div style={{display:"flex",gap:6,marginTop:8}}>
-                        <button onClick={function(e){e.stopPropagation();dp({t:"UC",p:{id:n.cliId,particularidades:Object.assign({},reajCli.particularidades||{},{reajusteStatus:"feito",reajusteData:new Date().toISOString().slice(0,10)})}})}} style={{padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid rgba(15,157,88,0.4)",background:reajStatus==="feito"?"rgba(15,157,88,0.2)":"transparent",color:T.green}}>✅ {reajStatus==="feito"?"Feito":"Marcar feito"}</button>
+                        <button onClick={function(e){e.stopPropagation();var novoFee=n._reajuste?n._reajuste.feeSugerido:null;var fb=String(reajCli.feeBase||"").split("/");var novaBase=fb.length===2?(fb[0]+"/"+(parseInt(fb[1])+1)):reajCli.feeBase;dp({t:"UC",p:{id:n.cliId,feeFixo:novoFee||reajCli.feeFixo,feeBase:novaBase,particularidades:Object.assign({},reajCli.particularidades||{},{reajusteStatus:"feito",reajusteData:new Date().toISOString().slice(0,10)})}})}} style={{padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid rgba(15,157,88,0.4)",background:reajStatus==="feito"?"rgba(15,157,88,0.2)":"transparent",color:T.green}}>✅ {reajStatus==="feito"?"Feito":"Marcar feito"}</button>
                         <button onClick={function(e){e.stopPropagation();dp({t:"UC",p:{id:n.cliId,particularidades:Object.assign({},reajCli.particularidades||{},{reajusteStatus:"pendente",reajusteData:null})}})}} style={{padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid rgba(239,100,97,0.4)",background:reajStatus==="pendente"?"rgba(239,100,97,0.15)":"transparent",color:T.red}}>⏳ {reajStatus==="pendente"?"Pendente":"Marcar pendente"}</button>
                       </div>
                     )}
