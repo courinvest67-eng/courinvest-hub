@@ -1003,13 +1003,11 @@ function gerarNotificacoesReais(d){
     var fbMes=parseInt(fb[0]),fbAno=parseInt(fb[1]);
     if(isNaN(fbMes)||isNaN(fbAno))return;
     if(fbAno<100)fbAno+=2000;
+    /* dtReaj = próximo aniversário anual do contrato a partir de hoje */
     var dtReaj=new Date(hoje.getFullYear(),fbMes-1,1);
-    var atrasado=false;
-    if(dtReaj<=hoje){
-      atrasado=true;
-      /* já passou — notifica como atrasado em vez de empurrar pro próximo ano */
-    }
-    var dias=atrasado?0:diasEntre(hoje,dtReaj);
+    if(dtReaj<hoje) dtReaj=new Date(hoje.getFullYear()+1,fbMes-1,1);
+    var atrasado=(dtReaj.getFullYear()===hoje.getFullYear()&&dtReaj.getMonth()===hoje.getMonth()&&hoje.getDate()>1)||dtReaj<hoje;
+    var dias=diasEntre(hoje,dtReaj);
     if(!atrasado && dias>90)return;
     var feeNovo=Math.round(c.feeFixo*(1+_ipcaGlobal/100));
     var ganho=feeNovo-c.feeFixo;
