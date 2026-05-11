@@ -7930,7 +7930,16 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
           body+="<div style=\"display:flex;align-items:center;gap:10px;background:#fff;border:1px solid rgba(212,163,40,0.25);border-radius:8px;padding:12px 16px;margin-bottom:14px\"><span style=\"font-size:22px\">⚡</span><div><div style=\"font-size:12px;color:#0A1628;font-weight:700;font-family:JetBrains Mono,monospace\">"+(_pk.length>35?_pk.substring(0,35)+"…":_pk)+"</div><div style=\"font-size:9px;color:#6B7489;margin-top:3px\">Chave PIX · COURINVEST</div></div></div>";
           body+="<div style=\"background:#fff;border:2px solid rgba(15,157,88,0.3);border-radius:10px;padding:16px 20px;display:inline-block\"><div style=\"font-size:9px;color:#6B7489;font-weight:700;letter-spacing:1px;margin-bottom:4px\">Valor a transferir</div><div style=\"font-size:30px;font-weight:900;color:#0F9D58;font-family:JetBrains Mono,monospace\">"+fmF(_taxa2)+"</div></div>";
           body+="</div>";
-          body+="<div style=\"flex:1;min-width:160px;background:#F8F9FB;border-radius:10px;padding:16px 18px;font-size:11px;color:#5a5a6e;line-height:1.8\"><div style=\"font-size:9px;color:#D4A328;font-weight:800;letter-spacing:1.5px;margin-bottom:8px\">MEMÓRIA DE CÁLCULO</div><div>RV+Exterior: <strong>"+fmF(_patRV2)+"</strong></div><div>× Taxa: <strong>"+(c.txGestao||0).toFixed(3)+"% a.m.</strong></div><div style=\"border-top:1px solid #e0e0e8;margin:8px 0;padding-top:8px;color:#0A1628;font-weight:700\">= "+fmF(_taxa2)+"</div>"+(_rp2.pixValorOverride>0?"<div style=\"font-size:9px;color:#D4A328\">⚠️ Ajustado manualmente</div>":"")+"<div style=\"font-size:9px;color:#6B7489;margin-top:6px;font-style:italic\">RF, Caixa e Cripto não entram na base.</div></div>";
+          var _excLines=[];
+          if(_feeCalc.exclReserva>0)_excLines.push("🛡️ Reserva de Emergência: −"+fmF(_feeCalc.exclReserva));
+          if(_feeCalc.exclHolding>0)_excLines.push("🏢 Holding: −"+fmF(_feeCalc.exclHolding));
+          if(_feeCalc.exclPrev>0)_excLines.push("📦 Previdência: −"+fmF(_feeCalc.exclPrev));
+          if(_feeCalc.exclRF>0)_excLines.push("📄 Renda Fixa: −"+fmF(_feeCalc.exclRF));
+          if(_feeCalc.exclCaixa>0)_excLines.push("💵 Caixa: −"+fmF(_feeCalc.exclCaixa));
+          if(_feeCalc.exclCripto>0)_excLines.push("₿ Cripto: −"+fmF(_feeCalc.exclCripto));
+          if(_feeCalc.valorFixo>0)_excLines.push("✂️ Dedução fixa: −"+fmF(_feeCalc.valorFixo));
+          var _excNota=_excLines.length>0?_excLines.join("<br>"):"Sem exclusões — patrimônio total na base.";
+          body+="<div style=\"flex:1;min-width:160px;background:#F8F9FB;border-radius:10px;padding:16px 18px;font-size:11px;color:#5a5a6e;line-height:1.8\"><div style=\"font-size:9px;color:#D4A328;font-weight:800;letter-spacing:1.5px;margin-bottom:8px\">MEMÓRIA DE CÁLCULO</div><div>Patrimônio total: <strong>"+fmF(_feeCalc.patTotal)+"</strong></div>"+(_excLines.length>0?"<div style=\"font-size:9px;color:#6B7489;margin:4px 0 2px;font-style:italic\">Exclusões:<br>"+_excNota+"</div>":"")+"<div>Base de cálculo: <strong>"+fmF(_patRV2)+"</strong></div><div>× Taxa: <strong>"+(c.txGestao||0).toFixed(3)+"% a.m.</strong></div><div style=\"border-top:1px solid #e0e0e8;margin:8px 0;padding-top:8px;color:#0A1628;font-weight:700\">= "+fmF(_taxa2)+"</div>"+(_rp2.pixValorOverride>0?"<div style=\"font-size:9px;color:#D4A328\">⚠️ Ajustado manualmente</div>":"")+"</div>";
           body+="</div></div></div>";
         }
       }
