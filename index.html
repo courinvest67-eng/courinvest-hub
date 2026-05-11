@@ -457,7 +457,7 @@ const receitaTotalBRL=function(c){
   if(c.sv && c.sv.includes("patrimonio")){
     total+=override>0?override:feeBaseDoCliente(c).fee;
   }
-  if(c.sv && c.sv.includes("planejamento")) total+=feeMensalBRL(c);
+  if(c.sv && c.sv.includes("planejamento") && !c.sv.includes("patrimonio")) total+=feeMensalBRL(c);
   return total;
 };
 
@@ -5719,7 +5719,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
     return patTit; 
   })();
   /* receitaCliente em BRL — converte fee em moeda estrangeira (Sara €100 → R$ 550) */
-  const receitaCliente=(function(){var _ov=(c.particularidades&&c.particularidades.relatorio&&c.particularidades.relatorio.pixValorOverride)||0;var feeGP=c.sv.includes("patrimonio")?(_ov>0?_ov:feeBaseDoCliente(c).fee):0;return feeGP+feeMensalBRL(c)+0;})();
+  const receitaCliente=(function(){var _ov=(c.particularidades&&c.particularidades.relatorio&&c.particularidades.relatorio.pixValorOverride)||0;var feeGP=c.sv.includes("patrimonio")?(_ov>0?_ov:feeBaseDoCliente(c).fee):0;var feePlan=(!c.sv.includes("patrimonio")&&c.sv.includes("planejamento"))?feeMensalBRL(c):0;return feeGP+feePlan;})();
 
   /* ========================================================================
      gerarRelatorioIRPF — produz HTML completo do Guia de Declaração IRPF
