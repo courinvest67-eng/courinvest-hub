@@ -4269,49 +4269,8 @@ function CL({data:d,onSel:os,dispatch:dp}){
         </div>
         <input ref={vestRef} type="file" accept=".pdf,application/pdf" onChange={function(e){if(e.target.files[0])importVestPDF(e.target.files[0]);e.target.value=""}} style={{display:"none"}}/>
         <Bt v="secondary" onClick={function(){vestRef.current&&vestRef.current.click()}} style={{fontSize:11,padding:"10px 14px",background:"rgba(37,99,235,0.08)",color:"#2563EB",border:"1px solid rgba(37,99,235,0.25)"}}>🇺🇸 Importar Extrato Vest</Bt>
-        <Bt v="secondary" onClick={function(){sShowAuditoria(true)}} style={{fontSize:11,padding:"10px 14px",background:"rgba(212,163,40,0.08)",color:T.gold,border:"1px solid rgba(212,163,40,0.25)"}}>🔍 Auditar Classificações</Bt>
-        <Bt v="secondary" onClick={function(){
-          var yara=(d.cl||[]).find(function(c){return (c.nome||'').toLowerCase().includes('yara')});
-          if(!yara){alert('Yara não encontrada');return}
-          window.__yara=yara;
-          var lines=[];
-          lines.push('=== YARA ===');
-          lines.push('_gorilaRent.dataIni: '+(yara._gorilaRent&&yara._gorilaRent.dataIni));
-          lines.push('_gorilaRent.dataFim: '+(yara._gorilaRent&&yara._gorilaRent.dataFim));
-          lines.push('_gorilaRent.resultado: '+(yara._gorilaRent&&yara._gorilaRent.resultado));
-          lines.push('');
-          ['PLURAL','RENDA+','LFT','NTNB','INTER HEDGE'].forEach(function(n){
-            var a=(yara._ativosImport||[]).find(function(x){return ((x.nm||x.tk||'').toUpperCase().includes(n))});
-            if(!a){lines.push('--- '+n+' NÃO ENCONTRADO ---');return}
-            lines.push('--- '+n+' ---');
-            lines.push('  nm: '+a.nm);
-            lines.push('  tp: '+a.tp);
-            lines.push('  posR: '+a.posR);
-            lines.push('  _gClasse: '+a._gClasse);
-            lines.push('  _gSubCl: '+a._gSubCl);
-            lines.push('  _gRentPct (cada chave em linha):');
-            if(a._gRentPct){
-              Object.keys(a._gRentPct).forEach(function(k){
-                lines.push('    ['+k+'] = '+a._gRentPct[k]);
-              });
-            }else{
-              lines.push('    (vazio)');
-            }
-            lines.push('  _gRentRs (cada chave em linha):');
-            if(a._gRentRs){
-              Object.keys(a._gRentRs).forEach(function(k){
-                lines.push('    ['+k+'] = '+a._gRentRs[k]);
-              });
-            }else{
-              lines.push('    (vazio)');
-            }
-            lines.push('');
-          });
-          var txt=lines.join('\n');
-          var w=window.open('','_blank','width=900,height=700');
-          w.document.write('<pre style="font-family:monospace;font-size:12px;padding:20px;background:#0a1628;color:#fff;line-height:1.6;">'+txt.replace(/</g,'&lt;')+'</pre>');
-          console.log('window.__yara salvo');
-        }} style={{fontSize:11,padding:"10px 14px",background:"rgba(239,100,97,0.08)",color:T.red,border:"1px solid rgba(239,100,97,0.25)"}}>🐛 Debug Yara</Bt>
+
+
       </div>
 
       {}
@@ -4432,7 +4391,7 @@ function CL({data:d,onSel:os,dispatch:dp}){
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>
         {fl.map(c=>(
-          <Cd key={c.id} onClick={()=>os(c)} style={{padding:22,position:"relative"}}>
+          <Cd key={c.id} onClick={()=>os(c)} style={{padding:22,position:"relative",...((c.pais&&c.pais!=="BR")?{borderColor:"rgba(99,179,237,0.4)",boxShadow:"0 0 0 1px rgba(99,179,237,0.15), 0 4px 24px rgba(0,0,0,0.3)"}:{})}}>
             {}
             <button onClick={function(e){
               e.stopPropagation();
@@ -4451,7 +4410,9 @@ function CL({data:d,onSel:os,dispatch:dp}){
                     var co=getCountry(c.pais||"BR");
                     if(!co)return null;
                     var iso=String(c.pais||"BR").toLowerCase();
-                    return <img src={"https://flagcdn.com/w40/"+iso+".png"} alt={co.n} title={"Reside em "+co.n} style={{width:22,height:16,borderRadius:3,objectFit:"cover",flexShrink:0,boxShadow:"0 0 0 1px rgba(255,255,255,0.08)"}} onError={function(e){e.target.style.display="none"}}/>;
+                    var isExterior=(c.pais&&c.pais!=="BR");
+                    if(!isExterior)return <img src={"https://flagcdn.com/w40/"+iso+".png"} alt={co.n} title={"Reside em "+co.n} style={{width:20,height:14,borderRadius:2,objectFit:"cover",flexShrink:0,opacity:0.5,boxShadow:"0 0 0 1px rgba(255,255,255,0.06)"}} onError={function(e){e.target.style.display="none"}}/>;
+                    return <span title={"Reside em "+co.n} style={{display:"inline-flex",alignItems:"center",gap:4,background:"rgba(99,179,237,0.12)",border:"1px solid rgba(99,179,237,0.35)",borderRadius:6,padding:"2px 6px 2px 3px",flexShrink:0}}><img src={"https://flagcdn.com/w40/"+iso+".png"} alt={co.n} style={{width:20,height:14,borderRadius:2,objectFit:"cover",flexShrink:0,boxShadow:"0 0 0 1px rgba(255,255,255,0.1)"}} onError={function(e){e.target.parentNode.style.display="none"}}/><span style={{fontSize:10,fontWeight:700,color:"#63b3ed",lineHeight:1,whiteSpace:"nowrap"}}>{co.n}</span></span>;
                   })()}
                   {(function(){
                     var ti={individual:{ic:"👤",l:"Individual"},casal:{ic:"👫",l:"Casal"},familia:{ic:"👨‍👩‍👧",l:"Família"}}[c.tipoCli||"individual"];
@@ -4462,7 +4423,7 @@ function CL({data:d,onSel:os,dispatch:dp}){
                 </div>
                 <div style={{display:"flex",gap:5,marginTop:4,flexWrap:"wrap"}}>
                   <Bg c={RC(c.risco)}>{c.risco}</Bg>
-                  {c.investExterior && <Bg c="cyan">🌍 Exterior</Bg>}
+                  {c.investExterior && (function(){var isoExt=String(c.pais||"BR").toLowerCase();return <Bg c="cyan"><span style={{display:"inline-flex",alignItems:"center",gap:4}}><img src={"https://flagcdn.com/w40/"+isoExt+".png"} alt="" style={{width:14,height:10,borderRadius:1,objectFit:"cover"}} onError={function(e){e.target.style.display="none"}}/>Investe Exterior</span></Bg>;})()}
                   {c.tipoCli==="casal" && <Bg c="gold">👫 Casal</Bg>}
                   {c.tipoCli==="familia" && <Bg c="gold">👨‍👩‍👧 Família ({1+((c.integrantes||[]).length)})</Bg>}
               {c.grupoFamiliarNome && <Bg c="gold">Familia: {c.grupoFamiliarNome}</Bg>}
