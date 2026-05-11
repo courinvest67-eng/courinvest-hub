@@ -6809,11 +6809,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
         }
         /* Caso 2: RV abaixo do alvo (>10pp) */
         else if(difRV<-10){
-          pqText='A carteira mantém uma base sólida em renda fixa ('+pRF.toFixed(0)+'%), com posicionamento estratégico em renda variável ('+pRV.toFixed(1)+'%). A composição prioriza a proteção do capital, com espaço para crescimento gradual conforme a evolução dos objetivos do cliente.';
+          if(pExt>15){
+            pqText='A carteira mantém uma base sólida em renda fixa ('+pRF.toFixed(0)+'%), com posicionamento estratégico em renda variável ('+pRV.toFixed(1)+'%) e exposição relevante ao exterior ('+pExt.toFixed(1)+'%). A composição prioriza a proteção do capital com diversificação cambial, mantendo espaço para crescimento gradual conforme a evolução dos objetivos do cliente.';
+          } else {
+            pqText='A carteira mantém uma base sólida em renda fixa ('+pRF.toFixed(0)+'%), com posicionamento estratégico em renda variável ('+pRV.toFixed(1)+'%). A composição prioriza a proteção do capital, com espaço para crescimento gradual conforme a evolução dos objetivos do cliente.';
+          }
         }
         /* Caso 3: RV acima do alvo (>10pp) */
         else if(difRV>10){
-          pqText='A carteira de '+n+' ativos está bem diversificada, com '+pRV.toFixed(0)+'% em renda variável e '+pRF.toFixed(0)+'% em renda fixa. A composição reflete o apetite por crescimento do perfil '+perfil+', equilibrando oportunidades e solidez patrimonial.';
+          pqText='A carteira de '+n+' ativos está bem diversificada, com '+pRV.toFixed(0)+'% em renda variável e '+pRF.toFixed(0)+'% em renda fixa'+(pExt>10?', mais '+pExt.toFixed(0)+'% no exterior':'')+'. A composição reflete o apetite por crescimento do perfil '+perfil+', equilibrando oportunidades e solidez patrimonial.';
         }
         /* Caso 4: boa exposição exterior */
         else if(pExt>15){
@@ -6821,7 +6825,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
         }
         /* Caso 5: previdência relevante */
         else if(pPrev>10){
-          pqText='A carteira inclui '+pPrev.toFixed(0)+'% em previdência privada, complementando a estratégia de renda fixa ('+pRF.toFixed(0)+'%) e renda variável ('+pRV.toFixed(0)+'%). Composição alinhada com o perfil '+perfil+' e foco no longo prazo.';
+          pqText='A carteira inclui '+pPrev.toFixed(0)+'% em previdência privada, complementando a estratégia de renda fixa ('+pRF.toFixed(0)+'%) e renda variável ('+pRV.toFixed(0)+'%)'+(pExt>10?', com '+pExt.toFixed(0)+'% no exterior':'')+'. Composição alinhada com o perfil '+perfil+' e foco no longo prazo.';
         }
         /* Caso 6: carteira bem equilibrada */
         else if(Math.abs(difRV)<=10&&pRV>=3){
