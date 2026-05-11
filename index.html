@@ -23985,6 +23985,8 @@ function App({authUser}){
               </div>
               {notsReais.map(function(n){
                 var clicavel=n.cliId&&d.cl.find(function(c){return c.id===n.cliId});
+                var reajCli=n.tipo==="reajuste_ipca"&&n.cliId?(d.cl||[]).find(function(x){return x.id===n.cliId}):null;
+                var reajStatus=reajCli&&reajCli.particularidades&&reajCli.particularidades.reajusteStatus||"pendente";
                 return (
                 <div key={n.id} onClick={clicavel?function(){var cli=d.cl.find(function(c){return c.id===n.cliId});if(cli){sPg("clients");sSel(cli);sShowN(false)}}:undefined}
                   style={{display:"flex",gap:10,padding:"10px 12px",
@@ -24004,14 +24006,12 @@ function App({authUser}){
                         <span style={{fontSize:10,color:T.t3}}>IPCA {n._reajuste.ipca.toFixed(2)}%</span>
                       </div>
                     )}
-                    {n.tipo==="reajuste_ipca"&&n.cliId&&(function(){
-                      var cli=(d.cl||[]).find(function(x){return x.id===n.cliId});
-                      var status=(cli&&cli.particularidades&&cli.particularidades.reajusteStatus)||"pendente";
-                      return <div style={{display:"flex",gap:6,marginTop:8}}>
-                        <button onClick={function(e){e.stopPropagation();dp({t:"UC",p:{id:n.cliId,particularidades:Object.assign({},cli&&cli.particularidades||{},{reajusteStatus:"feito",reajusteData:new Date().toISOString().slice(0,10)})}})}} style={{padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid rgba(15,157,88,0.4)",background:status==="feito"?"rgba(15,157,88,0.2)":"transparent",color:T.green}}>✅ {status==="feito"?"Feito":"Marcar feito"}</button>
-                        <button onClick={function(e){e.stopPropagation();dp({t:"UC",p:{id:n.cliId,particularidades:Object.assign({},cli&&cli.particularidades||{},{reajusteStatus:"pendente",reajusteData:null})}})}} style={{padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid rgba(239,100,97,0.4)",background:status==="pendente"?"rgba(239,100,97,0.15)":"transparent",color:T.red}}>⏳ {status==="pendente"?"Pendente":"Marcar pendente"}</button>
-                      </div>;
-                    })()}
+                    {n.tipo==="reajuste_ipca"&&reajCli&&(
+                      <div style={{display:"flex",gap:6,marginTop:8}}>
+                        <button onClick={function(e){e.stopPropagation();dp({t:"UC",p:{id:n.cliId,particularidades:Object.assign({},reajCli.particularidades||{},{reajusteStatus:"feito",reajusteData:new Date().toISOString().slice(0,10)})}})}} style={{padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid rgba(15,157,88,0.4)",background:reajStatus==="feito"?"rgba(15,157,88,0.2)":"transparent",color:T.green}}>✅ {reajStatus==="feito"?"Feito":"Marcar feito"}</button>
+                        <button onClick={function(e){e.stopPropagation();dp({t:"UC",p:{id:n.cliId,particularidades:Object.assign({},reajCli.particularidades||{},{reajusteStatus:"pendente",reajusteData:null})}})}} style={{padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid rgba(239,100,97,0.4)",background:reajStatus==="pendente"?"rgba(239,100,97,0.15)":"transparent",color:T.red}}>⏳ {reajStatus==="pendente"?"Pendente":"Marcar pendente"}</button>
+                      </div>
+                    )}
                     {n.tp && <div style={{fontSize:10,color:T.t3,marginTop:2}}>{n.tp}</div>}
                   </div>
                   {!n.lido && n.tipo!=="placeholder" && <div style={{width:8,height:8,borderRadius:"50%",background:n.tipo==="reajuste_ipca"?T.gold:T.gold,marginTop:6,flexShrink:0}}/>}
@@ -24054,6 +24054,8 @@ function App({authUser}){
             </div>
             {notsReais.map(function(n){
               var clicavel=n.cliId&&d.cl.find(function(c){return c.id===n.cliId});
+              var reajCli=n.tipo==="reajuste_ipca"&&n.cliId?(d.cl||[]).find(function(x){return x.id===n.cliId}):null;
+              var reajStatus=reajCli&&reajCli.particularidades&&reajCli.particularidades.reajusteStatus||"pendente";
               return (
               <div key={n.id} onClick={clicavel?function(){var cli=d.cl.find(function(c){return c.id===n.cliId});if(cli){sPg("clients");sSel(cli);sShowN(false)}}:undefined}
                 style={{display:"flex",gap:10,padding:"10px 12px",
@@ -24071,14 +24073,12 @@ function App({authUser}){
                       <span style={{fontSize:10,color:T.green,fontWeight:600}}>+R$ {n._reajuste.ganho}/mês</span>
                     </div>
                   )}
-                  {n.tipo==="reajuste_ipca"&&n.cliId&&(function(){
-                    var cli=(d.cl||[]).find(function(x){return x.id===n.cliId});
-                    var status=(cli&&cli.particularidades&&cli.particularidades.reajusteStatus)||"pendente";
-                    return <div style={{display:"flex",gap:6,marginTop:8}}>
-                      <button onClick={function(e){e.stopPropagation();var novoFee=n._reajuste?n._reajuste.feeSugerido:null;var fb=String(cli&&cli.feeBase||"").split("/");var novaBase=fb.length===2?(fb[0]+"/"+(parseInt(fb[1])+1)):cli&&cli.feeBase;dp({t:"UC",p:{id:n.cliId,feeFixo:novoFee||cli.feeFixo,feeBase:novaBase,particularidades:Object.assign({},cli&&cli.particularidades||{},{reajusteStatus:"feito",reajusteData:new Date().toISOString().slice(0,10)})}})}} style={{padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid rgba(15,157,88,0.4)",background:status==="feito"?"rgba(15,157,88,0.2)":"transparent",color:T.green}}>✅ {status==="feito"?"Feito":"Marcar feito"}</button>
-                      <button onClick={function(e){e.stopPropagation();dp({t:"UC",p:{id:n.cliId,particularidades:Object.assign({},cli&&cli.particularidades||{},{reajusteStatus:"pendente",reajusteData:null})}})}} style={{padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid rgba(239,100,97,0.4)",background:status==="pendente"?"rgba(239,100,97,0.15)":"transparent",color:T.red}}>⏳ {status==="pendente"?"Pendente":"Marcar pendente"}</button>
-                    </div>;
-                  })()}
+                  {n.tipo==="reajuste_ipca"&&reajCli&&(
+                    <div style={{display:"flex",gap:6,marginTop:8}}>
+                      <button onClick={function(e){e.stopPropagation();var novoFee=n._reajuste?n._reajuste.feeSugerido:null;var fb=String(reajCli.feeBase||"").split("/");var novaBase=fb.length===2?(fb[0]+"/"+(parseInt(fb[1])+1)):reajCli.feeBase;dp({t:"UC",p:{id:n.cliId,feeFixo:novoFee||reajCli.feeFixo,feeBase:novaBase,particularidades:Object.assign({},reajCli.particularidades||{},{reajusteStatus:"feito",reajusteData:new Date().toISOString().slice(0,10)})}})}} style={{padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid rgba(15,157,88,0.4)",background:reajStatus==="feito"?"rgba(15,157,88,0.2)":"transparent",color:T.green}}>✅ {reajStatus==="feito"?"Feito":"Marcar feito"}</button>
+                      <button onClick={function(e){e.stopPropagation();dp({t:"UC",p:{id:n.cliId,particularidades:Object.assign({},reajCli.particularidades||{},{reajusteStatus:"pendente",reajusteData:null})}})}} style={{padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid rgba(239,100,97,0.4)",background:reajStatus==="pendente"?"rgba(239,100,97,0.15)":"transparent",color:T.red}}>⏳ {reajStatus==="pendente"?"Pendente":"Marcar pendente"}</button>
+                    </div>
+                  )}
                   {n.tp && <div style={{fontSize:10,color:T.t3,marginTop:2}}>{n.tp}</div>}
                 </div>
                 {!n.lido && n.tipo!=="placeholder" && <div style={{width:8,height:8,borderRadius:"50%",background:T.gold,marginTop:6,flexShrink:0}}/>}
