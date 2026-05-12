@@ -895,6 +895,26 @@ const fatH=[{m:"Nov",t:35200},{m:"Dez",t:38100},{m:"Jan",t:36800},{m:"Fev",t:392
 /* gerarNotificacoesReais — produz lista de notificações dinâmicas a partir dos clientes reais.
    Tipos detectados: vencimentos de RF, contratos próximos, aniversários, dividendos recentes.
    Retorna array ordenado por urgência (mais próximo/urgente primeiro). */
+/* ============================================================
+   fetchIpcaAcumulado — busca IPCA acumulado entre dois meses via BCB
+   Série 433 (IPCA mensal %)
+   Retorna: { acumulado: 4.31, meses: [...] } ou null se falhar
+   ============================================================ */
+async function fetchIpcaAcumulado(anoIni,mesIni,anoFim,mesFim){
+  try{
+    var dtIni=String(mesIni).padStart(2,"0")+"/"+anoIni;
+    var dtFim=String(mesFim).padStart(2,"0")+"/"+anoFim;
+    var url="https://api.bcb.gov.br/dados/serie/bcdata.sgs.433/dados?formato=json&dataInicial="+dtIni+"&dataFinal="+dtFim;
+    var resp=await fetch(url);
+    if(!resp.ok)return null;
+    var dados=await resp.json();
+    if(!dados||!dados.length)return null;
+    /* Acumula: (1+r1/100)*(1+r2/100)*...-1 */
+    var acum=dados.reduce(function(acc,d){return acc*(1+(parseFloat(d.valor)||0)/100)},1)-1;
+    return{acumulado:+(acum*100).toFixed(4),meses:dados.length,periodo:dtIni+" a "+dtFim};
+  }catch(e){return null;}
+}
+
 function gerarNotificacoesReais(d){
   if(!d || !d.cl)return[];
   var nots=[];
@@ -1042,7 +1062,9 @@ function gerarNotificacoesReais(d){
     }
     var dias=diasEntre(hoje,dtReaj);
     if(dias>90)return;
-    var feeNovo=Math.round(c.feeFixo*(1+_ipcaGlobal/100));
+    /* IPCA do cliente: usa cache específico do período do contrato, fallback ao global */
+    var _ipcaCliente=(c._ipcaReajuste&&c._ipcaReajuste.acumulado)||_ipcaGlobal;
+    var feeNovo=Math.round(c.feeFixo*(1+_ipcaCliente/100));
     var ganho=feeNovo-c.feeFixo;
     var primeiroNome=String(c.nome||"").split(" ")[0];
     var ic=atrasado?"🔴":dias<=15?"🔴":dias<=30?"🟠":"📈";
@@ -1050,7 +1072,7 @@ function gerarNotificacoesReais(d){
     nots.push({
       id:"reaj_"+idCounter++,
       msg:"Reajuste IPCA de "+primeiroNome+" vence "+labelDias+" · "+
-          "Fee: R$"+c.feeFixo.toFixed(0)+" → R$"+feeNovo+" (+R$"+ganho+"/mês · IPCA "+_ipcaGlobal.toFixed(2)+"%)",
+          "Fee: R$"+c.feeFixo.toFixed(0)+" → R$"+feeNovo+" (+R$"+ganho+"/mês · IPCA "+_ipcaCliente.toFixed(2)+"%"+(c._ipcaReajuste&&c._ipcaReajuste.periodo?" · "+c._ipcaReajuste.periodo:"")+  ")",
       ic:ic,
       lido:false,
       tp:labelDias,
@@ -1058,7 +1080,7 @@ function gerarNotificacoesReais(d){
       cliId:c.id,
       cliNome:c.nome,
       tipo:"reajuste_ipca",
-      _reajuste:{feeAtual:c.feeFixo,feeSugerido:feeNovo,ganho:ganho,ipca:_ipcaGlobal,diasRestantes:dias}
+      _reajuste:{feeAtual:c.feeFixo,feeSugerido:feeNovo,ganho:ganho,ipca:_ipcaCliente,diasRestantes:dias,periodo:c._ipcaReajuste&&c._ipcaReajuste.periodo}
     });
   });
 
@@ -23653,10 +23675,32 @@ function App({authUser}){
     return{cl:iC,it:iI,lds:[],fin:{entradas:[],despesas:[]},vistaLearning:[],ag:[],tpAg:TIPOS_AGENDA_DEFAULT.slice(),overviewMercado:{},config:{}};
   })();
   const[d,dp]=useReducer(rd,initState);
-  
+
+  /* === IPCA por cliente: busca acumulado do período do contrato via BCB === */
   React.useEffect(function(){
-    try{
-      if(localStorage.getItem("courinvest_tx_migrated_v1")==="1")return;
+    if(!d||!d.cl||!d.cl.length)return;
+    var hoje=new Date();
+    d.cl.forEach(function(c){
+      if(!c.sv||!c.sv.includes("planejamento")||!c.feeFixo||!c.feeBase)return;
+      /* Verifica cache: se já tem e foi buscado há menos de 7 dias, pula */
+      var cache=c._ipcaReajuste;
+      if(cache&&cache.fetchedAt&&(Date.now()-cache.fetchedAt)<7*24*60*60*1000)return;
+      /* Calcula período: do início do contrato até hoje */
+      var fb=String(c.feeBase||"").trim().split("/");
+      var fbMes=parseInt(fb[0]),fbAno=parseInt(fb[1]);
+      if(isNaN(fbMes)||isNaN(fbAno))return;
+      if(fbAno<100)fbAno+=2000;
+      /* Período: de feeBase até o mês atual */
+      var mesAtual=hoje.getMonth()+1;
+      var anoAtual=hoje.getFullYear();
+      /* Mês anterior ao início (para capturar o acumulado do período completo) */
+      var mesIni=fbMes,anoIni=fbAno;
+      fetchIpcaAcumulado(anoIni,mesIni,anoAtual,mesAtual).then(function(res){
+        if(!res)return;
+        dp({t:"UC",p:{id:c.id,_ipcaReajuste:{acumulado:res.acumulado,periodo:res.periodo,meses:res.meses,fetchedAt:Date.now()}}});
+      });
+    });
+  },[d&&d.cl&&d.cl.length]);
       var migrated=0;
       d.cl.forEach(function(c){
         /* Heurística: valores >= 0.3 são quase certamente a.a. (taxa mensal típica é 0.05-0.15%) */
