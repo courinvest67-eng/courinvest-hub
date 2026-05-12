@@ -23698,7 +23698,7 @@ function App({authUser}){
         dp({t:"UC",p:{id:c.id,_ipcaReajuste:{acumulado:res.acumulado,periodo:res.periodo,meses:res.meses,fetchedAt:Date.now()}}});
       });
     });
-  },[d&&d.cl&&d.cl.length]);
+  },[d.cl?d.cl.length:0]);
 
   React.useEffect(function(){
     try{
@@ -24116,6 +24116,23 @@ function App({authUser}){
                       <div style={{display:"flex",gap:6,marginTop:8}}>
                         <button onClick={function(e){e.stopPropagation();var novoFee=n._reajuste?n._reajuste.feeSugerido:null;var fb=String(reajCli.feeBase||"").split("/");var novaBase=fb.length===2?(fb[0]+"/"+(parseInt(fb[1])+1)):reajCli.feeBase;dp({t:"UC",p:{id:n.cliId,feeFixo:novoFee||reajCli.feeFixo,feeBase:novaBase,particularidades:Object.assign({},reajCli.particularidades||{},{reajusteStatus:"feito",reajusteData:new Date().toISOString().slice(0,10)})}})}} style={{padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid rgba(15,157,88,0.4)",background:reajStatus==="feito"?"rgba(15,157,88,0.2)":"transparent",color:T.green}}>✅ {reajStatus==="feito"?"Feito":"Marcar feito"}</button>
                         <button onClick={function(e){e.stopPropagation();dp({t:"UC",p:{id:n.cliId,particularidades:Object.assign({},reajCli.particularidades||{},{reajusteStatus:"pendente",reajusteData:null})}})}} style={{padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid rgba(239,100,97,0.4)",background:reajStatus==="pendente"?"rgba(239,100,97,0.15)":"transparent",color:T.red}}>⏳ {reajStatus==="pendente"?"Pendente":"Marcar pendente"}</button>
+                        {n._reajuste&&reajCli&&(function(){
+                          var primeiroNome=String(reajCli.nome||"").split(" ")[0];
+                          var mesAno=(function(){var d=new Date();d.setMonth(d.getMonth()+1);return d.toLocaleDateString("pt-BR",{month:"long",year:"numeric"})})();
+                          var ipca=n._reajuste.ipca||0;
+                          var periodo=n._reajuste.periodo||"últimos 12 meses";
+                          var assunto=encodeURIComponent("Reajuste da Taxa de Gestão — "+mesAno.charAt(0).toUpperCase()+mesAno.slice(1));
+                          var corpo=encodeURIComponent(
+                            "Olá, "+primeiroNome+"!\n\n"+
+                            "Informamos que, a partir de "+mesAno+", a taxa de gestão da sua carteira será reajustada conforme previsto em contrato, com base na variação do IPCA acumulado no período ("+ipca.toFixed(2)+"% · "+periodo+").\n\n"+
+                            "Taxa atual: R$ "+n._reajuste.feeAtual.toFixed(2).replace(".",",")+"/mês\n"+
+                            "Nova taxa: R$ "+n._reajuste.feeSugerido.toFixed(2).replace(".",",")+"/mês\n\n"+
+                            "O débito continuará sendo realizado automaticamente no seu cartão de crédito. Qualquer dúvida, estou à disposição.\n\n"+
+                            "Atenciosamente,\nIgor Couri\nCourinvest Consultoria"
+                          );
+                          var email=reajCli.email||"";
+                          return <a href={"mailto:"+email+"?subject="+assunto+"&body="+corpo} onClick={function(e){e.stopPropagation()}} style={{padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid rgba(99,179,237,0.4)",background:"rgba(99,179,237,0.08)",color:"#63b3ed",textDecoration:"none",display:"inline-flex",alignItems:"center",gap:4}}>✉️ E-mail</a>;
+                        })()}
                       </div>
                     )}
                     {n.tp && <div style={{fontSize:10,color:T.t3,marginTop:2}}>{n.tp}</div>}
@@ -24183,6 +24200,23 @@ function App({authUser}){
                     <div style={{display:"flex",gap:6,marginTop:8}}>
                       <button onClick={function(e){e.stopPropagation();var novoFee=n._reajuste?n._reajuste.feeSugerido:null;var fb=String(reajCli.feeBase||"").split("/");var novaBase=fb.length===2?(fb[0]+"/"+(parseInt(fb[1])+1)):reajCli.feeBase;dp({t:"UC",p:{id:n.cliId,feeFixo:novoFee||reajCli.feeFixo,feeBase:novaBase,particularidades:Object.assign({},reajCli.particularidades||{},{reajusteStatus:"feito",reajusteData:new Date().toISOString().slice(0,10)})}})}} style={{padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid rgba(15,157,88,0.4)",background:reajStatus==="feito"?"rgba(15,157,88,0.2)":"transparent",color:T.green}}>✅ {reajStatus==="feito"?"Feito":"Marcar feito"}</button>
                       <button onClick={function(e){e.stopPropagation();dp({t:"UC",p:{id:n.cliId,particularidades:Object.assign({},reajCli.particularidades||{},{reajusteStatus:"pendente",reajusteData:null})}})}} style={{padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid rgba(239,100,97,0.4)",background:reajStatus==="pendente"?"rgba(239,100,97,0.15)":"transparent",color:T.red}}>⏳ {reajStatus==="pendente"?"Pendente":"Marcar pendente"}</button>
+                      {n._reajuste&&reajCli&&(function(){
+                        var primeiroNome=String(reajCli.nome||"").split(" ")[0];
+                        var mesAno=(function(){var d=new Date();d.setMonth(d.getMonth()+1);return d.toLocaleDateString("pt-BR",{month:"long",year:"numeric"})})();
+                        var ipca=n._reajuste.ipca||0;
+                        var periodo=n._reajuste.periodo||"últimos 12 meses";
+                        var assunto=encodeURIComponent("Reajuste da Taxa de Gestão — "+mesAno.charAt(0).toUpperCase()+mesAno.slice(1));
+                        var corpo=encodeURIComponent(
+                          "Olá, "+primeiroNome+"!\n\n"+
+                          "Informamos que, a partir de "+mesAno+", a taxa de gestão da sua carteira será reajustada conforme previsto em contrato, com base na variação do IPCA acumulado no período ("+ipca.toFixed(2)+"% · "+periodo+").\n\n"+
+                          "Taxa atual: R$ "+n._reajuste.feeAtual.toFixed(2).replace(".",",")+"/mês\n"+
+                          "Nova taxa: R$ "+n._reajuste.feeSugerido.toFixed(2).replace(".",",")+"/mês\n\n"+
+                          "O débito continuará sendo realizado automaticamente no seu cartão de crédito. Qualquer dúvida, estou à disposição.\n\n"+
+                          "Atenciosamente,\nIgor Couri\nCourinvest Consultoria"
+                        );
+                        var email=reajCli.email||"";
+                        return <a href={"mailto:"+email+"?subject="+assunto+"&body="+corpo} onClick={function(e){e.stopPropagation()}} style={{padding:"4px 10px",borderRadius:6,fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid rgba(99,179,237,0.4)",background:"rgba(99,179,237,0.08)",color:"#63b3ed",textDecoration:"none",display:"inline-flex",alignItems:"center",gap:4}}>✉️ E-mail</a>;
+                      })()}
                     </div>
                   )}
                   {n.tp && <div style={{fontSize:10,color:T.t3,marginTop:2}}>{n.tp}</div>}
