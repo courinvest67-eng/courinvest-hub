@@ -443,9 +443,26 @@ const feeBaseDoCliente=function(c){
   var exclInst=(part.excluiInsts&&part.excluiInsts.length)?valorAtivosPorInst(c,part.excluiInsts):0;
   var valorFixo=+(part.valorFixoDeduzir||0)||0;
   var base=Math.max(0,patTotal-exclReserva-exclHolding-exclPrev-exclRF-exclCaixa-exclCripto-exclInst-valorFixo);
-  var taxa=c.txGestao||0;
-  var fee=base*taxa/100;
-  return {patTotal:patTotal,exclReserva:exclReserva,exclHolding:exclHolding,exclPrev:exclPrev,exclRF:exclRF,exclCaixa:exclCaixa,exclCripto:exclCripto,exclInst:exclInst,valorFixo:valorFixo,base:base,fee:fee,taxa:taxa};
+  var taxa=0,fee=0,modoFee="fixo";
+  if(c.txRegressiva){
+    /* Modelo híbrido: abaixo do threshold usa fee fixo, acima usa tabela regressiva */
+    var threshold=c.txRegressivaThreshold||200000; /* padrão R$200k */
+    var feeFixoAbaixo=c.txRegressivaFeeFixo||0;    /* ex: R$350 */
+    if(base<=threshold && feeFixoAbaixo>0){
+      fee=feeFixoAbaixo;
+      taxa=base>0?(feeFixoAbaixo/base*100):0;
+      modoFee="fixo_abaixo_threshold";
+    } else {
+      taxa=txGestaoRegressiva(base)||(c.txGestao||0);
+      fee=base*taxa/100;
+      modoFee="regressiva";
+    }
+  } else {
+    taxa=c.txGestao||0;
+    fee=base*taxa/100;
+    modoFee="fixo";
+  }
+  return {patTotal:patTotal,exclReserva:exclReserva,exclHolding:exclHolding,exclPrev:exclPrev,exclRF:exclRF,exclCaixa:exclCaixa,exclCripto:exclCripto,exclInst:exclInst,valorFixo:valorFixo,base:base,fee:fee,taxa:taxa,regressiva:!!c.txRegressiva,modoFee:modoFee};
 };
 
 /* Receita TOTAL mensal do cliente em BRL — soma fee + % patrimônio (com particularidades) + milhas */
@@ -8541,10 +8558,16 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
   
 
   
-  const[contratos,sContratos]=useState([
+  const _defaultContratos=[
     {id:1,nome:"Contrato de Gestão — 2024",tipo:isPat?"Gestão de Patrimônio":"Gestão Financeira",status:"ativo",inicio:"2024-03-01",venc:"2026-03-01",valor:isPat?(c.txGestao||0.083).toFixed(3)+"% a.m.":fmF(c.feeFixo||0)+"/mês",obs:"Renovação automática"},
     {id:2,nome:"Termo de Suitability",tipo:"Compliance",status:"ativo",inicio:"2024-03-01",venc:"2025-03-01",valor:"—",obs:"Atualizar anualmente"},
-  ]);
+  ];
+  const[contratos,sContratosRaw]=useState(c._contratos||_defaultContratos);
+  const sContratos=function(fn){
+    var novos=typeof fn==="function"?fn(contratos):fn;
+    sContratosRaw(novos);
+    dp({t:"UC",p:{id:c.id,_contratos:novos}});
+  };
   const[showAddContr,sShowAddContr]=useState(false);
   const contrFileRef=useRef(null);
   const[herdeiros,sHerdeiros]=useState([
@@ -16561,8 +16584,39 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
                 </div>
               </div>
 
-              {}
-              <div style={{display:"grid",gridTemplateColumns:isMob?"1fr":"1fr 1fr",gap:10,marginBottom:14}}>
+              {/* Toggle taxa regressiva */}
+              <div style={{marginBottom:14,padding:"12px 16px",background:c.txRegressiva?"rgba(212,163,40,0.08)":"transparent",border:"1px solid "+(c.txRegressiva?T.gold:T.bdrL),borderRadius:10,cursor:"pointer"}} onClick={function(){dp({t:"UC",p:{id:c.id,txRegressiva:!c.txRegressiva}})}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{width:36,height:20,borderRadius:10,background:c.txRegressiva?T.gold:"rgba(255,255,255,0.1)",position:"relative",transition:"background 0.2s",flexShrink:0}}>
+                    <div style={{position:"absolute",top:2,left:c.txRegressiva?18:2,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left 0.2s"}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:12,fontWeight:700,color:c.txRegressiva?T.gold:T.t2}}>📉 Taxa Regressiva por Faixa de Patrimônio</div>
+                    <div style={{fontSize:10,color:T.t3,marginTop:1}}>Ativa a tabela regressiva: 0,20% → 0,175% → 0,15% → 0,125% → 0,10%</div>
+                  </div>
+                </div>
+                {c.txRegressiva&&(
+                  <div style={{marginTop:12,display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}} onClick={function(e){e.stopPropagation()}}>
+                    <div>
+                      <div style={{fontSize:9,color:T.t3,fontWeight:700,marginBottom:4}}>THRESHOLD (R$) — abaixo usa fee fixo</div>
+                      <input type="number" value={c.txRegressivaThreshold||200000} onChange={function(e){dp({t:"UC",p:{id:c.id,txRegressivaThreshold:+e.target.value}})}} style={{width:"100%",padding:"8px 10px",background:T.w3,border:"1px solid "+T.bdrL,borderRadius:8,color:T.t1,fontSize:12,outline:"none",boxSizing:"border-box",fontFamily:"'JetBrains Mono'"}}/>
+                      <div style={{fontSize:9,color:T.t3,marginTop:3}}>Ex: 200000 = abaixo de R$200k usa fee fixo</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:9,color:T.t3,fontWeight:700,marginBottom:4}}>FEE FIXO ABAIXO DO THRESHOLD (R$/mês)</div>
+                      <input type="number" value={c.txRegressivaFeeFixo||0} onChange={function(e){dp({t:"UC",p:{id:c.id,txRegressivaFeeFixo:+e.target.value}})}} style={{width:"100%",padding:"8px 10px",background:T.w3,border:"1px solid "+T.bdrL,borderRadius:8,color:T.gold,fontSize:12,outline:"none",boxSizing:"border-box",fontFamily:"'JetBrains Mono'"}}/>
+                      <div style={{fontSize:9,color:T.t3,marginTop:3}}>Ex: 350 = R$350/mês quando abaixo do threshold</div>
+                    </div>
+                  </div>
+                )}
+                {c.txRegressiva&&(
+                  <div style={{marginTop:10,padding:"8px 10px",background:"rgba(212,163,40,0.06)",borderRadius:6,fontSize:10,color:T.t3}}>
+                    {(function(){var b=feeBaseDoCliente(c);var threshold=c.txRegressivaThreshold||200000;return b.base<=threshold?
+                      <span>📌 Patrimônio base <strong style={{color:T.gold}}>{fmF(b.base)}</strong> ≤ threshold → Fee fixo: <strong style={{color:T.gold}}>{fmF(b.fee)}/mês</strong></span>:
+                      <span>📈 Patrimônio base <strong style={{color:T.gold}}>{fmF(b.base)}</strong> → Taxa regressiva: <strong style={{color:T.gold}}>{b.taxa.toFixed(3)}%</strong> = <strong style={{color:T.gold}}>{fmF(b.fee)}/mês</strong></span>;
+                    })()}
+                  </div>
+                )}
                 {[
                   {k:"excluiReservaEmerg",ic:"🛡️",l:"Reserva de Emergência",desc:"Exclui ativos marcados como reserva",val:calc.exclReserva},
                   {k:"excluiRF",ic:"📄",l:"Renda Fixa",desc:"Exclui todos os ativos RF (CDB, LCI, Tesouro…)",val:calc.exclRF||0},
@@ -20530,7 +20584,8 @@ function NewsView({data,dispatch}){
 /* ============ PROPOSTAS COMERCIAIS ============ */
 
 function txGestaoRegressiva(patrimonio){
-  if(!patrimonio||patrimonio<200000)return null;
+  if(!patrimonio||patrimonio<=0)return null;
+  if(patrimonio<=200000)return 0.200;
   if(patrimonio<=600000)return 0.175;
   if(patrimonio<=1500000)return 0.150;
   if(patrimonio<=3000000)return 0.125;
@@ -20546,6 +20601,7 @@ function precoConsultoria(patrimonio){
   return{tipo:"percentual",valor:p*0.01,base:p,pct:1.0};
 }
 const TABELA_TX_GP=[
+  {de:0,ate:200000,tx:0.200,label:"Até R$ 200 mil"},
   {de:200000,ate:600000,tx:0.175,label:"R$ 200 mil a R$ 600 mil"},
   {de:600000,ate:1500000,tx:0.150,label:"R$ 600 mil a R$ 1,5 mi"},
   {de:1500000,ate:3000000,tx:0.125,label:"R$ 1,5 mi a R$ 3 mi"},
