@@ -8685,6 +8685,145 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
   const importVista=function(file){
     if(!file)return;
     const isExcel=file.name.match(/\.(xlsx|xls)$/i);
+    const isPDF=file.name.match(/\.pdf$/i);
+
+    /* ── PDF do Meu Vista ── */
+    if(isPDF){
+      if(typeof pdfjsLib==="undefined"){alert("PDF.js não carregado. Use CSV/Excel.");return;}
+      const reader2=new FileReader();
+      reader2.onload=function(e){
+        pdfjsLib.getDocument({data:e.target.result}).promise.then(function(pdf){
+          var pageTexts=[];
+          var promises=[];
+          for(var pi=1;pi<=pdf.numPages;pi++){
+            promises.push(pdf.getPage(pi).then(function(page){
+              return page.getTextContent().then(function(tc){
+                /* Junta itens de texto na mesma linha (y próximo) */
+                var items=tc.items;
+                var lines=[];var curLine=[];var lastY=null;
+                items.forEach(function(it){
+                  var y=Math.round(it.transform[5]);
+                  if(lastY!==null && Math.abs(y-lastY)>4){lines.push(curLine.join(" ").trim());curLine=[];}
+                  if(it.str.trim())curLine.push(it.str.trim());
+                  lastY=y;
+                });
+                if(curLine.length)lines.push(curLine.join(" ").trim());
+                return lines.filter(Boolean);
+              });
+            }));
+          }
+          Promise.all(promises).then(function(pagesLines){
+            var allLines=[];
+            pagesLines.forEach(function(l){allLines=allLines.concat(l);});
+
+            /* Detecta período do cabeçalho: "01/04/2026 até 30/04/2026" */
+            var mesesDoIntervalo=[];var nMeses=1;
+            for(var li=0;li<Math.min(allLines.length,10);li++){
+              var mPer=allLines[li].match(/(\d{2})\/(\d{2})\/(\d{4})\s*até\s*(\d{2})\/(\d{2})\/(\d{4})/);
+              if(mPer){
+                var dIni=new Date(+mPer[3],+mPer[2]-1,1);
+                var dFim=new Date(+mPer[6],+mPer[5]-1,1);
+                var cur=new Date(dIni);
+                while(cur<=dFim&&mesesDoIntervalo.length<24){
+                  mesesDoIntervalo.push(cur.getFullYear()+"-"+String(cur.getMonth()+1).padStart(2,"0"));
+                  cur.setMonth(cur.getMonth()+1);
+                }
+                nMeses=Math.max(1,mesesDoIntervalo.length);
+                break;
+              }
+            }
+
+            var parseNum=function(s){return parseFloat(String(s||"0").replace(/[R$\s.]/g,"").replace(",","."))||0;};
+
+            /* Parse das linhas: procura padrão "Orçamento NOME" e "Categoria • NOME" */
+            var rows=[];
+            var catAtual="";
+            allLines.forEach(function(line){
+              /* Linha de categoria pai: "Orçamento Alimentação" */
+              var mOrc=line.match(/^Orçamento\s+(.+)/);
+              if(mOrc){catAtual=mOrc[1].trim();return;}
+              /* Linha de subcategoria: "Categoria • Subcategoria NUMS..." */
+              var mCat=line.match(/^Categoria\s*[•·]\s*(.+)/);
+              if(mCat){
+                var rest=mCat[1].trim();
+                /* Extrai números do final da linha: Estimado Realizado Mensal Qtd Total %Est %Real */
+                var nums=rest.match(/[\d.,]+/g)||[];
+                var nomeCat=rest.replace(/[\d.,\s%]+$/,"").trim();
+                /* Tenta pegar Realizado Mensal (2º número) e Estimado (1º) */
+                var estimado=nums.length>0?parseNum(nums[0]):0;
+                var realizadoMensal=nums.length>1?parseNum(nums[1]):0;
+                var total=nums.length>3?parseNum(nums[3]):realizadoMensal*nMeses;
+                if(nomeCat&&(realizadoMensal>0||estimado>0)){
+                  rows.push({
+                    nivel:"Categoria",
+                    categoria:catAtual,
+                    subcategoria:nomeCat,
+                    estimado:estimado,
+                    realizadoMensal:realizadoMensal,
+                    total:total||realizadoMensal*nMeses
+                  });
+                }
+                return;
+              }
+              /* Linha de orçamento total da categoria: "Orçamento NOME NUMS..." */
+              /* (já capturado acima, ignora) */
+            });
+
+            if(rows.length===0){
+              /* Fallback: tenta linha genérica com 2+ números */
+              allLines.forEach(function(line){
+                if(line.match(/^(Orçamento|Categoria|Lançamento|Nível)/i))return;
+                var nums=line.match(/[\d.]+,\d{2}/g)||[];
+                if(nums.length>=2){
+                  var nome=line.replace(/[\d.,\s%]+$/,"").trim();
+                  if(nome.length>2){
+                    rows.push({nivel:"Categoria",categoria:"Importado",subcategoria:nome,
+                      estimado:parseNum(nums[0]),realizadoMensal:parseNum(nums[1]),total:parseNum(nums[1])*nMeses});
+                  }
+                }
+              });
+            }
+
+            if(rows.length===0){alert("Não foi possível ler o PDF. Use o arquivo CSV/Excel exportado pelo Meu Vista.");return;}
+
+            /* Converte para o formato interno igual ao CSV */
+            var items=[];var idC=Date.now();
+            rows.forEach(function(r){
+              var sub=r.subcategoria||r.categoria;
+              var subLow=sub.toLowerCase();
+              var catLow=(r.categoria||"").toLowerCase();
+              var isReceita=catLow.indexOf("receita")>=0||catLow.indexOf("renda")>=0||
+                            subLow.match(/^receita|^renda|^salár|^freelan/);
+              var isInvest=catLow.indexOf("investimento")>=0||catLow.indexOf("previdência")>=0;
+              var val=r.realizadoMensal||0;
+              var orc=r.estimado||0;
+              if(val===0&&orc===0)return;
+              var cls=classifyMeuVista(sub,!!isReceita,d.vistaLearning||[]);
+              if(isInvest)cls.macro="investimentos";
+              items.push({
+                id:idC++,sub:sub,macro:cls.macro,conf:cls.conf,
+                valor:Math.abs(val||orc),tipo:isReceita?"r":"d",
+                orc:orc>0?orc:null,include:true,learned:!!cls.learned,
+                via:cls.via||null,hits:cls.hits||0,objId:cls.objId||null,
+                integrante:null
+              });
+            });
+
+            if(items.length===0){alert("Nenhum item válido encontrado no PDF.");return;}
+
+            /* Detecta mês do período */
+            var mesRef=mesesDoIntervalo.length>0?mesesDoIntervalo[mesesDoIntervalo.length-1]:
+              (new Date().getFullYear()+"-"+String(new Date().getMonth()).padStart(2,"0"));
+
+            /* Chama o mesmo fluxo de review que o CSV usa */
+            sReviewVista({items:items,mesRef:mesRef,mesesDoIntervalo:mesesDoIntervalo,fileName:file.name,ehTrimestral:nMeses>1});
+          });
+        }).catch(function(err){alert("Erro ao ler PDF: "+err.message);});
+      };
+      reader2.readAsArrayBuffer(file);
+      return;
+    }
+
     const reader=new FileReader();
     reader.onload=function(e){
       try{
@@ -14950,7 +15089,7 @@ ${proxPassos.map(function(p){return`<div class="passo">${p}</div>`}).join("")}
               <button key={t.id} onClick={()=>sPTab(t.id)} style={{padding:"6px 14px",borderRadius:8,fontSize:11,fontWeight:600,cursor:"pointer",border:pTab===t.id?"1.5px solid "+T.gold:"1px solid "+T.bdrL,background:pTab===t.id?T.goldD:"transparent",color:pTab===t.id?T.gold:T.t3}}>{t.l}</button>
             )}
             <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
-              <input ref={vistaRef} type="file" accept=".csv,.txt,.tsv,.xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/plain,*/*" onChange={function(e){if(e.target.files[0])importVista(e.target.files[0])}} style={{display:"none"}}/>
+              <input ref={vistaRef} type="file" accept=".csv,.txt,.tsv,.xlsx,.xls,.pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf,text/csv,text/plain,*/*" onChange={function(e){if(e.target.files[0])importVista(e.target.files[0])}} style={{display:"none"}}/>
               <Bt v="secondary" onClick={function(){vistaRef.current && vistaRef.current.click()}} style={{fontSize:10,padding:"6px 12px"}}>📥 Importar Meu Vista</Bt>
               <Bt onClick={function(){sTab("relatorio")}} style={{fontSize:10,padding:"6px 12px"}}>📊 Gerar Relatório</Bt>
             </div>
