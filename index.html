@@ -898,21 +898,19 @@ const fatH=[{m:"Nov",t:35200},{m:"Dez",t:38100},{m:"Jan",t:36800},{m:"Fev",t:392
 /* ============================================================
    fetchIpcaAcumulado — busca IPCA acumulado entre dois meses via BCB
    Série 433 (IPCA mensal %)
-   Retorna: { acumulado: 4.31, meses: [...] } ou null se falhar
    ============================================================ */
-async function fetchIpcaAcumulado(anoIni,mesIni,anoFim,mesFim){
-  try{
-    var dtIni=String(mesIni).padStart(2,"0")+"/"+anoIni;
-    var dtFim=String(mesFim).padStart(2,"0")+"/"+anoFim;
-    var url="https://api.bcb.gov.br/dados/serie/bcdata.sgs.433/dados?formato=json&dataInicial="+dtIni+"&dataFinal="+dtFim;
-    var resp=await fetch(url);
-    if(!resp.ok)return null;
-    var dados=await resp.json();
-    if(!dados||!dados.length)return null;
-    /* Acumula: (1+r1/100)*(1+r2/100)*...-1 */
-    var acum=dados.reduce(function(acc,d){return acc*(1+(parseFloat(d.valor)||0)/100)},1)-1;
-    return{acumulado:+(acum*100).toFixed(4),meses:dados.length,periodo:dtIni+" a "+dtFim};
-  }catch(e){return null;}
+function fetchIpcaAcumulado(anoIni,mesIni,anoFim,mesFim){
+  var dtIni=String(mesIni).padStart(2,"0")+"/"+anoIni;
+  var dtFim=String(mesFim).padStart(2,"0")+"/"+anoFim;
+  var url="https://api.bcb.gov.br/dados/serie/bcdata.sgs.433/dados?formato=json&dataInicial="+dtIni+"&dataFinal="+dtFim;
+  return fetch(url)
+    .then(function(resp){return resp.ok?resp.json():null;})
+    .then(function(dados){
+      if(!dados||!dados.length)return null;
+      var acum=dados.reduce(function(acc,d){return acc*(1+(parseFloat(d.valor)||0)/100)},1)-1;
+      return{acumulado:+(acum*100).toFixed(4),meses:dados.length,periodo:dtIni+" a "+dtFim};
+    })
+    .catch(function(){return null;});
 }
 
 function gerarNotificacoesReais(d){
