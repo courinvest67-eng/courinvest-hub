@@ -8735,42 +8735,95 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
 
             var parseNum=function(s){return parseFloat(String(s||"0").replace(/[R$\s.]/g,"").replace(",","."))||0;};
 
-            /* Parse das linhas: procura padrão "Orçamento NOME" e "Categoria • NOME" */
+            /* Parse das linhas: procura padrão "Orçamento NOME" e "Categoria • NOME"
+               IGNORA linhas "Lançamento -" (são repetições dos totais, uma por lançamento) */
             var rows=[];
             var catAtual="";
+            var integranteAtual=null; /* rastreia Hélio/Karla pela linha "Orçamento Receitas Hélio" etc */
+
+            /* Helper: detecta integrante pelo nome da categoria pai (ex: "Receitas Hélio" → "Hélio") */
+            var detectarIntegrante=function(nomeOrc){
+              if(!c.integrantes||c.integrantes.length===0){
+                /* Sem integrantes cadastrados — tenta pelo nome do titular */
+                var nomeTit=String(c.nome||"").split(" ")[0];
+                if(nomeTit&&nomeOrc.toLowerCase().indexOf(nomeTit.toLowerCase())>=0)return nomeTit;
+                return null;
+              }
+              for(var ii=0;ii<c.integrantes.length;ii++){
+                var np=String(c.integrantes[ii].nome||"").split(" ")[0];
+                if(np&&nomeOrc.toLowerCase().indexOf(np.toLowerCase())>=0)return c.integrantes[ii].nome;
+              }
+              /* Tenta pelo nome do próprio cliente titular */
+              var nt=String(c.nome||"").split(" ")[0];
+              if(nt&&nomeOrc.toLowerCase().indexOf(nt.toLowerCase())>=0)return c.nome;
+              return null;
+            };
+
             allLines.forEach(function(line){
-              /* Linha de categoria pai: "Orçamento Alimentação" */
+              /* IGNORAR linhas de Lançamento (repetições de totais, uma por lançamento individual) */
+              if(line.match(/^Lançamento\s*[-–]/))return;
+              /* Ignorar cabeçalho */
+              if(line.match(/^Nível\s+Orçamento/i))return;
+
+              /* Linha de categoria pai: "Orçamento Alimentação 3.250,00 4.327,36 66..." */
               var mOrc=line.match(/^Orçamento\s+(.+)/);
-              if(mOrc){catAtual=mOrc[1].trim();return;}
-              /* Linha de subcategoria: "Categoria • Subcategoria NUMS..." */
+              if(mOrc){
+                /* Remove números do final pro nome limpo */
+                var nomeOrc=mOrc[1].replace(/[\d.,\s%]+$/,"").trim();
+                catAtual=nomeOrc||mOrc[1].trim();
+                /* Detecta integrante pela categoria pai (ex: "Pessoais Hélio", "Receitas Karla") */
+                integranteAtual=detectarIntegrante(catAtual);
+                return;
+              }
+
+              /* Linha de subcategoria: "Categoria • Subcategoria NUMS..." 
+                 Formato das colunas no PDF do Meu Vista:
+                 Estimado | Realizado Mensal | Qtd Lançamentos | Total | %Estimativa | %Realizado
+                 Ex: "Aula Presencial 19.000,00 21.315,00 31 21.315,00 112,18% 86,47%"
+                 
+                 ATENÇÃO: "Realizado Mensal" no PDF mensal = valor do mês (não média).
+                          Quando o período é mensal (nMeses=1), Realizado Mensal == Total.
+                          Usamos o "Total" (4º número ou 2º quando há só 2) pois é mais confiável. */
               var mCat=line.match(/^Categoria\s*[•·]\s*(.+)/);
               if(mCat){
                 var rest=mCat[1].trim();
-                /* Extrai números do final da linha: Estimado Realizado Mensal Qtd Total %Est %Real */
-                var nums=rest.match(/[\d.,]+/g)||[];
+                /* Extrai todos os números da linha */
+                var nums=rest.match(/[\d.]+,\d{2}/g)||[];  /* apenas números com vírgula (valores BRL) */
+                var numsPct=rest.match(/\d+,\d{2}%/g)||[]; /* percentuais separados */
                 var nomeCat=rest.replace(/[\d.,\s%]+$/,"").trim();
-                /* Tenta pegar Realizado Mensal (2º número) e Estimado (1º) */
+
+                /* Estrutura: Estimado(0) RealMensal(1) [Qtd inteiro] Total(pode ser 3 ou 2) %Est %Real
+                   O campo Qtd é inteiro sem vírgula, então não aparece nos nums BRL.
+                   Logo: nums[0]=Estimado, nums[1]=RealMensal, nums[2]=Total (quando existe)
+                   Para período mensal (nMeses=1): RealMensal == Total.
+                   PRIORIDADE: usar nums[2] (Total explícito) se existir, senão nums[1] (RealMensal) */
                 var estimado=nums.length>0?parseNum(nums[0]):0;
                 var realizadoMensal=nums.length>1?parseNum(nums[1]):0;
-                var total=nums.length>3?parseNum(nums[3]):realizadoMensal*nMeses;
-                if(nomeCat&&(realizadoMensal>0||estimado>0)){
+                /* Total: 3º valor BRL quando existe (ex: 21.315,00 aparece 2x: RealMensal e Total) */
+                var total=nums.length>2?parseNum(nums[2]):realizadoMensal;
+
+                /* Para períodos mensais (nMeses=1), Total e RealMensal são idênticos — OK.
+                   Para trimestral: total = soma do período, realizadoMensal = média.
+                   Usamos: realizadoMensal para trimestral (já é média), total para mensal. */
+                var valorFinal=nMeses===1?total:realizadoMensal;
+
+                if(nomeCat&&(valorFinal>0||estimado>0)){
                   rows.push({
                     nivel:"Categoria",
                     categoria:catAtual,
                     subcategoria:nomeCat,
                     estimado:estimado,
-                    realizadoMensal:realizadoMensal,
-                    total:total||realizadoMensal*nMeses
+                    realizadoMensal:valorFinal,
+                    total:nMeses===1?total:realizadoMensal*nMeses,
+                    integrante:integranteAtual  /* preserva quem é (Hélio/Karla) */
                   });
                 }
                 return;
               }
-              /* Linha de orçamento total da categoria: "Orçamento NOME NUMS..." */
-              /* (já capturado acima, ignora) */
             });
 
             if(rows.length===0){
-              /* Fallback: tenta linha genérica com 2+ números */
+              /* Fallback: tenta linha genérica com 2+ valores BRL */
               allLines.forEach(function(line){
                 if(line.match(/^(Orçamento|Categoria|Lançamento|Nível)/i))return;
                 var nums=line.match(/[\d.]+,\d{2}/g)||[];
@@ -8778,7 +8831,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
                   var nome=line.replace(/[\d.,\s%]+$/,"").trim();
                   if(nome.length>2){
                     rows.push({nivel:"Categoria",categoria:"Importado",subcategoria:nome,
-                      estimado:parseNum(nums[0]),realizadoMensal:parseNum(nums[1]),total:parseNum(nums[1])*nMeses});
+                      estimado:parseNum(nums[0]),realizadoMensal:parseNum(nums[1]),total:parseNum(nums[1])*nMeses,
+                      integrante:null});
                   }
                 }
               });
@@ -8792,20 +8846,23 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
               var sub=r.subcategoria||r.categoria;
               var subLow=sub.toLowerCase();
               var catLow=(r.categoria||"").toLowerCase();
-              var isReceita=catLow.indexOf("receita")>=0||catLow.indexOf("renda")>=0||
-                            subLow.match(/^receita|^renda|^salár|^freelan/);
-              var isInvest=catLow.indexOf("investimento")>=0||catLow.indexOf("previdência")>=0;
+              /* BUG FIX: detecta "Receitas" (plural) além de "Receita" (singular) */
+              var isReceita=catLow.match(/receita[s]?|renda[s]?/)||
+                            subLow.match(/^receita[s]?|^renda[s]?|^salár|^freelan/);
+              var isInvest=catLow.match(/investimento[s]?|previdência|previdencia/);
               var val=r.realizadoMensal||0;
               var orc=r.estimado||0;
               if(val===0&&orc===0)return;
               var cls=classifyMeuVista(sub,!!isReceita,d.vistaLearning||[]);
               if(isInvest)cls.macro="investimentos";
+              /* Integrante: vem do row (detectado pela categoria pai ex: "Receitas Hélio") */
+              var integranteFinal=r.integrante||null;
               items.push({
                 id:idC++,sub:sub,macro:cls.macro,conf:cls.conf,
                 valor:Math.abs(val||orc),tipo:isReceita?"r":"d",
                 orc:orc>0?orc:null,include:true,learned:!!cls.learned,
                 via:cls.via||null,hits:cls.hits||0,objId:cls.objId||null,
-                integrante:null
+                integrante:integranteFinal
               });
             });
 
@@ -24617,7 +24674,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '263';
+  var SW_VERSION = '264';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
