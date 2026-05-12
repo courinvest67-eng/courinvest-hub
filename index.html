@@ -23699,6 +23699,10 @@ function App({authUser}){
       });
     });
   },[d&&d.cl&&d.cl.length]);
+
+  React.useEffect(function(){
+    try{
+      if(localStorage.getItem("courinvest_tx_migrated_v1")==="1")return;
       var migrated=0;
       d.cl.forEach(function(c){
         /* Heurística: valores >= 0.3 são quase certamente a.a. (taxa mensal típica é 0.05-0.15%) */
