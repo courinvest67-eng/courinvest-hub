@@ -9148,6 +9148,180 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
   };
 
   
+  const gerarRelatorioTrimestral=function(meses,cli){
+    var MN=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+    var fmt=function(v){return "R$ "+(v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})};
+    var fmtS=function(v){return (v>=0?"+":"")+fmt(v)};
+    var nomeMes=function(key){var p=key.split("-");return p.length===2?MN[+p[1]-1]+"/"+p[0]:key};
+    var nomeCliente=cli.nome||"Cliente";
+    /* Ordena mais recente primeiro */
+    var ms=meses.slice().sort(function(a,b){return b.mes.localeCompare(a.mes)});
+    var m1=ms[0],m2=ms[1],m3=ms[2]||null;
+    var meses3=m3?[m3,m2,m1]:[m2,m1]; /* cronológico: mais antigo → mais recente */
+    var primeiro=meses3[0],ultimo=meses3[meses3.length-1];
+
+    /* Coleta todas as categorias de despesas */
+    var cats={};
+    meses3.forEach(function(m){
+      (m.despesas||[]).forEach(function(d){
+        var cat=d.macro||d.cat||"Outros";
+        if(cat==="investimentos")return;
+        if(!cats[cat])cats[cat]={nome:cat,valores:{}};
+        cats[cat].valores[m.mes]=(cats[cat].valores[m.mes]||0)+d.valor;
+      });
+    });
+
+    /* Coleta receitas */
+    var recCats={};
+    meses3.forEach(function(m){
+      (m.receitas||[]).forEach(function(r){
+        var cat=r.cat||r.macro||"Receita";
+        if(!recCats[cat])recCats[cat]={nome:cat,valores:{}};
+        recCats[cat].valores[m.mes]=(recCats[cat].valores[m.mes]||0)+r.valor;
+      });
+    });
+
+    var totalRec=function(m){return(m.receitas||[]).reduce(function(s,r){return s+r.valor},0)};
+    var totalDesp=function(m){return(m.despesas||[]).filter(function(d){return(d.macro||d.cat||"")!=="investimentos"}).reduce(function(s,d){return s+d.valor},0)};
+    var saldo=function(m){return totalRec(m)-totalDesp(m)};
+
+    var tRecTotal=meses3.reduce(function(s,m){return s+totalRec(m)},0);
+    var tDespTotal=meses3.reduce(function(s,m){return s+totalDesp(m)},0);
+    var saldoAcum=tRecTotal-tDespTotal;
+    var reducaoDesp=totalDesp(ultimo)-totalDesp(primeiro);
+    var melhorMes=meses3.reduce(function(best,m){return saldo(m)>saldo(best)?m:best},meses3[0]);
+
+    /* Alertas por categoria */
+    var alertas=Object.values(cats).map(function(cat){
+      var vals=meses3.map(function(m){return cat.valores[m.mes]||0});
+      var vPrimeiro=vals[0],vUltimo=vals[vals.length-1];
+      var variacao=vUltimo-vPrimeiro;
+      var pct=vPrimeiro>0?((variacao/vPrimeiro)*100):0;
+      var status=variacao<-50?"BOM":Math.abs(pct)>20||variacao>200?"ATENÇÃO":"OK";
+      return{nome:cat.nome,vals:vals,variacao:variacao,pct:pct,status:status};
+    }).filter(function(a){return a.vals.some(function(v){return v>0})}).sort(function(a,b){return b.vals[b.vals.length-1]-a.vals[a.vals.length-1]});
+
+    var periodo=meses3.map(function(m){return nomeMes(m.mes)}).join(" · ");
+    var hoje=new Date();
+    var dataGer=hoje.getDate()+" de "+MN[hoje.getMonth()].toLowerCase()+" de "+hoje.getFullYear();
+
+    var corStatus=function(s){return s==="BOM"?"#2DD4A0":s==="ATENÇÃO"?"#F6A623":"#6B7489"};
+    var bgStatus=function(s){return s==="BOM"?"rgba(45,212,160,0.08)":s==="ATENÇÃO"?"rgba(246,166,35,0.08)":"transparent"};
+
+    /* Próximos passos automáticos */
+    var proxPassos=[];
+    alertas.filter(function(a){return a.status==="ATENÇÃO"&&a.vals[a.vals.length-1]>500}).slice(0,4).forEach(function(a){
+      proxPassos.push("Monitorar <strong>"+a.nome+"</strong>: cresceu "+Math.abs(a.pct.toFixed(0))+"% no período");
+    });
+    alertas.filter(function(a){return a.status==="BOM"}).slice(0,2).forEach(function(a){
+      proxPassos.push("Manter <strong>"+a.nome+"</strong> controlado — excelente desempenho!");
+    });
+    if(saldoAcum>0)proxPassos.push("Parabéns pelos meses positivos! Considere alocar o saldo acumulado de <strong>"+fmt(saldoAcum)+"</strong>");
+
+    return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Relatório Trimestral · ${nomeCliente}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Arial,sans-serif;background:#0D1B35;color:#fff;font-size:13px}
+.page{width:1120px;margin:0 auto;padding:40px}
+.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:32px;padding-bottom:20px;border-bottom:2px solid #D4A328}
+.logo{color:#D4A328;font-size:22px;font-weight:900;letter-spacing:2px}
+.logo small{display:block;font-size:10px;font-weight:400;color:#6B7489;letter-spacing:3px;margin-top:2px}
+.title{font-size:28px;font-weight:800;color:#fff;margin-bottom:4px}
+.subtitle{font-size:13px;color:#6B7489}
+.badge-destaque{background:rgba(45,212,160,0.12);border:1px solid rgba(45,212,160,0.3);border-radius:8px;padding:12px 18px;color:#2DD4A0;font-weight:700;font-size:13px;margin-bottom:28px}
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:32px}
+.kpi{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:18px}
+.kpi-label{font-size:10px;color:#6B7489;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
+.kpi-value{font-size:22px;font-weight:800}
+.kpi-sub{font-size:10px;color:#6B7489;margin-top:4px}
+.section-title{font-size:16px;font-weight:800;color:#D4A328;margin:28px 0 14px;letter-spacing:.3px}
+.mes-grid{display:grid;grid-template-columns:repeat(${meses3.length},1fr);gap:14px;margin-bottom:32px}
+.mes-card{border-radius:12px;padding:18px;border:1px solid rgba(255,255,255,0.08)}
+.mes-card.melhor{border-color:rgba(45,212,160,0.4);background:rgba(45,212,160,0.05)}
+.mes-card-title{font-size:11px;font-weight:700;letter-spacing:1px;margin-bottom:12px;text-transform:uppercase}
+.mes-item{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:12px}
+.mes-item:last-child{border-bottom:none;font-weight:700;margin-top:4px}
+table{width:100%;border-collapse:collapse;margin-bottom:28px}
+th{background:#0A1628;color:#D4A328;font-size:11px;font-weight:700;padding:10px 12px;text-align:left;letter-spacing:.5px}
+th:not(:first-child){text-align:right}
+td{padding:9px 12px;border-bottom:1px solid rgba(255,255,255,0.05);font-size:12px}
+td:not(:first-child){text-align:right;font-family:monospace}
+tr:hover td{background:rgba(255,255,255,0.02)}
+.alerta-row td:first-child{font-weight:600}
+.tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700}
+.passos{counter-reset:passo}
+.passo{counter-increment:passo;display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.06)}
+.passo::before{content:counter(passo);background:#D4A328;color:#0A1628;width:22px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:11px;flex-shrink:0;line-height:22px;text-align:center}
+.footer{margin-top:40px;padding-top:16px;border-top:1px solid rgba(255,255,255,0.08);font-size:10px;color:#6B7489;display:flex;justify-content:space-between}
+.green{color:#2DD4A0} .red{color:#EF6461} .gold{color:#D4A328} .gray{color:#6B7489}
+@media print{body{background:#fff;color:#000}.page{padding:20px}th{background:#1a2744;color:#D4A328}}
+</style></head><body><div class="page">
+<div class="header">
+  <div><div class="title">Orçamento de Receitas e Gastos</div><div class="subtitle">${nomeCliente} · ${periodo} · Gerado em ${dataGer}</div></div>
+  <div class="logo">COURINVEST<small>CONSULTORIA EM INVESTIMENTOS</small></div>
+</div>
+${melhorMes?`<div class="badge-destaque">🏆 PARABÉNS! ${nomeMes(melhorMes.mes)}: menor despesa do período e maior saldo — ${fmt(saldo(melhorMes))} positivo</div>`:""}
+<div class="kpi-grid">
+  <div class="kpi"><div class="kpi-label">Receita Total (${meses3.length} meses)</div><div class="kpi-value green">${fmt(tRecTotal)}</div></div>
+  <div class="kpi"><div class="kpi-label">Despesa Total (${meses3.length} meses)</div><div class="kpi-value red">${fmt(tDespTotal)}</div></div>
+  <div class="kpi"><div class="kpi-label">Saldo Acumulado</div><div class="kpi-value ${saldoAcum>=0?"green":"red"}">${fmtS(saldoAcum)}</div></div>
+  <div class="kpi"><div class="kpi-label">Redução ${nomeMes(primeiro.mes)} → ${nomeMes(ultimo.mes)}</div><div class="kpi-value ${reducaoDesp<=0?"green":"red"}">${reducaoDesp<=0?"−":"+"} ${fmt(Math.abs(reducaoDesp))} despesas</div></div>
+</div>
+
+<div class="section-title">📅 Visão Geral · ${periodo}</div>
+<div class="mes-grid">
+${meses3.map(function(m,i){var isMelhor=m.mes===melhorMes.mes;var sl=saldo(m);var tR=totalRec(m);var tD=totalDesp(m);return`<div class="mes-card${isMelhor?" melhor":""}">
+  <div class="mes-card-title" style="color:${isMelhor?"#2DD4A0":"#D4A328"}">${nomeMes(m.mes)}${isMelhor?" — MELHOR MÊS!":""}</div>
+  <div class="mes-item"><span class="gray">Receita total</span><span class="green">${fmt(tR)}</span></div>
+  <div class="mes-item"><span class="gray">Despesa total</span><span class="red">${fmt(tD)}</span></div>
+  <div class="mes-item"><span>Saldo</span><span class="${sl>=0?"green":"red"}">${fmtS(sl)}</span></div>
+</div>`}).join("")}
+</div>
+
+<div class="section-title">📊 Despesas por Categoria</div>
+<table>
+<thead><tr><th>Categoria</th>${meses3.map(function(m){return`<th>${nomeMes(m.mes)}</th>`}).join("")}<th>Total ${meses3.length}M</th><th>Variação ${nomeMes(primeiro.mes)}→${nomeMes(ultimo.mes)}</th></tr></thead>
+<tbody>
+${alertas.map(function(a){var total=a.vals.reduce(function(s,v){return s+v},0);var varPct=a.pct;return`<tr class="alerta-row" style="background:${bgStatus(a.status)}">
+  <td>${a.nome}</td>
+  ${a.vals.map(function(v,i){return`<td>${v>0?fmt(v):"R$ 0"}</td>`}).join("")}
+  <td style="font-weight:700">${fmt(total)}</td>
+  <td><span style="color:${a.variacao<=0?"#2DD4A0":"#F6A623"}">${a.variacao<=0?"−":"+"}${fmt(Math.abs(a.variacao))} (${varPct>0?"+":""}${varPct.toFixed(0)}%)</span></td>
+</tr>`}).join("")}
+<tr style="background:rgba(212,163,40,0.08);font-weight:800">
+  <td>TOTAL</td>
+  ${meses3.map(function(m){return`<td class="gold">${fmt(totalDesp(m))}</td>`}).join("")}
+  <td class="gold">${fmt(tDespTotal)}</td>
+  <td class="${reducaoDesp<=0?"green":"red"}">${reducaoDesp<=0?"−":"+"}${fmt(Math.abs(reducaoDesp))}</td>
+</tr>
+</tbody></table>
+
+<div class="section-title">⚠️ Alertas · Categorias e Tendências</div>
+<table>
+<thead><tr><th>Situação</th><th>Categoria</th>${meses3.map(function(m){return`<th>${nomeMes(m.mes)}</th>`}).join("")}<th>Observação</th></tr></thead>
+<tbody>
+${alertas.filter(function(a){return a.vals.some(function(v){return v>0})}).map(function(a){
+  var obs=a.status==="BOM"?"Controlado — bom desempenho!":a.variacao>0?"Crescendo no período. Monitorar e buscar redução.":"Variação no período. Identificar causas.";
+  return`<tr style="background:${bgStatus(a.status)}">
+    <td><span class="tag" style="background:${bgStatus(a.status)};color:${corStatus(a.status)}">${a.status}</span></td>
+    <td style="font-weight:600">${a.nome}</td>
+    ${a.vals.map(function(v){return`<td>${v>0?fmt(v):"—"}</td>`}).join("")}
+    <td style="color:#9BA3B2;font-size:11px">${obs}</td>
+  </tr>`;}).join("")}
+</tbody></table>
+
+<div class="section-title">✅ Próximos Passos</div>
+<div class="passos">
+${proxPassos.map(function(p){return`<div class="passo">${p}</div>`}).join("")}
+</div>
+
+<div class="footer">
+  <span>${nomeCliente} · ${periodo} · Courinvest — Consultoria em Investimentos · Confidencial</span>
+  <span>Gerado em ${dataGer}</span>
+</div>
+</div></body></html>`;
+  };
+
   const exportarRelatorioFinPDF=function(){
     var an=gerarAnaliseFinanceira();
     if(!an){alert("Sem dados para gerar relatório.");return}
@@ -16242,6 +16416,23 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
                         <div style={{flex:1}}>
                           <div style={{fontSize:14,fontWeight:800,color:T.cyan,marginBottom:2}}>Relatório Mensal Financeiro</div>
                           <div style={{fontSize:10,color:T.t3,lineHeight:1.5}}>Orçamento · Receitas vs Despesas · Fluxo de Caixa · Taxa de Poupança · Evolução patrimonial</div>
+                        </div>
+                      </div>
+                    </Cd>
+                    <Cd onClick={function(){
+                      var hist=(c.histMensal||[]).slice().sort(function(a,b){return b.mes.localeCompare(a.mes)});
+                      var ultimos3=hist.slice(0,3);
+                      if(ultimos3.length<2){alert("São necessários pelo menos 2 meses importados para gerar o relatório trimestral.");return;}
+                      var w=window.open("","_blank","width=1200,height=900");
+                      if(!w){alert("Bloqueador de pop-up impediu abrir a janela.");return;}
+                      w.document.write(gerarRelatorioTrimestral(ultimos3,c));
+                      w.document.close();
+                    }} style={{padding:20,cursor:"pointer",background:"linear-gradient(145deg,rgba(212,163,40,0.06),rgba(212,163,40,0.02))",border:"1px solid "+T.gold+"33"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:12}}>
+                        <div style={{fontSize:32}}>📈</div>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:14,fontWeight:800,color:T.gold,marginBottom:2}}>Relatório Trimestral Financeiro</div>
+                          <div style={{fontSize:10,color:T.t3,lineHeight:1.5}}>Comparativo dos últimos 3 meses · Evolução por categoria · Alertas e próximos passos</div>
                         </div>
                       </div>
                     </Cd>
