@@ -70,7 +70,6 @@ table{border-spacing:0}
 <body>
 <div id="root"></div>
 <!-- Selo de versão temporário pra confirmar deploy -->
-<div id="version-marker" style="position:fixed;bottom:4px;right:4px;background:red;color:white;font-size:9px;padding:2px 6px;z-index:99999;border-radius:4px;font-family:monospace">v-FIX-17h02</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
@@ -21631,7 +21630,7 @@ function ApresentacaoView(){
       <div style={{background:"#fff",borderRadius:12,overflow:"hidden",boxShadow:"0 20px 60px rgba(0,0,0,0.3)",maxWidth:820,margin:"0 auto",fontFamily:"'Outfit',sans-serif"}}>
 
         {/* CAPA */}
-        <div style={{backgroundImage:"url('"+gfBgImg+"')",backgroundSize:"cover",backgroundPosition:"center",backgroundRepeat:"no-repeat",backgroundColor:"rgba(6,14,31,0.80)",color:"#fff",padding:"60px 50px",minHeight:"85vh",display:"flex",flexDirection:"column",position:"relative",overflow:"hidden"}}>
+        <div style={{backgroundImage:"linear-gradient(to right,rgba(6,14,31,0.80) 0%,rgba(6,14,31,0.55) 50%,rgba(6,14,31,0.25) 100%),url('"+gfBgImg+"')",backgroundSize:"cover",backgroundPosition:"center top",backgroundRepeat:"no-repeat",color:"#fff",padding:"60px 50px",minHeight:"85vh",display:"flex",flexDirection:"column",position:"relative",overflow:"hidden"}}>
           <div style={{position:"absolute",inset:0,opacity:0.03,backgroundImage:"radial-gradient(#D4A328 1px,transparent 1px)",backgroundSize:"32px 32px",pointerEvents:"none"}}/>
           <div style={{position:"relative",zIndex:1,flex:1,display:"flex",flexDirection:"column"}}>
             <div style={{marginBottom:"auto"}}>
