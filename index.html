@@ -21548,9 +21548,368 @@ function CourinvestPattern({opacity=0.04,size=600,color="#D4A328"}){
 /* ============ APRESENTAÇÃO COMERCIAL INSTITUCIONAL ============ */
 function ApresentacaoView(){
   var hoje=new Date();
+  const[apres,sApres]=React.useState("institucional");
+
+  var tabs=[
+    {id:"institucional",l:"📊 Apresentação Institucional",d:"Pitch genérico da CourInvest"},
+    {id:"gp",l:"💎 Gestão de Patrimônio",d:"Apresentação específica do serviço GP"}
+  ];
+
+  /* ── Shared helpers ── */
+  var SectionLabel=function({txt}){return (
+    <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14,position:"relative"}}>
+      <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,#D4A328)"}}/>
+      <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>{txt}</span>
+    </div>
+  );};
+
+  var PageDark=function({children,style}){return (
+    <div className="pp-page" style={{padding:"70px 60px",background:"linear-gradient(135deg,#060E1F 0%,#0C1A33 40%,#142B52 100%)",color:"#fff",pageBreakBefore:"always",position:"relative",overflow:"hidden",...style}}>
+      <div style={{position:"absolute",top:-100,right:-100,opacity:0.05,pointerEvents:"none"}}><CourinvestPattern opacity={0.6} size={400} color="#F5C94B"/></div>
+      {children}
+    </div>
+  );};
+
+  var PageLight=function({children,style}){return (
+    <div className="pp-page" style={{padding:"70px 60px",background:"linear-gradient(180deg,#FAFBFD 0%,#F1F3F8 100%)",pageBreakBefore:"always",position:"relative",overflow:"hidden",...style}}>
+      <div style={{position:"absolute",top:-40,right:-80,opacity:0.04,pointerEvents:"none"}}><CourinvestPattern opacity={0.6} size={320} color="#D4A328"/></div>
+      {children}
+    </div>
+  );};
+
+  /* ═══════════════════════════════════════
+     APRESENTAÇÃO GESTÃO DE PATRIMÔNIO
+  ═══════════════════════════════════════ */
+  var ApresentacaoGP=function(){
+    /* tabela regressiva */
+    var taxaRows=[
+      {range:"Até R$ 200.000",rate:"0,20% a.m.",anual:"≈ 2,4% a.a.",hl:false},
+      {range:"Entre R$ 200.001 e R$ 600.000",rate:"0,175% a.m.",anual:"≈ 2,1% a.a.",hl:true},
+      {range:"Entre R$ 600.001 e R$ 1.500.000",rate:"0,15% a.m.",anual:"≈ 1,8% a.a.",hl:false},
+      {range:"Entre R$ 1.500.001 e R$ 3.000.000",rate:"0,125% a.m.",anual:"≈ 1,5% a.a.",hl:false},
+      {range:"Acima de R$ 3.000.000",rate:"0,10% a.m.",anual:"≈ 1,2% a.a.",hl:false},
+    ];
+    var exemplos=[
+      {mes:"1",aporte:"R$ 200.000",investido:"R$ 200.000",apurado:"R$ 202.000",ganho:"R$ 2.000",tx:"R$ 353,50",pct:"0,175%"},
+      {mes:"6",aporte:"R$ 550.000",investido:"R$ 750.000",apurado:"R$ 768.000",ganho:"R$ 18.000",tx:"R$ 1.152,00",pct:"0,15%"},
+      {mes:"12",aporte:"R$ 750.000",investido:"R$ 1.500.000",apurado:"R$ 1.573.500",ganho:"R$ 73.500",tx:"R$ 1.966,88",pct:"0,125%"},
+      {mes:"18",aporte:"R$ 1.500.000",investido:"R$ 3.000.000",apurado:"R$ 3.243.000",ganho:"R$ 243.000",tx:"R$ 3.243,00",pct:"0,10%"},
+    ];
+
+    return (
+      <div id="proposta-print" style={{background:"#fff",color:"#1a1a2e",padding:0,borderRadius:12,overflow:"hidden",boxShadow:"0 20px 60px rgba(0,0,0,0.3)",maxWidth:820,margin:"0 auto",fontFamily:"'Outfit',sans-serif"}}>
+
+        {/* ── CAPA GP ── */}
+        <div className="pp-page" style={{
+          background:"radial-gradient(ellipse 70% 50% at 75% 25%,rgba(212,163,40,0.28) 0%,transparent 55%),radial-gradient(ellipse 50% 40% at 15% 85%,rgba(56,128,220,0.10) 0%,transparent 50%),linear-gradient(135deg,#060E1F 0%,#0C1A33 40%,#142B52 100%)",
+          color:"#fff",padding:"60px 50px",minHeight:"100vh",display:"flex",flexDirection:"column",position:"relative",overflow:"hidden"
+        }}>
+          <div style={{position:"absolute",top:-80,right:-120,opacity:0.07,pointerEvents:"none"}}><CourinvestPattern opacity={0.5} size={500} color="#F5C94B"/></div>
+          <div style={{position:"absolute",inset:0,opacity:0.03,backgroundImage:"radial-gradient(#D4A328 1px,transparent 1px)",backgroundSize:"32px 32px",pointerEvents:"none"}}/>
+          <div style={{position:"relative",zIndex:1,flex:1,display:"flex",flexDirection:"column"}}>
+            <div style={{marginBottom:"auto"}}><CourinvestLogo width={280} darkMode={true}/></div>
+            <div style={{margin:"60px 0"}}>
+              <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:24}}>
+                <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,#D4A328)"}}/>
+                <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:4}}>APRESENTAÇÃO COMERCIAL</span>
+              </div>
+              <div style={{fontSize:72,fontWeight:900,lineHeight:0.95,marginBottom:16,letterSpacing:-3,background:"linear-gradient(135deg,#fff 0%,#C8D4E8 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
+                Gestão de<br/>Patrimônio
+              </div>
+              <div style={{fontSize:48,fontWeight:900,lineHeight:0.95,letterSpacing:-2,background:"linear-gradient(135deg,#F5C94B 0%,#D4A328 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text",marginBottom:24}}>
+                financeiro.
+              </div>
+              <div style={{fontSize:17,color:"#8B9DC3",lineHeight:1.65,maxWidth:520,fontWeight:300,letterSpacing:0.2}}>
+                Estratégia, execução e acompanhamento para quem já construiu capital e quer uma gestão profissional dedicada.
+              </div>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",paddingTop:24,borderTop:"1px solid rgba(212,163,40,0.15)"}}>
+              <div style={{display:"flex",gap:40,fontSize:11}}>
+                {[{n:"2019",l:"FUNDAÇÃO"},{n:"CVM",l:"REGULADA"},{n:"ANBIMA",l:"CERTIFICADA"}].map(function(b,i){return (
+                  <div key={i}>
+                    <div style={{color:"#D4A328",fontWeight:900,fontSize:24,letterSpacing:-0.5,lineHeight:1}}>{b.n}</div>
+                    <div style={{color:"#8B9DC3",fontWeight:700,letterSpacing:2,fontSize:9,marginTop:4}}>{b.l}</div>
+                  </div>
+                )})}
+              </div>
+              <div style={{fontSize:9,color:"#4A5F82",letterSpacing:2,textAlign:"right"}}>{hoje.getFullYear()}<br/><span style={{fontSize:8}}>courinvest.com.br</span></div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── P2: NOSSA ESSÊNCIA ── */}
+        <PageLight>
+          <SectionLabel txt="NOSSA ESSÊNCIA"/>
+          <div style={{fontSize:56,fontWeight:900,color:"#0A1628",lineHeight:0.95,letterSpacing:-2,marginBottom:36,maxWidth:680,position:"relative"}}>
+            Acreditamos que <span style={{color:"#D4A328",fontStyle:"italic"}}>liberdade financeira</span> começa com decisões bem informadas.
+          </div>
+          <div style={{fontSize:16,color:"#3a3a4e",lineHeight:1.8,maxWidth:680,fontWeight:400,marginBottom:50}}>
+            Somos dois irmãos apaixonados pelo mercado financeiro e convictos de que o acesso a investimentos de qualidade não pode ser privilégio de poucos. <strong style={{color:"#0A1628"}}>Descomplicamos decisões. Simplificamos caminhos.</strong> E caminhamos lado a lado com quem confia em nós para construir um futuro próspero.
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>
+            {[
+              {ic:"🎯",t:"Personalizada",d:"Cada cliente é único. Nada de receitas prontas."},
+              {ic:"⚖️",t:"Independente",d:"Sem vínculo com bancos. Sem conflito de interesse."},
+              {ic:"🔍",t:"Transparente",d:"Modelo Fee-Based. Você sabe exatamente o que paga."}
+            ].map(function(v,i){return (
+              <div key={i} style={{padding:"24px 22px",background:"#fff",borderRadius:14,boxShadow:"0 4px 20px rgba(10,22,40,0.06)",position:"relative",overflow:"hidden"}}>
+                <div style={{position:"absolute",top:0,left:0,width:"100%",height:3,background:"linear-gradient(90deg,#D4A328,#F5C94B)"}}/>
+                <div style={{fontSize:32,marginBottom:10}}>{v.ic}</div>
+                <div style={{fontSize:18,fontWeight:800,color:"#0A1628",marginBottom:6,letterSpacing:-0.3}}>{v.t}</div>
+                <div style={{fontSize:12,color:"#5a5a6e",lineHeight:1.6}}>{v.d}</div>
+              </div>
+            )})}
+          </div>
+        </PageLight>
+
+        {/* ── P3: O QUE É GESTÃO DE PATRIMÔNIO ── */}
+        <PageDark>
+          <SectionLabel txt="GESTÃO DE PATRIMÔNIO"/>
+          <div style={{fontSize:48,fontWeight:900,lineHeight:1.0,letterSpacing:-1.5,marginBottom:20,maxWidth:700,background:"linear-gradient(135deg,#fff 0%,#C8D4E8 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
+            A melhor solução para sua vida financeira.
+          </div>
+          <div style={{fontSize:16,color:"#8B9DC3",lineHeight:1.7,maxWidth:640,marginBottom:44}}>
+            Serviço exclusivo para o investidor que deseja delegar a gestão ativa da sua carteira a profissionais certificados — com estratégia personalizada, execução disciplinada e acompanhamento contínuo.
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:14}}>
+            {[
+              {ic:"📋",t:"Objetivo",d:"Gestão personalizada para otimizar seus investimentos com base no seu perfil e metas de vida."},
+              {ic:"⚡",t:"Execução",d:"Todas as operações realizadas pelo profissional contratado, com agilidade e precisão técnica."},
+              {ic:"🎧",t:"Suporte",d:"Disponibilidade total por WhatsApp, e-mail e telefone para decisões financeiras importantes."},
+              {ic:"📈",t:"Retorno",d:"Atingimento de metas e maximização de ganhos de capital ao longo do tempo."}
+            ].map(function(p,i){return (
+              <div key={i} style={{padding:"22px 24px",background:"rgba(212,163,40,0.05)",border:"1px solid rgba(212,163,40,0.15)",borderRadius:14,position:"relative",overflow:"hidden"}}>
+                <div style={{fontSize:28,marginBottom:10}}>{p.ic}</div>
+                <div style={{fontSize:17,fontWeight:800,color:"#fff",marginBottom:8,letterSpacing:-0.3}}>{p.t}</div>
+                <div style={{fontSize:12,color:"#8B9DC3",lineHeight:1.6}}>{p.d}</div>
+              </div>
+            )})}
+          </div>
+        </PageDark>
+
+        {/* ── P4: METODOLOGIA GP ── */}
+        <PageLight>
+          <SectionLabel txt="NOSSA METODOLOGIA"/>
+          <div style={{fontSize:48,fontWeight:900,color:"#0A1628",lineHeight:1.0,letterSpacing:-1.5,marginBottom:14,maxWidth:700}}>Processo claro. <span style={{color:"#D4A328"}}>Resultado consistente.</span></div>
+          <div style={{fontSize:15,color:"#5a5a6e",lineHeight:1.7,marginBottom:40,maxWidth:620}}>Seguimos um método estruturado em 4 etapas que garante que cada decisão seja tomada com base em dados, perfil e objetivos — nunca no achismo.</div>
+          <div style={{display:"flex",flexDirection:"column",gap:14,position:"relative"}}>
+            <div style={{position:"absolute",left:30,top:40,bottom:40,width:2,background:"linear-gradient(180deg,#D4A32866,transparent)",zIndex:0}}/>
+            {[
+              {t:"Diagnóstico",d:"Entendemos profundamente sua realidade financeira, objetivos de vida e perfil de risco. Sem diagnóstico correto, não existe estratégia eficiente."},
+              {t:"Estratégia",d:"Construímos um plano personalizado com alocação clara para reserva de emergência, curto, médio e longo prazo — cada escolha tem um porquê."},
+              {t:"Execução",d:"Realizamos as operações de compra, venda e realocação diretamente na corretora com total disciplina e rigor técnico."},
+              {t:"Acompanhamento",d:"Relatório mensal de desempenho, revisões periódicas e ajustes conforme o mercado e sua vida evoluem."}
+            ].map(function(m,i){return (
+              <div key={i} style={{display:"flex",gap:20,alignItems:"flex-start",position:"relative",zIndex:1}}>
+                <div style={{width:62,height:62,flexShrink:0,background:"linear-gradient(135deg,#D4A328 0%,#D4A328CC 100%)",color:"#fff",borderRadius:16,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,fontWeight:900,letterSpacing:-1,boxShadow:"0 10px 30px rgba(212,163,40,0.4),inset 0 1px 0 rgba(255,255,255,0.3)"}}>{(i+1).toString().padStart(2,"0")}</div>
+                <div style={{flex:1,padding:"18px 22px",background:"#fff",borderRadius:14,boxShadow:"0 4px 20px rgba(10,22,40,0.06)"}}>
+                  <div style={{fontSize:20,fontWeight:900,color:"#0A1628",marginBottom:6,letterSpacing:-0.3}}>{m.t}</div>
+                  <div style={{fontSize:13,color:"#5a5a6e",lineHeight:1.65}}>{m.d}</div>
+                </div>
+              </div>
+            )})}
+          </div>
+        </PageLight>
+
+        {/* ── P5: ALOCAÇÃO ESTRATÉGICA ── */}
+        <PageDark>
+          <SectionLabel txt="DEFINIÇÃO ESTRATÉGICA"/>
+          <div style={{fontSize:44,fontWeight:900,lineHeight:1.0,letterSpacing:-1.5,marginBottom:16,background:"linear-gradient(135deg,#fff 0%,#C8D4E8 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
+            Como estruturamos sua carteira.
+          </div>
+          <div style={{fontSize:15,color:"#8B9DC3",lineHeight:1.7,maxWidth:640,marginBottom:40}}>
+            A alocação é personalizada com base no seu perfil e objetivos. Abaixo, um exemplo ilustrativo da estrutura que adotamos:
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            {[
+              {pct:"40%",label:"Reserva de Emergência",sub:"Liquidez imediata · Indexado ao CDI / Poupança",color:"#3B82F6",w:40},
+              {pct:"30%",label:"Curto Prazo",sub:"Segurança · Preservar o patrimônio · CDB, LCI, LCA",color:"#06B6D4",w:30},
+              {pct:"20%",label:"Médio Prazo",sub:"Segurança/Rentabilidade · Prefixado, IPCA+",color:"#D4A328",w:20},
+              {pct:"10%",label:"Longo Prazo",sub:"Rentabilidade · Ações, FIIs, BDRs, ETFs",color:"#10B981",w:10}
+            ].map(function(a,i){return (
+              <div key={i} style={{display:"flex",gap:16,alignItems:"center",padding:"16px 20px",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,position:"relative",overflow:"hidden"}}>
+                <div style={{position:"absolute",left:0,top:0,bottom:0,width:a.w+"%",background:"linear-gradient(90deg,"+a.color+"22,transparent)",borderRadius:"12px 0 0 12px"}}/>
+                <div style={{fontSize:28,fontWeight:900,color:a.color,letterSpacing:-1,minWidth:56,position:"relative"}}>{a.pct}</div>
+                <div style={{flex:1,position:"relative"}}>
+                  <div style={{fontSize:16,fontWeight:800,color:"#fff",marginBottom:2}}>{a.label}</div>
+                  <div style={{fontSize:11,color:"#8B9DC3"}}>{a.sub}</div>
+                </div>
+              </div>
+            )})}
+          </div>
+          <div style={{marginTop:20,fontSize:10,color:"#4A5F82",fontStyle:"italic"}}>* Alocação ilustrativa. A carteira é personalizada com base no seu perfil e objetivos.</div>
+        </PageDark>
+
+        {/* ── P6: REMUNERAÇÃO ── */}
+        <PageLight>
+          <SectionLabel txt="REMUNERAÇÃO DO SERVIÇO"/>
+          <div style={{fontSize:48,fontWeight:900,color:"#0A1628",lineHeight:1.0,letterSpacing:-1.5,marginBottom:10}}>Quanto mais você investe, <span style={{color:"#D4A328"}}>menos você paga.</span></div>
+          <div style={{fontSize:15,color:"#5a5a6e",lineHeight:1.7,marginBottom:20,maxWidth:620}}>Taxa de administração mensal variável com tabela regressiva. Cobrada sobre o valor total apurado ao final de cada mês.</div>
+
+          {/* min box */}
+          <div style={{padding:"14px 20px",background:"rgba(212,163,40,0.06)",border:"1px solid rgba(212,163,40,0.2)",borderRadius:12,marginBottom:24,display:"flex",gap:12,alignItems:"center"}}>
+            <span style={{fontSize:20}}>💰</span>
+            <div>
+              <div style={{fontSize:10,fontWeight:700,color:"#D4A328",letterSpacing:2,marginBottom:3}}>VALOR DE INVESTIMENTO MÍNIMO INICIAL</div>
+              <div style={{fontSize:14,fontWeight:700,color:"#0A1628"}}>Patrimônio sob custódia a partir de R$ 200.000,00</div>
+            </div>
+          </div>
+
+          {/* table */}
+          <div style={{borderRadius:14,overflow:"hidden",boxShadow:"0 4px 20px rgba(10,22,40,0.06)"}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 120px 100px",background:"#0A1628",padding:"12px 20px",gap:8}}>
+              {["Patrimônio sob Custódia","Taxa Mensal","Equiv. Anual"].map(function(h,i){return (
+                <div key={i} style={{fontSize:10,fontWeight:700,color:"#D4A328",letterSpacing:1}}>{h}</div>
+              )})}
+            </div>
+            {taxaRows.map(function(r,i){return (
+              <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 120px 100px",padding:"14px 20px",gap:8,background:r.hl?"rgba(212,163,40,0.06)":i%2===0?"#fff":"#FAFAFA",borderLeft:r.hl?"3px solid #D4A328":"3px solid transparent",borderBottom:"1px solid #E8E8E8",alignItems:"center"}}>
+                <div style={{fontSize:13,color:"#0A1628",fontWeight:r.hl?700:400}}>{r.range}</div>
+                <div style={{fontSize:15,fontWeight:900,color:r.hl?"#D4A328":"#0A1628"}}>{r.rate}</div>
+                <div style={{fontSize:11,color:"#8B9DC3"}}>{r.anual}</div>
+              </div>
+            )})}
+          </div>
+          <div style={{marginTop:14,fontSize:10,color:"#9CA3AF",fontStyle:"italic"}}>* Para débito automático, investimentos em Real devem ser realizados via Genial Investimentos.</div>
+        </PageLight>
+
+        {/* ── P7: EXEMPLO PRÁTICO ── */}
+        <PageLight style={{background:"linear-gradient(180deg,#F1F3F8 0%,#FAFBFD 100%)"}}>
+          <SectionLabel txt="EXEMPLO PRÁTICO — TAXA VARIÁVEL"/>
+          <div style={{fontSize:44,fontWeight:900,color:"#0A1628",lineHeight:1.0,letterSpacing:-1.5,marginBottom:10}}>Quanto mais você investir, <span style={{color:"#D4A328"}}>mais você tende a ganhar.</span></div>
+          <div style={{fontSize:14,color:"#5a5a6e",lineHeight:1.7,marginBottom:28}}>Veja como a taxa regride à medida que o patrimônio cresce:</div>
+
+          {/* main table */}
+          <div style={{borderRadius:14,overflow:"hidden",boxShadow:"0 4px 20px rgba(10,22,40,0.06)",marginBottom:24}}>
+            <div style={{display:"grid",gridTemplateColumns:"50px 1fr 1fr 1fr 1fr 100px",background:"#D4A328",padding:"11px 16px",gap:8}}>
+              {["Mês","Aporte","Valor Investido","Valor Apurado","Ganho de Capital","TX ADM"].map(function(h,i){return (
+                <div key={i} style={{fontSize:9,fontWeight:800,color:"#0A1628",letterSpacing:0.5,textAlign:"center"}}>{h}</div>
+              )})}
+            </div>
+            {exemplos.map(function(r,i){return (
+              <div key={i} style={{display:"grid",gridTemplateColumns:"50px 1fr 1fr 1fr 1fr 100px",padding:"12px 16px",gap:8,background:i%2===0?"#fff":"#FAFAFA",borderBottom:"1px solid #E8E8E8",alignItems:"center"}}>
+                {[r.mes,r.aporte,r.investido,r.apurado,r.ganho].map(function(v,j){return (
+                  <div key={j} style={{fontSize:11,color:"#333",textAlign:"center"}}>{v}</div>
+                )})}
+                <div style={{fontSize:12,fontWeight:800,color:"#D4A328",textAlign:"center"}}>{r.tx}</div>
+              </div>
+            )})}
+          </div>
+
+          {/* summary mini cards */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
+            {exemplos.map(function(r,i){return (
+              <div key={i} style={{padding:"16px 12px",background:"#fff",borderRadius:14,boxShadow:"0 4px 20px rgba(10,22,40,0.06)",textAlign:"center",position:"relative",overflow:"hidden"}}>
+                <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,#D4A328,#F5C94B)"}}/>
+                <div style={{fontSize:11,color:"#8B9DC3",marginBottom:4}}>Mês {r.mes}</div>
+                <div style={{fontSize:10,color:"#B0B8C4",marginBottom:8}}>{r.apurado}</div>
+                <div style={{fontSize:26,fontWeight:900,color:"#D4A328",letterSpacing:-1,lineHeight:1}}>{r.pct}</div>
+                <div style={{fontSize:10,color:"#5a5a6e",marginTop:6}}>{r.tx}</div>
+              </div>
+            )})}
+          </div>
+          <div style={{marginTop:14,fontSize:10,color:"#9CA3AF",fontStyle:"italic"}}>* Simulação ilustrativa. Rendimentos não garantidos. Valores sujeitos a oscilação de mercado.</div>
+        </PageLight>
+
+        {/* ── P8: SÓCIOS ── */}
+        <PageDark style={{background:"linear-gradient(135deg,#0A1628 0%,#142B52 100%)"}}>
+          <SectionLabel txt="QUEM ESTÁ POR TRÁS"/>
+          <div style={{fontSize:48,fontWeight:900,lineHeight:1.05,letterSpacing:-1.5,marginBottom:14,background:"linear-gradient(135deg,#fff 0%,#C8D4E8 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>Dois irmãos. <span style={{background:"linear-gradient(135deg,#F5C94B,#D4A328)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>Uma missão.</span></div>
+          <div style={{fontSize:15,color:"#8B9DC3",lineHeight:1.7,marginBottom:36,maxWidth:620}}>Nossa história começou dentro de casa — administrando o dinheiro do nosso pai, o homem mais cético com mercado financeiro que conhecemos. Hoje, ele é nosso maior admirador. É dessa confiança que nasceu a CourInvest.</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:16}}>
+            {[
+              {n:"Igor Couri",c:"Sócio · Consultoria PJ e Gestão de Patrimônio",b:"Pós-graduado em Engenharia de Produção, 10+ anos de mercado financeiro.",cert:["CGA","CGE","ANBIMA"],foto:"https://courinvest.com.br/_next/image?url=%2Fimages%2Figor_sem_fundo.png&w=400&q=85",ini:"IC"},
+              {n:"Victor Couri",c:"Sócio · Consultoria PF e Gestão Financeira",b:"Mestre em Engenharia pela PUC-RJ, MBA em Ações e Stock Picking pelo Ibmec-SP.",cert:["CEA","ANBIMA","MBA"],foto:"https://courinvest.com.br/_next/image?url=%2Fimages%2Fvictor_sem_fundo.png&w=400&q=85",ini:"VC"}
+            ].map(function(s,i){return (
+              <div key={i} style={{position:"relative",padding:"24px 26px",background:"rgba(212,163,40,0.05)",border:"1px solid rgba(212,163,40,0.2)",borderRadius:16,boxShadow:"0 10px 40px rgba(0,0,0,0.2),inset 0 1px 0 rgba(255,255,255,0.05)",overflow:"hidden"}}>
+                <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,#D4A328,#F5C94B,#D4A328)"}}/>
+                <div style={{display:"flex",gap:16,alignItems:"flex-start"}}>
+                  <div style={{width:90,height:90,flexShrink:0,borderRadius:"50%",overflow:"hidden",background:"linear-gradient(135deg,#D4A328 0%,#F5C94B 100%)",padding:3,boxShadow:"0 6px 20px rgba(212,163,40,0.3)"}}>
+                    <div style={{width:"100%",height:"100%",borderRadius:"50%",overflow:"hidden",background:"#0A1628",display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
+                      <img src={s.foto} alt={s.n} crossOrigin="anonymous" style={{width:"100%",height:"100%",objectFit:"cover",objectPosition:"center top",display:"block"}} onError={function(e){e.target.style.display="none";e.target.nextSibling.style.display="flex"}}/>
+                      <div style={{display:"none",position:"absolute",inset:0,alignItems:"center",justifyContent:"center",fontSize:28,fontWeight:900,color:"#F5C94B",letterSpacing:-1}}>{s.ini}</div>
+                    </div>
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:24,fontWeight:900,color:"#fff",letterSpacing:-0.3,marginBottom:4}}>{s.n}</div>
+                    <div style={{fontSize:10,color:"#D4A328",fontWeight:700,letterSpacing:1.5,marginBottom:12,textTransform:"uppercase"}}>{s.c}</div>
+                    <div style={{fontSize:12,color:"#B8C4D6",lineHeight:1.6,marginBottom:12}}>{s.b}</div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      {s.cert.map(function(c,j){return (<span key={j} style={{fontSize:9,fontWeight:700,padding:"4px 10px",background:"rgba(212,163,40,0.15)",border:"1px solid rgba(212,163,40,0.3)",color:"#F5C94B",borderRadius:20,letterSpacing:0.5}}>{c}</span>)})}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )})}
+          </div>
+        </PageDark>
+
+        {/* ── P9: DEPOIMENTOS ── */}
+        <PageLight>
+          <SectionLabel txt="QUEM CONFIA NO NOSSO TRABALHO"/>
+          <div style={{fontSize:48,fontWeight:900,color:"#0A1628",lineHeight:1.05,letterSpacing:-1.5,marginBottom:36}}>O que nossos <span style={{color:"#D4A328"}}>clientes</span> dizem.</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+            {[
+              {n:"Mariana Molica",p:"Veterinária",t:"A equipe da CourInvest é extremamente competente. Eles transformaram a minha vida financeira, e eu sei que isso é só o começo. Seguimos juntos nessa jornada.",ini:"MM"},
+              {n:"Gustavo Neves",p:"Personal Trainer",t:"O trabalho da CourInvest é incrível. Com tanta informação por aí, é difícil saber por onde começar — eles me ajudaram a entender tudo e a dar os primeiros passos.",ini:"GN"},
+              {n:"Paula Oliveira",p:"Médica",t:"Foi um divisor de águas. Agora tenho mais controle sobre meus gastos e finalmente comecei a investir. A equipe é super atenciosa e me orienta em cada passo.",ini:"PO"},
+              {n:"Ivo Cherem",p:"Empresário",t:"Adoro o trabalho de vocês. Prático e claro, me ajudam a organizar tudo de forma que eu nunca imaginei ser possível. Agora me sinto muito mais seguro em relação ao meu futuro.",ini:"IC"}
+            ].map(function(d,i){return (
+              <div key={i} style={{padding:"24px 22px",background:"#fff",borderRadius:14,boxShadow:"0 4px 20px rgba(10,22,40,0.06)",position:"relative",overflow:"hidden"}}>
+                <div style={{position:"absolute",top:0,left:0,width:"100%",height:3,background:"linear-gradient(90deg,#D4A328,#F5C94B)"}}/>
+                <div style={{fontSize:26,color:"#D4A328",fontWeight:900,marginBottom:10,lineHeight:1}}>"</div>
+                <div style={{fontSize:13,color:"#3a3a4e",lineHeight:1.7,marginBottom:20,fontStyle:"italic"}}>{d.t}</div>
+                <div style={{borderTop:"1px solid #E8E8E8",paddingTop:14,display:"flex",alignItems:"center",gap:12}}>
+                  <div style={{width:44,height:44,borderRadius:"50%",background:"linear-gradient(135deg,#D4A328,#F5C94B)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:900,letterSpacing:-0.5,boxShadow:"0 4px 12px rgba(212,163,40,0.3)"}}>{d.ini}</div>
+                  <div>
+                    <div style={{fontSize:14,fontWeight:800,color:"#0A1628",letterSpacing:-0.2}}>{d.n}</div>
+                    <div style={{fontSize:11,color:"#8B9DC3"}}>{d.p}</div>
+                  </div>
+                </div>
+              </div>
+            )})}
+          </div>
+        </PageLight>
+
+        {/* ── P10: CTA FINAL ── */}
+        <div className="pp-page" style={{padding:"80px 60px 50px",background:"radial-gradient(ellipse 70% 50% at 50% 30%,rgba(212,163,40,0.25) 0%,transparent 60%),linear-gradient(135deg,#060E1F 0%,#0C1A33 50%,#142B52 100%)",color:"#fff",pageBreakBefore:"always",position:"relative",overflow:"hidden",textAlign:"center"}}>
+          <div style={{position:"absolute",top:-100,left:"50%",transform:"translateX(-50%)",opacity:0.04,pointerEvents:"none"}}><CourinvestPattern opacity={0.6} size={600} color="#F5C94B"/></div>
+          <div style={{position:"absolute",inset:0,opacity:0.03,backgroundImage:"radial-gradient(#D4A328 1px,transparent 1px)",backgroundSize:"40px 40px",pointerEvents:"none"}}/>
+          <div style={{position:"relative",zIndex:1}}>
+            <div style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:4,marginBottom:24}}>✦ O PRÓXIMO PASSO ESTÁ COM VOCÊ</div>
+            <div style={{fontSize:64,fontWeight:900,lineHeight:0.95,letterSpacing:-2.5,marginBottom:24,background:"linear-gradient(135deg,#fff 0%,#C8D4E8 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>Vamos construir<br/>o seu <span style={{background:"linear-gradient(135deg,#F5C94B,#D4A328)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>futuro financeiro.</span></div>
+            <div style={{fontSize:17,color:"#8B9DC3",lineHeight:1.7,maxWidth:560,margin:"0 auto 48px",fontWeight:300}}>Agende uma conversa gratuita. Vamos entender seus objetivos e mostrar como podemos caminhar juntos nessa jornada.</div>
+            <div style={{display:"inline-block",padding:"20px 44px",background:"linear-gradient(135deg,#D4A328,#F5C94B)",color:"#0A1628",borderRadius:100,fontSize:17,fontWeight:900,letterSpacing:1,boxShadow:"0 20px 60px rgba(212,163,40,0.4)",marginBottom:60}}>✦ FALE CONOSCO ✦</div>
+            <div style={{width:"60%",maxWidth:400,margin:"0 auto 40px",height:1,background:"linear-gradient(90deg,transparent,rgba(212,163,40,0.4),transparent)"}}/>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,maxWidth:640,margin:"0 auto",fontSize:11}}>
+              {[
+                {ic:"✉",lbl:"E-MAIL",val:["contato@courinvest.com.br"]},
+                {ic:"☏",lbl:"WHATSAPP",val:["+55 (32) 98849-6755","+55 (32) 98841-4085"]},
+                {ic:"🌐",lbl:"SITE",val:["courinvest.com.br"]}
+              ].map(function(c,i){return (
+                <div key={i} style={{padding:"18px 14px",background:"rgba(212,163,40,0.05)",border:"1px solid rgba(212,163,40,0.15)",borderRadius:12}}>
+                  <div style={{fontSize:18,marginBottom:8,color:"#D4A328"}}>{c.ic}</div>
+                  <div style={{color:"#D4A328",fontWeight:800,marginBottom:6,letterSpacing:2,fontSize:9}}>{c.lbl}</div>
+                  {c.val.map(function(v,j){return (<div key={j} style={{color:"#E8ECF4",fontSize:11,marginBottom:2}}>{v}</div>)})}
+                </div>
+              )})}
+            </div>
+            <div style={{display:"flex",justifyContent:"center",marginTop:48}}><CourinvestLogo width={260} darkMode={true}/></div>
+            <div style={{marginTop:16,fontSize:9,color:"#4a5f82",letterSpacing:2.5}}>CONSULTORIA EM INVESTIMENTOS · CVM · ANBIMA<br/>© {hoje.getFullYear()} CourInvest · Todos os direitos reservados</div>
+          </div>
+        </div>
+
+      </div>
+    );
+  };/* end ApresentacaoGP */
+
+  /* ═══════════════════════════════════════
+     WRAPPER PRINCIPAL
+  ═══════════════════════════════════════ */
   return (
     <div>
-      <div className="no-print" style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:12}}>
+      {/* ── Cabeçalho ── */}
+      <div className="no-print" style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:12}}>
         <div>
           <h2 style={{margin:0,fontSize:24,fontWeight:800,color:T.t1}}>📊 Apresentação Comercial</h2>
           <div style={{fontSize:12,color:T.t3,marginTop:4}}>Material institucional para prospecção e primeiros contatos</div>
@@ -21558,6 +21917,7 @@ function ApresentacaoView(){
         <Bt onClick={function(){window.print()}}>🖨 Imprimir / Salvar PDF</Bt>
       </div>
 
+      {/* ── Aviso ── */}
       <div className="no-print" style={{padding:14,background:"rgba(212,163,40,0.06)",border:"1px solid rgba(212,163,40,0.15)",borderRadius:12,marginBottom:20,display:"flex",gap:12,alignItems:"flex-start"}}>
         <span style={{fontSize:20}}>💡</span>
         <div style={{flex:1,fontSize:12,color:T.t2,lineHeight:1.6}}>
@@ -21565,8 +21925,23 @@ function ApresentacaoView(){
         </div>
       </div>
 
-      {}
-      <div id="proposta-print" style={{background:"#fff",color:"#1a1a2e",padding:0,borderRadius:12,overflow:"hidden",boxShadow:"0 20px 60px rgba(0,0,0,0.3)",maxWidth:820,margin:"0 auto",fontFamily:"'Outfit',sans-serif"}}>
+      {/* ── Selector de apresentação ── */}
+      <div className="no-print" style={{display:"flex",gap:8,marginBottom:20,padding:"6px",background:T.w3,borderRadius:14,border:"1px solid "+T.bdrL,width:"fit-content"}}>
+        {tabs.map(function(tab){
+          var ativo=apres===tab.id;
+          return (
+            <button key={tab.id} onClick={function(){sApres(tab.id)}} style={{padding:"10px 20px",borderRadius:10,fontSize:12,fontWeight:700,cursor:"pointer",border:ativo?"1.5px solid "+T.gold:"1.5px solid transparent",background:ativo?T.goldD:"transparent",color:ativo?T.gold:T.t3,transition:"all 0.2s",display:"flex",alignItems:"center",gap:6}}>
+              {tab.l}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── Conteúdo selecionado ── */}
+      {apres==="gp" && <ApresentacaoGP/>}
+
+      {apres==="institucional" && (
+        <div id="proposta-print" style={{background:"#fff",color:"#1a1a2e",padding:0,borderRadius:12,overflow:"hidden",boxShadow:"0 20px 60px rgba(0,0,0,0.3)",maxWidth:820,margin:"0 auto",fontFamily:"'Outfit',sans-serif"}}>
 
         {/* ===== PÁGINA 1: CAPA ===== */}
         <div className="pp-page" style={{
@@ -21797,10 +22172,11 @@ function ApresentacaoView(){
               {n:"Paula Oliveira",p:"Médica",t:"Foi um divisor de águas. Agora tenho mais controle sobre meus gastos e finalmente comecei a investir. A equipe é super atenciosa e me orienta em cada passo.",ini:"PO"},
               {n:"Ivo Cherem",p:"Empresário",t:"Adoro o trabalho de vocês. Prático e claro, me ajudam a organizar tudo de forma que eu nunca imaginei ser possível. Agora me sinto muito mais seguro em relação ao meu futuro.",ini:"IC"}
             ].map(function(d,i){return (
-              <div key={i} style={{padding:"22px 24px",background:"#fff",borderRadius:14,boxShadow:"0 4px 20px rgba(10,22,40,0.06)",position:"relative"}}>
-                <div style={{position:"absolute",top:-4,left:20,fontSize:64,color:"#D4A328",fontFamily:"Georgia,serif",lineHeight:1,opacity:0.3}}>"</div>
-                <div style={{fontSize:13,color:"#3a3a4e",lineHeight:1.7,marginBottom:16,fontStyle:"italic",paddingTop:10,position:"relative"}}>{d.t}</div>
-                <div style={{display:"flex",alignItems:"center",gap:12,paddingTop:14,borderTop:"1px solid #e5e7eb"}}>
+              <div key={i} style={{padding:"24px 22px",background:"#fff",borderRadius:14,boxShadow:"0 4px 20px rgba(10,22,40,0.06)",position:"relative",overflow:"hidden"}}>
+                <div style={{position:"absolute",top:0,left:0,width:"100%",height:3,background:"linear-gradient(90deg,#D4A328,#F5C94B)"}}/>
+                <div style={{fontSize:26,color:"#D4A328",fontWeight:900,marginBottom:10,lineHeight:1}}>"</div>
+                <div style={{fontSize:13,color:"#3a3a4e",lineHeight:1.7,marginBottom:20,fontStyle:"italic"}}>{d.t}</div>
+                <div style={{borderTop:"1px solid #E8E8E8",paddingTop:14,display:"flex",alignItems:"center",gap:12}}>
                   <div style={{width:44,height:44,borderRadius:"50%",background:"linear-gradient(135deg,#D4A328,#F5C94B)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:900,letterSpacing:-0.5,boxShadow:"0 4px 12px rgba(212,163,40,0.3)"}}>{d.ini}</div>
                   <div>
                     <div style={{fontSize:14,fontWeight:800,color:"#0A1628",letterSpacing:-0.2}}>{d.n}</div>
@@ -21849,7 +22225,8 @@ function ApresentacaoView(){
           </div>
         </div>
 
-      </div>
+        </div>
+      )}
 
       <style>{`
         @media print {
@@ -21865,6 +22242,8 @@ function ApresentacaoView(){
     </div>
   );
 }
+
+
 
 function PropostasView({data,dispatch}){
   const[view,sView]=useState("list"); 
