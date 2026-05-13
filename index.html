@@ -21583,8 +21583,7 @@ function ApresentacaoView(){
   var ApresentacaoGP=function(){
     /* tabela regressiva */
     var taxaRows=[
-      {range:"Até R$ 200.000",rate:"0,20% a.m.",anual:"≈ 2,4% a.a.",hl:false},
-      {range:"Entre R$ 200.001 e R$ 600.000",rate:"0,175% a.m.",anual:"≈ 2,1% a.a.",hl:true},
+      {range:"Entre R$ 200.000 e R$ 600.000",rate:"0,175% a.m.",anual:"≈ 2,1% a.a.",hl:true},
       {range:"Entre R$ 600.001 e R$ 1.500.000",rate:"0,15% a.m.",anual:"≈ 1,8% a.a.",hl:false},
       {range:"Entre R$ 1.500.001 e R$ 3.000.000",rate:"0,125% a.m.",anual:"≈ 1,5% a.a.",hl:false},
       {range:"Acima de R$ 3.000.000",rate:"0,10% a.m.",anual:"≈ 1,2% a.a.",hl:false},
@@ -21723,7 +21722,7 @@ function ApresentacaoView(){
           <div style={{display:"flex",flexDirection:"column",gap:14}}>
             {[
               {ic:"🛡️",label:"Proteção e Liquidez",sub:"Reserva estratégica para imprevistos e oportunidades. Prioridade antes de qualquer alocação.",color:"#3B82F6"},
-              {ic:"📅",label:"Objetivos de Curto Prazo",sub:"Capital destinado a metas com horizonte de até 2 anos. Foco em segurança e previsibilidade.",color:"#06B6D4"},
+              {ic:"📅",label:"Objetivos de Curto Prazo",sub:"Capital destinado a metas com horizonte de até 1 ano. Foco em segurança e previsibilidade.",color:"#06B6D4"},
               {ic:"📊",label:"Crescimento de Médio Prazo",sub:"Rentabilidade superior ao CDI com risco calibrado. Prefixado, IPCA+ e renda fixa estratégica.",color:"#D4A328"},
               {ic:"🚀",label:"Potencialização de Longo Prazo",sub:"Exposição a ativos de maior retorno — Ações, FIIs, Stocks, ETFs e REITs (investimentos no exterior) — gerando renda passiva consistente do seu patrimônio.",color:"#10B981"}
             ].map(function(a,i){return (
@@ -21818,8 +21817,8 @@ function ApresentacaoView(){
           <div style={{fontSize:15,color:"#8B9DC3",lineHeight:1.7,marginBottom:36,maxWidth:620}}>Nossa história começou dentro de casa — administrando o dinheiro do nosso pai, o homem mais cético com mercado financeiro que conhecemos. Hoje, ele é nosso maior admirador. É dessa confiança que nasceu a CourInvest.</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:16}}>
             {[
-              {n:"Igor Couri",c:"Sócio · Consultoria PJ e Gestão de Patrimônio",b:"Pós-graduado em Engenharia de Produção, 10+ anos de mercado financeiro.",cert:["CGA","CGE","ANBIMA"],foto:"https://courinvest.com.br/_next/image?url=%2Fimages%2Figor_sem_fundo.png&w=400&q=85",ini:"IC"},
-              {n:"Victor Couri",c:"Sócio · Consultoria PF e Gestão Financeira",b:"Mestre em Engenharia pela PUC-RJ, MBA em Ações e Stock Picking pelo Ibmec-SP.",cert:["CEA","ANBIMA","MBA"],foto:"https://courinvest.com.br/_next/image?url=%2Fimages%2Fvictor_sem_fundo.png&w=400&q=85",ini:"VC"}
+              {n:"Igor Couri",c:"Sócio · Consultoria PJ e Gestão de Patrimônio",b:"Pós-graduado em Engenharia de Produção, 10+ anos de mercado financeiro.",cert:["CGA","CGE","ANBIMA"],foto:"https://drive.google.com/uc?export=view&id=1MnqaluNOlQ9UNpnn1-CSY_fnL2xhCil7",ini:"IC"},
+              {n:"Victor Couri",c:"Sócio · Consultoria PF e Gestão Financeira",b:"Mestre em Engenharia pela PUC-RJ, MBA em Ações e Stock Picking pelo Ibmec-SP.",cert:["CEA","ANBIMA","MBA"],foto:"https://drive.google.com/uc?export=view&id=14bUCdyMsxw65etxzbh9DdDAjmVDXfUEU",ini:"VC"}
             ].map(function(s,i){return (
               <div key={i} style={{position:"relative",padding:"24px 26px",background:"rgba(212,163,40,0.05)",border:"1px solid rgba(212,163,40,0.2)",borderRadius:16,boxShadow:"0 10px 40px rgba(0,0,0,0.2),inset 0 1px 0 rgba(255,255,255,0.05)",overflow:"hidden"}}>
                 <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,#D4A328,#F5C94B,#D4A328)"}}/>
@@ -22126,8 +22125,8 @@ function ApresentacaoView(){
 
           <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:16,position:"relative"}}>
             {[
-              {n:"Igor Couri",c:"Sócio · Consultoria PJ e Gestão de Patrimônio",b:"Pós-graduado em Engenharia de Produção, 10+ anos de mercado financeiro.",cert:["CGA","CGE","ANBIMA"],foto:"https://courinvest.com.br/_next/image?url=%2Fimages%2Figor_sem_fundo.png&w=400&q=85",ini:"IC"},
-              {n:"Victor Couri",c:"Sócio · Consultoria PF e Gestão Financeira",b:"Mestre em Engenharia pela PUC-RJ, MBA em Ações e Stock Picking pelo Ibmec-SP.",cert:["CEA","ANBIMA","MBA"],foto:"https://courinvest.com.br/_next/image?url=%2Fimages%2Fvictor_sem_fundo.png&w=400&q=85",ini:"VC"}
+              {n:"Igor Couri",c:"Sócio · Consultoria PJ e Gestão de Patrimônio",b:"Pós-graduado em Engenharia de Produção, 10+ anos de mercado financeiro.",cert:["CGA","CGE","ANBIMA"],foto:"https://drive.google.com/uc?export=view&id=1MnqaluNOlQ9UNpnn1-CSY_fnL2xhCil7",ini:"IC"},
+              {n:"Victor Couri",c:"Sócio · Consultoria PF e Gestão Financeira",b:"Mestre em Engenharia pela PUC-RJ, MBA em Ações e Stock Picking pelo Ibmec-SP.",cert:["CEA","ANBIMA","MBA"],foto:"https://drive.google.com/uc?export=view&id=14bUCdyMsxw65etxzbh9DdDAjmVDXfUEU",ini:"VC"}
             ].map(function(s,i){return (
               <div key={i} style={{position:"relative",padding:"24px 26px",background:"rgba(212,163,40,0.05)",border:"1px solid rgba(212,163,40,0.2)",borderRadius:16,boxShadow:"0 10px 40px rgba(0,0,0,0.2),inset 0 1px 0 rgba(255,255,255,0.05)",overflow:"hidden"}}>
                 <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,#D4A328,#F5C94B,#D4A328)"}}/>
@@ -22549,8 +22548,8 @@ function PropostasView({data,dispatch}){
               
               <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:16}}>
                 {[
-                  {n:"Igor Couri",c:"Sócio · Consultoria PJ e Gestão de Patrimônio",b:"Pós-graduado em Engenharia de Produção, 10+ anos de mercado financeiro.",cert:["CGA","CGE","ANBIMA"],foto:"https://courinvest.com.br/_next/image?url=%2Fimages%2Figor_sem_fundo.png&w=400&q=85",ini:"IC"},
-                  {n:"Victor Couri",c:"Sócio · Consultoria PF e Gestão Financeira",b:"Mestre em Engenharia pela PUC-RJ, MBA em Ações e Stock Picking pelo Ibmec-SP.",cert:["CEA","ANBIMA","MBA"],foto:"https://courinvest.com.br/_next/image?url=%2Fimages%2Fvictor_sem_fundo.png&w=400&q=85",ini:"VC"}
+                  {n:"Igor Couri",c:"Sócio · Consultoria PJ e Gestão de Patrimônio",b:"Pós-graduado em Engenharia de Produção, 10+ anos de mercado financeiro.",cert:["CGA","CGE","ANBIMA"],foto:"https://drive.google.com/uc?export=view&id=1MnqaluNOlQ9UNpnn1-CSY_fnL2xhCil7",ini:"IC"},
+                  {n:"Victor Couri",c:"Sócio · Consultoria PF e Gestão Financeira",b:"Mestre em Engenharia pela PUC-RJ, MBA em Ações e Stock Picking pelo Ibmec-SP.",cert:["CEA","ANBIMA","MBA"],foto:"https://drive.google.com/uc?export=view&id=14bUCdyMsxw65etxzbh9DdDAjmVDXfUEU",ini:"VC"}
                 ].map(function(s,i){return (
                   <div key={i} style={{
                     position:"relative",
