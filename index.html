@@ -21883,7 +21883,7 @@ function ApresentacaoView(){
 
         {/* ── CAPA GP ── */}
         <div className="pp-page" style={{
-          background:"linear-gradient(to right,rgba(6,14,31,0.88) 0%,rgba(6,14,31,0.70) 40%,rgba(6,14,31,0.40) 70%,rgba(6,14,31,0.15) 100%),url(\'" + gpBgImg + "\') center/cover no-repeat",
+          background:"linear-gradient(to right,rgba(6,14,31,0.88) 0%,rgba(6,14,31,0.70) 40%,rgba(6,14,31,0.40) 70%,rgba(6,14,31,0.15) 100%),url(\'" + gpBgImg + "\') center 30%/cover no-repeat",
           color:"#fff",padding:"60px 50px",minHeight:"100vh",display:"flex",flexDirection:"column",position:"relative",overflow:"hidden"
         }}>
           <div style={{position:"absolute",top:-80,right:-120,opacity:0.07,pointerEvents:"none"}}><CourinvestPattern opacity={0.5} size={500} color="#F5C94B"/></div>
@@ -22707,7 +22707,14 @@ function PropostasView({data,dispatch}){
           <Bt v="secondary" onClick={function(){sView("list")}}>← Voltar</Bt>
           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
             <Bt v="secondary" onClick={function(){editarProposta(form)}}>✏ Editar</Bt>
-            <Bt onClick={function(){window.print()}}>🖨 Imprimir / Salvar PDF</Bt>
+            <Bt onClick={function(){
+  var el=document.getElementById("proposta-print");
+  if(!el){alert("Apresentação não encontrada");return;}
+  var w=window.open("","_blank");
+  w.document.write("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}body{margin:0;padding:0}@page{margin:0;size:A4}</style></head><body>"+el.outerHTML+"</body></html>");
+  w.document.close();
+  setTimeout(function(){w.print();},1200);
+}}>🖨 Imprimir / Salvar PDF</Bt>
           </div>
         </div>
 
