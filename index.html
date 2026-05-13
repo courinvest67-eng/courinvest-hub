@@ -21641,10 +21641,10 @@ function ApresentacaoView(){
         <PageLight>
           <SectionLabel txt="NOSSA ESSÊNCIA"/>
           <div style={{fontSize:56,fontWeight:900,color:"#0A1628",lineHeight:0.95,letterSpacing:-2,marginBottom:36,maxWidth:680,position:"relative"}}>
-            Acreditamos que <span style={{color:"#D4A328",fontStyle:"italic"}}>liberdade financeira</span> começa com decisões bem informadas.
+            Acreditamos que patrimônio bem gerido <span style={{color:"#D4A328",fontStyle:"italic"}}>merece atenção profissional</span> e dedicada.
           </div>
           <div style={{fontSize:16,color:"#3a3a4e",lineHeight:1.8,maxWidth:680,fontWeight:400,marginBottom:50}}>
-            Somos dois irmãos apaixonados pelo mercado financeiro e convictos de que o acesso a investimentos de qualidade não pode ser privilégio de poucos. <strong style={{color:"#0A1628"}}>Descomplicamos decisões. Simplificamos caminhos.</strong> E caminhamos lado a lado com quem confia em nós para construir um futuro próspero.
+            Somos dois irmãos com formação técnica sólida e anos de atuação no mercado financeiro. Sabemos que quem já construiu capital precisa de mais do que uma conta numa corretora — precisa de estratégia, execução e alguém de confiança para tomar as decisões certas no momento certo.
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>
             {[
@@ -21666,10 +21666,10 @@ function ApresentacaoView(){
         <PageDark>
           <SectionLabel txt="GESTÃO DE PATRIMÔNIO"/>
           <div style={{fontSize:48,fontWeight:900,lineHeight:1.0,letterSpacing:-1.5,marginBottom:20,maxWidth:700,background:"linear-gradient(135deg,#fff 0%,#C8D4E8 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
-            A melhor solução para sua vida financeira.
+            A gestão que o seu patrimônio merece.
           </div>
           <div style={{fontSize:16,color:"#8B9DC3",lineHeight:1.7,maxWidth:640,marginBottom:44}}>
-            Serviço exclusivo para o investidor que deseja delegar a gestão ativa da sua carteira a profissionais certificados — com estratégia personalizada, execução disciplinada e acompanhamento contínuo.
+            Você já fez a parte difícil: construiu capital. Agora é hora de garantir que ele trabalhe com a máxima eficiência — preservado, bem alocado e crescendo de forma consistente. É isso que a Gestão de Patrimônio da CourInvest entrega.
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:14}}>
             {[
@@ -21711,33 +21711,33 @@ function ApresentacaoView(){
           </div>
         </PageLight>
 
-        {/* ── P5: ALOCAÇÃO ESTRATÉGICA ── */}
+        {/* ── P5: PILARES ESTRATÉGICOS ── */}
         <PageDark>
           <SectionLabel txt="DEFINIÇÃO ESTRATÉGICA"/>
           <div style={{fontSize:44,fontWeight:900,lineHeight:1.0,letterSpacing:-1.5,marginBottom:16,background:"linear-gradient(135deg,#fff 0%,#C8D4E8 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
-            Como estruturamos sua carteira.
+            Cada carteira tem uma estratégia própria.
           </div>
-          <div style={{fontSize:15,color:"#8B9DC3",lineHeight:1.7,maxWidth:640,marginBottom:40}}>
-            A alocação é personalizada com base no seu perfil e objetivos. Abaixo, um exemplo ilustrativo da estrutura que adotamos:
+          <div style={{fontSize:15,color:"#8B9DC3",lineHeight:1.7,maxWidth:680,marginBottom:40}}>
+            Não existe alocação padrão. A estrutura da sua carteira é definida a partir do seu perfil, objetivos e momento de vida. Abaixo, os pilares que orientam nossas decisões:
           </div>
-          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
             {[
-              {pct:"40%",label:"Reserva de Emergência",sub:"Liquidez imediata · Indexado ao CDI / Poupança",color:"#3B82F6",w:40},
-              {pct:"30%",label:"Curto Prazo",sub:"Segurança · Preservar o patrimônio · CDB, LCI, LCA",color:"#06B6D4",w:30},
-              {pct:"20%",label:"Médio Prazo",sub:"Segurança/Rentabilidade · Prefixado, IPCA+",color:"#D4A328",w:20},
-              {pct:"10%",label:"Longo Prazo",sub:"Rentabilidade · Ações, FIIs, BDRs, ETFs",color:"#10B981",w:10}
+              {ic:"🛡️",label:"Proteção e Liquidez",sub:"Reserva estratégica para imprevistos e oportunidades. Prioridade antes de qualquer alocação.",color:"#3B82F6"},
+              {ic:"📅",label:"Objetivos de Curto Prazo",sub:"Capital destinado a metas com horizonte de até 2 anos. Foco em segurança e previsibilidade.",color:"#06B6D4"},
+              {ic:"📊",label:"Crescimento de Médio Prazo",sub:"Rentabilidade superior ao CDI com risco calibrado. Prefixado, IPCA+ e renda fixa estratégica.",color:"#D4A328"},
+              {ic:"🚀",label:"Potencialização de Longo Prazo",sub:"Exposição a ativos de maior retorno — Ações, FIIs, Stocks, ETFs e REITs (investimentos no exterior) — gerando renda passiva consistente do seu patrimônio.",color:"#10B981"}
             ].map(function(a,i){return (
-              <div key={i} style={{display:"flex",gap:16,alignItems:"center",padding:"16px 20px",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,position:"relative",overflow:"hidden"}}>
-                <div style={{position:"absolute",left:0,top:0,bottom:0,width:a.w+"%",background:"linear-gradient(90deg,"+a.color+"22,transparent)",borderRadius:"12px 0 0 12px"}}/>
-                <div style={{fontSize:28,fontWeight:900,color:a.color,letterSpacing:-1,minWidth:56,position:"relative"}}>{a.pct}</div>
-                <div style={{flex:1,position:"relative"}}>
-                  <div style={{fontSize:16,fontWeight:800,color:"#fff",marginBottom:2}}>{a.label}</div>
-                  <div style={{fontSize:11,color:"#8B9DC3"}}>{a.sub}</div>
+              <div key={i} style={{display:"flex",gap:20,alignItems:"flex-start",padding:"20px 24px",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:14,position:"relative",overflow:"hidden",transition:"all 0.2s"}}>
+                <div style={{position:"absolute",left:0,top:0,bottom:0,width:4,background:a.color,borderRadius:"14px 0 0 14px"}}/>
+                <div style={{fontSize:28,flexShrink:0,marginTop:2}}>{a.ic}</div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:17,fontWeight:800,color:"#fff",marginBottom:6,letterSpacing:-0.3}}>{a.label}</div>
+                  <div style={{fontSize:12,color:"#8B9DC3",lineHeight:1.65}}>{a.sub}</div>
                 </div>
               </div>
             )})}
           </div>
-          <div style={{marginTop:20,fontSize:10,color:"#4A5F82",fontStyle:"italic"}}>* Alocação ilustrativa. A carteira é personalizada com base no seu perfil e objetivos.</div>
+          <div style={{marginTop:20,fontSize:10,color:"#4A5F82",fontStyle:"italic"}}>* A alocação final é sempre definida em conjunto com o cliente, respeitando seu perfil de risco e objetivos de vida.</div>
         </PageDark>
 
         {/* ── P6: REMUNERAÇÃO ── */}
