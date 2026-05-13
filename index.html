@@ -116,6 +116,16 @@ table{border-spacing:0}
     }
   })();
 </script>
+<script>
+window.onerror = function(msg, src, line, col, err) {
+  document.getElementById('root').innerHTML = 
+    '<div style="background:#0a1628;color:#F5C94B;padding:20px;font-family:monospace;font-size:12px;white-space:pre-wrap;min-height:100vh">' +
+    '<b style="color:#ff4444;font-size:16px">ERRO:</b>\n' + msg + '\n\nLine: ' + line + ':' + col + '\n\nFile: ' + src + '\n\n' +
+    (err && err.stack ? err.stack : '') +
+    '</div>';
+  return false;
+};
+</script>
 <script type="text/babel" data-presets="react">
 const {useState, useReducer, useEffect, useRef} = React;
 
