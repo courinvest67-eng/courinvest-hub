@@ -21782,27 +21782,39 @@ function ApresentacaoView(){
             <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,"+C.gold+")"}}/>
             <span style={{fontSize:11,color:C.gold,fontWeight:700,letterSpacing:3.5}}>INVESTIMENTO</span>
           </div>
-          <div style={{fontSize:36,fontWeight:900,color:C.navy,lineHeight:1.1,letterSpacing:-1,marginBottom:12}}>Planos sob <span style={{color:C.gold}}>medida.</span></div>
-          <div style={{fontSize:13,color:"#5a6577",marginBottom:36,lineHeight:1.6}}>O valor é personalizado conforme a renda e complexidade de cada situação. Os valores abaixo são o ponto de partida.</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,maxWidth:640,margin:"0 auto"}}>
-            <PriceCard
-              title="PLANO INDIVIDUAL"
-              price="A partir de R$ 510"
-              min="por mês · valor único"
-              highlight={false}
-              features={["Diagnóstico financeiro completo","Orçamento personalizado mensal","Planejamento de metas individuais","Orientação em investimentos","Relatório mensal detalhado","Reunião mensal de alinhamento","Suporte via WhatsApp","Educação financeira contínua"]}
-            />
-            <PriceCard
-              title="PLANO CASAL"
-              price="A partir de R$ 790"
-              min="por mês · para duas pessoas"
-              highlight={true}
-              features={["Tudo do Plano Individual (×2)","Planejamento financeiro conjunto","Alinhamento de objetivos do casal","Estratégia de gastos compartilhados","Consultoria de dívidas conjuntas","Planejamento de aposentadoria","2 reuniões mensais de alinhamento","Suporte ilimitado via WhatsApp"]}
-            />
+          <div style={{fontSize:36,fontWeight:900,color:C.navy,lineHeight:1.1,letterSpacing:-1,marginBottom:16}}>Estruturas <span style={{color:C.gold}}>personalizadas.</span></div>
+          <div style={{fontSize:15,color:"#4A5568",lineHeight:1.8,maxWidth:560,marginBottom:48}}>Cada cliente tem uma realidade financeira única. Por isso, desenhamos um plano com base no seu diagnóstico — sem pacotes pré-definidos, sem compromisso de longo prazo.</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24,maxWidth:680,margin:"0 auto"}}>
+            <div style={{padding:"36px 32px",background:"linear-gradient(145deg,#f9f9f9,#fff)",border:"1px solid rgba(212,163,40,0.2)",borderRadius:16,position:"relative",overflow:"hidden"}}>
+              <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,"+C.gold+","+C.goldL+")"}}/>
+              <div style={{fontSize:10,fontWeight:700,color:C.gold,letterSpacing:3,marginBottom:16,textTransform:"uppercase"}}>Pessoa Física</div>
+              <div style={{fontSize:22,fontWeight:900,color:C.navy,lineHeight:1.2,marginBottom:12}}>Gestão financeira individual ou familiar</div>
+              <div style={{fontSize:13,color:"#5a6577",lineHeight:1.8,marginBottom:28}}>Diagnóstico completo, planejamento de metas, orientação em investimentos e acompanhamento contínuo com reuniões periódicas.</div>
+              <div style={{borderTop:"1px solid rgba(212,163,40,0.15)",paddingTop:20}}>
+                <div style={{fontSize:11,color:"#9CA3AF",letterSpacing:1,marginBottom:4}}>INVESTIMENTO MENSAL</div>
+                <div style={{fontSize:20,fontWeight:800,color:C.navy}}>A partir de <span style={{color:C.gold}}>R$ 510</span></div>
+                <div style={{fontSize:11,color:"#9CA3AF",marginTop:4}}>Conforme complexidade e objetivos</div>
+              </div>
+            </div>
+            <div style={{padding:"36px 32px",background:"linear-gradient(145deg,"+C.navy+",#142B52)",border:"1px solid rgba(212,163,40,0.3)",borderRadius:16,position:"relative",overflow:"hidden",boxShadow:"0 20px 60px rgba(10,22,40,0.2)"}}>
+              <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,#D4A328,#F5C94B,#D4A328)"}}/>
+              <div style={{position:"absolute",top:16,right:16,background:"rgba(212,163,40,0.15)",border:"1px solid rgba(212,163,40,0.3)",borderRadius:20,padding:"4px 12px",fontSize:9,fontWeight:700,color:C.gold,letterSpacing:1}}>MAIS SOLICITADO</div>
+              <div style={{fontSize:10,fontWeight:700,color:C.gold,letterSpacing:3,marginBottom:16,textTransform:"uppercase"}}>Casal</div>
+              <div style={{fontSize:22,fontWeight:900,color:"#fff",lineHeight:1.2,marginBottom:12}}>Gestão financeira conjunta e alinhamento patrimonial</div>
+              <div style={{fontSize:13,color:"#8B9DC3",lineHeight:1.8,marginBottom:28}}>Inclui tudo do plano individual para os dois, com estratégia compartilhada, alinhamento de objetivos e planejamento de longo prazo.</div>
+              <div style={{borderTop:"1px solid rgba(212,163,40,0.15)",paddingTop:20}}>
+                <div style={{fontSize:11,color:"rgba(255,255,255,0.4)",letterSpacing:1,marginBottom:4}}>INVESTIMENTO MENSAL</div>
+                <div style={{fontSize:20,fontWeight:800,color:"#fff"}}>A partir de <span style={{color:C.gold}}>R$ 790</span></div>
+                <div style={{fontSize:11,color:"rgba(255,255,255,0.4)",marginTop:4}}>Para duas pessoas · conforme objetivos</div>
+              </div>
+            </div>
           </div>
-          <div style={{marginTop:20,fontSize:11,color:"#9CA3AF",fontStyle:"italic",textAlign:"center"}}>* O valor final é ajustado conforme a renda e complexidade da situação. A cobrança é realizada de forma recorrente no cartão de crédito. Entre em contato para uma proposta personalizada.</div>
+          <div style={{marginTop:32,padding:"20px 28px",background:"linear-gradient(135deg,rgba(212,163,40,0.06),rgba(212,163,40,0.02))",borderRadius:12,border:"1px solid rgba(212,163,40,0.15)",textAlign:"center",maxWidth:580,margin:"32px auto 0"}}>
+            <div style={{fontSize:13,color:C.navy,lineHeight:1.7}}>O valor final é definido após um diagnóstico gratuito, considerando renda, objetivos e complexidade da sua situação.</div>
+          </div>
         </div>
 
+        
         {/* VALOR GERADO */}
         <div style={{padding:"60px 50px",background:C.lightBg}}>
           <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14}}>
