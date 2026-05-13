@@ -65,6 +65,13 @@ table{border-spacing:0}
   [style*="font-size:9px"]{font-size:11px!important}
   [style*="font-size:10px"]{font-size:12px!important}
 }
+@media print{
+  body{margin:0!important;padding:0!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
+  #root{display:block!important}
+  .no-print,[class*="no-print"]{display:none!important}
+  button{display:none!important}
+  @page{margin:0;size:A4}
+}
 </style>
 </head>
 <body>
@@ -22190,7 +22197,7 @@ function ApresentacaoView(){
           <h2 style={{margin:0,fontSize:24,fontWeight:800,color:T.t1}}>📊 Apresentação Comercial</h2>
           <div style={{fontSize:12,color:T.t3,marginTop:4}}>Material institucional para prospecção e primeiros contatos</div>
         </div>
-        <Bt onClick={function(){window.print()}}>🖨 Imprimir / Salvar PDF</Bt>
+        <Bt onClick={function(){window.scrollTo(0,0);setTimeout(function(){window.print();},800)}}>🖨 Imprimir / Salvar PDF</Bt>
       </div>
 
       {/* ── Aviso ── */}
