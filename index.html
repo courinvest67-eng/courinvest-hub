@@ -22182,7 +22182,7 @@ function ApresentacaoView(){
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,maxWidth:640,margin:"0 auto",fontSize:11}}>
               {[
                 {ic:"✉",lbl:"E-MAIL",val:["courinvest.67@gmail.com"]},
-                {ic:"☏",lbl:"WHATSAPP",val:["+55 (32) 98849-6755","+55 (32) 98849-6755"]},
+                {ic:"☏",lbl:"WHATSAPP",val:["+55 (32) 98849-6755","+55 (32) 98841-4085"]},
                 {ic:"🌐",lbl:"SITE",val:["courinvest.com.br"]}
               ].map(function(c,i){return (
                 <div key={i} style={{padding:"18px 14px",background:"rgba(212,163,40,0.05)",border:"1px solid rgba(212,163,40,0.15)",borderRadius:12}}>
@@ -22213,7 +22213,7 @@ function ApresentacaoView(){
           <div style={{fontSize:12,color:T.t3,marginTop:4}}>Material institucional para prospecção e primeiros contatos</div>
         </div>
         <Bt onClick={function(){
-  var el=document.getElementById("gf-apresentacao");
+  var el=document.getElementById("proposta-print");
   if(!el){alert("Apresentação não encontrada");return;}
   var w=window.open("","_blank");
   w.document.write("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}body{margin:0;padding:0}@page{margin:0;size:A4}</style></head><body>"+el.outerHTML+"</body></html>");
