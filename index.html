@@ -21782,13 +21782,13 @@ function ApresentacaoView(){
             <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,"+C.gold+")"}}/>
             <span style={{fontSize:11,color:C.gold,fontWeight:700,letterSpacing:3.5}}>INVESTIMENTO</span>
           </div>
-          <div style={{fontSize:36,fontWeight:900,color:C.navy,lineHeight:1.1,letterSpacing:-1,marginBottom:16}}>Estruturas <span style={{color:C.gold}}>personalizadas.</span></div>
-          <div style={{fontSize:15,color:"#4A5568",lineHeight:1.8,maxWidth:560,marginBottom:48}}>Cada cliente tem uma realidade financeira única. Por isso, desenhamos um plano com base no seu diagnóstico — sem pacotes pré-definidos, sem compromisso de longo prazo.</div>
+          <div style={{fontSize:36,fontWeight:900,color:C.navy,lineHeight:1.1,letterSpacing:-1,marginBottom:16}}>Planos <span style={{color:C.gold}}>personalizados.</span></div>
+          <div style={{fontSize:15,color:"#4A5568",lineHeight:1.8,maxWidth:560,marginBottom:48}}>Cada cliente tem uma realidade financeira única. Por isso, desenhamos um plano com base no seu diagnóstico — adaptado à sua realidade, revisado conforme você evolui.</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24,maxWidth:680,margin:"0 auto"}}>
             <div style={{padding:"36px 32px",background:"linear-gradient(145deg,#f9f9f9,#fff)",border:"1px solid rgba(212,163,40,0.2)",borderRadius:16,position:"relative",overflow:"hidden"}}>
               <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,"+C.gold+","+C.goldL+")"}}/>
               <div style={{fontSize:10,fontWeight:700,color:C.gold,letterSpacing:3,marginBottom:16,textTransform:"uppercase"}}>Pessoa Física</div>
-              <div style={{fontSize:22,fontWeight:900,color:C.navy,lineHeight:1.2,marginBottom:12}}>Gestão financeira individual ou familiar</div>
+              <div style={{fontSize:22,fontWeight:900,color:C.navy,lineHeight:1.2,marginBottom:12}}>Gestão financeira individual</div>
               <div style={{fontSize:13,color:"#5a6577",lineHeight:1.8,marginBottom:28}}>Diagnóstico completo, planejamento de metas, orientação em investimentos e acompanhamento contínuo com reuniões periódicas.</div>
               <div style={{borderTop:"1px solid rgba(212,163,40,0.15)",paddingTop:20}}>
                 <div style={{fontSize:11,color:"#9CA3AF",letterSpacing:1,marginBottom:4}}>INVESTIMENTO MENSAL</div>
@@ -21798,7 +21798,7 @@ function ApresentacaoView(){
             </div>
             <div style={{padding:"36px 32px",background:"linear-gradient(145deg,"+C.navy+",#142B52)",border:"1px solid rgba(212,163,40,0.3)",borderRadius:16,position:"relative",overflow:"hidden",boxShadow:"0 20px 60px rgba(10,22,40,0.2)"}}>
               <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,#D4A328,#F5C94B,#D4A328)"}}/>
-              <div style={{position:"absolute",top:16,right:16,background:"rgba(212,163,40,0.15)",border:"1px solid rgba(212,163,40,0.3)",borderRadius:20,padding:"4px 12px",fontSize:9,fontWeight:700,color:C.gold,letterSpacing:1}}>MAIS SOLICITADO</div>
+              
               <div style={{fontSize:10,fontWeight:700,color:C.gold,letterSpacing:3,marginBottom:16,textTransform:"uppercase"}}>Casal</div>
               <div style={{fontSize:22,fontWeight:900,color:"#fff",lineHeight:1.2,marginBottom:12}}>Gestão financeira conjunta e alinhamento patrimonial</div>
               <div style={{fontSize:13,color:"#8B9DC3",lineHeight:1.8,marginBottom:28}}>Inclui tudo do plano individual para os dois, com estratégia compartilhada, alinhamento de objetivos e planejamento de longo prazo.</div>
@@ -21857,7 +21857,7 @@ function ApresentacaoView(){
             </div>
             <a href={wa_url} target="_blank" rel="noopener noreferrer" style={{display:"inline-block",padding:"20px 44px",background:"linear-gradient(135deg,"+C.gold+","+C.goldL+")",color:C.navy,borderRadius:100,fontSize:17,fontWeight:900,letterSpacing:1,boxShadow:"0 20px 60px rgba(212,163,40,0.4)",marginBottom:48,textDecoration:"none",cursor:"pointer"}}>✦ AGENDAR CONVERSA ✦</a>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:16,maxWidth:500,margin:"0 auto",fontSize:11}}>
-              {[{ic:"✉",lbl:"E-MAIL",val:["courinvest.67@gmail.com"]},{ic:"📱",lbl:"WHATSAPP",val:["+55 (32) 98841-4085"]},{ic:"🌐",lbl:"SITE",val:["courinvest.com.br"]}].map(function(c,i){return(
+              {[{ic:"✉",lbl:"E-MAIL",val:["courinvest.67@gmail.com"]},{ic:"📱",lbl:"WHATSAPP",val:["+55 (32) 98849-6755"]},{ic:"🌐",lbl:"SITE",val:["courinvest.com.br"]}].map(function(c,i){return(
                 <div key={i} style={{background:"rgba(255,255,255,0.05)",borderRadius:12,padding:"14px 12px",border:"1px solid rgba(255,255,255,0.08)"}}>
                   <div style={{fontSize:16,marginBottom:6}}>{c.ic}</div>
                   <div style={{color:C.gold,fontWeight:700,letterSpacing:2,marginBottom:6}}>{c.lbl}</div>
@@ -22181,7 +22181,7 @@ function ApresentacaoView(){
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,maxWidth:640,margin:"0 auto",fontSize:11}}>
               {[
                 {ic:"✉",lbl:"E-MAIL",val:["courinvest.67@gmail.com"]},
-                {ic:"☏",lbl:"WHATSAPP",val:["+55 (32) 98849-6755","+55 (32) 98841-4085"]},
+                {ic:"☏",lbl:"WHATSAPP",val:["+55 (32) 98849-6755","+55 (32) 98849-6755"]},
                 {ic:"🌐",lbl:"SITE",val:["courinvest.com.br"]}
               ].map(function(c,i){return (
                 <div key={i} style={{padding:"18px 14px",background:"rgba(212,163,40,0.05)",border:"1px solid rgba(212,163,40,0.15)",borderRadius:12}}>
@@ -22514,7 +22514,7 @@ function ApresentacaoView(){
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,maxWidth:640,margin:"0 auto",fontSize:11}}>
               {[
                 {ic:"✉",lbl:"E-MAIL",val:["courinvest.67@gmail.com"]},
-                {ic:"☏",lbl:"WHATSAPP",val:["+55 (32) 98849-6755","+55 (32) 98841-4085"]},
+                {ic:"☏",lbl:"WHATSAPP",val:["+55 (32) 98849-6755","+55 (32) 98849-6755"]},
                 {ic:"🌐",lbl:"SITE",val:["courinvest.com.br"]}
               ].map(function(c,i){return (
                 <div key={i} style={{padding:"18px 14px",background:"rgba(212,163,40,0.05)",border:"1px solid rgba(212,163,40,0.15)",borderRadius:12}}>
@@ -23434,7 +23434,7 @@ function PropostasView({data,dispatch}){
             <div style={{width:"60%",maxWidth:400,margin:"0 auto 40px",height:1,background:"linear-gradient(90deg,transparent,rgba(212,163,40,0.4),transparent)",position:"relative"}}/>
             
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,maxWidth:640,margin:"0 auto",fontSize:11,position:"relative"}}>
-              {[{ic:"✉",lbl:"E-MAIL",val:["courinvest.67@gmail.com"]},{ic:"☏",lbl:"TELEFONE",val:["+55 (32) 98849-6755","+55 (32) 98841-4085"]},{ic:"🌐",lbl:"SITE",val:["courinvest.com.br"]}].map(function(c,i){return (
+              {[{ic:"✉",lbl:"E-MAIL",val:["courinvest.67@gmail.com"]},{ic:"☏",lbl:"TELEFONE",val:["+55 (32) 98849-6755","+55 (32) 98849-6755"]},{ic:"🌐",lbl:"SITE",val:["courinvest.com.br"]}].map(function(c,i){return (
                 <div key={i} style={{padding:"18px 14px",background:"rgba(212,163,40,0.05)",border:"1px solid rgba(212,163,40,0.15)",borderRadius:12}}>
                   <div style={{fontSize:18,marginBottom:8,color:"#D4A328"}}>{c.ic}</div>
                   <div style={{color:"#D4A328",fontWeight:800,marginBottom:6,letterSpacing:2,fontSize:9}}>{c.lbl}</div>
