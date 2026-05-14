@@ -21583,7 +21583,6 @@ function ApresentacaoView(){
     {id:"institucional",l:"📊 Apresentação Institucional",d:"Pitch genérico da CourInvest"},
     {id:"gp",l:"💎 Gestão de Patrimônio",d:"Apresentação específica do serviço GP"},
     {id:"gf",l:"📈 Gestão Financeira",d:"Apresentação do serviço de organização financeira"},
-    {id:"tutoriais",l:"📚 Tutoriais",d:"Passo a passo por instituição e produto"}
   ];
 
   /* ── Shared helpers ── */
@@ -22459,19 +22458,23 @@ var ApresentacaoGP=function(){
   var children=clone.children;
   for(var i=0;i<children.length;i++){
     var child=children[i];
-    // First child = CAPA: force full page + break after
     if(i===0){
+      // CAPA: full page + break after
       child.style.minHeight="100vh";
       child.style.pageBreakAfter="always";
       child.style.breakAfter="page";
-      child.style.display="flex";
-      child.style.flexDirection="column";
     } else {
       // All other sections: remove minHeight to avoid whitespace
       child.style.minHeight="";
-      // Add page break before each section to start on new page
+      child.style.height="auto";
       child.style.pageBreakInside="avoid";
       child.style.breakInside="avoid";
+      // Remove minHeight from ALL nested elements too
+      var nested=child.querySelectorAll("*");
+      nested.forEach(function(n){
+        n.style.minHeight="";
+        if(n.style.height && n.style.height.indexOf("vh")>-1) n.style.height="auto";
+      });
     }
   }
   var printCSS=[
@@ -22517,8 +22520,6 @@ var ApresentacaoGP=function(){
       {apres==="gp" && <ApresentacaoGP/>}
 
       {apres==="gf" && <ApresentacaoGF/>}
-
-      {apres==="tutoriais" && <AbaTutoriais/>}
 
       {apres==="institucional" && (
         <div id="proposta-print" style={{background:"#fff",color:"#1a1a2e",padding:0,borderRadius:12,overflow:"hidden",boxShadow:"0 20px 60px rgba(0,0,0,0.3)",maxWidth:820,margin:"0 auto",fontFamily:"'Outfit',sans-serif"}}>
@@ -24289,7 +24290,7 @@ function PropostasView({data,dispatch}){
   return null;
 }
 
-const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"fiscal",l:"Fiscal",i:"🧾"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"}];
+const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"fiscal",l:"Fiscal",i:"🧾"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"tutoriais",l:"Tutoriais",i:"📚"}];
 
 /* ============ AUTH + FIRESTORE SYNC ============ */
 
@@ -25937,6 +25938,7 @@ function App({authUser}){
           {pg==="comercial" && <ComercialView data={d} dispatch={dp}/>}
           {pg==="agenda" && <Ag d={d} dp={dp} sPg={sPg}/>}
           {pg==="news" && <NewsView data={d} dispatch={dp}/>}
+          {pg==="tutoriais" && <AbaTutoriais/>}
           {pg==="import" && <ImportView/>}
         </div>
       </div>
