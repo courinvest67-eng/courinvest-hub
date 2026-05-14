@@ -21577,7 +21577,8 @@ function ApresentacaoView(){
   var tabs=[
     {id:"institucional",l:"📊 Apresentação Institucional",d:"Pitch genérico da CourInvest"},
     {id:"gp",l:"💎 Gestão de Patrimônio",d:"Apresentação específica do serviço GP"},
-    {id:"gf",l:"📈 Gestão Financeira",d:"Apresentação do serviço de organização financeira"}
+    {id:"gf",l:"📈 Gestão Financeira",d:"Apresentação do serviço de organização financeira"},
+    {id:"tutoriais",l:"📚 Tutoriais",d:"Passo a passo por instituição e produto"}
   ];
 
   /* ── Shared helpers ── */
@@ -21877,7 +21878,241 @@ function ApresentacaoView(){
     /* ═══════════════════════════════════════
      APRESENTAÇÃO GESTÃO DE PATRIMÔNIO
   ═══════════════════════════════════════ */
-  var ApresentacaoGP=function(){
+  var INSTITUICOES = [
+  "BTG Pactual","XP Investimentos","Rico","Clear","Inter","C6 Bank","NuInvest","Itaú","Bradesco","Santander",
+  "Caixa Econômica","Banco do Brasil","Avenue","Passfolio","Stake","Interactive Brokers","Wise","Vest","Warren","Órama",
+  "Modal","Modalmais","Sicoob","Sicredi","Daycoval","Sofisa","PicPay","Mercado Pago"
+];
+
+var PRODUTOS = [
+  "Tesouro Direto","CDB","LCI","LCA","Debêntures","CRI","CRA","Fundos de Investimento",
+  "Ações","FIIs (Fundos Imobiliários)","BDRs","ETFs","Opções","Fundos Offshore",
+  "Previdência Privada (PGBL/VGBL)","COE","Poupança","Conta Corrente Remunerada",
+  "Câmbio / Moeda Estrangeira","Criptoativos"
+];
+
+var AbaTutoriais = function() {
+  var T = useTema();
+  var C = useCores();
+  var [clienteSel, setClienteSel] = React.useState(null);
+  var [instSel, setInstSel] = React.useState([]);
+  var [prodSel, setProdSel] = React.useState({});
+  var [tutoriais, setTutoriais] = React.useState({});
+  var [editando, setEditando] = React.useState(null);
+  var [textoEdit, setTextoEdit] = React.useState("");
+  var [loading, setLoading] = React.useState(false);
+  var [saved, setSaved] = React.useState(false);
+  var [viewMode, setViewMode] = React.useState("config"); // config | viewer
+
+  var clientes = dadosGlobais ? dadosGlobais.clientes || [] : [];
+
+  // Load client data from storage
+  var loadCliente = async function(cid) {
+    setLoading(true);
+    try {
+      var r = await window.storage.get("tut_inst_" + cid);
+      setInstSel(r ? JSON.parse(r.value) : []);
+      var rp = await window.storage.get("tut_prod_" + cid);
+      setProdSel(rp ? JSON.parse(rp.value) : {});
+      var rt = await window.storage.get("tut_text_" + cid);
+      setTutoriais(rt ? JSON.parse(rt.value) : {});
+    } catch(e) { setInstSel([]); setProdSel({}); setTutoriais({}); }
+    setLoading(false);
+    setViewMode("config");
+    setEditando(null);
+  };
+
+  var saveData = async function(cid, newInst, newProd, newTut) {
+    try {
+      await window.storage.set("tut_inst_" + cid, JSON.stringify(newInst || instSel));
+      await window.storage.set("tut_prod_" + cid, JSON.stringify(newProd || prodSel));
+      if (newTut) await window.storage.set("tut_text_" + cid, JSON.stringify(newTut));
+      setSaved(true);
+      setTimeout(function(){setSaved(false);}, 2000);
+    } catch(e) {}
+  };
+
+  var toggleInst = function(inst) {
+    var newInst = instSel.includes(inst) ? instSel.filter(function(i){return i!==inst;}) : [...instSel, inst];
+    setInstSel(newInst);
+    var newProd = {...prodSel};
+    if (!newInst.includes(inst)) { delete newProd[inst]; setProdSel(newProd); }
+    if (clienteSel) saveData(clienteSel.id, newInst, newProd, null);
+  };
+
+  var toggleProd = function(inst, prod) {
+    var cur = prodSel[inst] || [];
+    var newP = cur.includes(prod) ? cur.filter(function(p){return p!==prod;}) : [...cur, prod];
+    var newProd = {...prodSel, [inst]: newP};
+    setProdSel(newProd);
+    if (clienteSel) saveData(clienteSel.id, null, newProd, null);
+  };
+
+  var saveTutorial = async function() {
+    if (!editando || !clienteSel) return;
+    var key = editando.inst + "||" + editando.prod;
+    var newTut = {...tutoriais, [key]: textoEdit};
+    setTutoriais(newTut);
+    await saveData(clienteSel.id, null, null, newTut);
+    setEditando(null);
+    setTextoEdit("");
+  };
+
+  var getTutorial = function(inst, prod) {
+    return tutoriais[inst + "||" + prod] || "";
+  };
+
+  var totalTuts = instSel.reduce(function(acc, inst) {
+    return acc + (prodSel[inst] || []).length;
+  }, 0);
+
+  var completedTuts = instSel.reduce(function(acc, inst) {
+    return acc + (prodSel[inst] || []).filter(function(p){ return getTutorial(inst,p).length > 10; }).length;
+  }, 0);
+
+  return (
+    <div style={{padding:"28px 24px",fontFamily:"'Outfit',sans-serif",minHeight:400}}>
+
+      {/* Header */}
+      <div style={{marginBottom:24}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+          <span style={{fontSize:22}}>📚</span>
+          <span style={{fontSize:22,fontWeight:900,color:T.t1,letterSpacing:-0.5}}>Tutoriais</span>
+          {saved && <span style={{fontSize:11,color:"#22C997",fontWeight:700,background:"rgba(34,201,151,0.1)",padding:"3px 10px",borderRadius:20}}>✓ Salvo</span>}
+        </div>
+        <div style={{fontSize:13,color:T.t3}}>Passo a passo de investimento por instituição e produto — personalizado por cliente.</div>
+      </div>
+
+      {/* Client selector */}
+      <div style={{marginBottom:24,padding:"16px 20px",background:T.card,border:"1px solid "+T.bdrL,borderRadius:12}}>
+        <div style={{fontSize:11,fontWeight:700,color:T.t3,letterSpacing:2,marginBottom:10}}>SELECIONAR CLIENTE</div>
+        <select onChange={function(e){
+          var c = clientes.find(function(x){return x.id===e.target.value;});
+          setClienteSel(c||null);
+          if(c) loadCliente(c.id);
+        }} style={{width:"100%",padding:"10px 14px",borderRadius:8,border:"1px solid "+T.bdrL,background:T.bg,color:T.t1,fontSize:13,cursor:"pointer"}}>
+          <option value="">— escolha um cliente —</option>
+          {clientes.map(function(c){return <option key={c.id} value={c.id}>{c.nome}</option>;})}
+        </select>
+      </div>
+
+      {!clienteSel && (
+        <div style={{textAlign:"center",padding:"60px 20px",color:T.t3,fontSize:14}}>
+          Selecione um cliente para configurar os tutoriais.
+        </div>
+      )}
+
+      {clienteSel && loading && (
+        <div style={{textAlign:"center",padding:"40px",color:T.t3}}>Carregando...</div>
+      )}
+
+      {clienteSel && !loading && (
+        <div>
+          {/* Mode toggle */}
+          <div style={{display:"flex",gap:8,marginBottom:20}}>
+            <button onClick={function(){setViewMode("config");}} style={{padding:"8px 18px",borderRadius:8,fontSize:12,fontWeight:700,cursor:"pointer",border:"1.5px solid "+(viewMode==="config"?C.gold:"transparent"),background:viewMode==="config"?"rgba(212,163,40,0.1)":"transparent",color:viewMode==="config"?C.gold:T.t3}}>⚙ Configurar</button>
+            <button onClick={function(){setViewMode("viewer");}} style={{padding:"8px 18px",borderRadius:8,fontSize:12,fontWeight:700,cursor:"pointer",border:"1.5px solid "+(viewMode==="viewer"?C.gold:"transparent"),background:viewMode==="viewer"?"rgba(212,163,40,0.1)":"transparent",color:viewMode==="viewer"?C.gold:T.t3}}>👁 Visualizar ({completedTuts}/{totalTuts})</button>
+          </div>
+
+          {/* CONFIG MODE */}
+          {viewMode==="config" && (
+            <div>
+              <div style={{fontSize:12,fontWeight:700,color:T.t2,marginBottom:12}}>Instituições do cliente:</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:24}}>
+                {INSTITUICOES.map(function(inst){
+                  var ativo = instSel.includes(inst);
+                  return (
+                    <button key={inst} onClick={function(){toggleInst(inst);}} style={{padding:"6px 14px",borderRadius:20,fontSize:11,fontWeight:700,cursor:"pointer",border:"1.5px solid "+(ativo?C.gold:T.bdrL),background:ativo?"rgba(212,163,40,0.12)":T.card,color:ativo?C.gold:T.t3,transition:"all 0.15s"}}>
+                      {ativo?"✓ ":""}{inst}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {instSel.length > 0 && (
+                <div>
+                  <div style={{fontSize:12,fontWeight:700,color:T.t2,marginBottom:12}}>Produtos por instituição:</div>
+                  {instSel.map(function(inst){
+                    return (
+                      <div key={inst} style={{marginBottom:16,padding:"16px",background:T.card,border:"1px solid "+T.bdrL,borderRadius:10}}>
+                        <div style={{fontSize:13,fontWeight:700,color:T.t1,marginBottom:10}}>🏦 {inst}</div>
+                        <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                          {PRODUTOS.map(function(prod){
+                            var ativo = (prodSel[inst]||[]).includes(prod);
+                            return (
+                              <button key={prod} onClick={function(){toggleProd(inst,prod);}} style={{padding:"5px 12px",borderRadius:16,fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid "+(ativo?C.gold:T.bdrL),background:ativo?"rgba(212,163,40,0.1)":T.bg,color:ativo?C.gold:T.t3}}>
+                                {ativo?"✓ ":""}{prod}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* VIEWER MODE */}
+          {viewMode==="viewer" && (
+            <div>
+              {instSel.length===0 && <div style={{color:T.t3,fontSize:13,textAlign:"center",padding:40}}>Nenhuma instituição configurada. Vá em ⚙ Configurar.</div>}
+              {instSel.map(function(inst){
+                var prods = prodSel[inst] || [];
+                if (prods.length===0) return null;
+                return (
+                  <div key={inst} style={{marginBottom:24}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,paddingBottom:8,borderBottom:"1px solid "+T.bdrL}}>
+                      <span style={{fontSize:16}}>🏦</span>
+                      <span style={{fontSize:16,fontWeight:900,color:T.t1}}>{inst}</span>
+                    </div>
+                    {prods.map(function(prod){
+                      var tut = getTutorial(inst, prod);
+                      var isEdit = editando && editando.inst===inst && editando.prod===prod;
+                      return (
+                        <div key={prod} style={{marginBottom:12,padding:"16px 18px",background:T.card,border:"1px solid "+T.bdrL,borderRadius:10}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:isEdit||tut?10:0}}>
+                            <div style={{display:"flex",alignItems:"center",gap:8}}>
+                              <span style={{fontSize:10,padding:"3px 10px",borderRadius:12,background:tut.length>10?"rgba(34,201,151,0.1)":"rgba(245,201,75,0.1)",color:tut.length>10?"#22C997":C.gold,fontWeight:700}}>{tut.length>10?"✓ Preenchido":"Pendente"}</span>
+                              <span style={{fontSize:13,fontWeight:700,color:T.t1}}>{prod}</span>
+                            </div>
+                            <button onClick={function(){
+                              if(isEdit){setEditando(null);setTextoEdit("");}
+                              else{setEditando({inst,prod});setTextoEdit(tut);}
+                            }} style={{fontSize:11,padding:"5px 14px",borderRadius:8,border:"1px solid "+T.bdrL,background:"transparent",color:T.t3,cursor:"pointer",fontWeight:700}}>
+                              {isEdit?"Cancelar":"✏ Editar"}
+                            </button>
+                          </div>
+                          {!isEdit && tut && (
+                            <div style={{fontSize:12,color:T.t2,lineHeight:1.8,whiteSpace:"pre-wrap",marginTop:4}}>{tut}</div>
+                          )}
+                          {!isEdit && !tut && (
+                            <div style={{fontSize:11,color:T.t3,fontStyle:"italic"}}>Nenhum tutorial cadastrado.</div>
+                          )}
+                          {isEdit && (
+                            <div>
+                              <textarea value={textoEdit} onChange={function(e){setTextoEdit(e.target.value);}} placeholder={"Passo a passo para investir em "+prod+" via "+inst+"...&#10;&#10;Exemplo:&#10;1. Acesse o app do "+inst+"&#10;2. Vá em Investimentos&#10;3. Busque por "+prod+"&#10;..."} style={{width:"100%",minHeight:180,padding:"12px",borderRadius:8,border:"1px solid "+C.gold,background:T.bg,color:T.t1,fontSize:12,lineHeight:1.7,resize:"vertical",fontFamily:"'Outfit',sans-serif",boxSizing:"border-box"}}/>
+                              <div style={{display:"flex",justifyContent:"flex-end",marginTop:8}}>
+                                <button onClick={saveTutorial} style={{padding:"8px 20px",borderRadius:8,background:"linear-gradient(135deg,#D4A328,#F5C94B)",color:"#0A1628",fontSize:12,fontWeight:800,border:"none",cursor:"pointer"}}>💾 Salvar Tutorial</button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+var ApresentacaoGP=function(){
     /* tabela regressiva */
     var taxaRows=[
       {range:"Entre R$ 200.000 e R$ 600.000",rate:"0,175% a.m.",anual:"≈ 2,1% a.a.",hl:true},
@@ -22213,7 +22448,7 @@ function ApresentacaoView(){
           <div style={{fontSize:12,color:T.t3,marginTop:4}}>Material institucional para prospecção e primeiros contatos</div>
         </div>
         <Bt onClick={function(){
-  var el=document.getElementById("proposta-print");
+  var el=document.getElementById("gf-apresentacao");
   if(!el){alert("Apresentação não encontrada");return;}
   var w=window.open("","_blank");
   w.document.write("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}body{margin:0;padding:0}@page{margin:0;size:A4}</style></head><body>"+el.outerHTML+"</body></html>");
@@ -22245,7 +22480,7 @@ function ApresentacaoView(){
       {/* ── Conteúdo selecionado ── */}
       {apres==="gp" && <ApresentacaoGP/>}
 
-      {apres==="gf" && <ApresentacaoGF/>}
+      {apres==="tutoriais" && <AbaTutoriais/>}
 
       {apres==="institucional" && (
         <div id="proposta-print" style={{background:"#fff",color:"#1a1a2e",padding:0,borderRadius:12,overflow:"hidden",boxShadow:"0 20px 60px rgba(0,0,0,0.3)",maxWidth:820,margin:"0 auto",fontFamily:"'Outfit',sans-serif"}}>
