@@ -66,17 +66,16 @@ table{border-spacing:0}
   [style*="font-size:10px"]{font-size:12px!important}
 }
 @media print{
-  body{margin:0!important;padding:0!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
+  body{margin:0!important;padding:0!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important;height:auto!important}
+  html{height:auto!important}
   #root{display:block!important}
   .no-print,[class*="no-print"]{display:none!important}
   button{display:none!important}
-  @page{margin:0;size:A4 portrait}
+  @page{margin:0;size:auto}
+  div{page-break-inside:avoid!important;break-inside:avoid!important}
   body.gf-printing *{visibility:hidden}
   body.gf-printing #gf-apresentacao,body.gf-printing #gf-apresentacao *{visibility:visible}
   body.gf-printing #gf-apresentacao{position:fixed!important;top:0!important;left:0!important;width:100%!important;margin:0!important}
-  #gf-apresentacao>div,#proposta-print>div,.pp-page{page-break-inside:avoid!important;break-inside:avoid!important}
-  #gf-apresentacao>div>div,#proposta-print>div>div{page-break-inside:avoid!important;break-inside:avoid!important}
-  html,body{height:auto!important}
 }
 </style>
 </head>
@@ -22457,8 +22456,19 @@ var ApresentacaoGP=function(){
   var el=document.getElementById("gf-apresentacao");
   if(!el){alert("Apresentação não encontrada");return;}
   var clone=el.cloneNode(true);
-  var printCSS="*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important;box-sizing:border-box!important}body{margin:0!important;padding:0!important}@page{margin:0;size:A4 portrait}div{page-break-inside:avoid!important;break-inside:avoid!important}html,body{height:auto!important}";
-  var fullHtml="<!DOCTYPE html><html><head><meta charset=\"utf-8\"><link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap\"><style>"+printCSS+"</style></head><body style=\"margin:0;padding:0\">"+clone.outerHTML+"</body></html>";
+  var printCSS=[
+    "*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important;box-sizing:border-box!important;margin:0;padding:0}",
+    "body{margin:0!important;padding:0!important;background:#fff}",
+    "@page{margin:0;size:auto}",
+    "div,section{page-break-inside:avoid!important;break-inside:avoid!important}",
+    "html,body{height:auto!important;overflow:visible!important}"
+  ].join("");
+  var fullHtml=[
+    "<!DOCTYPE html><html><head><meta charset=\"utf-8\">",
+    "<link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap\">",
+    "<style>",printCSS,"</style>",
+    "</head><body>",clone.outerHTML,"</body></html>"
+  ].join("");
   var blob=new Blob([fullHtml],{type:"text/html"});
   var url=URL.createObjectURL(blob);
   var w=window.open(url,"_blank");
