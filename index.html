@@ -70,10 +70,13 @@ table{border-spacing:0}
   #root{display:block!important}
   .no-print,[class*="no-print"]{display:none!important}
   button{display:none!important}
-  @page{margin:0;size:A4}
+  @page{margin:0;size:A4 portrait}
   body.gf-printing *{visibility:hidden}
   body.gf-printing #gf-apresentacao,body.gf-printing #gf-apresentacao *{visibility:visible}
   body.gf-printing #gf-apresentacao{position:fixed!important;top:0!important;left:0!important;width:100%!important;margin:0!important}
+  #gf-apresentacao>div,#proposta-print>div,.pp-page{page-break-inside:avoid!important;break-inside:avoid!important}
+  #gf-apresentacao>div>div,#proposta-print>div>div{page-break-inside:avoid!important;break-inside:avoid!important}
+  html,body{height:auto!important}
 }
 </style>
 </head>
@@ -22454,20 +22457,12 @@ var ApresentacaoGP=function(){
   var el=document.getElementById("gf-apresentacao");
   if(!el){alert("Apresentação não encontrada");return;}
   var clone=el.cloneNode(true);
-  var allEls=clone.querySelectorAll("*");
-  allEls.forEach(function(e){
-    var cs=window.getComputedStyle(document.getElementById("gf-apresentacao").querySelectorAll("*")[Array.from(allEls).indexOf(e)]||e);
-    if(cs.backgroundImage && cs.backgroundImage!=="none") e.style.backgroundImage=cs.backgroundImage;
-    if(cs.backgroundColor && cs.backgroundColor!=="rgba(0, 0, 0, 0)") e.style.backgroundColor=cs.backgroundColor;
-    if(cs.color) e.style.color=cs.color;
-  });
-  var fullHtml="<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important;box-sizing:border-box}body{margin:0;padding:0}@page{margin:0;size:A4 portrait}@font-face{font-family:\"Outfit\";src:url(\"https://fonts.gstatic.com/s/outfit/v11/QGYyz_MVcBeNP4NjuGObqx1XmO1I4TC1O4a0EQ.woff2\") format(\"woff2\")}</style><link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap\"></head><body>"+clone.outerHTML+"</body></html>";
+  var printCSS="*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important;box-sizing:border-box!important}body{margin:0!important;padding:0!important}@page{margin:0;size:A4 portrait}div{page-break-inside:avoid!important;break-inside:avoid!important}html,body{height:auto!important}";
+  var fullHtml="<!DOCTYPE html><html><head><meta charset=\"utf-8\"><link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap\"><style>"+printCSS+"</style></head><body style=\"margin:0;padding:0\">"+clone.outerHTML+"</body></html>";
   var blob=new Blob([fullHtml],{type:"text/html"});
   var url=URL.createObjectURL(blob);
   var w=window.open(url,"_blank");
-  setTimeout(function(){
-    try{w.print();}catch(e){}
-  },2000);
+  setTimeout(function(){try{w.print();}catch(e){}},2000);
 }}>🖨 Imprimir / Salvar PDF</Bt>
       </div>
 
