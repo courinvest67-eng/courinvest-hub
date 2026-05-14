@@ -22459,28 +22459,23 @@ var ApresentacaoGP=function(){
   for(var i=0;i<children.length;i++){
     var child=children[i];
     if(i===0){
-      // CAPA: full page + break after
       child.style.minHeight="100vh";
       child.style.pageBreakAfter="always";
       child.style.breakAfter="page";
     } else {
-      // All other sections: remove minHeight to avoid whitespace
       child.style.minHeight="";
       child.style.height="auto";
-      child.style.pageBreakInside="avoid";
-      child.style.breakInside="avoid";
-      // Remove minHeight from ALL nested elements too
       var nested=child.querySelectorAll("*");
       nested.forEach(function(n){
         n.style.minHeight="";
-        if(n.style.height && n.style.height.indexOf("vh")>-1) n.style.height="auto";
+        if(n.style.height&&n.style.height.indexOf("vh")>-1)n.style.height="auto";
       });
     }
   }
   var printCSS=[
     "*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important;box-sizing:border-box!important}",
     "body{margin:0!important;padding:0!important;background:#fff}",
-    "@page{margin:0;size:A4 portrait}",
+    "@page{margin:0;size:auto}",
     "html,body{height:auto!important;overflow:visible!important}"
   ].join("");
   var fullHtml=[
@@ -22492,7 +22487,7 @@ var ApresentacaoGP=function(){
   var blob=new Blob([fullHtml],{type:"text/html"});
   var url=URL.createObjectURL(blob);
   var w=window.open(url,"_blank");
-  setTimeout(function(){try{w.print();}catch(e){}},2000);
+  setTimeout(function(){try{w.print();}catch(e){}},2500);
 }}>🖨 Imprimir / Salvar PDF</Bt>
       </div>
 
