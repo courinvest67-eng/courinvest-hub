@@ -22456,11 +22456,17 @@ var ApresentacaoGP=function(){
   var el=document.getElementById("gf-apresentacao");
   if(!el){alert("Apresentação não encontrada");return;}
   var clone=el.cloneNode(true);
+  // Remove minHeight from all elements to avoid whitespace
+  var allDivs=clone.querySelectorAll("*");
+  allDivs.forEach(function(d){
+    d.style.minHeight="";
+    d.style.minWidth="";
+    d.style.height="auto";
+  });
   var printCSS=[
-    "*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important;box-sizing:border-box!important;margin:0;padding:0}",
+    "*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important;box-sizing:border-box!important}",
     "body{margin:0!important;padding:0!important;background:#fff}",
     "@page{margin:0;size:auto}",
-    "div,section{page-break-inside:avoid!important;break-inside:avoid!important}",
     "html,body{height:auto!important;overflow:visible!important}"
   ].join("");
   var fullHtml=[
