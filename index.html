@@ -22453,19 +22453,21 @@ var ApresentacaoGP=function(){
         <Bt onClick={function(){
   var el=document.getElementById("gf-apresentacao");
   if(!el){alert("Apresentação não encontrada");return;}
-  var style=document.createElement("style");
-  style.id="gf-print-style";
-  style.innerHTML="@media print{body>*{display:none!important}#root>*{display:none!important}.hub-wrapper>*:not(#gf-print-wrapper){display:none!important}#gf-print-wrapper{display:block!important;position:fixed;top:0;left:0;width:100%;z-index:9999}button{display:none!important}-webkit-print-color-adjust:exact;print-color-adjust:exact}";
-  document.head.appendChild(style);
-  document.body.classList.add("gf-printing");
-  window.scrollTo(0,0);
+  var clone=el.cloneNode(true);
+  var allEls=clone.querySelectorAll("*");
+  allEls.forEach(function(e){
+    var cs=window.getComputedStyle(document.getElementById("gf-apresentacao").querySelectorAll("*")[Array.from(allEls).indexOf(e)]||e);
+    if(cs.backgroundImage && cs.backgroundImage!=="none") e.style.backgroundImage=cs.backgroundImage;
+    if(cs.backgroundColor && cs.backgroundColor!=="rgba(0, 0, 0, 0)") e.style.backgroundColor=cs.backgroundColor;
+    if(cs.color) e.style.color=cs.color;
+  });
+  var fullHtml="<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important;box-sizing:border-box}body{margin:0;padding:0}@page{margin:0;size:A4 portrait}@font-face{font-family:\"Outfit\";src:url(\"https://fonts.gstatic.com/s/outfit/v11/QGYyz_MVcBeNP4NjuGObqx1XmO1I4TC1O4a0EQ.woff2\") format(\"woff2\")}</style><link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap\"></head><body>"+clone.outerHTML+"</body></html>";
+  var blob=new Blob([fullHtml],{type:"text/html"});
+  var url=URL.createObjectURL(blob);
+  var w=window.open(url,"_blank");
   setTimeout(function(){
-    window.print();
-    setTimeout(function(){
-      document.head.removeChild(document.getElementById("gf-print-style"));
-      document.body.classList.remove("gf-printing");
-    },500);
-  },600);
+    try{w.print();}catch(e){}
+  },2000);
 }}>🖨 Imprimir / Salvar PDF</Bt>
       </div>
 
