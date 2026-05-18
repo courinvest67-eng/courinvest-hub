@@ -1660,6 +1660,40 @@ function Dash({data:d,onSel:os,goTo}){
                   sRelEnviando(cl.id);
                   sRelEnviados(function(prev){var n=Object.assign({},prev);n[cl.id+"-"+mesRefKey]=true;return n;});
 
+                  /* 📢 Registrar relatório publicado no Firebase para notificação push do portal */
+                  try {
+                    if(window._fbDB) {
+                      var mesAno = mesRefKey; // formato YYYY-MM
+                      var relKey = "rel_" + mesAno;
+                      var upRel = {id: cl.id};
+                      upRel[relKey] = {
+                        publicado: true,
+                        mes: mesAno,
+                        mesNome: mesRefNome,
+                        dtPublicacao: new Date().toISOString(),
+                        notificado: false
+                      };
+                      window._fbDB.collection("workspaces").doc("main").get().then(function(snap){
+                        if(!snap.exists) return;
+                        var data = snap.data();
+                        var clientes = (data.cl||[]).map(function(c){
+                          if(c.id !== cl.id) return c;
+                          var particularidades = c.particularidades || {};
+                          var relatorios = particularidades.relatorios || {};
+                          relatorios[mesAno] = {
+                            publicado: true,
+                            mes: mesAno,
+                            mesNome: mesRefNome,
+                            dtPublicacao: new Date().toISOString(),
+                            notificado: false
+                          };
+                          return Object.assign({}, c, {particularidades: Object.assign({}, particularidades, {relatorios: relatorios})});
+                        });
+                        window._fbDB.collection("workspaces").doc("main").update({cl: clientes});
+                      }).catch(function(e){console.warn("Rel push:", e)});
+                    }
+                  } catch(e) { console.warn("Push reg:", e); }
+
                   /* 1. Gera e abre o relatório em nova aba para salvar como PDF */
                   try{
                     var tipoRel=cl.sv&&cl.sv.includes("patrimonio")?"mensal":null;
@@ -3302,49 +3336,71 @@ function CL({data:d,onSel:os,dispatch:dp}){
 
   var importGorilaBulk=function(files){
     if(!files||files.length===0)return;
-    var arr=Array.from(files);
+    var arr=Array.from(files).filter(function(f){return /\.(xlsx|xls|pdf|csv)$/i.test(f.name)});
+    if(arr.length===0){sGMsg("⚠ Nenhum arquivo XLSX/PDF/CSV encontrado.");return}
     var total=arr.length;
     var results={ok:[],fail:[],skipped:[]};
     var startTime=Date.now();
-    /* Pré-análise: extrai nome e período do filename antes de processar */
+    var completed=0;
     var preview=arr.map(function(f){
       var parsed=parseFilenameGorila(f.name);
       return {file:f,parsed:parsed,filename:f.name};
     });
-    sBulkProgress({current:0,total:total,nome:"",results:results,preview:preview,startTime:startTime});
+    sBulkProgress({current:0,total:total,nome:"Preparando "+total+" arquivos...",results:results,preview:preview,startTime:startTime});
 
-    var processNext=function(idx){
-      if(idx>=arr.length){
-        var elapsed=((Date.now()-startTime)/1000).toFixed(0);
+    // Processar em paralelo (lotes de 4 para não travar o browser)
+    var PARALELO = 4;
+    var idx = 0;
+    var processarLote = function(){
+      if(completed >= total){
+        var elapsed=((Date.now()-startTime)/1000).toFixed(1);
+        // Salvar timestamp da última importação em lote no Firebase
+        var tsImport = Date.now();
+        if(window._fbDB){
+          window._fbDB.collection("workspaces").doc("main").update({
+            _ultimaImportacaoGorila: tsImport,
+            _importacaoStats: {
+              total: total,
+              ok: results.ok.length,
+              fail: results.fail.length,
+              elapsedSec: +elapsed,
+              ts: tsImport
+            }
+          }).catch(function(){});
+        }
         sBulkProgress({current:total,total:total,nome:"",results:results,done:true,preview:preview,elapsedSec:elapsed});
-        sGMsg("✅ Importação em massa concluída em "+elapsed+"s — "+results.ok.length+" sucessos · "+results.fail.length+" falhas");
-        /* NÃO esconde automaticamente — usuário fecha quando quiser ver o relatório */
+        sGMsg("✅ "+results.ok.length+"/"+total+" clientes importados em "+elapsed+"s · Dados atualizados no portal");
         return;
       }
-      var file=arr[idx];
-      var parsed=preview[idx].parsed;
-      /* Estima tempo restante baseado no progresso atual */
-      var elapsed=(Date.now()-startTime)/1000;
-      var avgPerFile=idx>0?elapsed/idx:0;
-      var remainingSec=avgPerFile>0?Math.ceil(avgPerFile*(total-idx)):0;
-      sBulkProgress({
-        current:idx+1,total:total,
-        nome:parsed?parsed.nomeCliente:file.name,
-        filename:file.name,
-        results:results,preview:preview,
-        startTime:startTime,
-        remainingSec:remainingSec
-      });
-      
-      var done=function(success,name,patVal){
-        if(success){results.ok.push({nome:name||(parsed?parsed.nomeCliente:file.name),pat:patVal||0,filename:file.name})}
-        else{results.fail.push({nome:(parsed?parsed.nomeCliente:file.name),filename:file.name,err:name||"erro desconhecido"})}
-        setTimeout(function(){processNext(idx+1)},150);
-      };
-      
-      processGorilaFile(file,done);
+      // Iniciar até PARALELO arquivos ao mesmo tempo
+      while(idx < total && (idx - completed) < PARALELO){
+        (function(i){
+          var file = arr[i];
+          var parsed = preview[i].parsed;
+          var elapsed=(Date.now()-startTime)/1000;
+          var avgPerFile=completed>0?elapsed/completed:0;
+          var remainingSec=avgPerFile>0?Math.ceil(avgPerFile*(total-completed)):0;
+          sBulkProgress(function(prev){
+            return Object.assign({},prev||{},{
+              current:completed,total:total,
+              nome:parsed?parsed.nomeCliente:file.name,
+              filename:file.name,
+              results:results,preview:preview,
+              startTime:startTime,
+              remainingSec:remainingSec
+            });
+          });
+          processGorilaFile(file, function(success, name, patVal){
+            if(success){results.ok.push({nome:name||(parsed?parsed.nomeCliente:file.name),pat:patVal||0,filename:file.name})}
+            else{results.fail.push({nome:(parsed?parsed.nomeCliente:file.name),filename:file.name,err:name||"erro"})}
+            completed++;
+            setTimeout(processarLote, 50);
+          });
+        })(idx);
+        idx++;
+      }
     };
-    processNext(0);
+    processarLote();
   };
 
   
@@ -4335,6 +4391,27 @@ function CL({data:d,onSel:os,dispatch:dp}){
           e.target.value="";
         }} style={{display:"none"}}/>
         {/* Dropdown wrapper */}
+        {/* === PAINEL DE STATUS DE IMPORTAÇÃO === */}
+        {(function(){
+          var tsUlt=d.config&&d.config._ultimaImportacaoGorila;
+          if(!tsUlt)return null;
+          var agora=Date.now();
+          var diasDesde=Math.floor((agora-tsUlt)/(1000*60*60*24));
+          var cor=diasDesde<=3?T.green:diasDesde<=7?T.orange:T.red;
+          var msg=diasDesde===0?"hoje":diasDesde===1?"ontem":diasDesde+" dias atrás";
+          var clientesSemImport=(d.cl||[]).filter(function(c){
+            if(!c._ativosTs)return true;
+            return (agora - c._ativosTs) > 8*24*60*60*1000; // mais de 8 dias sem update
+          }).length;
+          return (
+            <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px",background:"rgba(255,255,255,0.03)",border:"1px solid "+T.bdrL,borderRadius:10,fontSize:11,flexWrap:"wrap"}}>
+              <span style={{color:cor,fontWeight:700}}>● Gorila: {msg}</span>
+              {clientesSemImport>0 && <span style={{color:T.orange}}>{clientesSemImport} cliente{clientesSemImport>1?"s":""} desatualizado{clientesSemImport>1?"s":""}</span>}
+              {diasDesde>7 && <span style={{color:T.red,fontWeight:700}}>⚠ Atualização urgente!</span>}
+              <span style={{color:T.t3,fontSize:10}}>{d._importacaoStats&&("("+d._importacaoStats.ok+"/"+d._importacaoStats.total+" na última importação)")}</span>
+            </div>
+          );
+        })()}
         <div style={{position:"relative",display:"inline-block"}}>
           <Bt v="secondary" onClick={function(){sShowBulkMenu(!showBulkMenu)}} style={{fontSize:11,padding:"10px 14px",background:"rgba(167,139,250,0.08)",color:T.purple,border:"1px solid rgba(167,139,250,0.2)"}}>📦 Importar em Massa ▾</Bt>
           {showBulkMenu && (
@@ -4697,6 +4774,7 @@ function NewClientForm({onSave,onClose}){
         </div>
       )}
       <div><div style={{fontSize:10,fontWeight:700,color:T.t3,marginBottom:4}}>NOTAS</div><textarea value={f.notas} onChange={e=>u("notas",e.target.value)} placeholder="Observações..." style={{...inpS,minHeight:50,resize:"vertical"}}/></div>
+      <div style={{background:"rgba(201,161,85,0.04)",border:"1px solid rgba(201,161,85,0.12)",borderRadius:10,padding:"12px 14px"}}><div style={{fontSize:10,fontWeight:700,color:T.gold,marginBottom:8,letterSpacing:1}}>🔐 ACESSO AO PORTAL DO CLIENTE</div><div style={{display:"flex",gap:8,alignItems:"flex-end"}}><div style={{flex:1}}><div style={{fontSize:9,color:T.t3,marginBottom:4}}>SENHA DE ACESSO (CPF + esta senha)</div><input value={f.portalSenha||""} onChange={e=>u("portalSenha",e.target.value)} placeholder="Defina uma senha para o cliente" style={{...inpS,borderColor:f.portalSenha?"rgba(201,161,85,0.3)":undefined}}/></div></div><div style={{fontSize:9,color:T.t3,marginTop:6}}>O cliente acessa o portal com o CPF cadastrado + esta senha. Deixe em branco para bloquear o acesso.</div></div>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Bt v="secondary" onClick={onClose}>Cancelar</Bt><Bt onClick={()=>{if(!f.nome)return;onSave(Object.assign({},f,{dtCaptacao:new Date().toISOString().split("T")[0],status:"ativo"}))}}>✦ Salvar Cliente</Bt></div>
     </div>
   );
@@ -11515,6 +11593,12 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
                 <div style={{fontSize:9,color:T.t3,fontWeight:600,marginBottom:3}}>💬 LINK WHATSAPP (Grupo de Suporte)</div>
                 <input value={c.waGrupo||""} onChange={function(e){dp({t:"UC",p:{id:c.id,waGrupo:e.target.value}})}} placeholder="https://chat.whatsapp.com/XXXXXXXXX" style={{width:"100%",padding:"6px 8px",background:T.w3,border:"1px solid "+T.bdrL,borderRadius:6,color:c.waGrupo?"#25D366":T.t3,fontSize:11,fontFamily:"'JetBrains Mono'",outline:"none",boxSizing:"border-box"}}/>
                 <div style={{fontSize:8,color:T.t3,marginTop:3,fontStyle:"italic"}}>Cole o link do grupo aqui. Se vazio, usa o telefone acima.</div>
+              </div>
+              <div style={{gridColumn:isMob?"1":"1/-1",background:"rgba(201,161,85,0.04)",border:"1px solid rgba(201,161,85,0.14)",borderRadius:8,padding:"10px 12px"}}>
+                <div style={{fontSize:9,fontWeight:700,color:T.gold,marginBottom:8,letterSpacing:0.5}}>🔐 PORTAL DO CLIENTE</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}><div><div style={{fontSize:8,color:T.t3,marginBottom:3}}>SENHA DE ACESSO</div><input value={c.portalSenha||""} onChange={function(e){dp({t:"UC",p:{id:c.id,portalSenha:e.target.value}})}} placeholder="Senha do portal" style={{width:"100%",padding:"6px 8px",background:T.bg2,border:"1px solid "+(c.portalSenha?"rgba(201,161,85,0.3)":T.bdrL),borderRadius:6,color:c.portalSenha?T.gold:T.t3,fontSize:12,outline:"none",boxSizing:"border-box"}}/></div><div><div style={{fontSize:8,color:T.t3,marginBottom:3}}>APORTE SUGERIDO (R$)</div><input type="number" value={(c.aporteSugerido&&c.aporteSugerido.valor)||""} onChange={function(e){dp({t:"UC",p:{id:c.id,aporteSugerido:Object.assign({},c.aporteSugerido||{},{valor:+e.target.value,atualizadoEm:Date.now()})}})}} placeholder="0" style={{width:"100%",padding:"6px 8px",background:T.bg2,border:"1px solid "+T.bdrL,borderRadius:6,color:T.t1,fontSize:12,outline:"none",boxSizing:"border-box"}}/></div></div>
+                <div><div style={{fontSize:8,color:T.t3,marginBottom:3}}>DESTINO DO APORTE</div><input value={(c.aporteSugerido&&c.aporteSugerido.destino)||""} onChange={function(e){dp({t:"UC",p:{id:c.id,aporteSugerido:Object.assign({},c.aporteSugerido||{},{destino:e.target.value,atualizadoEm:Date.now()})}})}} placeholder="Ex: Tesouro IPCA+ 2035 via XP" style={{width:"100%",padding:"6px 8px",background:T.bg2,border:"1px solid "+T.bdrL,borderRadius:6,color:T.t1,fontSize:12,outline:"none",boxSizing:"border-box"}}/></div>
+                <div style={{fontSize:8,color:T.t3,marginTop:6}}>Login: CPF + senha. Aporte sugerido aparece no portal do cliente em tempo real.</div>
               </div>
               <div>
                 <div style={{fontSize:9,color:T.t3,fontWeight:600,marginBottom:3}}>🎂 DATA DE NASCIMENTO</div>
@@ -21708,12 +21792,23 @@ var gerarComIA = async function(inst, prod, cliente) {
 var loadCliente = function(cid) {
   setLoading(true);
   try {
-    var r = localStorage.getItem("tut_inst_" + cid);
-    setInstSel(r ? JSON.parse(r) : []);
-    var rp = localStorage.getItem("tut_prod_" + cid);
-    setProdSel(rp ? JSON.parse(rp) : {});
-    var rt = localStorage.getItem("tut_text_" + cid);
-    setTutoriais(rt ? JSON.parse(rt) : {});
+    // Prioridade: Firebase (via data.cl) > localStorage (fallback legado)
+    var clienteAtual = data && data.cl ? data.cl.find(function(c){return c.id===cid;}) : null;
+    var tutData = clienteAtual && clienteAtual._tutoriais ? clienteAtual._tutoriais : null;
+    
+    if (tutData) {
+      setInstSel(tutData.inst || []);
+      setProdSel(tutData.prod || {});
+      setTutoriais(tutData.textos || {});
+    } else {
+      // Fallback: localStorage (dados antigos antes da migração)
+      var r = localStorage.getItem("tut_inst_" + cid);
+      setInstSel(r ? JSON.parse(r) : []);
+      var rp = localStorage.getItem("tut_prod_" + cid);
+      setProdSel(rp ? JSON.parse(rp) : {});
+      var rt = localStorage.getItem("tut_text_" + cid);
+      setTutoriais(rt ? JSON.parse(rt) : {});
+    }
   } catch(e) { setInstSel([]); setProdSel({}); setTutoriais({}); }
   setLoading(false);
   setViewMode("config");
@@ -21722,12 +21817,28 @@ var loadCliente = function(cid) {
 
 var saveData = function(cid, newInst, newProd, newTut) {
   try {
-    localStorage.setItem("tut_inst_" + cid, JSON.stringify(newInst || instSel));
-    localStorage.setItem("tut_prod_" + cid, JSON.stringify(newProd || prodSel));
-    if (newTut) localStorage.setItem("tut_text_" + cid, JSON.stringify(newTut));
+    var instAtual = newInst || instSel;
+    var prodAtual = newProd || prodSel;
+    var tutAtual  = newTut  || tutoriais;
+    // Salvar no Firebase via dispatch (sincroniza automaticamente com portal do cliente)
+    if (dispatch) {
+      dispatch({t:"UC", p:{
+        id: cid,
+        _tutoriais: {
+          inst: instAtual,
+          prod: prodAtual,
+          textos: tutAtual,
+          atualizadoEm: Date.now()
+        }
+      }});
+    }
+    // Manter localStorage como backup
+    localStorage.setItem("tut_inst_" + cid, JSON.stringify(instAtual));
+    localStorage.setItem("tut_prod_" + cid, JSON.stringify(prodAtual));
+    if (newTut) localStorage.setItem("tut_text_" + cid, JSON.stringify(tutAtual));
     setSaved(true);
     setTimeout(function(){setSaved(false);}, 2000);
-  } catch(e) {}
+  } catch(e) { console.warn("saveData:", e); }
 };
 
 var toggleInst = function(inst) {
@@ -25682,6 +25793,28 @@ function App({authUser}){
     },800);
     return function(){clearTimeout(timeoutId)};
   },[d]);
+  /* === LEMBRETE SEMANAL DE IMPORTAÇÃO GORILA ===
+     Verifica se faz mais de 7 dias sem importação e mostra alerta */
+  useEffect(function(){
+    var verificarLembrete = function(){
+      var tsUlt = d.config && d.config._ultimaImportacaoGorila;
+      if(!tsUlt) return; // nunca importou, não incomoda
+      var diasDesde = Math.floor((Date.now()-tsUlt)/(1000*60*60*24));
+      var jaLembrou = sessionStorage.getItem("gorila_lembrou_"+tsUlt);
+      if(diasDesde >= 7 && !jaLembrou){
+        sessionStorage.setItem("gorila_lembrou_"+tsUlt, "1");
+        // Notificação push se disponível
+        if("Notification" in window && Notification.permission === "granted"){
+          new Notification("📊 Courinvest Hub — Atualização Gorila", {
+            body: diasDesde+" dias sem importar o Gorila. "+((d.cl||[]).length)+" clientes podem estar desatualizados.",
+            icon: "./icon-192.png"
+          });
+        }
+      }
+    };
+    verificarLembrete();
+  },[d.config&&d.config._ultimaImportacaoGorila]);
+
   /* === REAL-TIME LISTENER ===
      Escuta mudanças no Firestore — quando o sócio modifica algo, atualiza minha tela.
      Roda 1x ao montar, fica escutando até o componente desmontar.
@@ -26039,7 +26172,7 @@ function App({authUser}){
           {pg==="comercial" && <ComercialView data={d} dispatch={dp}/>}
           {pg==="agenda" && <Ag d={d} dp={dp} sPg={sPg}/>}
           {pg==="news" && <NewsView data={d} dispatch={dp}/>}
-          {pg==="tutoriais" && <AbaTutoriais data={d}/>}
+          {pg==="tutoriais" && <AbaTutoriais data={d} dispatch={dp}/>}
           {pg==="import" && <ImportView/>}
         </div>
       </div>
@@ -26166,7 +26299,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '267';
+  var SW_VERSION = '271';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
