@@ -18826,6 +18826,137 @@ function FinanceiroView({data:d,dispatch:dp}){
                 </Cd>
               )}
               {}
+              {/* ═══════════ PROJEÇÃO DE RECEITA ═══════════ */}
+              {(function(){
+                if(mesesOrdenados.length < 3) return null;
+                var anoAtual = new Date().getFullYear();
+                var mesAtual = new Date().getMonth() + 1; // 1-12
+
+                // Filtrar só o ano atual ou selecionado
+                var anoRef = selYear === "todos" ? String(anoAtual) : String(selYear);
+                var mesesAno = mesesOrdenados.filter(function(m){ return m.startsWith(anoRef); });
+                if(mesesAno.length === 0) return null;
+
+                // Receitas reais do ano
+                var receitasReais = mesesAno.map(function(m){ return byMonth[m].rec; });
+                var mesesRealizados = mesesAno.length;
+                var totalRealizado = receitasReais.reduce(function(s,v){return s+v}, 0);
+
+                // Média móvel dos últimos 3 meses para projeção
+                var ultimos3 = mesesOrdenados.slice(-3).map(function(m){ return byMonth[m].rec; });
+                var mediaMovel = ultimos3.reduce(function(s,v){return s+v},0) / ultimos3.length;
+
+                // Média simples do ano atual
+                var mediaAno = totalRealizado / mesesRealizados;
+
+                // Usar média ponderada (60% móvel + 40% ano) para projeção mais precisa
+                var mediaProjeto = (mediaMovel * 0.6) + (mediaAno * 0.4);
+
+                // Meses restantes no ano
+                var mesesRestantes = anoRef === String(anoAtual) ? (12 - mesAtual) : 0;
+                var projecaoRestante = mediaProjeto * mesesRestantes;
+                var totalProjetado = totalRealizado + projecaoRestante;
+
+                // Tendência (regressão linear simples)
+                var n = receitasReais.length;
+                var sumX=0, sumY=0, sumXY=0, sumX2=0;
+                receitasReais.forEach(function(v,i){ sumX+=i; sumY+=v; sumXY+=i*v; sumX2+=i*i; });
+                var slope = n>1 ? (n*sumXY - sumX*sumY)/(n*sumX2 - sumX*sumX) : 0;
+                var tendencia = slope >= 0 ? "crescimento" : "queda";
+                var tendenciaPct = mediaAno > 0 ? Math.abs(slope / mediaAno * 100) : 0;
+
+                // Cenários
+                var cenarioPessimista = totalRealizado + (mediaProjeto * 0.85 * mesesRestantes);
+                var cenarioOtimista   = totalRealizado + (mediaProjeto * 1.15 * mesesRestantes);
+
+                // Meta anual (MRR × 12 estimado pela média)
+                var metaAnual = mediaMovel * 12;
+                var pctMeta = metaAnual > 0 ? (totalProjetado / metaAnual * 100) : 0;
+
+                if(mesesRestantes === 0 && anoRef !== String(anoAtual)) return null;
+
+                return (
+                  <Cd style={{padding:20,marginBottom:14}} hov={false} glow={true}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
+                      <div>
+                        <h4 style={{margin:0,fontSize:14,fontWeight:700,color:T.gold}}>📈 Projeção de Receita {anoRef}</h4>
+                        <div style={{fontSize:10,color:T.t3,marginTop:3}}>
+                          Baseada em {mesesRealizados} {mesesRealizados>1?"meses realizados":"mês realizado"} · Média móvel (últimos 3m) + tendência do ano
+                        </div>
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 12px",borderRadius:20,background:slope>=0?"rgba(45,212,160,0.1)":"rgba(239,100,97,0.1)",border:"1px solid "+(slope>=0?"rgba(45,212,160,0.2)":"rgba(239,100,97,0.2)")}}>
+                        <span style={{fontSize:12}}>{slope>=0?"📈":"📉"}</span>
+                        <span style={{fontSize:11,fontWeight:700,color:slope>=0?T.green:T.red}}>
+                          Tendência de {tendencia} {tendenciaPct > 0 ? "(~"+tendenciaPct.toFixed(1)+"% ao mês)" : ""}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Cards principais */}
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginBottom:16}}>
+                      <div style={{background:"rgba(255,255,255,0.02)",borderRadius:10,padding:"12px 14px",border:"1px solid rgba(45,212,160,0.12)"}}>
+                        <div style={{fontSize:9,color:T.t3,fontWeight:600,letterSpacing:1,marginBottom:4}}>REALIZADO</div>
+                        <div style={{fontSize:18,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(totalRealizado)}</div>
+                        <div style={{fontSize:9,color:T.t3,marginTop:2}}>{mesesRealizados} meses</div>
+                      </div>
+                      {mesesRestantes > 0 && (
+                        <div style={{background:"rgba(255,255,255,0.02)",borderRadius:10,padding:"12px 14px",border:"1px solid rgba(212,163,40,0.2)"}}>
+                          <div style={{fontSize:9,color:T.t3,fontWeight:600,letterSpacing:1,marginBottom:4}}>PROJETADO ({mesesRestantes}m restantes)</div>
+                          <div style={{fontSize:18,fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(projecaoRestante)}</div>
+                          <div style={{fontSize:9,color:T.t3,marginTop:2}}>{fm(mediaProjeto)}/mês estimado</div>
+                        </div>
+                      )}
+                      <div style={{background:"rgba(255,255,255,0.02)",borderRadius:10,padding:"12px 14px",border:"1px solid rgba(167,139,250,0.15)"}}>
+                        <div style={{fontSize:9,color:T.t3,fontWeight:600,letterSpacing:1,marginBottom:4}}>TOTAL PROJETADO {anoRef}</div>
+                        <div style={{fontSize:18,fontWeight:800,color:T.purple,fontFamily:"'JetBrains Mono'"}}>{fm(totalProjetado)}</div>
+                        <div style={{fontSize:9,color:T.t3,marginTop:2}}>projeção central</div>
+                      </div>
+                    </div>
+
+                    {/* Barra de progresso vs projeção */}
+                    {mesesRestantes > 0 && (
+                      <div style={{marginBottom:16}}>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                          <span style={{fontSize:10,color:T.t3,fontWeight:600}}>Progresso do ano</span>
+                          <span style={{fontSize:10,fontWeight:700,color:T.gold}}>{(totalRealizado/totalProjetado*100).toFixed(0)}% realizado</span>
+                        </div>
+                        <div style={{height:8,background:"rgba(255,255,255,0.04)",borderRadius:4,overflow:"hidden",position:"relative"}}>
+                          <div style={{height:"100%",width:(totalRealizado/totalProjetado*100)+"%",background:"linear-gradient(90deg,"+T.green+","+T.gold+")",borderRadius:4,transition:"width 0.8s ease"}}/>
+                        </div>
+                        <div style={{display:"flex",justifyContent:"space-between",marginTop:4,fontSize:9,color:T.t3}}>
+                          <span>Jan</span><span>Dez</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Cenários */}
+                    {mesesRestantes > 0 && (
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                        <div style={{textAlign:"center",padding:"10px 8px",borderRadius:8,background:"rgba(239,100,97,0.06)",border:"1px solid rgba(239,100,97,0.12)"}}>
+                          <div style={{fontSize:8,color:T.red,fontWeight:700,letterSpacing:.5,marginBottom:4}}>PESSIMISTA −15%</div>
+                          <div style={{fontSize:13,fontWeight:700,color:T.red,fontFamily:"'JetBrains Mono'"}}>{fm(cenarioPessimista)}</div>
+                        </div>
+                        <div style={{textAlign:"center",padding:"10px 8px",borderRadius:8,background:"rgba(212,163,40,0.08)",border:"1px solid rgba(212,163,40,0.2)"}}>
+                          <div style={{fontSize:8,color:T.gold,fontWeight:700,letterSpacing:.5,marginBottom:4}}>CENTRAL</div>
+                          <div style={{fontSize:13,fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(totalProjetado)}</div>
+                        </div>
+                        <div style={{textAlign:"center",padding:"10px 8px",borderRadius:8,background:"rgba(45,212,160,0.06)",border:"1px solid rgba(45,212,160,0.12)"}}>
+                          <div style={{fontSize:8,color:T.green,fontWeight:700,letterSpacing:.5,marginBottom:4}}>OTIMISTA +15%</div>
+                          <div style={{fontSize:13,fontWeight:700,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(cenarioOtimista)}</div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{fontSize:9,color:T.t3,marginTop:12,padding:"8px 0",borderTop:"1px solid rgba(255,255,255,0.04)",lineHeight:1.5}}>
+                      💡 Projeção calculada pela média ponderada (60% últimos 3 meses + 40% média do ano). 
+                      Cenários aplicam variação de ±15% sobre a projeção central.
+                      {mesesRestantes === 0 ? " Ano finalizado — todos os meses realizados." : " "+mesesRestantes+" meses restantes para fechar o ano."}
+                    </div>
+                  </Cd>
+                );
+              })()}
+
+              {/* ══════════════════════════════════════════ */}
               <div style={{display:"flex",gap:14,flexWrap:"wrap",marginTop:14}}>
                 <Cd style={{padding:18,flex:1,minWidth:240}} hov={false}>
                   <h4 style={{margin:"0 0 12px",fontSize:13,fontWeight:700,color:T.gold}}>Por Serviço</h4>
@@ -26299,7 +26430,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '271';
+  var SW_VERSION = '272';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
