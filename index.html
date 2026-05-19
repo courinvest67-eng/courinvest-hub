@@ -18475,11 +18475,27 @@ function FinanceiroView({data:d,dispatch:dp}){
         var rows=[];var sheetUsed="";
         if(isExcel){
           var wb=XLSX.read(e.target.result,{type:"array",raw:false});
-          var bestSheet="";var bestCount=0;
+          /* Priorizar aba que tenha colunas de faturamento (cliente + valor + meio)
+             em vez de simplesmente a aba com mais linhas — evita pegar aba DN/resumo */
+          var bestSheet="";var bestScore=0;
           wb.SheetNames.forEach(function(name){
             var ws=wb.Sheets[name];
             var r=XLSX.utils.sheet_to_json(ws,{defval:"",raw:false});
-            if(r.length>bestCount){bestCount=r.length;bestSheet=name}
+            if(r.length===0)return;
+            var keys=Object.keys(r[0]).map(function(k){return k.toLowerCase().trim()});
+            var temCliente=keys.some(function(k){return k.indexOf("cliente")>=0});
+            var temValor=keys.some(function(k){return k.indexOf("valor")>=0||k.indexOf("value")>=0});
+            var temMeio=keys.some(function(k){return k.indexOf("meio")>=0||k.indexOf("recebimento")>=0||k.indexOf("pagamento")>=0});
+            var temServico=keys.some(function(k){return k.indexOf("servic")>=0||k.indexOf("serviç")>=0});
+            var temData=keys.some(function(k){return k.indexOf("data")>=0||k.indexOf("date")>=0});
+            /* Score: colunas essenciais valem mais que quantidade de linhas */
+            var score = r.length;
+            if(temCliente) score += 100000;
+            if(temValor)   score += 100000;
+            if(temMeio)    score += 50000;
+            if(temServico) score += 50000;
+            if(temData)    score += 30000;
+            if(score>bestScore){bestScore=score;bestSheet=name}
           });
           sheetUsed=bestSheet;
           var ws=wb.Sheets[bestSheet];
@@ -18829,6 +18845,7 @@ function FinanceiroView({data:d,dispatch:dp}){
               {/* ═══════════ PROJEÇÃO DE RECEITA ═══════════ */}
               {(function(){
                 if(mesesOrdenados.length < 3) return null;
+                var isMob = typeof window !== "undefined" && window.innerWidth < 640;
                 var anoAtual = new Date().getFullYear();
                 var mesAtual = new Date().getMonth() + 1; // 1-12
 
@@ -26430,7 +26447,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '272';
+  var SW_VERSION = '274';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
