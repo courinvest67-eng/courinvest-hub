@@ -19184,7 +19184,7 @@ function FinanceiroView({data:d,dispatch:dp}){
                     </Cd>
                     {}
                     {isSelCli && (function(){
-                      
+                      var isMob=typeof window!=="undefined"&&window.innerWidth<640;
                       
                       var mesesCli=Object.keys(d.meses).sort();
                       var valoresMes=mesesCli.map(function(m){return d.meses[m]});
@@ -19237,11 +19237,12 @@ function FinanceiroView({data:d,dispatch:dp}){
                                 var v=valoresMes[idx];
                                 var hBar=maxMes>0?Math.max(6,(v/maxMes)*100):6;
                                 var isBest=idx===bestMesIdx&&v>0;
+                                var _mob=typeof window!=="undefined"&&window.innerWidth<640;
                                 return (
-                                  <div key={idx} style={{flex:mesesCli.length>8&&isMob?"0 0 auto":1,width:mesesCli.length>8&&isMob?28:"auto",display:"flex",flexDirection:"column",alignItems:"center",minWidth:isMob?24:0}}>
-                                    <div style={{fontSize:isMob?7:8,color:isBest?T.green:T.t3,fontWeight:isBest?700:500,marginBottom:3,whiteSpace:"nowrap",fontFamily:"'JetBrains Mono'"}}>{v>=1000?(v/1000).toFixed(1)+"k":v.toFixed(0)}</div>
+                                  <div key={idx} style={{flex:mesesCli.length>8&&_mob?"0 0 auto":1,width:mesesCli.length>8&&_mob?28:"auto",display:"flex",flexDirection:"column",alignItems:"center",minWidth:_mob?24:0}}>
+                                    <div style={{fontSize:_mob?7:8,color:isBest?T.green:T.t3,fontWeight:isBest?700:500,marginBottom:3,whiteSpace:"nowrap",fontFamily:"'JetBrains Mono'"}}>{v>=1000?(v/1000).toFixed(1)+"k":v.toFixed(0)}</div>
                                     <div style={{width:"100%",maxWidth:32,height:hBar+"px",background:isBest?"linear-gradient(180deg,"+T.gold+","+T.goldD+")":"linear-gradient(180deg,rgba(45,212,160,0.7),rgba(45,212,160,0.2))",borderRadius:"4px 4px 2px 2px",border:isBest?"1px solid "+T.gold:"1px solid rgba(45,212,160,0.2)"}}/>
-                                    <div style={{fontSize:isMob?7:8,color:isBest?T.gold:T.t3,marginTop:4,whiteSpace:"nowrap",fontWeight:isBest?700:500}}>{fmtMes(m)}</div>
+                                    <div style={{fontSize:_mob?7:8,color:isBest?T.gold:T.t3,marginTop:4,whiteSpace:"nowrap",fontWeight:isBest?700:500}}>{fmtMes(m)}</div>
                                   </div>
                                 );
                               })}
@@ -26447,7 +26448,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '274';
+  var SW_VERSION = '275';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
