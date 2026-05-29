@@ -25812,14 +25812,14 @@ function rfCalcSaldoAsync(ativo,taxas){
   var valor=+(ativo.valorAporte||0);
   if(!valor||!ativo.dataAporte)return Promise.resolve(valor);
   var hoje=new Date();
+  var amanha=new Date(hoje); amanha.setDate(amanha.getDate()+1); /* +1 para incluir D+0 quando disponível */
   var inicio=new Date(ativo.dataAporte+"T12:00:00");
   var dias=Math.max(0,Math.floor((hoje-inicio)/86400000));
   var idx=ativo.indexador||"cdi";
   var tx=+(ativo.taxa||100);
 
   if(idx==="cdi"||idx==="selic"){
-    /* Busca taxa diária CDI no período e acumula com o percentual contratado */
-    return _fetchBCBPeriodo(12,inicio,hoje)
+    return _fetchBCBPeriodo(12,inicio,amanha)
       .then(function(taxasDia){
         if(!taxasDia||!taxasDia.length) throw new Error("sem dados");
         var fator=_acumularDiario(taxasDia,tx);
@@ -25828,7 +25828,7 @@ function rfCalcSaldoAsync(ativo,taxas){
       .catch(function(){return rfCalcSaldoSync(ativo,taxas);});
 
   }else if(idx==="ipca"){
-    return _fetchBCBPeriodo(433,inicio,hoje)
+    return _fetchBCBPeriodo(433,inicio,amanha)
       .then(function(taxasMes){
         if(!taxasMes||!taxasMes.length) throw new Error("sem dados");
         var fator=_acumularMensal(taxasMes,tx,dias);
@@ -25837,7 +25837,7 @@ function rfCalcSaldoAsync(ativo,taxas){
       .catch(function(){return rfCalcSaldoSync(ativo,taxas);});
 
   }else if(idx==="igpm"){
-    return _fetchBCBPeriodo(189,inicio,hoje)
+    return _fetchBCBPeriodo(189,inicio,amanha)
       .then(function(taxasMes){
         if(!taxasMes||!taxasMes.length) throw new Error("sem dados");
         var fator=_acumularMensal(taxasMes,tx,dias);
@@ -25855,12 +25855,12 @@ function rfCalcSaldoAsync(ativo,taxas){
    não podem ser assíncronas (preview no modal, KPIs rápidos).
    Usa histórico em cache se disponível, senão taxa atual como estimativa. */
 function rfCalcSaldo(ativo,taxas){
-  /* Tenta usar cache de histórico já carregado */
   var valor=+(ativo.valorAporte||0);
   if(!valor||!ativo.dataAporte)return valor;
   var hoje=new Date(),inicio=new Date(ativo.dataAporte+"T12:00:00");
+  var amanha=new Date(hoje); amanha.setDate(amanha.getDate()+1);
   var idx=ativo.indexador||"cdi",tx=+(ativo.taxa||100);
-  var di=_fmtBCBDate(inicio),df=_fmtBCBDate(hoje);
+  var di=_fmtBCBDate(inicio),df=_fmtBCBDate(amanha); /* usa amanha como chave (igual ao async) */
 
   if(idx==="cdi"||idx==="selic"){
     var ck="rf_hist_12_"+di.replace(/\//g,"")+"_"+df.replace(/\//g,"");
@@ -25874,7 +25874,6 @@ function rfCalcSaldo(ativo,taxas){
     if(!cached2){try{var ls3=JSON.parse(localStorage.getItem(ck2)||"null");if(ls3&&ls3.dados)cached2=_rfHistCache[ck2]=ls3.dados;}catch(e){}}
     if(cached2&&cached2.length){var dias2=Math.max(0,Math.floor((hoje-inicio)/86400000));return Math.round(valor*_acumularMensal(cached2,tx,dias2)*100)/100;}
   }
-  /* fallback: taxa atual */
   return rfCalcSaldoSync(ativo,taxas);
 }
 function rfRentPct(ativo,taxas){var s=rfCalcSaldo(ativo,taxas),v=+(ativo.valorAporte||0);return v>0?((s/v)-1)*100:0;}
