@@ -25942,6 +25942,7 @@ function RfPainelTaxas({taxas,status}){
 function RfModalAtivo({ativo,clienteId,taxas,onSave,onClose}){
   var isEdit=!!(ativo&&ativo.id);
   var [form,sForm]=useState({nm:ativo&&ativo.nm||"",tk:ativo&&ativo.tk||"",tp:ativo&&ativo.tp||"cdb",inst:ativo&&ativo.inst||"XP",indexador:ativo&&ativo.indexador||"cdi",taxa:ativo&&ativo.taxa!=null?String(ativo.taxa):"",valorAporte:ativo&&ativo.valorAporte||"",dataAporte:ativo&&ativo.dataAporte||new Date().toISOString().split("T")[0],dataVenc:ativo&&ativo.dataVenc||"",liquidez:ativo&&ativo.liquidez||"venc",obs:ativo&&ativo.obs||""});
+  var [prevSaldoAsync,sPrevSaldoAsync]=useState(null); /* saldo calculado com histórico real */
   var set=function(k,v){sForm(function(p){return Object.assign({},p,{[k]:v})});};
   var tipoSel=RF_TIPOS_LISTA.find(function(t){return t.k===form.tp})||RF_TIPOS_LISTA[0];
   var idxSel=RF_INDEXADORES.find(function(i){return i.k===form.indexador})||RF_INDEXADORES[0];
@@ -25949,8 +25950,21 @@ function RfModalAtivo({ativo,clienteId,taxas,onSave,onClose}){
   var txPH=form.indexador==="cdi"?"110":form.indexador==="ipca"?"6.50":"13.50";
   var prevValor=parseFloat(String(form.valorAporte).replace(/\./g,"").replace(",","."))||0;
   var prevTaxa=parseFloat(form.taxa)||0;
-  var prevSaldo=prevValor&&prevTaxa&&form.dataAporte?rfCalcSaldo(Object.assign({},form,{valorAporte:prevValor,taxa:prevTaxa}),taxas):0;
+
+  /* Busca histórico real sempre que valor, taxa ou data mudam */
+  React.useEffect(function(){
+    if(!prevValor||!prevTaxa||!form.dataAporte)return;
+    var ativoPreview=Object.assign({},form,{valorAporte:prevValor,taxa:prevTaxa});
+    rfCalcSaldoAsync(ativoPreview,taxas).then(function(s){sPrevSaldoAsync(s);});
+  },[prevValor,prevTaxa,form.dataAporte,form.indexador]);
+
+  /* usa histórico se disponível, senão fallback síncrono */
+  var prevSaldo=prevValor&&prevTaxa&&form.dataAporte
+    ?(prevSaldoAsync!==null?prevSaldoAsync:rfCalcSaldo(Object.assign({},form,{valorAporte:prevValor,taxa:prevTaxa}),taxas))
+    :0;
   var prevRent=prevValor&&prevSaldo?((prevSaldo/prevValor)-1)*100:0;
+  var labelFonte=prevSaldoAsync!==null?"histórico real BCB":"CDI "+(taxas&&taxas.cdi_aa?taxas.cdi_aa.toFixed(2).replace(".",","):"…")+"% a.a. (estimado)";
+
   var gerarNome=function(){if(form.nm)return;set("nm",(tipoSel.l+" "+form.inst+" "+idxSel.l+(form.taxa?" "+form.taxa+"%":"")).trim());};
   var valid=form.nm&&form.tp&&form.inst&&form.indexador&&form.taxa&&form.valorAporte&&form.dataAporte;
   var s2={width:"100%",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,padding:"9px 12px",fontSize:13,color:T.t1,outline:"none",fontFamily:"'Outfit'",boxSizing:"border-box"};
@@ -25959,7 +25973,8 @@ function RfModalAtivo({ativo,clienteId,taxas,onSave,onClose}){
     var id=isEdit?ativo.id:"rf_"+Date.now()+"_"+Math.random().toString(36).slice(2,6);
     var vAp=parseFloat(String(form.valorAporte).replace(/\./g,"").replace(",","."))||0;
     var txa=parseFloat(form.taxa)||0;
-    onSave(Object.assign({},form,{id,clienteId,taxa:txa,valorAporte:vAp,posR:rfCalcSaldo(Object.assign({},form,{valorAporte:vAp,taxa:txa}),taxas),pa:vAp,qtd:1,_rfNativo:true,updatedAt:new Date().toISOString()}));
+    var posR=prevSaldoAsync!==null?prevSaldoAsync:rfCalcSaldo(Object.assign({},form,{valorAporte:vAp,taxa:txa}),taxas);
+    onSave(Object.assign({},form,{id,clienteId,taxa:txa,valorAporte:vAp,posR:posR,pa:vAp,qtd:1,_rfNativo:true,updatedAt:new Date().toISOString()}));
   };
   return React.createElement(Mo,{open:true,onClose,title:isEdit?"Editar Ativo RF":"Novo Ativo de Renda Fixa",wide:true},
     React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:14}},
@@ -25997,7 +26012,7 @@ function RfModalAtivo({ativo,clienteId,taxas,onSave,onClose}){
         React.createElement("div",null,
           React.createElement("div",{style:{fontSize:10,color:T.t3,fontWeight:600,letterSpacing:.5}},"SALDO ESTIMADO HOJE"),
           React.createElement("div",{style:{fontSize:18,fontWeight:800,color:T.goldL,fontFamily:"'JetBrains Mono'",marginTop:2}},fm(prevSaldo)),
-          React.createElement("div",{style:{fontSize:10,color:T.t3,marginTop:2}},"CDI "+(taxas&&taxas.cdi_aa?taxas.cdi_aa.toFixed(2).replace(".",","):"…")+"% a.a. via BCB")
+          React.createElement("div",{style:{fontSize:10,color:T.t3,marginTop:2}},labelFonte)
         ),
         React.createElement("div",{style:{textAlign:"right"}},
           React.createElement("div",{style:{fontSize:10,color:T.t3}},"Rentabilidade"),
