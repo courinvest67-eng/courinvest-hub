@@ -25747,14 +25747,17 @@ function _fetchBCBPeriodo(serie,dataInicio,dataFim){
     });
 }
 
-/* Acumula array de taxas diárias (% a.d.) com percentual do índice
-   ex: taxas=[0.0569, 0.0569, ...], pct=105  →  fator acumulado */
+/* Acumula array de taxas diárias (% a.d.) e aplica % do índice
+   Método de mercado BR (compatível com Gorila/B3):
+   fator_cdi = produto de (1 + taxa_dia/100)
+   saldo = aporte × (1 + (fator_cdi - 1) × pct/100)            */
 function _acumularDiario(taxasDia, pct){
-  var fator=1;
+  var fatorCDI=1;
   for(var i=0;i<taxasDia.length;i++){
-    fator*=(1+(taxasDia[i]/100)*(pct/100));
+    fatorCDI*=(1+taxasDia[i]/100);
   }
-  return fator; /* ex: 1.4786 = +47,86% */
+  /* aplica percentual sobre o rendimento acumulado */
+  return 1+(fatorCDI-1)*(pct/100);
 }
 
 /* Acumula array de taxas mensais (% a.m.) + spread anual
@@ -25778,9 +25781,11 @@ function rfCalcSaldoSync(ativo,taxas){
   var idx=ativo.indexador||"cdi",tx=+(ativo.taxa||100);
   var saldo=valor;
   if(idx==="cdi"||idx==="selic"){
-    var base_aa=(idx==="selic"?t.selic_aa:t.cdi_aa)*(tx/100)/100;
+    /* método mercado BR: acumula CDI puro, aplica % linearmente sobre o rendimento */
+    var base_aa=(idx==="selic"?t.selic_aa:t.cdi_aa)/100;
     var taxa_dia=Math.pow(1+base_aa,1/252)-1;
-    saldo=valor*Math.pow(1+taxa_dia,dias);
+    var fatorCDI=Math.pow(1+taxa_dia,dias);
+    saldo=valor*(1+(fatorCDI-1)*(tx/100));
   }else if(idx==="ipca"){
     var meses=dias/30.4375;
     var iAcum=Math.pow(1+t.ipca_mm/100,meses)-1;
