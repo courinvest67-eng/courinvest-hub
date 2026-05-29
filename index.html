@@ -25723,15 +25723,14 @@ function _fmtBCBDate(d){
 }
 
 function _fetchBCBPeriodo(serie,dataInicio,dataFim){
-  /* dataInicio/dataFim: objetos Date */
   var di=_fmtBCBDate(dataInicio),df=_fmtBCBDate(dataFim);
   var cacheKey="rf_hist_"+serie+"_"+di.replace(/\//g,"")+"_"+df.replace(/\//g,"");
   /* verifica cache em memória (sessão) */
   if(_rfHistCache[cacheKey]){return Promise.resolve(_rfHistCache[cacheKey]);}
-  /* verifica localStorage (24h) */
+  /* verifica localStorage — TTL de 30min, pois o último dia pode atualizar */
   try{
     var ls=JSON.parse(localStorage.getItem(cacheKey)||"null");
-    if(ls&&ls.ts&&(Date.now()-ls.ts)<86400000){
+    if(ls&&ls.ts&&(Date.now()-ls.ts)<30*60*1000){
       _rfHistCache[cacheKey]=ls.dados;
       return Promise.resolve(ls.dados);
     }
@@ -25950,6 +25949,9 @@ function RfModalAtivo({ativo,clienteId,taxas,onSave,onClose}){
   var prevValor=parseFloat(String(form.valorAporte).replace(/\./g,"").replace(",","."))||0;
   var prevTaxa=parseFloat(form.taxa)||0;
 
+  /* Limpa cache em memória ao abrir o modal — garante dados frescos do BCB */
+  React.useEffect(function(){ _rfHistCache={}; },[]);
+
   /* Busca histórico real sempre que valor, taxa ou data mudam */
   React.useEffect(function(){
     if(!prevValor||!prevTaxa||!form.dataAporte)return;
@@ -26105,9 +26107,11 @@ function ModuloRendaFixa({c,dispatch,taxasBCB,taxaBCBStatus}){
   var [busca,sBusca]=useState("");
   var [filtroTp,sFiltroTp]=useState("todos");
   var [ordenar,sOrdenar]=useState("valor");
-  /* saldosAsync: {id → saldo calculado com histórico real BCB} */
   var [saldosAsync,sSaldosAsync]=useState({});
   var [carregandoSaldos,sCarregandoSaldos]=useState(false);
+
+  /* Ao montar e ao mudar de cliente: limpa cache em memória para forçar rebusca do dia atual */
+  React.useEffect(function(){ _rfHistCache={}; },[c.id]);
 
   /* Carrega saldos históricos reais assim que os ativos ou taxas mudam */
   React.useEffect(function(){
