@@ -25703,14 +25703,22 @@ function rfCalcSaldo(ativo,taxas){
   var anos=dias/365,saldo=valor;
   var idx=ativo.indexador||"cdi",tx=+(ativo.taxa||100);
   if(idx==="cdi"||idx==="selic"){
-    var base=(idx==="selic"?t.selic_aa:t.cdi_aa)*(tx/100)/100;
-    saldo=valor*Math.pow(1+Math.pow(1+base,1/252)-1,dias);
+    /* taxa anual efetiva = CDI * percentual contratado */
+    var base_aa=(idx==="selic"?t.selic_aa:t.cdi_aa)*(tx/100)/100;
+    /* converte para taxa diária (base 252 dias úteis) e acumula */
+    var taxa_dia=Math.pow(1+base_aa,1/252)-1;
+    saldo=valor*Math.pow(1+taxa_dia,dias);
   }else if(idx==="ipca"){
-    var iAcum=Math.pow(1+t.ipca_mm/100,dias/30.4375)-1;
-    saldo=valor*(1+iAcum)*Math.pow(1+(tx/100),1/252*dias);
+    /* IPCA acumulado pelo número de meses + spread anual em dias úteis */
+    var meses=dias/30.4375;
+    var iAcum=Math.pow(1+t.ipca_mm/100,meses)-1;
+    var spread_dia=Math.pow(1+tx/100,1/252)-1;
+    saldo=valor*(1+iAcum)*Math.pow(1+spread_dia,dias);
   }else if(idx==="igpm"){
-    var gAcum=Math.pow(1+t.igpm_mm/100,dias/30.4375)-1;
-    saldo=valor*(1+gAcum)*Math.pow(1+(tx/100),1/252*dias);
+    var mesesG=dias/30.4375;
+    var gAcum=Math.pow(1+t.igpm_mm/100,mesesG)-1;
+    var spreadG_dia=Math.pow(1+tx/100,1/252)-1;
+    saldo=valor*(1+gAcum)*Math.pow(1+spreadG_dia,dias);
   }else if(idx==="pre"){
     saldo=valor*Math.pow(1+tx/100,anos);
   }else{
