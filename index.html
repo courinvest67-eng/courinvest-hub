@@ -25664,11 +25664,12 @@ function FiscalView({data:d,dispatch:dp}){
    Salva ativos em c.rendaFixa[] via dispatch UC (mesmo padrão do sistema).
    ════════════════════════════════════════════════════════════════ */
 
-var _bcbCacheKey="courinvest_bcb_taxas_v2";
+var _bcbCacheKey="courinvest_bcb_taxas_v3";
 var _bcbCacheTTL=6*60*60*1000;
 var _bcbFallback={cdi_aa:14.40,cdi_mm:1.126,selic_aa:14.50,ipca_mm:0.43,igpm_mm:0.24,igpm_aa:2.93,fonte:"fallback",atualizadoEm:null};
 
-function _anualizarMensal(pm){return(Math.pow(1+pm/100,12)-1)*100;}
+function _anualizarDiario(pd){return(Math.pow(1+pd/100,252)-1)*100;}   /* CDI/Selic diário → anual base 252 */
+function _anualizarMensal(pm){return(Math.pow(1+pm/100,12)-1)*100;}    /* IPCA/IGP-M mensal → anual */
 function _fetchBCBSerie(serie){
   return fetch("https://api.bcb.gov.br/dados/serie/bcdata.sgs."+serie+"/dados/ultimos/1?formato=json")
     .then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json();})
@@ -25681,9 +25682,23 @@ function carregarTaxasBCB(){
       return Promise.resolve(Object.assign({},cached.dados,{fonte:"cache",atualizadoEm:new Date(cached.ts)}));
     }
   }catch(e){}
+  /* Séries BCB:
+     12  = CDI taxa DIÁRIA (% a.d.)   → anualizar base 252
+     432 = Meta Selic (% a.a.)        → já é anual
+     433 = IPCA mensal (% a.m.)       → anualizar base 12
+     189 = IGP-M mensal (% a.m.)      → anualizar base 12         */
   return Promise.all([_fetchBCBSerie(12),_fetchBCBSerie(432),_fetchBCBSerie(433),_fetchBCBSerie(189)])
     .then(function(vals){
-      var dados={cdi_mm:vals[0],cdi_aa:_anualizarMensal(vals[0]),selic_aa:vals[1],ipca_mm:vals[2],igpm_mm:vals[3],igpm_aa:_anualizarMensal(vals[3]),fonte:"bcb",atualizadoEm:new Date()};
+      var cdi_dia=vals[0];                          /* ex: 0.0569 (% a.d.) */
+      var dados={
+        cdi_dia:cdi_dia,
+        cdi_aa:_anualizarDiario(cdi_dia),           /* ex: ~14,40% a.a.    */
+        selic_aa:vals[1],                           /* ex: 14,50% a.a.     */
+        ipca_mm:vals[2],                            /* ex: 0,43% a.m.      */
+        igpm_mm:vals[3],                            /* ex: 0,24% a.m.      */
+        igpm_aa:_anualizarMensal(vals[3]),
+        fonte:"bcb",atualizadoEm:new Date()
+      };
       try{localStorage.setItem(_bcbCacheKey,JSON.stringify({ts:Date.now(),dados:dados}));}catch(e){}
       return dados;
     })
