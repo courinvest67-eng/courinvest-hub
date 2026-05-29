@@ -25708,38 +25708,169 @@ function carregarTaxasBCB(){
     });
 }
 
-function rfCalcSaldo(ativo,taxas){
+/* ── Cache de séries históricas BCB por período ─────────────────────────
+   Chave: "rf_hist_{serie}_{ddMMaaaa}_{ddMMaaaa}"
+   Valor: array de taxas diárias/mensais já parseadas
+   TTL: 24h (dados históricos não mudam, só o último dia pode atualizar)
+   ─────────────────────────────────────────────────────────────────────── */
+var _rfHistCache={};
+
+function _fmtBCBDate(d){
+  /* Date → "dd/MM/aaaa" */
+  var dd=String(d.getDate()).padStart(2,"0");
+  var mm=String(d.getMonth()+1).padStart(2,"0");
+  return dd+"/"+mm+"/"+d.getFullYear();
+}
+
+function _fetchBCBPeriodo(serie,dataInicio,dataFim){
+  /* dataInicio/dataFim: objetos Date */
+  var di=_fmtBCBDate(dataInicio),df=_fmtBCBDate(dataFim);
+  var cacheKey="rf_hist_"+serie+"_"+di.replace(/\//g,"")+"_"+df.replace(/\//g,"");
+  /* verifica cache em memória (sessão) */
+  if(_rfHistCache[cacheKey]){return Promise.resolve(_rfHistCache[cacheKey]);}
+  /* verifica localStorage (24h) */
+  try{
+    var ls=JSON.parse(localStorage.getItem(cacheKey)||"null");
+    if(ls&&ls.ts&&(Date.now()-ls.ts)<86400000){
+      _rfHistCache[cacheKey]=ls.dados;
+      return Promise.resolve(ls.dados);
+    }
+  }catch(e){}
+  var url="https://api.bcb.gov.br/dados/serie/bcdata.sgs."+serie+"/dados?formato=json&dataInicial="+encodeURIComponent(di)+"&dataFinal="+encodeURIComponent(df);
+  return fetch(url)
+    .then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json();})
+    .then(function(arr){
+      var dados=(arr||[]).map(function(x){return parseFloat(String(x.valor).replace(",","."));});
+      _rfHistCache[cacheKey]=dados;
+      try{localStorage.setItem(cacheKey,JSON.stringify({ts:Date.now(),dados:dados}));}catch(e){}
+      return dados;
+    });
+}
+
+/* Acumula array de taxas diárias (% a.d.) com percentual do índice
+   ex: taxas=[0.0569, 0.0569, ...], pct=105  →  fator acumulado */
+function _acumularDiario(taxasDia, pct){
+  var fator=1;
+  for(var i=0;i<taxasDia.length;i++){
+    fator*=(1+(taxasDia[i]/100)*(pct/100));
+  }
+  return fator; /* ex: 1.4786 = +47,86% */
+}
+
+/* Acumula array de taxas mensais (% a.m.) + spread anual
+   IPCA/IGP-M: fator_indice * fator_spread_proporcional_aos_meses */
+function _acumularMensal(taxasMes, spreadAA, totalDias){
+  var fatorIdx=1;
+  for(var i=0;i<taxasMes.length;i++){ fatorIdx*=(1+taxasMes[i]/100); }
+  /* spread diário proporcional ao período */
+  var spreadDia=Math.pow(1+spreadAA/100,1/252)-1;
+  var fatorSpread=Math.pow(1+spreadDia,totalDias);
+  return fatorIdx*fatorSpread;
+}
+
+/* Cálculo SÍNCRONO com taxas atuais (fallback enquanto histórico carrega) */
+function rfCalcSaldoSync(ativo,taxas){
   var t=taxas||_bcbFallback;
   var valor=+(ativo.valorAporte||0);
-  var data=ativo.dataAporte;
-  if(!valor||!data)return valor;
-  var hoje=new Date(),inicio=new Date(data+"T12:00:00");
+  if(!valor||!ativo.dataAporte)return valor;
+  var hoje=new Date(),inicio=new Date(ativo.dataAporte+"T12:00:00");
   var dias=Math.max(0,Math.floor((hoje-inicio)/86400000));
-  var anos=dias/365,saldo=valor;
   var idx=ativo.indexador||"cdi",tx=+(ativo.taxa||100);
+  var saldo=valor;
   if(idx==="cdi"||idx==="selic"){
-    /* taxa anual efetiva = CDI * percentual contratado */
     var base_aa=(idx==="selic"?t.selic_aa:t.cdi_aa)*(tx/100)/100;
-    /* converte para taxa diária (base 252 dias úteis) e acumula */
     var taxa_dia=Math.pow(1+base_aa,1/252)-1;
     saldo=valor*Math.pow(1+taxa_dia,dias);
   }else if(idx==="ipca"){
-    /* IPCA acumulado pelo número de meses + spread anual em dias úteis */
     var meses=dias/30.4375;
     var iAcum=Math.pow(1+t.ipca_mm/100,meses)-1;
-    var spread_dia=Math.pow(1+tx/100,1/252)-1;
-    saldo=valor*(1+iAcum)*Math.pow(1+spread_dia,dias);
+    saldo=valor*(1+iAcum)*Math.pow(1+Math.pow(1+tx/100,1/252)-1,dias);
   }else if(idx==="igpm"){
     var mesesG=dias/30.4375;
     var gAcum=Math.pow(1+t.igpm_mm/100,mesesG)-1;
-    var spreadG_dia=Math.pow(1+tx/100,1/252)-1;
-    saldo=valor*(1+gAcum)*Math.pow(1+spreadG_dia,dias);
+    saldo=valor*(1+gAcum)*Math.pow(1+Math.pow(1+tx/100,1/252)-1,dias);
   }else if(idx==="pre"){
-    saldo=valor*Math.pow(1+tx/100,anos);
+    saldo=valor*Math.pow(1+tx/100,dias/365);
   }else{
-    saldo=valor*Math.pow(1+(tx||t.cdi_aa)/100,anos);
+    saldo=valor*Math.pow(1+(tx||t.cdi_aa)/100,dias/365);
   }
   return Math.round(saldo*100)/100;
+}
+
+/* Cálculo ASSÍNCRONO com histórico real do BCB ─────────────────────────
+   CDI/Selic  → série 12 (taxa diária % a.d.) por período
+   IPCA       → série 433 (taxa mensal % a.m.) por período
+   IGP-M      → série 189 (taxa mensal % a.m.) por período
+   Prefixado  → juros compostos simples (sem API)
+   ─────────────────────────────────────────────────────────────────────── */
+function rfCalcSaldoAsync(ativo,taxas){
+  var valor=+(ativo.valorAporte||0);
+  if(!valor||!ativo.dataAporte)return Promise.resolve(valor);
+  var hoje=new Date();
+  var inicio=new Date(ativo.dataAporte+"T12:00:00");
+  var dias=Math.max(0,Math.floor((hoje-inicio)/86400000));
+  var idx=ativo.indexador||"cdi";
+  var tx=+(ativo.taxa||100);
+
+  if(idx==="cdi"||idx==="selic"){
+    /* Busca taxa diária CDI no período e acumula com o percentual contratado */
+    return _fetchBCBPeriodo(12,inicio,hoje)
+      .then(function(taxasDia){
+        if(!taxasDia||!taxasDia.length) throw new Error("sem dados");
+        var fator=_acumularDiario(taxasDia,tx);
+        return Math.round(valor*fator*100)/100;
+      })
+      .catch(function(){return rfCalcSaldoSync(ativo,taxas);});
+
+  }else if(idx==="ipca"){
+    return _fetchBCBPeriodo(433,inicio,hoje)
+      .then(function(taxasMes){
+        if(!taxasMes||!taxasMes.length) throw new Error("sem dados");
+        var fator=_acumularMensal(taxasMes,tx,dias);
+        return Math.round(valor*fator*100)/100;
+      })
+      .catch(function(){return rfCalcSaldoSync(ativo,taxas);});
+
+  }else if(idx==="igpm"){
+    return _fetchBCBPeriodo(189,inicio,hoje)
+      .then(function(taxasMes){
+        if(!taxasMes||!taxasMes.length) throw new Error("sem dados");
+        var fator=_acumularMensal(taxasMes,tx,dias);
+        return Math.round(valor*fator*100)/100;
+      })
+      .catch(function(){return rfCalcSaldoSync(ativo,taxas);});
+
+  }else{
+    /* Prefixado e outros: síncrono */
+    return Promise.resolve(rfCalcSaldoSync(ativo,taxas));
+  }
+}
+
+/* Wrapper síncrono mantido para compatibilidade com partes do código que
+   não podem ser assíncronas (preview no modal, KPIs rápidos).
+   Usa histórico em cache se disponível, senão taxa atual como estimativa. */
+function rfCalcSaldo(ativo,taxas){
+  /* Tenta usar cache de histórico já carregado */
+  var valor=+(ativo.valorAporte||0);
+  if(!valor||!ativo.dataAporte)return valor;
+  var hoje=new Date(),inicio=new Date(ativo.dataAporte+"T12:00:00");
+  var idx=ativo.indexador||"cdi",tx=+(ativo.taxa||100);
+  var di=_fmtBCBDate(inicio),df=_fmtBCBDate(hoje);
+
+  if(idx==="cdi"||idx==="selic"){
+    var ck="rf_hist_12_"+di.replace(/\//g,"")+"_"+df.replace(/\//g,"");
+    var cached=_rfHistCache[ck];
+    if(!cached){try{var ls2=JSON.parse(localStorage.getItem(ck)||"null");if(ls2&&ls2.dados)cached=_rfHistCache[ck]=ls2.dados;}catch(e){}}
+    if(cached&&cached.length){return Math.round(valor*_acumularDiario(cached,tx)*100)/100;}
+  }else if(idx==="ipca"||idx==="igpm"){
+    var serie=idx==="ipca"?433:189;
+    var ck2="rf_hist_"+serie+"_"+di.replace(/\//g,"")+"_"+df.replace(/\//g,"");
+    var cached2=_rfHistCache[ck2];
+    if(!cached2){try{var ls3=JSON.parse(localStorage.getItem(ck2)||"null");if(ls3&&ls3.dados)cached2=_rfHistCache[ck2]=ls3.dados;}catch(e){}}
+    if(cached2&&cached2.length){var dias2=Math.max(0,Math.floor((hoje-inicio)/86400000));return Math.round(valor*_acumularMensal(cached2,tx,dias2)*100)/100;}
+  }
+  /* fallback: taxa atual */
+  return rfCalcSaldoSync(ativo,taxas);
 }
 function rfRentPct(ativo,taxas){var s=rfCalcSaldo(ativo,taxas),v=+(ativo.valorAporte||0);return v>0?((s/v)-1)*100:0;}
 function rfLabelIdx(ativo){
@@ -25901,10 +26032,11 @@ function RfModalMov({ativo,tipo,taxas,onConfirm,onClose}){
   );
 }
 
-function RfCardAtivo({ativo,taxas,onEdit,onDelete,onAporte,onResgate}){
+function RfCardAtivo({ativo,taxas,saldoOverride,onEdit,onDelete,onAporte,onResgate}){
   var [exp,sExp]=useState(false);
   var tipo=RF_TIPOS_LISTA.find(function(t){return t.k===ativo.tp})||RF_TIPOS_LISTA[0];
-  var saldo=rfCalcSaldo(ativo,taxas),rent=rfRentPct(ativo,taxas);
+  var saldo=saldoOverride!==undefined?saldoOverride:rfCalcSaldo(ativo,taxas);
+  var rent=+(ativo.valorAporte||0)>0?((saldo/ativo.valorAporte)-1)*100:0;
   var dias=ativo.dataVenc?Math.ceil((new Date(ativo.dataVenc+"T12:00:00")-new Date())/86400000):null;
   var sCor=dias===null?T.t3:dias<0?T.red:dias<30?"#E0A85C":T.green;
   var sLabel=dias===null?"Sem venc.":dias<0?"Vencido":dias===0?"Hoje":dias+"d";
@@ -25954,9 +26086,32 @@ function ModuloRendaFixa({c,dispatch,taxasBCB,taxaBCBStatus}){
   var [busca,sBusca]=useState("");
   var [filtroTp,sFiltroTp]=useState("todos");
   var [ordenar,sOrdenar]=useState("valor");
+  /* saldosAsync: {id → saldo calculado com histórico real BCB} */
+  var [saldosAsync,sSaldosAsync]=useState({});
+  var [carregandoSaldos,sCarregandoSaldos]=useState(false);
+
+  /* Carrega saldos históricos reais assim que os ativos ou taxas mudam */
+  React.useEffect(function(){
+    if(!rendaFixa.length)return;
+    sCarregandoSaldos(true);
+    var ativos=rendaFixa.filter(function(a){return a.indexador==="cdi"||a.indexador==="selic"||a.indexador==="ipca"||a.indexador==="igpm";});
+    if(!ativos.length){sCarregandoSaldos(false);return;}
+    Promise.all(ativos.map(function(a){
+      return rfCalcSaldoAsync(a,taxasBCB).then(function(s){return {id:a.id,saldo:s};});
+    })).then(function(resultados){
+      var novo={};
+      resultados.forEach(function(r){novo[r.id]=r.saldo;});
+      sSaldosAsync(novo);
+      sCarregandoSaldos(false);
+    }).catch(function(){sCarregandoSaldos(false);});
+  },[c.id,c._rfUpdatedAt,taxasBCB]);
+
+  /* Helper: retorna saldo do ativo (histórico se disponível, estimado se não) */
+  var getSaldo=function(a){return saldosAsync[a.id]!==undefined?saldosAsync[a.id]:rfCalcSaldo(a,taxasBCB);};
+  var getRent=function(a){var s=getSaldo(a),v=+(a.valorAporte||0);return v>0?((s/v)-1)*100:0;};
 
   var salvarAtivos=function(novos){
-    var atualizados=novos.map(function(a){return Object.assign({},a,{posR:rfCalcSaldo(a,taxasBCB)});});
+    var atualizados=novos.map(function(a){return Object.assign({},a,{posR:saldosAsync[a.id]||rfCalcSaldo(a,taxasBCB)});});
     dispatch({t:"UC",p:{id:c.id,rendaFixa:atualizados,_rfUpdatedAt:Date.now()}});
   };
   var salvarAtivo=function(ativo){
@@ -25974,7 +26129,7 @@ function ModuloRendaFixa({c,dispatch,taxasBCB,taxaBCBStatus}){
       var nAp=(at.valorAporte||0)+mv.valor;
       novos=rendaFixa.map(function(a){return a.id===at.id?Object.assign({},at,{valorAporte:nAp,dataAporte:mv.data,posR:rfCalcSaldo(Object.assign({},at,{valorAporte:nAp,dataAporte:mv.data}),taxasBCB),updatedAt:new Date().toISOString()}):a;});
     }else{
-      var saldoAt=rfCalcSaldo(at,taxasBCB),rest=saldoAt-mv.valor;
+      var saldoAt=getSaldo(at),rest=saldoAt-mv.valor;
       if(rest<=0.01){novos=rendaFixa.filter(function(a){return a.id!==at.id;});}
       else{var prop=rest/saldoAt;novos=rendaFixa.map(function(a){return a.id===at.id?Object.assign({},at,{valorAporte:(at.valorAporte||0)*prop,dataAporte:mv.data,posR:rest,updatedAt:new Date().toISOString()}):a;});}
     }
@@ -25984,21 +26139,22 @@ function ModuloRendaFixa({c,dispatch,taxasBCB,taxaBCBStatus}){
   var lista=rendaFixa.slice();
   if(busca)lista=lista.filter(function(a){return(a.nm+a.inst+(a.tk||"")).toLowerCase().indexOf(busca.toLowerCase())>=0;});
   if(filtroTp!=="todos")lista=lista.filter(function(a){return a.tp===filtroTp;});
-  if(ordenar==="valor")lista.sort(function(a,b){return rfCalcSaldo(b,taxasBCB)-rfCalcSaldo(a,taxasBCB);});
+  if(ordenar==="valor")lista.sort(function(a,b){return getSaldo(b)-getSaldo(a);});
   else if(ordenar==="venc")lista.sort(function(a,b){return(a.dataVenc||"9999")<(b.dataVenc||"9999")?-1:1;});
-  else if(ordenar==="rent")lista.sort(function(a,b){return rfRentPct(b,taxasBCB)-rfRentPct(a,taxasBCB);});
+  else if(ordenar==="rent")lista.sort(function(a,b){return getRent(b)-getRent(a);});
 
   var totalAp=rendaFixa.reduce(function(s,a){return s+(a.valorAporte||0);},0);
-  var totalAt=rendaFixa.reduce(function(s,a){return s+rfCalcSaldo(a,taxasBCB);},0);
+  var totalAt=rendaFixa.reduce(function(s,a){return s+getSaldo(a);},0);
   var ganho=totalAt-totalAp;
-  var isentos=rendaFixa.filter(function(a){var t=RF_TIPOS_LISTA.find(function(t){return t.k===a.tp;});return t&&t.isento;}).reduce(function(s,a){return s+rfCalcSaldo(a,taxasBCB);},0);
+  var isentos=rendaFixa.filter(function(a){var t=RF_TIPOS_LISTA.find(function(t){return t.k===a.tp;});return t&&t.isento;}).reduce(function(s,a){return s+getSaldo(a);},0);
   var venc30=rendaFixa.filter(function(a){var d=a.dataVenc?Math.ceil((new Date(a.dataVenc+"T12:00:00")-new Date())/86400000):null;return d!==null&&d>=0&&d<=30;}).length;
   var tiposP=[...new Set(rendaFixa.map(function(a){return a.tp;}))];
+  var labelSaldo=carregandoSaldos?"Saldo (calculando…)":"Saldo histórico BCB";
 
   return React.createElement("div",null,
     React.createElement(RfPainelTaxas,{taxas:taxasBCB,status:taxaBCBStatus}),
     React.createElement("div",{style:{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:14}},
-      [{l:"Total aplicado",v:fm(totalAp),ic:"💸",cor:T.t2},{l:"Saldo estimado",v:fm(totalAt),ic:"💰",cor:T.goldL},{l:"Rendimento acum.",v:(ganho>=0?"+":"")+fm(ganho),ic:"📈",cor:ganho>=0?T.green:T.red},{l:"Rentab. média",v:((totalAp>0?(ganho/totalAp)*100:0).toFixed(2).replace(".",","))+"%",ic:"📊",cor:ganho>=0?T.green:T.red},{l:"Isentos de IR",v:fm(isentos),ic:"🛡️",cor:T.green},{l:"Vence em 30d",v:venc30+" ativo"+(venc30!==1?"s":""),ic:"⏰",cor:venc30>0?"#E0A85C":T.t3}].map(function(k){
+      [{l:"Total aplicado",v:fm(totalAp),ic:"💸",cor:T.t2},{l:labelSaldo,v:fm(totalAt),ic:"💰",cor:T.goldL},{l:"Rendimento acum.",v:(ganho>=0?"+":"")+fm(ganho),ic:"📈",cor:ganho>=0?T.green:T.red},{l:"Rentab. média",v:((totalAp>0?(ganho/totalAp)*100:0).toFixed(2).replace(".",","))+"%",ic:"📊",cor:ganho>=0?T.green:T.red},{l:"Isentos de IR",v:fm(isentos),ic:"🛡️",cor:T.green},{l:"Vence em 30d",v:venc30+" ativo"+(venc30!==1?"s":""),ic:"⏰",cor:venc30>0?"#E0A85C":T.t3}].map(function(k){
         return React.createElement(KCard,{key:k.l,label:k.l,valor:k.v,cor:k.cor,ic:k.ic,compact:true});
       })
     ),
@@ -26021,7 +26177,14 @@ function ModuloRendaFixa({c,dispatch,taxasBCB,taxaBCBStatus}){
       React.createElement("div",{style:{fontSize:12,color:T.t3,marginBottom:16}},rendaFixa.length===0?"Cadastre CDBs, LCIs, LCAs, Tesouro e outros ativos deste cliente":"Ajuste os filtros"),
       rendaFixa.length===0&&React.createElement(Bt,{v:"primary",onClick:function(){sModal({tipo:"novo"});}},"➕ Adicionar primeiro ativo")
     ):React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:10}},
-      lista.map(function(a){return React.createElement(RfCardAtivo,{key:a.id,ativo:a,taxas:taxasBCB,onEdit:function(at){sModal({tipo:"editar",ativo:at});},onDelete:deletarAtivo,onAporte:function(at){sModal({tipo:"aporte",ativo:at});},onResgate:function(at){sModal({tipo:"resgate",ativo:at});}});})
+      lista.map(function(a){
+        return React.createElement(RfCardAtivo,{key:a.id,ativo:a,taxas:taxasBCB,
+          saldoOverride:saldosAsync[a.id],
+          onEdit:function(at){sModal({tipo:"editar",ativo:at});},onDelete:deletarAtivo,
+          onAporte:function(at){sModal({tipo:"aporte",ativo:at});},
+          onResgate:function(at){sModal({tipo:"resgate",ativo:at});}
+        });
+      })
     ),
     modal&&(modal.tipo==="novo"||modal.tipo==="editar")&&React.createElement(RfModalAtivo,{ativo:modal.ativo,clienteId:c.id,taxas:taxasBCB,onSave:salvarAtivo,onClose:function(){sModal(null);}}),
     modal&&(modal.tipo==="aporte"||modal.tipo==="resgate")&&React.createElement(RfModalMov,{ativo:modal.ativo,tipo:modal.tipo,taxas:taxasBCB,onConfirm:confirmarMov,onClose:function(){sModal(null);}})
