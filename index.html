@@ -4780,7 +4780,7 @@ function NewClientForm({onSave,onClose}){
   );
 }
 
-function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
+function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
   /* Salva d globalmente para acesso em closures como gerarRelatorio */
   window._courinvestData=d;
   const[tab,sTab]=useState("geral");
@@ -10739,6 +10739,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
   if(isPat&&!isFin) tabs.push({id:"suc",l:"🏛 Sucessório"});
   if(isPat) tabs.push({id:"fire",l:"🏖 Aposentadoria"});
   
+  if(isPat||isFin) tabs.push({id:"rendafixa",l:"🏦 Renda Fixa"});
+  
   tabs.push({id:"contratos",l:"📎 Contratos"});
   tabs.push({id:"relatorio",l:"📄 Relatório"});
   /* Particularidades — config técnica do cliente (regras de fee, layout do relatório) */
@@ -16197,6 +16199,10 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob}){
       )}
 
       {}
+      {tab==="rendafixa" && (isPat||isFin) && (
+        React.createElement(ModuloRendaFixa,{c:c,dispatch:dp,taxasBCB:taxasBCB,taxaBCBStatus:taxaBCBStatus})
+      )}
+
       {tab==="contratos" && (
         <div>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
@@ -25652,6 +25658,354 @@ function FiscalView({data:d,dispatch:dp}){
   );
 }
 
+/* ════════════════════════════════════════════════════════════════
+   MÓDULO RENDA FIXA — Módulo 1 do Courinvest Hub
+   Busca taxas CDI/IPCA/Selic/IGP-M em tempo real via API BCB/SGS.
+   Salva ativos em c.rendaFixa[] via dispatch UC (mesmo padrão do sistema).
+   ════════════════════════════════════════════════════════════════ */
+
+var _bcbCacheKey="courinvest_bcb_taxas_v2";
+var _bcbCacheTTL=6*60*60*1000;
+var _bcbFallback={cdi_aa:14.40,cdi_mm:1.126,selic_aa:14.50,ipca_mm:0.43,igpm_mm:0.24,igpm_aa:2.93,fonte:"fallback",atualizadoEm:null};
+
+function _anualizarMensal(pm){return(Math.pow(1+pm/100,12)-1)*100;}
+function _fetchBCBSerie(serie){
+  return fetch("https://api.bcb.gov.br/dados/serie/bcdata.sgs."+serie+"/dados/ultimos/1?formato=json")
+    .then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json();})
+    .then(function(arr){if(!arr||!arr.length)throw new Error("vazio");return parseFloat(String(arr[arr.length-1].valor).replace(",","."));});
+}
+function carregarTaxasBCB(){
+  try{
+    var cached=JSON.parse(localStorage.getItem(_bcbCacheKey)||"null");
+    if(cached&&cached.ts&&(Date.now()-cached.ts)<_bcbCacheTTL){
+      return Promise.resolve(Object.assign({},cached.dados,{fonte:"cache",atualizadoEm:new Date(cached.ts)}));
+    }
+  }catch(e){}
+  return Promise.all([_fetchBCBSerie(12),_fetchBCBSerie(432),_fetchBCBSerie(433),_fetchBCBSerie(189)])
+    .then(function(vals){
+      var dados={cdi_mm:vals[0],cdi_aa:_anualizarMensal(vals[0]),selic_aa:vals[1],ipca_mm:vals[2],igpm_mm:vals[3],igpm_aa:_anualizarMensal(vals[3]),fonte:"bcb",atualizadoEm:new Date()};
+      try{localStorage.setItem(_bcbCacheKey,JSON.stringify({ts:Date.now(),dados:dados}));}catch(e){}
+      return dados;
+    })
+    .catch(function(err){
+      console.warn("[BCB] Falha:",err.message,"— fallback.");
+      return Object.assign({},_bcbFallback,{atualizadoEm:null});
+    });
+}
+
+function rfCalcSaldo(ativo,taxas){
+  var t=taxas||_bcbFallback;
+  var valor=+(ativo.valorAporte||0);
+  var data=ativo.dataAporte;
+  if(!valor||!data)return valor;
+  var hoje=new Date(),inicio=new Date(data+"T12:00:00");
+  var dias=Math.max(0,Math.floor((hoje-inicio)/86400000));
+  var anos=dias/365,saldo=valor;
+  var idx=ativo.indexador||"cdi",tx=+(ativo.taxa||100);
+  if(idx==="cdi"||idx==="selic"){
+    var base=(idx==="selic"?t.selic_aa:t.cdi_aa)*(tx/100)/100;
+    saldo=valor*Math.pow(1+Math.pow(1+base,1/252)-1,dias);
+  }else if(idx==="ipca"){
+    var iAcum=Math.pow(1+t.ipca_mm/100,dias/30.4375)-1;
+    saldo=valor*(1+iAcum)*Math.pow(1+(tx/100),1/252*dias);
+  }else if(idx==="igpm"){
+    var gAcum=Math.pow(1+t.igpm_mm/100,dias/30.4375)-1;
+    saldo=valor*(1+gAcum)*Math.pow(1+(tx/100),1/252*dias);
+  }else if(idx==="pre"){
+    saldo=valor*Math.pow(1+tx/100,anos);
+  }else{
+    saldo=valor*Math.pow(1+(tx||t.cdi_aa)/100,anos);
+  }
+  return Math.round(saldo*100)/100;
+}
+function rfRentPct(ativo,taxas){var s=rfCalcSaldo(ativo,taxas),v=+(ativo.valorAporte||0);return v>0?((s/v)-1)*100:0;}
+function rfLabelIdx(ativo){
+  var idx=ativo.indexador||"cdi",tx=+(ativo.taxa||0);
+  if(idx==="cdi"||idx==="selic")return tx+"% "+(idx==="selic"?"Selic":"CDI");
+  if(idx==="pre")return tx.toFixed(2).replace(".",",")+"% a.a. Pré";
+  return {ipca:"IPCA+",igpm:"IGP-M+",outros:"Taxa+"}[idx]+" "+tx.toFixed(2).replace(".",",")+"% a.a.";
+}
+
+var RF_TIPOS_LISTA=[
+  {k:"cdb",l:"CDB",ic:"🏦",cor:"#5FA8D3",isento:false},{k:"lci",l:"LCI",ic:"🏠",cor:"#5FB99D",isento:true},
+  {k:"lca",l:"LCA",ic:"🌾",cor:"#5FB99D",isento:true},{k:"lc",l:"LC",ic:"🏦",cor:"#5FA8D3",isento:false},
+  {k:"cri",l:"CRI",ic:"🏗️",cor:"#C9A155",isento:true},{k:"cra",l:"CRA",ic:"🌱",cor:"#C9A155",isento:true},
+  {k:"deb",l:"Debênture",ic:"📋",cor:"#9B8BD0",isento:false},{k:"debi",l:"Deb. Incentivada",ic:"📋",cor:"#5FB99D",isento:true},
+  {k:"tesouro",l:"Tesouro",ic:"🏛️",cor:"#C9A155",isento:false},{k:"fundo_rf",l:"Fundo RF",ic:"📈",cor:"#5FA8D3",isento:false},
+  {k:"fundo_mm",l:"Fundo Multi",ic:"📊",cor:"#9B8BD0",isento:false},{k:"coe",l:"COE",ic:"🔷",cor:"#9B8BD0",isento:false},
+  {k:"poupanca",l:"Poupança",ic:"💰",cor:"#5FB99D",isento:true},
+];
+var RF_INDEXADORES=[{k:"cdi",l:"CDI",ex:"ex: 110% do CDI"},{k:"ipca",l:"IPCA+",ex:"ex: IPCA+ 6,5% a.a."},{k:"pre",l:"Prefixado",ex:"ex: 13,5% a.a."},{k:"selic",l:"Selic",ex:"ex: Selic + 0,5%"},{k:"igpm",l:"IGP-M+",ex:"ex: IGP-M+ 5% a.a."},{k:"outros",l:"Outros",ex:"ex: TJLP + 3%"}];
+var RF_LIQUIDEZ=[{k:"venc",l:"No vencimento"},{k:"D0",l:"D+0 diária"},{k:"D1",l:"D+1"},{k:"D30",l:"D+30"},{k:"D60",l:"D+60"},{k:"D90",l:"D+90"}];
+var RF_INSTS=["XP","BTG Pactual","Rico","Clear","NuInvest","Inter","Genial","Daycoval","Sicoob","Sicredi","Bradesco","Itaú","Santander","Caixa","BB","C6 Bank","Órama","Modal","Safra","Warren","Toro","Outros"];
+
+function RfBadge({children,cor}){return React.createElement("span",{style:{display:"inline-flex",alignItems:"center",background:cor+"18",border:"1px solid "+cor+"40",color:cor,borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}},children);}
+
+function RfVencBar({dataAporte,dataVenc}){
+  if(!dataAporte||!dataVenc)return null;
+  var inicio=new Date(dataAporte+"T12:00:00"),fim=new Date(dataVenc+"T12:00:00"),hoje=new Date();
+  var pct=Math.min(100,Math.max(0,((hoje-inicio)/(fim-inicio))*100));
+  var dias=Math.ceil((fim-hoje)/86400000);
+  var cor=dias<0?T.red:dias<30?"#E0A85C":T.green;
+  return React.createElement("div",{style:{marginTop:8}},
+    React.createElement("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:3}},
+      React.createElement("span",{style:{fontSize:10,color:T.t3}},"Prazo decorrido"),
+      React.createElement("span",{style:{fontSize:10,fontWeight:700,color:cor,fontFamily:"'JetBrains Mono'"}},dias<0?"VENCIDO":dias===0?"HOJE":dias+"d restantes")
+    ),
+    React.createElement("div",{style:{height:4,background:"rgba(255,255,255,0.06)",borderRadius:4,overflow:"hidden"}},
+      React.createElement("div",{style:{height:"100%",width:pct+"%",background:"linear-gradient(90deg,"+T.gold+","+cor+")",borderRadius:4}})
+    ),
+    React.createElement("div",{style:{display:"flex",justifyContent:"space-between",marginTop:2}},
+      React.createElement("span",{style:{fontSize:9,color:T.t3}},dataAporte.split("-").reverse().join("/")),
+      React.createElement("span",{style:{fontSize:9,color:T.t3}},dataVenc.split("-").reverse().join("/"))
+    )
+  );
+}
+
+function RfPainelTaxas({taxas,status}){
+  if(!taxas)return React.createElement("div",{style:{height:34,background:"rgba(255,255,255,0.02)",borderRadius:10,marginBottom:12}});
+  var items=[{l:"CDI",v:(taxas.cdi_aa||0).toFixed(2).replace(".",",")+"% a.a.",cor:T.cyan},{l:"Selic",v:(taxas.selic_aa||0).toFixed(2).replace(".",",")+"% a.a.",cor:T.gold},{l:"IPCA",v:(taxas.ipca_mm||0).toFixed(2).replace(".",",")+"% a.m.",cor:T.green},{l:"IGP-M",v:(taxas.igpm_mm||0).toFixed(2).replace(".",",")+"% a.m.",cor:T.purple}];
+  var dt=taxas.atualizadoEm?new Date(taxas.atualizadoEm).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}):null;
+  return React.createElement("div",{style:{background:"rgba(10,20,38,0.6)",border:"1px solid "+T.bdr,borderRadius:10,padding:"8px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}},
+    React.createElement("div",{style:{display:"flex",alignItems:"center",gap:5,flexShrink:0}},
+      React.createElement("span",{style:{fontSize:9,color:status==="ok"?T.green:"#E0A85C"}},status==="loading"?"⟳":"●"),
+      React.createElement("span",{style:{fontSize:10,color:T.t3,fontWeight:600}},status==="loading"?"Buscando BCB…":("Taxas BCB"+(dt?" · "+dt:"")))
+    ),
+    React.createElement("div",{style:{display:"flex",gap:12,flexWrap:"wrap"}},
+      items.map(function(i){return React.createElement("div",{key:i.l,style:{display:"flex",gap:4,alignItems:"baseline"}},
+        React.createElement("span",{style:{fontSize:10,color:T.t3,fontWeight:600}},i.l),
+        React.createElement("span",{style:{fontSize:12,fontWeight:700,color:i.cor,fontFamily:"'JetBrains Mono'"}},i.v)
+      )})
+    )
+  );
+}
+
+function RfModalAtivo({ativo,clienteId,taxas,onSave,onClose}){
+  var isEdit=!!(ativo&&ativo.id);
+  var [form,sForm]=useState({nm:ativo&&ativo.nm||"",tk:ativo&&ativo.tk||"",tp:ativo&&ativo.tp||"cdb",inst:ativo&&ativo.inst||"XP",indexador:ativo&&ativo.indexador||"cdi",taxa:ativo&&ativo.taxa!=null?String(ativo.taxa):"",valorAporte:ativo&&ativo.valorAporte||"",dataAporte:ativo&&ativo.dataAporte||new Date().toISOString().split("T")[0],dataVenc:ativo&&ativo.dataVenc||"",liquidez:ativo&&ativo.liquidez||"venc",obs:ativo&&ativo.obs||""});
+  var set=function(k,v){sForm(function(p){return Object.assign({},p,{[k]:v})});};
+  var tipoSel=RF_TIPOS_LISTA.find(function(t){return t.k===form.tp})||RF_TIPOS_LISTA[0];
+  var idxSel=RF_INDEXADORES.find(function(i){return i.k===form.indexador})||RF_INDEXADORES[0];
+  var txSuffix=(form.indexador==="cdi"||form.indexador==="selic")?"% do índice":"% a.a.";
+  var txPH=form.indexador==="cdi"?"110":form.indexador==="ipca"?"6.50":"13.50";
+  var prevValor=parseFloat(String(form.valorAporte).replace(/\./g,"").replace(",","."))||0;
+  var prevTaxa=parseFloat(form.taxa)||0;
+  var prevSaldo=prevValor&&prevTaxa&&form.dataAporte?rfCalcSaldo(Object.assign({},form,{valorAporte:prevValor,taxa:prevTaxa}),taxas):0;
+  var prevRent=prevValor&&prevSaldo?((prevSaldo/prevValor)-1)*100:0;
+  var gerarNome=function(){if(form.nm)return;set("nm",(tipoSel.l+" "+form.inst+" "+idxSel.l+(form.taxa?" "+form.taxa+"%":"")).trim());};
+  var valid=form.nm&&form.tp&&form.inst&&form.indexador&&form.taxa&&form.valorAporte&&form.dataAporte;
+  var s2={width:"100%",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,padding:"9px 12px",fontSize:13,color:T.t1,outline:"none",fontFamily:"'Outfit'",boxSizing:"border-box"};
+  var handleSave=function(){
+    if(!valid)return;
+    var id=isEdit?ativo.id:"rf_"+Date.now()+"_"+Math.random().toString(36).slice(2,6);
+    var vAp=parseFloat(String(form.valorAporte).replace(/\./g,"").replace(",","."))||0;
+    var txa=parseFloat(form.taxa)||0;
+    onSave(Object.assign({},form,{id,clienteId,taxa:txa,valorAporte:vAp,posR:rfCalcSaldo(Object.assign({},form,{valorAporte:vAp,taxa:txa}),taxas),pa:vAp,qtd:1,_rfNativo:true,updatedAt:new Date().toISOString()}));
+  };
+  return React.createElement(Mo,{open:true,onClose,title:isEdit?"Editar Ativo RF":"Novo Ativo de Renda Fixa",wide:true},
+    React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:14}},
+      React.createElement("div",null,
+        React.createElement("div",{style:{fontSize:11,color:T.t3,fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:8}},"Tipo de produto *"),
+        React.createElement("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5}},
+          RF_TIPOS_LISTA.map(function(t){return React.createElement("button",{key:t.k,onClick:function(){set("tp",t.k)},style:{padding:"7px 4px",borderRadius:8,fontSize:10,fontWeight:700,background:form.tp===t.k?t.cor+"20":"rgba(255,255,255,0.03)",border:form.tp===t.k?"1.5px solid "+t.cor+"70":"1px solid rgba(255,255,255,0.06)",color:form.tp===t.k?t.cor:T.t3,cursor:"pointer",lineHeight:1.3,textAlign:"center"}},
+            React.createElement("div",{style:{fontSize:12,marginBottom:2}},t.ic),t.l,
+            t.isento&&React.createElement("div",{style:{fontSize:8,color:T.green,marginTop:1}},"Isento IR"));}))
+      ),
+      React.createElement("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},
+        React.createElement("div",null,React.createElement("div",{style:{fontSize:11,color:T.t3,fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:5}},"Instituição *"),React.createElement("select",{value:form.inst,onChange:function(e){set("inst",e.target.value)},style:Object.assign({},s2,{cursor:"pointer"})},RF_INSTS.map(function(i){return React.createElement("option",{key:i,value:i,style:{background:"#0F1B2E"}},i);}))),
+        React.createElement("div",null,React.createElement("div",{style:{fontSize:11,color:T.t3,fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:5}},"Indexador *"),React.createElement("select",{value:form.indexador,onChange:function(e){set("indexador",e.target.value)},style:Object.assign({},s2,{cursor:"pointer"})},RF_INDEXADORES.map(function(i){return React.createElement("option",{key:i.k,value:i.k,style:{background:"#0F1B2E"}},i.l);})))
+      ),
+      React.createElement("div",null,
+        React.createElement("div",{style:{fontSize:11,color:T.t3,fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:5}},(form.indexador==="cdi"||form.indexador==="selic"?"% do indexador":"Taxa a.a.")+" * — "+idxSel.ex),
+        React.createElement("div",{style:{position:"relative"}},
+          React.createElement("input",{type:"number",step:"0.01",value:form.taxa,onChange:function(e){set("taxa",e.target.value)},placeholder:txPH,style:Object.assign({},s2,{paddingRight:80})}),
+          React.createElement("span",{style:{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",color:T.t3,fontSize:11,pointerEvents:"none"}},txSuffix)
+        )
+      ),
+      React.createElement("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},
+        React.createElement("div",null,React.createElement("div",{style:{fontSize:11,color:T.t3,fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:5}},"Valor do aporte *"),React.createElement("div",{style:{position:"relative"}},React.createElement("span",{style:{position:"absolute",left:10,top:"50%",transform:"translateY(-50%)",color:T.t3,fontSize:13,pointerEvents:"none"}},"R$"),React.createElement("input",{type:"number",step:"0.01",value:form.valorAporte,onChange:function(e){set("valorAporte",e.target.value)},placeholder:"0,00",style:Object.assign({},s2,{paddingLeft:32})}))),
+        React.createElement("div",null,React.createElement("div",{style:{fontSize:11,color:T.t3,fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:5}},"Data do aporte *"),React.createElement("input",{type:"date",value:form.dataAporte,onChange:function(e){set("dataAporte",e.target.value)},style:s2}))
+      ),
+      React.createElement("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},
+        React.createElement("div",null,React.createElement("div",{style:{fontSize:11,color:T.t3,fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:5}},"Vencimento"),React.createElement("input",{type:"date",value:form.dataVenc,onChange:function(e){set("dataVenc",e.target.value)},style:s2})),
+        React.createElement("div",null,React.createElement("div",{style:{fontSize:11,color:T.t3,fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:5}},"Liquidez"),React.createElement("select",{value:form.liquidez,onChange:function(e){set("liquidez",e.target.value)},style:Object.assign({},s2,{cursor:"pointer"})},RF_LIQUIDEZ.map(function(l){return React.createElement("option",{key:l.k,value:l.k,style:{background:"#0F1B2E"}},l.l);})))
+      ),
+      React.createElement("div",null,
+        React.createElement("div",{style:{fontSize:11,color:T.t3,fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:5}},"Nome do ativo * — deixe em branco e clique fora para gerar"),
+        React.createElement("input",{type:"text",value:form.nm,onChange:function(e){set("nm",e.target.value)},onBlur:gerarNome,placeholder:"ex: CDB BTG 115% CDI",style:s2})
+      ),
+      prevSaldo>0&&React.createElement("div",{style:{background:T.goldD,border:"1px solid "+T.bdr,borderRadius:10,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+        React.createElement("div",null,
+          React.createElement("div",{style:{fontSize:10,color:T.t3,fontWeight:600,letterSpacing:.5}},"SALDO ESTIMADO HOJE"),
+          React.createElement("div",{style:{fontSize:18,fontWeight:800,color:T.goldL,fontFamily:"'JetBrains Mono'",marginTop:2}},fm(prevSaldo)),
+          React.createElement("div",{style:{fontSize:10,color:T.t3,marginTop:2}},"CDI "+(taxas&&taxas.cdi_aa?taxas.cdi_aa.toFixed(2).replace(".",","):"…")+"% a.a. via BCB")
+        ),
+        React.createElement("div",{style:{textAlign:"right"}},
+          React.createElement("div",{style:{fontSize:10,color:T.t3}},"Rentabilidade"),
+          React.createElement("div",{style:{fontSize:14,fontWeight:700,color:prevRent>=0?T.green:T.red,fontFamily:"'JetBrains Mono'"}},
+            (prevRent>=0?"+":"")+prevRent.toFixed(2).replace(".",",")+"%")
+        )
+      ),
+      React.createElement("div",null,
+        React.createElement("div",{style:{fontSize:11,color:T.t3,fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:5}},"Observação"),
+        React.createElement("textarea",{value:form.obs,onChange:function(e){set("obs",e.target.value)},rows:2,placeholder:"Notas sobre este ativo...",style:Object.assign({},s2,{resize:"vertical"})})
+      ),
+      React.createElement("div",{style:{display:"flex",gap:10,justifyContent:"flex-end",paddingTop:4}},
+        React.createElement(Bt,{v:"secondary",onClick:onClose},"Cancelar"),
+        React.createElement(Bt,{v:"primary",onClick:handleSave,disabled:!valid,style:{opacity:valid?1:0.5}},isEdit?"💾 Salvar":"➕ Adicionar ativo")
+      )
+    )
+  );
+}
+
+function RfModalMov({ativo,tipo,taxas,onConfirm,onClose}){
+  var isRes=tipo==="resgate";
+  var [valor,sValor]=useState(""),data_=useState(new Date().toISOString().split("T")[0]),sData=data_[1];var data=data_[0];
+  var [obs,sObs]=useState("");
+  var saldo=rfCalcSaldo(ativo,taxas);
+  var s2={width:"100%",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,padding:"9px 12px",fontSize:13,color:T.t1,outline:"none",fontFamily:"'Outfit'",boxSizing:"border-box"};
+  return React.createElement(Mo,{open:true,onClose,title:isRes?"↩ Registrar Resgate":"➕ Registrar Aporte"},
+    React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:14}},
+      React.createElement("div",{style:{fontSize:12,color:T.t2,background:"rgba(255,255,255,0.03)",borderRadius:8,padding:"8px 12px"}},ativo.nm," — saldo: ",React.createElement("strong",{style:{color:T.goldL,fontFamily:"'JetBrains Mono'"}},fm(saldo))),
+      React.createElement("div",null,React.createElement("div",{style:{fontSize:11,color:T.t3,fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:5}},isRes?"Valor resgatado (R$) *":"Novo aporte (R$) *"),React.createElement("input",{type:"number",step:"0.01",value:valor,onChange:function(e){sValor(e.target.value)},placeholder:"0,00",style:s2})),
+      React.createElement("div",null,React.createElement("div",{style:{fontSize:11,color:T.t3,fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:5}},"Data *"),React.createElement("input",{type:"date",value:data,onChange:function(e){sData(e.target.value)},style:s2})),
+      React.createElement("div",null,React.createElement("div",{style:{fontSize:11,color:T.t3,fontWeight:600,letterSpacing:.5,textTransform:"uppercase",marginBottom:5}},"Observação"),React.createElement("textarea",{value:obs,onChange:function(e){sObs(e.target.value)},rows:2,placeholder:"Opcional...",style:Object.assign({},s2,{resize:"vertical"})})),
+      React.createElement("div",{style:{display:"flex",gap:10,justifyContent:"flex-end"}},
+        React.createElement(Bt,{v:"secondary",onClick:onClose},"Cancelar"),
+        React.createElement(Bt,{v:"primary",onClick:function(){if(!valor||parseFloat(valor)<=0)return;onConfirm({valor:parseFloat(valor)||0,data,obs,tipo});},disabled:!valor||parseFloat(valor)<=0},isRes?"↩ Confirmar":"➕ Confirmar")
+      )
+    )
+  );
+}
+
+function RfCardAtivo({ativo,taxas,onEdit,onDelete,onAporte,onResgate}){
+  var [exp,sExp]=useState(false);
+  var tipo=RF_TIPOS_LISTA.find(function(t){return t.k===ativo.tp})||RF_TIPOS_LISTA[0];
+  var saldo=rfCalcSaldo(ativo,taxas),rent=rfRentPct(ativo,taxas);
+  var dias=ativo.dataVenc?Math.ceil((new Date(ativo.dataVenc+"T12:00:00")-new Date())/86400000):null;
+  var sCor=dias===null?T.t3:dias<0?T.red:dias<30?"#E0A85C":T.green;
+  var sLabel=dias===null?"Sem venc.":dias<0?"Vencido":dias===0?"Hoje":dias+"d";
+  return React.createElement(Cd,{style:{padding:0,overflow:"hidden"}},
+    React.createElement("div",{style:{height:3,background:"linear-gradient(90deg,"+tipo.cor+","+tipo.cor+"30)"}}),
+    React.createElement("div",{style:{padding:"12px 16px"}},
+      React.createElement("div",{style:{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:10}},
+        React.createElement("div",{style:{flex:1,minWidth:0}},
+          React.createElement("div",{style:{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap",marginBottom:5}},
+            React.createElement("span",{style:{fontSize:14}},tipo.ic),
+            React.createElement("span",{style:{fontSize:13,fontWeight:700,color:T.t1}},ativo.nm),
+            React.createElement(RfBadge,{cor:tipo.cor},tipo.l),
+            tipo.isento&&React.createElement(RfBadge,{cor:T.green},"Isento IR")
+          ),
+          React.createElement("div",{style:{display:"flex",gap:10,flexWrap:"wrap"}},
+            React.createElement("span",{style:{fontSize:11,color:T.t3}},"🏦 "+ativo.inst),
+            React.createElement("span",{style:{fontSize:11,color:T.t3}},"📊 "+rfLabelIdx(ativo)),
+            React.createElement("span",{style:{fontSize:11,color:sCor}},"📅 "+sLabel)
+          )
+        ),
+        React.createElement("div",{style:{textAlign:"right",flexShrink:0}},
+          React.createElement("div",{style:{fontSize:16,fontWeight:800,color:T.goldL,fontFamily:"'JetBrains Mono'"}},fm(saldo)),
+          React.createElement("div",{style:{fontSize:11,color:rent>=0?T.green:T.red,fontFamily:"'JetBrains Mono'",marginTop:2}},(rent>=0?"▲":"▼")+" "+Math.abs(rent).toFixed(2).replace(".",",")+"%"),
+          React.createElement("div",{style:{fontSize:10,color:T.t3,marginTop:1}},"Aporte: "+fm(ativo.valorAporte))
+        )
+      ),
+      React.createElement(RfVencBar,{dataAporte:ativo.dataAporte,dataVenc:ativo.dataVenc}),
+      React.createElement("div",{style:{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}},
+        React.createElement(Bt,{v:"secondary",onClick:function(){onAporte(ativo)},style:{fontSize:10,padding:"5px 10px"}},"+Aporte"),
+        React.createElement(Bt,{v:"secondary",onClick:function(){onResgate(ativo)},style:{fontSize:10,padding:"5px 10px"}},"↩Resgate"),
+        React.createElement(Bt,{v:"secondary",onClick:function(){onEdit(ativo)},style:{fontSize:10,padding:"5px 10px"}},"✏️Editar"),
+        React.createElement(Bt,{v:"ghost",onClick:function(){onDelete(ativo.id)},style:{fontSize:10,padding:"5px 10px",color:T.red}},"🗑️"),
+        React.createElement("button",{onClick:function(){sExp(function(e){return !e});},style:{marginLeft:"auto",background:"none",border:"none",color:T.t3,fontSize:10,cursor:"pointer"}},exp?"▲ menos":"▼ mais")
+      ),
+      exp&&React.createElement("div",{style:{marginTop:10,paddingTop:10,borderTop:"1px solid "+T.bdrL,display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}},
+        [["Aporte em",ativo.dataAporte?ativo.dataAporte.split("-").reverse().join("/"):"—"],["Liquidez",(RF_LIQUIDEZ.find(function(l){return l.k===ativo.liquidez})||{l:ativo.liquidez}).l],["Ganho acum.",fm(saldo-ativo.valorAporte)],ativo.obs&&["Obs.",ativo.obs]].filter(Boolean).map(function(p){
+          return React.createElement("div",{key:p[0]},React.createElement("div",{style:{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:.5}},p[0].toUpperCase()),React.createElement("div",{style:{fontSize:12,color:T.t2,marginTop:2}},p[1]));
+        })
+      )
+    )
+  );
+}
+
+function ModuloRendaFixa({c,dispatch,taxasBCB,taxaBCBStatus}){
+  var rendaFixa=c.rendaFixa||[];
+  var [modal,sModal]=useState(null);
+  var [busca,sBusca]=useState("");
+  var [filtroTp,sFiltroTp]=useState("todos");
+  var [ordenar,sOrdenar]=useState("valor");
+
+  var salvarAtivos=function(novos){
+    var atualizados=novos.map(function(a){return Object.assign({},a,{posR:rfCalcSaldo(a,taxasBCB)});});
+    dispatch({t:"UC",p:{id:c.id,rendaFixa:atualizados,_rfUpdatedAt:Date.now()}});
+  };
+  var salvarAtivo=function(ativo){
+    var idx=rendaFixa.findIndex(function(a){return a.id===ativo.id;});
+    salvarAtivos(idx>=0?rendaFixa.map(function(a){return a.id===ativo.id?ativo:a;}):[...rendaFixa,ativo]);
+    sModal(null);
+  };
+  var deletarAtivo=function(id){
+    if(!window.confirm("Remover este ativo?"))return;
+    salvarAtivos(rendaFixa.filter(function(a){return a.id!==id;}));
+  };
+  var confirmarMov=function(mv){
+    var at=modal.ativo,novos;
+    if(mv.tipo==="aporte"){
+      var nAp=(at.valorAporte||0)+mv.valor;
+      novos=rendaFixa.map(function(a){return a.id===at.id?Object.assign({},at,{valorAporte:nAp,dataAporte:mv.data,posR:rfCalcSaldo(Object.assign({},at,{valorAporte:nAp,dataAporte:mv.data}),taxasBCB),updatedAt:new Date().toISOString()}):a;});
+    }else{
+      var saldoAt=rfCalcSaldo(at,taxasBCB),rest=saldoAt-mv.valor;
+      if(rest<=0.01){novos=rendaFixa.filter(function(a){return a.id!==at.id;});}
+      else{var prop=rest/saldoAt;novos=rendaFixa.map(function(a){return a.id===at.id?Object.assign({},at,{valorAporte:(at.valorAporte||0)*prop,dataAporte:mv.data,posR:rest,updatedAt:new Date().toISOString()}):a;});}
+    }
+    salvarAtivos(novos);sModal(null);
+  };
+
+  var lista=rendaFixa.slice();
+  if(busca)lista=lista.filter(function(a){return(a.nm+a.inst+(a.tk||"")).toLowerCase().indexOf(busca.toLowerCase())>=0;});
+  if(filtroTp!=="todos")lista=lista.filter(function(a){return a.tp===filtroTp;});
+  if(ordenar==="valor")lista.sort(function(a,b){return rfCalcSaldo(b,taxasBCB)-rfCalcSaldo(a,taxasBCB);});
+  else if(ordenar==="venc")lista.sort(function(a,b){return(a.dataVenc||"9999")<(b.dataVenc||"9999")?-1:1;});
+  else if(ordenar==="rent")lista.sort(function(a,b){return rfRentPct(b,taxasBCB)-rfRentPct(a,taxasBCB);});
+
+  var totalAp=rendaFixa.reduce(function(s,a){return s+(a.valorAporte||0);},0);
+  var totalAt=rendaFixa.reduce(function(s,a){return s+rfCalcSaldo(a,taxasBCB);},0);
+  var ganho=totalAt-totalAp;
+  var isentos=rendaFixa.filter(function(a){var t=RF_TIPOS_LISTA.find(function(t){return t.k===a.tp;});return t&&t.isento;}).reduce(function(s,a){return s+rfCalcSaldo(a,taxasBCB);},0);
+  var venc30=rendaFixa.filter(function(a){var d=a.dataVenc?Math.ceil((new Date(a.dataVenc+"T12:00:00")-new Date())/86400000):null;return d!==null&&d>=0&&d<=30;}).length;
+  var tiposP=[...new Set(rendaFixa.map(function(a){return a.tp;}))];
+
+  return React.createElement("div",null,
+    React.createElement(RfPainelTaxas,{taxas:taxasBCB,status:taxaBCBStatus}),
+    React.createElement("div",{style:{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:14}},
+      [{l:"Total aplicado",v:fm(totalAp),ic:"💸",cor:T.t2},{l:"Saldo estimado",v:fm(totalAt),ic:"💰",cor:T.goldL},{l:"Rendimento acum.",v:(ganho>=0?"+":"")+fm(ganho),ic:"📈",cor:ganho>=0?T.green:T.red},{l:"Rentab. média",v:((totalAp>0?(ganho/totalAp)*100:0).toFixed(2).replace(".",","))+"%",ic:"📊",cor:ganho>=0?T.green:T.red},{l:"Isentos de IR",v:fm(isentos),ic:"🛡️",cor:T.green},{l:"Vence em 30d",v:venc30+" ativo"+(venc30!==1?"s":""),ic:"⏰",cor:venc30>0?"#E0A85C":T.t3}].map(function(k){
+        return React.createElement(KCard,{key:k.l,label:k.l,valor:k.v,cor:k.cor,ic:k.ic,compact:true});
+      })
+    ),
+    React.createElement("div",{style:{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}},
+      rendaFixa.length>0&&React.createElement("input",{value:busca,onChange:function(e){sBusca(e.target.value);},placeholder:"🔍 Buscar...",style:Object.assign({},inpS,{flex:1,minWidth:120,fontSize:12,padding:"7px 12px"})}),
+      rendaFixa.length>0&&React.createElement("select",{value:filtroTp,onChange:function(e){sFiltroTp(e.target.value);},style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:9,padding:"7px 10px",fontSize:11,color:T.t2,outline:"none",cursor:"pointer"}},
+        React.createElement("option",{value:"todos",style:{background:"#0F1B2E"}},"Todos os tipos"),
+        tiposP.map(function(tp){var t=RF_TIPOS_LISTA.find(function(x){return x.k===tp;});return React.createElement("option",{key:tp,value:tp,style:{background:"#0F1B2E"}},t&&t.l||tp);})
+      ),
+      rendaFixa.length>0&&React.createElement("select",{value:ordenar,onChange:function(e){sOrdenar(e.target.value);},style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:9,padding:"7px 10px",fontSize:11,color:T.t2,outline:"none",cursor:"pointer"}},
+        React.createElement("option",{value:"valor",style:{background:"#0F1B2E"}},"Maior saldo"),
+        React.createElement("option",{value:"venc",style:{background:"#0F1B2E"}},"Vencimento"),
+        React.createElement("option",{value:"rent",style:{background:"#0F1B2E"}},"Rentabilidade")
+      ),
+      React.createElement(Bt,{v:"primary",onClick:function(){sModal({tipo:"novo"});},style:{fontSize:11,padding:"7px 14px",marginLeft:"auto"}},"+ Novo ativo RF")
+    ),
+    lista.length===0?React.createElement(Cd,{style:{padding:36,textAlign:"center"},hov:false},
+      React.createElement("div",{style:{fontSize:34,marginBottom:10}},"🏦"),
+      React.createElement("div",{style:{fontSize:14,fontWeight:700,color:T.t2,marginBottom:6}},rendaFixa.length===0?"Nenhum ativo cadastrado":"Nenhum resultado"),
+      React.createElement("div",{style:{fontSize:12,color:T.t3,marginBottom:16}},rendaFixa.length===0?"Cadastre CDBs, LCIs, LCAs, Tesouro e outros ativos deste cliente":"Ajuste os filtros"),
+      rendaFixa.length===0&&React.createElement(Bt,{v:"primary",onClick:function(){sModal({tipo:"novo"});}},"➕ Adicionar primeiro ativo")
+    ):React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:10}},
+      lista.map(function(a){return React.createElement(RfCardAtivo,{key:a.id,ativo:a,taxas:taxasBCB,onEdit:function(at){sModal({tipo:"editar",ativo:at});},onDelete:deletarAtivo,onAporte:function(at){sModal({tipo:"aporte",ativo:at});},onResgate:function(at){sModal({tipo:"resgate",ativo:at});}});})
+    ),
+    modal&&(modal.tipo==="novo"||modal.tipo==="editar")&&React.createElement(RfModalAtivo,{ativo:modal.ativo,clienteId:c.id,taxas:taxasBCB,onSave:salvarAtivo,onClose:function(){sModal(null);}}),
+    modal&&(modal.tipo==="aporte"||modal.tipo==="resgate")&&React.createElement(RfModalMov,{ativo:modal.ativo,tipo:modal.tipo,taxas:taxasBCB,onConfirm:confirmarMov,onClose:function(){sModal(null);}})
+  );
+}
+/* ════════════ FIM MÓDULO RENDA FIXA ════════════ */
+
 function AppWithAuth(){
   const[authUser,sAuthUser]=useState(null);
   const[authChecked,sAuthChecked]=useState(false);
@@ -25811,6 +26165,17 @@ function App({authUser}){
     return{cl:iC,it:iI,lds:[],fin:{entradas:[],despesas:[]},vistaLearning:[],ag:[],tpAg:TIPOS_AGENDA_DEFAULT.slice(),overviewMercado:{},config:{}};
   })();
   const[d,dp]=useReducer(rd,initState);
+
+  /* === TAXAS BCB — carregadas uma vez, passadas para todos os componentes === */
+  const[taxasBCB,sTaxasBCB]=useState(null);
+  const[taxaBCBStatus,sTaxaBCBStatus]=useState("loading");
+  React.useEffect(function(){
+    sTaxaBCBStatus("loading");
+    carregarTaxasBCB().then(function(t){
+      sTaxasBCB(t);
+      sTaxaBCBStatus(t.fonte==="bcb"||t.fonte==="cache"?"ok":"fallback");
+    });
+  },[]);
 
   /* === IPCA por cliente: busca acumulado do período do contrato via BCB === */
   React.useEffect(function(){
@@ -26314,7 +26679,7 @@ function App({authUser}){
         <div style={{flex:1,overflow:"auto",padding:isMobile?14:28,background:"radial-gradient(ellipse at 15% -5%,rgba(212,163,40,0.03),transparent 45%),radial-gradient(ellipse at 85% 100%,rgba(56,189,248,0.015),transparent 45%)"}} onClick={function(){sShowN(false)}}>
           {pg==="dashboard" && <Dash data={d} onSel={function(c){sPg("clients");sSel(c)}} goTo={function(p){sPg(p)}}/>}
           {pg==="clients" && !sel && <CL data={d} onSel={function(c){sSel(c)}} dispatch={dp}/>}
-          {pg==="clients" && sel && <CD client={sel} data={d} dispatch={dp} onBack={function(){sSel(null)}}/>}
+          {pg==="clients" && sel && <CD client={sel} data={d} dispatch={dp} onBack={function(){sSel(null)}} taxasBCB={taxasBCB} taxaBCBStatus={taxaBCBStatus}/>}
           {pg==="financeiro" && <FinanceiroView data={d} dispatch={dp}/>}
           {pg==="fiscal" && <FiscalView data={d} dispatch={dp}/>}
           {pg==="metas" && <MetasConsultor/>}
