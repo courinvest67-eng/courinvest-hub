@@ -18961,7 +18961,15 @@ function FinanceiroView({data:d,dispatch:dp}){
                 <Cd style={{padding:18,marginTop:12}} hov={false} glow>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
                     <h4 style={{margin:0,fontSize:14,fontWeight:700,color:T.gold}}>📅 {fmtMonth(selMonth)} — Detalhamento</h4>
-                    <button onClick={function(){sSelMonth(null)}} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:8,color:T.t3,padding:"4px 10px",cursor:"pointer",fontSize:12}}>✕</button>
+                    <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                      <button onClick={function(){
+                        if(!window.confirm("Excluir todos os "+byMonth[selMonth].entries.length+" lançamentos de "+fmtMonth(selMonth)+"?"))return;
+                        var restantes=entradas.filter(function(e){return !e.data||e.data.substring(0,7)!==selMonth});
+                        sEntradas(restantes);
+                        sSelMonth(null);
+                      }} style={{background:"rgba(239,100,97,0.12)",border:"1px solid rgba(239,100,97,0.3)",borderRadius:8,color:"#EF6461",padding:"4px 12px",cursor:"pointer",fontSize:11,fontWeight:700}}>🗑️ Excluir mês</button>
+                      <button onClick={function(){sSelMonth(null)}} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:8,color:T.t3,padding:"4px 10px",cursor:"pointer",fontSize:12}}>✕</button>
+                    </div>
                   </div>
                   <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
                     <Cd style={{padding:"10px 14px",flex:1,minWidth:100}} hov={false}><div style={{fontSize:7,color:T.t3,fontWeight:600}}>RECEITA</div><div style={{fontSize:16,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(byMonth[selMonth].rec)}</div></Cd>
@@ -27001,7 +27009,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '291';
+  var SW_VERSION = '292';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
