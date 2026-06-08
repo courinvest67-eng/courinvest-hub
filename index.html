@@ -7218,6 +7218,22 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
           if(rentUSDvalor===null && somaRsUSD_brl!==null && usdRate>0){
             rentUSDvalor=somaRsUSD_brl/usdRate;
           }
+          /* === Rentabilidade em BRL dos ativos USD (inclui efeito câmbio) — calculada pelo Gorila ===
+             É a variação patrimonial real em reais. Diferente do rentUSDpct que é em dólar. */
+          var rentUSD_brl_pct=null,rentUSD_brl_rs=null;
+          var somaIniUSD_brl=0,somaGanhoUSD_brl=0,algumBRL=false;
+          ativosUSD.forEach(function(a){
+            var r=getRentAtivoPer(a);
+            if(r&&r.doPeriodo&&r.rs!=null&&a.vA>0){
+              somaGanhoUSD_brl+=r.rs;
+              somaIniUSD_brl+=(a.vA-r.rs);
+              algumBRL=true;
+            }
+          });
+          if(algumBRL&&somaIniUSD_brl>0){
+            rentUSD_brl_pct=(somaGanhoUSD_brl/somaIniUSD_brl)*100;
+            rentUSD_brl_rs=somaGanhoUSD_brl;
+          }
           var corRentUSD=rentUSDpct!==null?(rentUSDpct>=0?'#0F9D58':'#D93025'):'#374151';
           body+='<div style="background:#EFF6FF;border:1.5px solid #2563EB55;border-left:4px solid #2563EB;border-radius:10px;padding:16px 20px;margin-bottom:14px">';
           body+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
@@ -7232,6 +7248,14 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
             if(rentUSDvalor!==null){
               body+=' <span style="font-size:12px;font-weight:700;color:'+corRentUSD+';opacity:.85">('+(rentUSDvalor>=0?'+':'')+'US$ '+Math.abs(rentUSDvalor).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})+')</span>';
             }
+            body+='</div></div>';
+          }
+          /* Rentabilidade em BRL (inclui variação cambial) */
+          if(rentUSD_brl_pct!==null){
+            var corBRL=rentUSD_brl_pct>=0?'#0F9D58':'#D93025';
+            body+='<div><div style="'+labelS+'">Rentabilidade em BRL <span style="color:#9CA3AF;font-weight:400;text-transform:none;letter-spacing:0">· Gorila (incl. câmbio)</span></div>';
+            body+='<div style="font-size:17px;font-weight:800;color:'+corBRL+'">'+(rentUSD_brl_pct>=0?'+':'')+rentUSD_brl_pct.toFixed(2)+'%';
+            body+=' <span style="font-size:12px;font-weight:700;color:'+corBRL+';opacity:.85">('+(rentUSD_brl_rs>=0?'+R$ ':'-R$ ')+Math.abs(rentUSD_brl_rs).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+')</span>';
             body+='</div></div>';
           }
           body+='<div><div style="'+labelS+'">Benchmark</div><div style="font-size:13px;font-weight:700;color:#2563EB">S&amp;P 500 · Nasdaq</div></div>';
@@ -26912,7 +26936,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '284';
+  var SW_VERSION = '285';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
