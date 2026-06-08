@@ -17401,7 +17401,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
                         var dataFmtHifen=dataFmt.slice(0,4)+"-"+dataFmt.slice(4,6)+"-"+dataFmt.slice(6,8);
                         var dtRef=new Date(dataFmtHifen+"T12:00:00");
                         var dtIni=new Date(dtRef);dtIni.setDate(dtRef.getDate()-5);
-                        var fmtD=function(d){return d.getFullYear()+""+String(d.getMonth()+1).padStart(2,"0")+String(d.getDate()).padStart(2,"0");};
+                        var fmtD=function(dt){return dt.getFullYear()+""+String(dt.getMonth()+1).padStart(2,"0")+String(dt.getDate()).padStart(2,"0");};
                         fetch("https://economia.awesomeapi.com.br/json/daily/USD-BRL/5?start_date="+fmtD(dtIni)+"&end_date="+dataFmt)
                           .then(function(r){return r.json()})
                           .then(function(data){
@@ -27001,7 +27001,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '290';
+  var SW_VERSION = '291';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
