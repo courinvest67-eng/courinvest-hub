@@ -17382,8 +17382,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
                       }
                       /* Busca câmbio: tenta o dia exato e até 5 dias anteriores (para cobrir fins de semana/feriados) */
                       var tentativas=[];
-                      for(var d=0;d<7;d++){
-                        var t=new Date(refDateObj);t.setDate(t.getDate()-d);
+                      for(var di=0;di<7;di++){
+                        var t=new Date(refDateObj);t.setDate(t.getDate()-di);
                         var anoT=t.getFullYear();var mesT=String(t.getMonth()+1).padStart(2,"0");var diaT=String(t.getDate()).padStart(2,"0");
                         tentativas.push(anoT+""+mesT+""+diaT);
                       }
@@ -27001,7 +27001,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '289';
+  var SW_VERSION = '290';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
