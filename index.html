@@ -3492,7 +3492,15 @@ function CL({data:d,onSel:os,dispatch:dp}){
               txGestao:existing?existing.txGestao:0.80,feeFixo:existing?existing.feeFixo:0,feeBase:existing?existing.feeBase:"",
               _ativosImport:existing&&existing._ativosImport&&existing._ativosImport.length>ativos.length?existing._ativosImport:ativos,
               _ativosTs:Date.now(),
-              _backupAntesImport:backup
+              _backupAntesImport:backup,
+              /* === PRESERVAÇÃO EXPLÍCITA DE DADOS MANUAIS === sempre mantém, nunca sobrescreve na reimportação */
+              proventos:(existing&&existing.proventos&&existing.proventos.length>0)?existing.proventos:(existing&&existing.proventos||[]),
+              notasFiscais:(existing&&existing.notasFiscais)||[],
+              objetivos:(existing&&existing.objetivos)||[],
+              _contratos:(existing&&existing._contratos)||[],
+              movimentacoes:(existing&&existing.movimentacoes)||[],
+              histMensal:(existing&&existing.histMensal)||[],
+              orcamento:(existing&&existing.orcamento)||{}
             });
             dp({t:"RC",p:newC});
             callback(true,nomeCliente,patReal);
@@ -3658,7 +3666,15 @@ function CL({data:d,onSel:os,dispatch:dp}){
           txGestao:existing?existing.txGestao:0.80,feeFixo:existing?existing.feeFixo:0,feeBase:existing?existing.feeBase:"",
           _ativosImport:ativos,
           _ativosTs:Date.now(),
-          _backupAntesImport:backup
+          _backupAntesImport:backup,
+          /* === PRESERVAÇÃO EXPLÍCITA DE DADOS MANUAIS === sempre mantém, nunca sobrescreve na reimportação */
+          proventos:(existing&&existing.proventos&&existing.proventos.length>0)?existing.proventos:(existing&&existing.proventos||[]),
+          notasFiscais:(existing&&existing.notasFiscais)||[],
+          objetivos:(existing&&existing.objetivos)||[],
+          _contratos:(existing&&existing._contratos)||[],
+          movimentacoes:(existing&&existing.movimentacoes)||[],
+          histMensal:(existing&&existing.histMensal)||[],
+          orcamento:(existing&&existing.orcamento)||{}
         });
         dp({t:"RC",p:newC});
         callback(true,nomeCliente,patReal);
@@ -3899,7 +3915,15 @@ function CL({data:d,onSel:os,dispatch:dp}){
               txGestao:existing?existing.txGestao:0.80,feeFixo:existing?existing.feeFixo:0,feeBase:existing?existing.feeBase:"",
               _ativosImport:existing&&existing._ativosImport&&existing._ativosImport.length>ativos.length?existing._ativosImport:ativos,
               _ativosTs:Date.now(),
-              _backupAntesImport:backup
+              _backupAntesImport:backup,
+              /* === PRESERVAÇÃO EXPLÍCITA DE DADOS MANUAIS === sempre mantém, nunca sobrescreve na reimportação */
+              proventos:(existing&&existing.proventos&&existing.proventos.length>0)?existing.proventos:(existing&&existing.proventos||[]),
+              notasFiscais:(existing&&existing.notasFiscais)||[],
+              objetivos:(existing&&existing.objetivos)||[],
+              _contratos:(existing&&existing._contratos)||[],
+              movimentacoes:(existing&&existing.movimentacoes)||[],
+              histMensal:(existing&&existing.histMensal)||[],
+              orcamento:(existing&&existing.orcamento)||{}
             });
             dp({t:"RC",p:newC});
             sGMsg("✅ "+nomeCliente+(existing?" atualizado":" criado")+" via PDF! Patrimônio: "+fm(patReal)+" | "+Object.keys(instData).length+" instituições");
@@ -4334,7 +4358,15 @@ function CL({data:d,onSel:os,dispatch:dp}){
           dtNascimento:(existing&&existing.dtNascimento)?existing.dtNascimento:"",
           particularidades:(existing&&existing.particularidades)?existing.particularidades:"",
           dtCaptacao:existing&&existing.dtCaptacao?existing.dtCaptacao:(dataFim||new Date().toISOString().split("T")[0]),
-          status:existing&&existing.status?existing.status:"ativo"
+          status:existing&&existing.status?existing.status:"ativo",
+          /* === PRESERVAÇÃO EXPLÍCITA DE DADOS MANUAIS === nunca sobrescreve na reimportação */
+          proventos:(existing&&existing.proventos&&existing.proventos.length>0)?existing.proventos:(existing&&existing.proventos||[]),
+          notasFiscais:(existing&&existing.notasFiscais)||[],
+          objetivos:(existing&&existing.objetivos)||[],
+          _contratos:(existing&&existing._contratos)||[],
+          movimentacoes:(existing&&existing.movimentacoes)||[],
+          histMensal:(existing&&existing.histMensal)||[],
+          orcamento:(existing&&existing.orcamento)||{}
         });
         dp({t:"RC",p:newC});
         var msg="✅ "+nomeCliente+(existing?" atualizado":" criado")+" • "+ativos.length+" ativos • "+fm(patReal);
@@ -7088,7 +7120,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
         var totalCart=enr.reduce(function(s,a){return s+(a.vA||0);},0);
         /* === Rentabilidade USD ===
            PRIORIDADE 1: extrato PDF Vest importado (mais preciso, vem direto do broker americano)
-           PRIORIDADE 2: Gorila (período mensal, coluna "ext") */
+           PRIORIDADE 2: Gorila (período mensal, coluna "ext")
+           PRIORIDADE 3: Calculado a partir dos ativos individuais (getRentAtivoPer) */
         var rentUSDpct=null,rentUSDvalor=null,fonteRentUSD="";
         if(c._vestRent && typeof c._vestRent.rentPct==="number"){
           rentUSDpct=c._vestRent.rentPct*100;
@@ -7097,6 +7130,22 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
         } else if(temGorila&&c._gorilaRent&&c._gorilaRent.periods){
           var pUSD=findRentMesAtual(c._gorilaRent.periods);
           if(pUSD&&pUSD.ext!=null){rentUSDpct=parseFloat(pUSD.ext)*100;fonteRentUSD="Gorila";}
+        }
+        /* PRIORIDADE 3: calcular a partir dos ativos individuais USD quando não há fonte direta */
+        if(rentUSDpct===null && ativosUSD.length>0){
+          var somaRsUSD=0,somaPosIniUSD=0,algumValido=false;
+          ativosUSD.forEach(function(a){
+            var r=getRentAtivoPer(a);
+            if(r&&r.doPeriodo&&r.rs!=null&&a.vA>0){
+              somaRsUSD+=r.rs;
+              somaPosIniUSD+=(a.vA-r.rs);
+              algumValido=true;
+            }
+          });
+          if(algumValido&&somaPosIniUSD>0){
+            rentUSDpct=(somaRsUSD/somaPosIniUSD)*100;
+            fonteRentUSD="Gorila (estimado)";
+          }
         }
         var labelC='color:#374151';
         var labelS='font-size:9px;color:#6B7480;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px';
@@ -26837,7 +26886,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '277';
+  var SW_VERSION = '279';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
