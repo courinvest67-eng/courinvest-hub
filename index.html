@@ -4780,6 +4780,26 @@ function NewClientForm({onSave,onClose}){
   );
 }
 
+/* Componente isolado para o input de taxa de gestão — necessário para usar hooks (useState/useEffect)
+   fora de um IIFE no JSX, respeitando as regras dos hooks do React. */
+function TaxaGestaoInput({txGestao,clienteId,dispatch:dp}){
+  var [txLocal,setTxLocal]=useState(String(txGestao||0));
+  useEffect(function(){setTxLocal(String(txGestao||0))},[txGestao]);
+  var salvarTaxa=function(){
+    var v=parseFloat(String(txLocal).replace(",",".").replace(/[^\d.]/g,""));
+    if(!isNaN(v)&&v>=0){dp({t:"UC",p:{id:clienteId,txGestao:v}});}
+    else{setTxLocal(String(txGestao||0));}
+  };
+  return <input
+    type="text" inputMode="decimal"
+    value={txLocal}
+    onChange={function(e){setTxLocal(e.target.value)}}
+    onBlur={salvarTaxa}
+    onKeyDown={function(e){if(e.key==="Enter"){e.target.blur();}}}
+    style={{width:"100%",padding:"6px 8px",background:T.w3,border:"1px solid "+T.bdrL,borderRadius:6,color:T.gold,fontSize:14,fontWeight:700,fontFamily:"'JetBrains Mono'",outline:"none",boxSizing:"border-box"}}
+  />;
+}
+
 function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
   /* Salva d globalmente para acesso em closures como gerarRelatorio */
   window._courinvestData=d;
@@ -11710,23 +11730,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
               {c.sv.includes("patrimonio")&&(
                 <div>
                   <div style={{fontSize:9,color:T.t3,fontWeight:600,marginBottom:3}}>TAXA DE GESTÃO (% A.M.)</div>
-                  {(function(){
-                    var [txLocal,setTxLocal]=useState(String(c.txGestao||0));
-                    useEffect(function(){setTxLocal(String(c.txGestao||0))},[c.txGestao]);
-                    var salvarTaxa=function(){
-                      var v=parseFloat(String(txLocal).replace(",",".").replace(/[^\d.]/g,""));
-                      if(!isNaN(v)&&v>=0){dp({t:"UC",p:{id:c.id,txGestao:v}});}
-                      else{setTxLocal(String(c.txGestao||0));}
-                    };
-                    return React.createElement("input",{
-                      type:"text",inputMode:"decimal",
-                      value:txLocal,
-                      onChange:function(e){setTxLocal(e.target.value)},
-                      onBlur:salvarTaxa,
-                      onKeyDown:function(e){if(e.key==="Enter"){e.target.blur();}},
-                      style:{width:"100%",padding:"6px 8px",background:T.w3,border:"1px solid "+T.bdrL,borderRadius:6,color:T.gold,fontSize:14,fontWeight:700,fontFamily:"'JetBrains Mono'",outline:"none",boxSizing:"border-box"}
-                    });
-                  })()}
+                  <TaxaGestaoInput txGestao={c.txGestao} clienteId={c.id} dispatch={dp}/>
                 </div>
               )}
             </div>
@@ -26833,7 +26837,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '276';
+  var SW_VERSION = '277';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
