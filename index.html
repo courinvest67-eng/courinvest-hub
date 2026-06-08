@@ -8183,7 +8183,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
           if(_feeCalc.exclCripto>0)_excLines.push("₿ Cripto: −"+fmF(_feeCalc.exclCripto));
           if(_feeCalc.valorFixo>0)_excLines.push("✂️ Dedução fixa: −"+fmF(_feeCalc.valorFixo));
           var _excNota=_excLines.length>0?_excLines.join("<br>"):"Sem exclusões — patrimônio total na base.";
-          body+="<div style=\"flex:1;min-width:160px;background:#F8F9FB;border-radius:10px;padding:16px 18px;font-size:11px;color:#5a5a6e;line-height:1.8\"><div style=\"font-size:9px;color:#D4A328;font-weight:800;letter-spacing:1.5px;margin-bottom:8px\">MEMÓRIA DE CÁLCULO</div><div>Patrimônio total: <strong>"+fmF(_feeCalc.patTotal)+"</strong></div>"+(_excLines.length>0?"<div style=\"font-size:9px;color:#6B7489;margin:4px 0 2px;font-style:italic\">Exclusões:<br>"+_excNota+"</div>":"")+"<div>Base de cálculo: <strong>"+fmF(_patRV2)+"</strong></div><div>× Taxa: <strong>"+(c.txGestao||0).toFixed(3)+"% a.m.</strong></div><div style=\"border-top:1px solid #e0e0e8;margin:8px 0;padding-top:8px;color:#0A1628;font-weight:700\">= "+fmF(_taxa2)+"</div>"+(_rp2.pixValorOverride>0?"<div style=\"font-size:9px;color:#D4A328\">⚠️ Ajustado manualmente</div>":"")+"</div>";
+          body+="<div style=\"flex:1;min-width:160px;background:#F8F9FB;border-radius:10px;padding:16px 18px;font-size:11px;color:#5a5a6e;line-height:1.8\"><div style=\"font-size:9px;color:#D4A328;font-weight:800;letter-spacing:1.5px;margin-bottom:8px\">MEMÓRIA DE CÁLCULO</div><div>Patrimônio total: <strong>"+fmF(_feeCalc.patTotal)+"</strong></div>"+(_excLines.length>0?"<div style=\"font-size:9px;color:#6B7489;margin:4px 0 2px;font-style:italic\">Exclusões:<br>"+_excNota+"</div>":"")+"<div>Base de cálculo: <strong>"+fmF(_patRV2)+"</strong></div><div>× Taxa: <strong>"+(c.txGestao||0).toFixed(3)+"% a.m.</strong></div><div style=\"border-top:1px solid #e0e0e8;margin:8px 0;padding-top:8px;color:#0A1628;font-weight:700\">= "+fmF(_taxa2)+"</div>"+"</div>";
           body+="</div></div></div>";
         }
       }
@@ -26912,7 +26912,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '281';
+  var SW_VERSION = '282';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
