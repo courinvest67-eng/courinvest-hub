@@ -7123,13 +7123,20 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
            PRIORIDADE 2: Gorila (período mensal, coluna "ext")
            PRIORIDADE 3: Calculado a partir dos ativos individuais (getRentAtivoPer) */
         var rentUSDpct=null,rentUSDvalor=null,fonteRentUSD="";
+        var somaRsUSD_brl=null; /* ganho em BRL dos ativos USD — usado pra converter p/ USD depois */
         if(c._vestRent && typeof c._vestRent.rentPct==="number"){
           rentUSDpct=c._vestRent.rentPct*100;
           rentUSDvalor=c._vestRent.rentUSD;
           fonteRentUSD="Vest";
         } else if(temGorila&&c._gorilaRent&&c._gorilaRent.periods){
           var pUSD=findRentMesAtual(c._gorilaRent.periods);
-          if(pUSD&&pUSD.ext!=null){rentUSDpct=parseFloat(pUSD.ext)*100;fonteRentUSD="Gorila";}
+          if(pUSD&&pUSD.ext!=null){
+            rentUSDpct=parseFloat(pUSD.ext)*100;
+            fonteRentUSD="Gorila";
+            /* Gorila não dá ganho R$ direto por moeda — estima pelo pct sobre o patrimônio ext */
+            var totalUSD_brl_est=ativosUSD.reduce(function(s,a){return s+(a.vA||0);},0);
+            if(totalUSD_brl_est>0) somaRsUSD_brl=totalUSD_brl_est*(rentUSDpct/100)/(1+rentUSDpct/100);
+          }
         }
         /* PRIORIDADE 3: calcular a partir dos ativos individuais USD quando não há fonte direta */
         if(rentUSDpct===null && ativosUSD.length>0){
@@ -7144,6 +7151,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
           });
           if(algumValido&&somaPosIniUSD>0){
             rentUSDpct=(somaRsUSD/somaPosIniUSD)*100;
+            somaRsUSD_brl=somaRsUSD;
             fonteRentUSD="Gorila (estimado)";
           }
         }
@@ -7206,6 +7214,10 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
             fonteUsdRate=usdRelatorio?"fechamento do mês":"câmbio atual";
           }
           var totalUSD_usd=usdRate>0?totalUSD_brl/usdRate:totalUSD_brl/5.70;
+          /* Calcula rentUSDvalor em USD se ainda não veio do Vest */
+          if(rentUSDvalor===null && somaRsUSD_brl!==null && usdRate>0){
+            rentUSDvalor=somaRsUSD_brl/usdRate;
+          }
           var corRentUSD=rentUSDpct!==null?(rentUSDpct>=0?'#0F9D58':'#D93025'):'#374151';
           body+='<div style="background:#EFF6FF;border:1.5px solid #2563EB55;border-left:4px solid #2563EB;border-radius:10px;padding:16px 20px;margin-bottom:14px">';
           body+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
@@ -17280,32 +17292,44 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
                       var dataRefStr=null;
                       if(c._vestRent && c._vestRent.dataFim) dataRefStr=c._vestRent.dataFim; /* formato YYYY-MM-DD */
                       else if(c._gorilaRent && c._gorilaRent.dataFim) dataRefStr=c._gorilaRent.dataFim;
-                      var dataFmt;
+                      /* Calcula a data de referência (último dia do mês de fechamento) */
+                      var refDateObj;
                       if(dataRefStr){
-                        /* Já vem no formato "2026-04-30" → vira "20260430" */
-                        dataFmt=dataRefStr.replace(/-/g,"").substring(0,8);
+                        refDateObj=new Date(dataRefStr+"T12:00:00");
                       } else {
                         /* Fallback: último dia do mês anterior à data atual */
-                        var refDate=new Date();refDate.setDate(1);refDate.setMonth(refDate.getMonth()-1);
-                        var anoRef=refDate.getFullYear();var mesRef=String(refDate.getMonth()+1).padStart(2,"0");
-                        var ultimoDia=new Date(anoRef,refDate.getMonth()+1,0);
-                        var diaStr=String(ultimoDia.getDate()).padStart(2,"0");
-                        dataFmt=anoRef+""+mesRef+""+diaStr;
+                        refDateObj=new Date();refDateObj.setDate(1);refDateObj.setMonth(refDateObj.getMonth()-1);
+                        refDateObj=new Date(refDateObj.getFullYear(),refDateObj.getMonth()+1,0);
                       }
-                      fetch("https://economia.awesomeapi.com.br/json/daily/USD-BRL/5?start_date="+dataFmt+"&end_date="+dataFmt)
-                        .then(function(r){return r.json()})
-                        .then(function(data){
-                          if(Array.isArray(data)&&data.length>0&&data[0].bid){
-                            sUsdRelatorio(parseFloat(data[0].bid));
-                          } else {
-                            /* Fallback: câmbio atual */
-                            sUsdRelatorio(usdRateGlobal||5.70);
-                          }
-                        })
-                        .catch(function(){sUsdRelatorio(usdRateGlobal||5.70);})
-                        .finally(function(){
-                          try{sReportHtml(gerarRelatorio("mensal",d))}catch(e){alert("Erro ao gerar relatório:\n"+e.message+"\n\nLinha: "+e.stack.split("\n")[1])}
-                        });
+                      /* Busca câmbio: tenta o dia exato e até 5 dias anteriores (para cobrir fins de semana/feriados) */
+                      var tentativas=[];
+                      for(var d=0;d<7;d++){
+                        var t=new Date(refDateObj);t.setDate(t.getDate()-d);
+                        var anoT=t.getFullYear();var mesT=String(t.getMonth()+1).padStart(2,"0");var diaT=String(t.getDate()).padStart(2,"0");
+                        tentativas.push(anoT+""+mesT+""+diaT);
+                      }
+                      /* Tenta cada data até achar uma com dado */
+                      var idx=0;
+                      var tryNext=function(){
+                        if(idx>=tentativas.length){
+                          sUsdRelatorio(usdRateGlobal||5.70);
+                          try{sReportHtml(gerarRelatorio("mensal",d))}catch(e){alert("Erro ao gerar relatório:\n"+e.message)}
+                          return;
+                        }
+                        var dataFmt=tentativas[idx++];
+                        fetch("https://economia.awesomeapi.com.br/json/daily/USD-BRL/5?start_date="+dataFmt+"&end_date="+dataFmt)
+                          .then(function(r){return r.json()})
+                          .then(function(data){
+                            if(Array.isArray(data)&&data.length>0&&data[0].bid){
+                              sUsdRelatorio(parseFloat(data[0].bid));
+                              try{sReportHtml(gerarRelatorio("mensal",d))}catch(e){alert("Erro ao gerar relatório:\n"+e.message+"\n\nLinha: "+e.stack.split("\n")[1])}
+                            } else {
+                              tryNext();
+                            }
+                          })
+                          .catch(function(){tryNext();});
+                      };
+                      tryNext();
                     }} style={{padding:20,cursor:"pointer",background:"linear-gradient(145deg,"+T.goldD+",rgba(212,163,40,0.04))",border:"1px solid "+T.gold+"33"}}>
                       <div style={{display:"flex",alignItems:"center",gap:12}}>
                         <div style={{fontSize:32}}>📊</div>
@@ -26886,7 +26910,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '279';
+  var SW_VERSION = '280';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
