@@ -17312,10 +17312,29 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
               {c.sv&&c.sv.includes("patrimonio")&&(
                 <>
                   <div style={{fontSize:10,color:T.t3,fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>📊 Performance da Carteira</div>
+                  {/* Campo para override manual do câmbio USD/BRL */}
+                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,padding:"10px 14px",background:T.w3,borderRadius:8,border:"1px solid "+T.bdrL}}>
+                    <span style={{fontSize:11,color:T.t2,fontWeight:600}}>💱 Câmbio fechamento (USD/BRL):</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="1"
+                      max="20"
+                      placeholder="ex: 5.04"
+                      value={usdRelatorio||""}
+                      onChange={function(e){var v=parseFloat(e.target.value);if(v>1&&v<20)sUsdRelatorio(v);else if(!e.target.value)sUsdRelatorio(null);}}
+                      style={{width:90,padding:"5px 8px",background:"rgba(255,255,255,0.05)",border:"1px solid "+T.bdrL,borderRadius:6,color:T.gold,fontSize:13,fontWeight:700,fontFamily:"'JetBrains Mono'",outline:"none"}}
+                    />
+                    <span style={{fontSize:10,color:T.t3}}>{usdRelatorio?"✅ fixado":"deixe em branco para buscar automaticamente"}</span>
+                  </div>
                   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:12,marginBottom:20}}>
                     <Cd onClick={function(){
-                      /* Busca câmbio do último dia útil do mês do RELATÓRIO.
-                         Prioridade: dataFim do _vestRent (extrato Vest) > dataFim do _gorilaRent > último dia do mês anterior à data atual. */
+                      /* Se câmbio já foi informado manualmente, usa direto sem buscar API */
+                      if(usdRelatorio&&usdRelatorio>1&&usdRelatorio<20){
+                        try{sReportHtml(gerarRelatorio("mensal",d,usdRelatorio))}catch(e){alert("Erro ao gerar relatório:\n"+e.message)}
+                        return;
+                      }
+                      /* Busca câmbio do último dia útil do mês do RELATÓRIO. */
                       var dataRefStr=null;
                       if(c._vestRent && c._vestRent.dataFim) dataRefStr=c._vestRent.dataFim; /* formato YYYY-MM-DD */
                       else if(c._gorilaRent && c._gorilaRent.dataFim) dataRefStr=c._gorilaRent.dataFim;
@@ -17335,7 +17354,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
                         var anoT=t.getFullYear();var mesT=String(t.getMonth()+1).padStart(2,"0");var diaT=String(t.getDate()).padStart(2,"0");
                         tentativas.push(anoT+""+mesT+""+diaT);
                       }
-                      /* Tenta cada data até achar uma com dado */
+                      /* Busca câmbio: usa endpoint de histórico dos últimos 5 dias a partir da data de referência */
                       var idx=0;
                       var tryNext=function(){
                         if(idx>=tentativas.length){
@@ -17345,16 +17364,26 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
                           return;
                         }
                         var dataFmt=tentativas[idx++];
-                        fetch("https://economia.awesomeapi.com.br/json/daily/USD-BRL/5?start_date="+dataFmt+"&end_date="+dataFmt)
+                        /* Usa endpoint daily com janela de 5 dias antes da data — pega o mais recente disponível */
+                        var dataFmtHifen=dataFmt.slice(0,4)+"-"+dataFmt.slice(4,6)+"-"+dataFmt.slice(6,8);
+                        var dtRef=new Date(dataFmtHifen+"T12:00:00");
+                        var dtIni=new Date(dtRef);dtIni.setDate(dtRef.getDate()-5);
+                        var fmtD=function(d){return d.getFullYear()+""+String(d.getMonth()+1).padStart(2,"0")+String(d.getDate()).padStart(2,"0");};
+                        fetch("https://economia.awesomeapi.com.br/json/daily/USD-BRL/5?start_date="+fmtD(dtIni)+"&end_date="+dataFmt)
                           .then(function(r){return r.json()})
                           .then(function(data){
-                            if(Array.isArray(data)&&data.length>0&&data[0].bid){
-                              var taxaFechamento=parseFloat(data[0].bid);
-                              sUsdRelatorio(taxaFechamento);
-                              try{sReportHtml(gerarRelatorio("mensal",d,taxaFechamento))}catch(e){alert("Erro ao gerar relatório:\n"+e.message+"\n\nLinha: "+e.stack.split("\n")[1])}
-                            } else {
-                              tryNext();
+                            if(Array.isArray(data)&&data.length>0){
+                              /* Ordena por timestamp decrescente e pega o mais recente */
+                              var sorted=data.slice().sort(function(a,b){return parseInt(b.timestamp)-parseInt(a.timestamp)});
+                              var melhor=sorted[0];
+                              if(melhor&&melhor.bid){
+                                var taxaFechamento=parseFloat(melhor.bid);
+                                sUsdRelatorio(taxaFechamento);
+                                try{sReportHtml(gerarRelatorio("mensal",d,taxaFechamento))}catch(e){alert("Erro ao gerar relatório:\n"+e.message+"\n\nLinha: "+e.stack.split("\n")[1])}
+                                return;
+                              }
                             }
+                            tryNext();
                           })
                           .catch(function(){tryNext();});
                       };
@@ -26939,7 +26968,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '286';
+  var SW_VERSION = '287';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
