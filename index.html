@@ -6766,7 +6766,25 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       narrativa+='</div>';
       body+=narrativa;
 
-      /* ===== EVOLUÇÃO PATRIMONIAL ===== */
+      /* ===== AVISO COME-COTAS (maio e novembro) ===== */
+      if(tipo==="mensal"){
+        var mesRef=dataRef.getMonth(); /* 0=jan ... 4=mai ... 10=nov */
+        var temFundos=enr.some(function(a){return a.tp==="fundo_rf"||a.tp==="fundo_mm"||a.tp==="fundo_camb"||a.tp==="fundo_acoes"||a.tp==="fundo_infra";});
+        if((mesRef===4||mesRef===10)&&temFundos){
+          body+='<div style="margin:16px 0;padding:16px 18px;background:linear-gradient(135deg,rgba(251,191,36,0.08),rgba(251,191,36,0.03));border:1px solid rgba(251,191,36,0.3);border-radius:12px;border-left:4px solid #F59E0B">'
+            +'<div style="font-size:10px;font-weight:800;color:#D97706;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px">⚠️ Come-Cotas — Evento do Período</div>'
+            +'<div style="font-size:12px;color:#4B5563;line-height:1.7">'
+            +'O mês de <strong>'+(mesRef===4?"maio":"novembro")+'</strong> é um dos dois meses do ano em que ocorre a incidência do <strong>come-cotas</strong> — '
+            +'antecipação do Imposto de Renda cobrada diretamente sobre os fundos de investimento. '
+            +'Nessa data, a Receita Federal desconta automaticamente o IR equivalente à alíquota mínima da tabela regressiva '
+            +'(15% para fundos de longo prazo e 20% para fundos de curto prazo) sobre os rendimentos acumulados no período, '
+            +'reduzindo a quantidade de cotas. '
+            +'<strong>Esse desconto impacta diretamente a rentabilidade líquida dos fundos neste mês</strong>, '
+            +'podendo fazer com que o retorno apareça menor do que a variação bruta dos ativos subjacentes. '
+            +'O IR pago antecipadamente será deduzido no momento do resgate, evitando dupla tributação.'
+            +'</div></div>';
+        }
+      }
       if(secAtiva("evolucao")){
       (function(){
         var patAtualGraf=tCV||c.patGorila||c.pat||0;
@@ -7018,7 +7036,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
 
         var pqCite='ANÁLISE COURINVEST · '+periodoLabel.toUpperCase();
         if(secAtiva('pullquote')){
-          body+='<div class="cv-pullquote"><div class="cv-pullquote-mark">"</div><div class="cv-pullquote-text">'+pqText+'</div><div class="cv-pullquote-cite">— '+pqCite+'</div></div>';
+          body+='<div class="cv-pullquote" style="page-break-inside:avoid;break-inside:avoid"><div class="cv-pullquote-mark">"</div><div class="cv-pullquote-text">'+pqText+'</div><div class="cv-pullquote-cite">— '+pqCite+'</div></div>';
         }
       })();
       } 
@@ -7368,9 +7386,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       var bt={};enr.forEach(function(a){var t=tipoAtivoLabel(a);if(!bt[t])bt[t]={v:0,c:a.col};bt[t].v+=a.vA});
       var btEntries=Object.entries(bt).sort(function(a,b){return b[1].v-a[1].v});
       var totalAlloc=btEntries.reduce(function(s,e){return s+e[1].v},0);
+      if(totalAlloc>0 && btEntries.length>0){
       body+='<!-- PAGE_BREAK -->';
       body+=secTitle('🎨','Alocação da Carteira');
-      if(totalAlloc>0 && btEntries.length>0){
         
         var donutSize=200, donutR=donutSize/2-8, donutInnerR=donutR*0.6, donutCx=donutSize/2;
         var cumAng=0;
@@ -8144,7 +8162,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       });
       var pctUSD=tCV>0?(valUSD/tCV*100):0;
       var pctBRL=tCV>0?(valBRL/tCV*100):0;
-
+      if(tCV>0){
       body+='<!-- PAGE_BREAK -->';
       body+=secTitle('📐','Métricas Estratégicas');
       body+='<div style="display:grid;grid-template-columns:1fr;gap:12px">';
@@ -8172,7 +8190,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       body+='<div style="font-size:11px;color:#9BA5B7;margin-top:10px;line-height:1.6;font-style:italic;padding:8px 10px;background:rgba(107,116,137,0.08);border-radius:6px;border-left:3px solid rgba(107,116,137,0.3)">'+txtExp+'</div>';
       body+='</div>';
       body+='</div>';
-      } 
+      } /* fecha if(tCV>0) */
+      }
 
       /* ===== TAXA + PIX no relatório mensal ===== */
       if(tipo==="mensal" && isPat && (c.txGestao||0)>0){
@@ -13888,7 +13907,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
               "dividendo":"dividendo","dividendos":"dividendo","div":"dividendo",
               "rendimento":"rendimento","rendimentos":"rendimento","rend":"rendimento",
               "jscp":"jscp","juros":"jscp","jcp":"jscp",
-              "restituicao":"restituicao","restituição":"restituicao","rest":"restituicao","amortizacao":"restituicao","amortização":"restituicao"
+              "restituicao":"restituicao","restituição":"restituicao","rest":"restituicao",
+              "amortizacao":"restituicao","amortização":"restituicao",
+              "amortizacoes":"restituicao","amortizações":"restituicao","amortizaçoes":"restituicao"
             };
             
             var ehData=function(s){return /^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(s.trim())};
@@ -13918,14 +13939,26 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
             
             var ehTicker=function(s){return /^[A-Z]{2,6}\d{0,2}[A-Z0-9]{0,2}$/i.test(s.trim())};
             
+            var normalizarTipo=function(s){
+              return s.trim().toLowerCase()
+                .normalize("NFD").replace(/[\u0300-\u036f]/g,"") /* remove acentos */
+                .replace(/\s+/g," ");
+            };
+            
             var ehTipo=function(s){
-              var lLow=s.trim().toLowerCase();
-              return Object.keys(TIPO_MAP).some(function(k){return lLow===k||lLow.indexOf(k)>=0});
+              var lLow=normalizarTipo(s);
+              return Object.keys(TIPO_MAP).some(function(k){
+                var kNorm=normalizarTipo(k);
+                return lLow===kNorm||lLow.indexOf(kNorm)>=0;
+              });
             };
             
             var extraiTipo=function(s){
-              var lLow=s.trim().toLowerCase();
-              for(var k in TIPO_MAP){if(lLow.indexOf(k)>=0)return TIPO_MAP[k]}
+              var lLow=normalizarTipo(s);
+              for(var k in TIPO_MAP){
+                var kNorm=normalizarTipo(k);
+                if(lLow.indexOf(kNorm)>=0)return TIPO_MAP[k];
+              }
               return "rendimento";
             };
 
@@ -26968,7 +27001,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '287';
+  var SW_VERSION = '289';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
