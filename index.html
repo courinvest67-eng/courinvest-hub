@@ -26028,8 +26028,21 @@ function ModuloRendaFixa({c,dispatch,taxasBCB,taxaBCBStatus}){
 function AppWithAuth(){
   const[authUser,sAuthUser]=useState(null);
   const[authChecked,sAuthChecked]=useState(false);
-  
-  if(window._fbLoadError||!window._fbAuth){
+  var fbError=window._fbLoadError||!window._fbAuth;
+  useEffect(function(){
+    if(fbError)return;
+    var unsub=window._fbAuth.onAuthStateChanged(function(user){
+      if(user&&window._fbWhitelist.indexOf((user.email||"").toLowerCase())>=0){
+        sAuthUser(user);
+      }else{
+        sAuthUser(null);
+        if(user)window._fbAuth.signOut();
+      }
+      sAuthChecked(true);
+    });
+    return function(){unsub()};
+  },[]);
+  if(fbError){
     return (
       <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:T.bg,padding:20}}>
         <div style={{maxWidth:480,width:"100%",background:T.card,border:"1px solid "+T.red+"44",borderRadius:20,padding:32,textAlign:"center"}}>
@@ -26048,18 +26061,6 @@ function AppWithAuth(){
       </div>
     );
   }
-  useEffect(function(){
-    var unsub=window._fbAuth.onAuthStateChanged(function(user){
-      if(user&&window._fbWhitelist.indexOf((user.email||"").toLowerCase())>=0){
-        sAuthUser(user);
-      }else{
-        sAuthUser(null);
-        if(user)window._fbAuth.signOut();
-      }
-      sAuthChecked(true);
-    });
-    return function(){unsub()};
-  },[]);
   if(!authChecked){
     return (
       <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:T.bg}}>
@@ -26832,7 +26833,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '275';
+  var SW_VERSION = '276';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
