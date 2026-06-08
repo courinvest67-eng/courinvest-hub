@@ -7263,7 +7263,6 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
          Antes: contrib = peso × rentCarteira → mostrava só proporção do peso, ignorando
          que classes diferentes têm rentabilidades diferentes (RENDA+ +4,4% vs LFT +0,06%). */
       (function(){
-        
         var macroMap={cdb:"Renda Fixa",lci:"Renda Fixa",lca:"Renda Fixa",lc:"Renda Fixa",cri:"Renda Fixa",cra:"Renda Fixa",tesouro:"Renda Fixa",deb:"Renda Fixa",debi:"Renda Fixa",fundo_rf:"Renda Fixa",fundo_mm:"Renda Fixa",fundo_camb:"Renda Fixa",coe:"Renda Fixa",poupanca:"Renda Fixa",acao:"Renda Variável",fii:"Renda Variável",fiagro:"Renda Variável",fip:"Renda Variável",etf_br:"Renda Variável",bdr:"Renda Variável",fundo_acoes:"Renda Variável",ouro:"Renda Variável",fundo_infra:"Renda Variável",stock_us:"Investimento no Exterior",etf_int:"Investimento no Exterior",etf_eu:"Investimento no Exterior",reit:"Investimento no Exterior",prev:"Previdência",cripto:"Cripto",caixa:"Caixa"};
         var byClasse={};
         var totalV=0;
@@ -7280,7 +7279,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
           }
         });
         if(totalV>0 && rentPeriodo!==null){
-          
+          body+='<!-- PAGE_BREAK -->';
           var classesOrdenadas=Object.keys(byClasse).sort(function(a,b){return byClasse[b].v-byClasse[a].v});
           body+=secTitle('🧩','Atribuição de Performance por Classe');
           /* Decide se usa rent. real de cada classe (Gorila) ou aproximação peso × rentCarteira */
@@ -7323,7 +7322,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
           }
           body+='<div class="nota-inline" style="margin-top:14px">'+notaTexto+'</div>';
         } else if(temGorila && c._gorilaRent.atribuicao && c._gorilaRent.atribuicao.length>0){
-          
+          body+='<!-- PAGE_BREAK -->';
           body+=secTitle('🧩','Atribuição de Performance por Classe');
           c._gorilaRent.atribuicao.forEach(function(a){
             var pct=a.pct*100;
@@ -26913,7 +26912,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '283';
+  var SW_VERSION = '284';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
