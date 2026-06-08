@@ -6252,7 +6252,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
     return html;
   };
 
-  var gerarRelatorio=function(tipo, _dadosGlobais){
+  var gerarRelatorio=function(tipo, _dadosGlobais, _usdRateOverride){
     var d=_dadosGlobais; /* dados do estado React passado como parâmetro */
     var normI=function(n){if(!n)return"Sem instituição";if(n.match(/xp\b|xp investimentos/i))return"Rico";if(n.match(/rico/i))return"Rico";if(n.match(/sproutfi|passfolio|PASSFOLIO|passfólio/i))return"Vest";if(n.match(/j\.?\s*safra/i))return"Safra";return n;};
     /* Garante acesso ao estado global d — usa window._courinvestData como fallback */
@@ -6959,7 +6959,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       } /* fim secAtiva("evolucao") */
 
       /* === FASE 4: PULL QUOTE — destaque editorial sobre composição da carteira === */
-      var usdRateRelatorio=usdRelatorio||usdRateGlobal||5.70; /* Câmbio do fechamento do mês de referência */
+      var usdRateRelatorio=_usdRateOverride||usdRelatorio||usdRateGlobal||5.70; /* Câmbio do fechamento do mês de referência */
       var temExt=enr.some(function(a){return ['stock_us','etf_int','etf_eu','reit','bdr'].indexOf(a.tp)>=0});
       var temRV=enr.some(function(a){return ['acao','fii','fiagro','etf_br','fundo_acoes'].indexOf(a.tp)>=0});
       var temRF=enr.some(function(a){return ['cdb','lci','lca','tesouro','fundo_rf','fundo_mm'].indexOf(a.tp)>=0});
@@ -17312,8 +17312,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
                       var idx=0;
                       var tryNext=function(){
                         if(idx>=tentativas.length){
-                          sUsdRelatorio(usdRateGlobal||5.70);
-                          try{sReportHtml(gerarRelatorio("mensal",d))}catch(e){alert("Erro ao gerar relatório:\n"+e.message)}
+                          var taxaFallback=usdRateGlobal||5.70;
+                          sUsdRelatorio(taxaFallback);
+                          try{sReportHtml(gerarRelatorio("mensal",d,taxaFallback))}catch(e){alert("Erro ao gerar relatório:\n"+e.message)}
                           return;
                         }
                         var dataFmt=tentativas[idx++];
@@ -17321,8 +17322,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
                           .then(function(r){return r.json()})
                           .then(function(data){
                             if(Array.isArray(data)&&data.length>0&&data[0].bid){
-                              sUsdRelatorio(parseFloat(data[0].bid));
-                              try{sReportHtml(gerarRelatorio("mensal",d))}catch(e){alert("Erro ao gerar relatório:\n"+e.message+"\n\nLinha: "+e.stack.split("\n")[1])}
+                              var taxaFechamento=parseFloat(data[0].bid);
+                              sUsdRelatorio(taxaFechamento);
+                              try{sReportHtml(gerarRelatorio("mensal",d,taxaFechamento))}catch(e){alert("Erro ao gerar relatório:\n"+e.message+"\n\nLinha: "+e.stack.split("\n")[1])}
                             } else {
                               tryNext();
                             }
@@ -26910,7 +26912,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '280';
+  var SW_VERSION = '281';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
