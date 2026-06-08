@@ -8730,9 +8730,10 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       
       var miniFtr=function(pgNum,pgTotal){        return '<div class="cv-page-footer-mini">'          +'<div class="cv-footer-left-mini">COURINVEST · CONFIDENCIAL</div>'          +'<div class="cv-footer-pagenum-mini">'          +'<div class="cv-pagenum-line-mini"></div>'          +'<span class="cv-pagenum-mini">'+String(pgNum).padStart(2,"0")+'</span>'          +'<span class="cv-pagenum-total-mini">/ '+pgTotal+'</span>'          +'</div></div>';      };
       
-      var totalPgs=2+body.split('<!-- PAGE_BREAK -->').length;
-      
       var bodyPages=body.split('<!-- PAGE_BREAK -->');
+      /* Remove páginas vazias (só whitespace ou tags HTML vazias) — evita folha em branco no PDF */
+      bodyPages=bodyPages.filter(function(pg){return pg.replace(/<[^>]*>/g,'').trim().length>0;});
+      var totalPgs=2+bodyPages.length;
       var pagesHtml='';
       bodyPages.forEach(function(pg,i){
         var isComposicao=pg.indexOf('Composição')>=0&&pg.indexOf('Detalhada')>=0;
@@ -26912,7 +26913,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '282';
+  var SW_VERSION = '283';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
