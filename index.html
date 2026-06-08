@@ -7197,11 +7197,14 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
           var totalUSD_brl=ativosUSD.reduce(function(s,a){return s+(a.vA||0);},0);
           var pesoUSD=totalCart>0?(totalUSD_brl/totalCart*100).toFixed(1):0;
           /* === Câmbio do FECHAMENTO do mês de referência ===
-             PRIORIDADE 1: derivado do extrato Vest (patBRL ÷ patUSD) — mais preciso, é o câmbio que fechou o mês
-             PRIORIDADE 2: usdRateRelatorio (cotação do último dia do mês via AwesomeAPI)
+             PRIORIDADE 1: usdRateRelatorio — cotação real de fechamento via AwesomeAPI (mais preciso)
+             PRIORIDADE 2: derivado do extrato Vest (patBRL ÷ patUSD) — câmbio interno da corretora
              PRIORIDADE 3: fallback 5.70 */
           var usdRate, fonteUsdRate="";
-          if(c._vestRent && c._vestRent.ending && c._vestRent.ending>0 && totalUSD_brl>0){
+          if(usdRateRelatorio && usdRateRelatorio>3 && usdRateRelatorio<10){
+            usdRate=usdRateRelatorio;
+            fonteUsdRate="fechamento do mês";
+          } else if(c._vestRent && c._vestRent.ending && c._vestRent.ending>0 && totalUSD_brl>0){
             /* Câmbio derivado: BRL do Gorila / USD do Vest */
             var rateDerived=totalUSD_brl/c._vestRent.ending;
             if(rateDerived>3 && rateDerived<10){
@@ -7210,8 +7213,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
             }
           }
           if(!usdRate){
-            usdRate=usdRateRelatorio||5.70;
-            fonteUsdRate=usdRelatorio?"fechamento do mês":"câmbio atual";
+            usdRate=usdRateGlobal||5.70;
+            fonteUsdRate="câmbio atual";
           }
           var totalUSD_usd=usdRate>0?totalUSD_brl/usdRate:totalUSD_brl/5.70;
           /* Calcula rentUSDvalor em USD se ainda não veio do Vest */
@@ -26936,7 +26939,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '285';
+  var SW_VERSION = '286';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
