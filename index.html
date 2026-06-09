@@ -19007,7 +19007,8 @@ function FinanceiroView({data:d,dispatch:dp}){
                   {l:"RECEITA "+(selYear==="todos"?"TOTAL":selYear),v:fm(totalEntradas),c:T.green},
                   {l:"DESPESA "+(selYear==="todos"?"TOTAL":selYear),v:fm(totalDespesas),c:T.red},
                   {l:"LUCRO "+(selYear==="todos"?"":""+selYear),v:fm(lucro),c:lucro>=0?T.green:T.red},
-                  {l:"MARGEM OPERACIONAL",v:margem.toFixed(0)+"%",c:margem>=50?T.green:T.gold,hint:"excl. remuneração sócios"},
+                  {l:"MARGEM OPERACIONAL",v:margem.toFixed(0)+"%",c:margem>=70?T.green:T.gold,hint:"excl. remuneração sócios"},
+                  {l:"MARGEM LÍQUIDA",v:(totalEntradas>0?((lucro/totalEntradas)*100):0).toFixed(0)+"%",c:(lucro/totalEntradas*100)>=10?T.green:T.gold,hint:"após todas as despesas"},
                   {l:"ENTRADAS",v:String(entradasFilt.length),c:T.cyan},
                   {l:"MESES",v:String(mesesOrdenados.length),c:T.purple},
                 ].map(function(k,i){return (
@@ -27319,7 +27320,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '302';
+  var SW_VERSION = '303';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
