@@ -26439,6 +26439,8 @@ function App({authUser}){
   const[syncState,sSyncState]=useState("loading"); 
   const isInitialLoadRef=useRef(true);
   const skipNextSaveRef=useRef(false);
+  const finRef=useRef(d.fin); /* Sempre aponta para o fin atual — evita closures stale no sync */
+  useEffect(function(){finRef.current=d.fin;},[d.fin]);
   
   useEffect(function(){
     if(!window._fbDB){sSyncState("error");return}
@@ -26452,7 +26454,7 @@ function App({authUser}){
              (ex: usei o Hub muito tempo antes do Firestore funcionar),
              então o local é mais recente. Faz UPLOAD do local ao invés de
              sobrescrever com Firestore vazio. */
-          var localEntradas=(d.fin&&d.fin.entradas&&d.fin.entradas.length)||0;
+          var localEntradas=((finRef.current&&finRef.current.entradas)||[]).length;
           var remoteEntradas=(data.fin&&data.fin.entradas&&data.fin.entradas.length)||0;
           var localTemMaisDados=
             (d.cl.length>data.cl.length) ||
@@ -26460,8 +26462,8 @@ function App({authUser}){
             ((d.lds||[]).length>(data.lds||[]).length) ||
             (localEntradas>remoteEntradas);
           if(localTemMaisDados){
-            console.log("[Sync] Local tem mais dados ("+d.cl.length+" clientes vs "+data.cl.length+" no Firestore). Fazendo UPLOAD do local.");
-            docRef.set({cl:d.cl,it:d.it,lds:d.lds||[],fin:d.fin||{entradas:[],despesas:[]},updated:Date.now()}).catch(function(e){console.warn("Upload migration failed:",e)});
+            console.log("[Sync] Local tem mais dados. clientes:"+d.cl.length+" vs "+data.cl.length+", entradas:"+localEntradas+" vs "+remoteEntradas+". Fazendo UPLOAD do local.");
+            docRef.set({cl:d.cl,it:d.it,lds:d.lds||[],fin:finRef.current||{entradas:[],despesas:[]},updated:Date.now()}).catch(function(e){console.warn("Upload migration failed:",e)});
             sSyncState("synced");
             isInitialLoadRef.current=false;
             return;
@@ -26494,12 +26496,14 @@ function App({authUser}){
       return;
     }
     
-    var nEntradas=((d.fin&&d.fin.entradas)||[]).length;
+    var nEntradas=((finRef.current&&finRef.current.entradas)||[]).length;
     console.log("[Sync] Agendando save. Entradas fin:",nEntradas,"clientes:",d.cl.length);
     var timeoutId=setTimeout(function(){
       if(!window._fbDB)return;
+      var finToSave=finRef.current||{entradas:[],despesas:[]};
+      console.log("[Sync] Salvando no Firestore. Entradas fin:",((finToSave.entradas)||[]).length);
       window._fbDB.collection("workspaces").doc("main").set({
-        cl:d.cl,it:d.it,lds:d.lds||[],fin:d.fin||{entradas:[],despesas:[]},overviewMercado:d.overviewMercado||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[],updated:Date.now()
+        cl:d.cl,it:d.it,lds:d.lds||[],fin:finToSave,overviewMercado:d.overviewMercado||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[],updated:Date.now()
       }).then(function(){sSyncState("synced")}).catch(function(e){
         console.warn("Firestore save failed:",e);
         sSyncState("offline");
@@ -26546,10 +26550,11 @@ function App({authUser}){
       console.log("[Sync] Atualização recebida do Firestore: "+data.cl.length+" clientes");
       /* Não sobrescreve dados financeiros locais se o local tem mais entradas
          (evita apagar importações recentes que ainda não foram salvas no Firestore) */
-      var localEnt=((d.fin&&d.fin.entradas)||[]).length;
+      var localEnt=((finRef.current&&finRef.current.entradas)||[]).length;
       var remoteEnt=((data.fin&&data.fin.entradas)||[]).length;
-      var finParaUsar=(localEnt>remoteEnt)?(d.fin||{entradas:[],despesas:[]}):(data.fin||{entradas:[],despesas:[]});
-      if(localEnt>remoteEnt) console.log("[Sync] Mantendo fin local ("+localEnt+" > "+remoteEnt+" do Firestore)");
+      var finParaUsar=(localEnt>remoteEnt)?(finRef.current||{entradas:[],despesas:[]}):(data.fin||{entradas:[],despesas:[]});
+      if(localEnt>remoteEnt) console.log("[Sync] onSnapshot: mantendo fin local ("+localEnt+" > "+remoteEnt+" do Firestore)");
+      else console.log("[Sync] onSnapshot: usando fin do Firestore ("+remoteEnt+" entradas)");
       skipNextSaveRef.current=true; 
       dp({t:"REPLACE_ALL",p:{cl:data.cl,it:data.it,lds:data.lds||[],fin:finParaUsar,overviewMercado:data.overviewMercado||{},config:data.config||{},ag:data.ag||[],tpAg:data.tpAg||[]}});
     },function(err){
@@ -27019,7 +27024,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '295';
+  var SW_VERSION = '296';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
