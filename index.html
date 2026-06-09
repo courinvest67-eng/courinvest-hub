@@ -19527,19 +19527,19 @@ function FinanceiroView({data:d,dispatch:dp}){
                       );
                     })}
                   </tbody>
-                  <tfoot><tr style={{borderTop:"2px solid rgba(212,163,40,0.2)",background:"rgba(212,163,40,0.04)"}}>
-                    <td style={{padding:"10px",fontWeight:800,color:T.gold,position:"sticky",left:0,background:"rgba(12,24,48,0.98)",zIndex:1}}>TOTAL</td>
-                    <td style={{padding:"10px",textAlign:"right",fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(totalRecDRE)}</td>
+                  <tfoot><tr style={{borderTop:"2px solid rgba(212,163,40,0.2)",background:"rgba(12,24,48,0.98)"}}>
+                    <td style={{padding:"10px 10px",fontWeight:800,color:T.gold,position:"sticky",left:0,background:"rgba(12,24,48,0.98)",zIndex:1,fontSize:11}}>TOTAL</td>
+                    <td style={{padding:"10px 8px",textAlign:"right",fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'",fontSize:11,whiteSpace:"nowrap"}}>{fm(totalRecDRE)}</td>
                     {catsDespOp.map(function(c){
-                      var tot=despesasFilt.filter(function(d){return(d.cat||"")=== c&&!ehRemuneracao(c)}).reduce(function(s,d){return s+d.valor},0);
-                      return <td key={c} style={{padding:"10px 8px",textAlign:"right",fontWeight:700,color:"#F87171",fontFamily:"'JetBrains Mono'",fontSize:10}}>{tot>0?("-"+fm(tot)):"—"}</td>;
+                      var tot=despesasFilt.filter(function(d){return(d.cat||"")===c&&!ehRemuneracao(c)}).reduce(function(s,d){return s+d.valor},0);
+                      return <td key={c} style={{padding:"10px 8px",textAlign:"right",fontWeight:700,color:"#F87171",fontFamily:"'JetBrains Mono'",fontSize:11,whiteSpace:"nowrap"}}>{tot>0?("-"+fm(tot)):"—"}</td>;
                     })}
-                    <td style={{padding:"10px",textAlign:"right",fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(totalRecDRE-totalDespOpDRE)}</td>
+                    <td style={{padding:"10px 8px",textAlign:"right",fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'",fontSize:11,whiteSpace:"nowrap"}}>{fm(totalRecDRE-totalDespOpDRE)}</td>
                     {catsDespRem.map(function(c){
-                      var tot=despesasFilt.filter(function(d){return(d.cat||"")=== c}).reduce(function(s,d){return s+d.valor},0);
-                      return <td key={c} style={{padding:"10px 8px",textAlign:"right",fontWeight:700,color:"#C084FC",fontFamily:"'JetBrains Mono'",fontSize:10}}>{tot>0?("-"+fm(tot)):"—"}</td>;
+                      var tot=despesasFilt.filter(function(d){return(d.cat||"")===c}).reduce(function(s,d){return s+d.valor},0);
+                      return <td key={c} style={{padding:"10px 8px",textAlign:"right",fontWeight:700,color:"#C084FC",fontFamily:"'JetBrains Mono'",fontSize:11,whiteSpace:"nowrap"}}>{tot>0?("-"+fm(tot)):"—"}</td>;
                     })}
-                    <td style={{padding:"10px",textAlign:"right",fontWeight:800,color:(totalRecDRE-totalDespOpDRE-totalDespRemDRE)>=0?"#34D399":"#F87171",fontFamily:"'JetBrains Mono'"}}>{fm(totalRecDRE-totalDespOpDRE-totalDespRemDRE)}</td>
+                    <td style={{padding:"10px 8px",textAlign:"right",fontWeight:800,color:(totalRecDRE-totalDespOpDRE-totalDespRemDRE)>=0?"#34D399":"#F87171",fontFamily:"'JetBrains Mono'",fontSize:11,whiteSpace:"nowrap"}}>{fm(totalRecDRE-totalDespOpDRE-totalDespRemDRE)}</td>
                   </tr></tfoot>
                 </table>
               </div>
@@ -27255,7 +27255,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '309';
+  var SW_VERSION = '310';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
