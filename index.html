@@ -1265,6 +1265,7 @@ function rd(st,ac){
   if(ac.t==="SET_LEADS") return {...st,lds:ac.p||[]};
   
   if(ac.t==="FIN_ADD_ENTRADAS") return {...st,fin:{...(st.fin||{}),entradas:[...((st.fin&&st.fin.entradas)||[]),...ac.p]}};
+  if(ac.t==="FIN_REPLACE_ENTRADAS") return {...st,fin:{...(st.fin||{}),entradas:ac.p}};
   if(ac.t==="FIN_CLEAR_ENTRADAS") return {...st,fin:{...(st.fin||{}),entradas:[]}};
   if(ac.t==="FIN_ADD_DESPESA") return {...st,fin:{...(st.fin||{}),despesas:[...((st.fin&&st.fin.despesas)||[]),ac.p]}};
   if(ac.t==="FIN_DEL_DESPESA") return {...st,fin:{...(st.fin||{}),despesas:((st.fin&&st.fin.despesas)||[]).filter(function(d){return d.id!==ac.p})}};
@@ -18630,17 +18631,16 @@ function FinanceiroView({data:d,dispatch:dp}){
   const entradas=(d&&d.fin&&d.fin.entradas)||[];
   const despesas=(d&&d.fin&&d.fin.despesas)||[];
   const sEntradas=function(updater){
-    
     var next=typeof updater==="function"?updater(entradas):updater;
-    if(next.length===0)dp({t:"FIN_CLEAR_ENTRADAS"});
-    else if(next.length>entradas.length){
-      
+    if(next.length===0){
+      dp({t:"FIN_CLEAR_ENTRADAS"});
+    } else if(next.length>entradas.length && next.slice(0,entradas.length).every(function(e,i){return e===entradas[i]})){
+      /* Apenas adicionando ao final — usa ADD incremental */
       var added=next.slice(entradas.length);
       dp({t:"FIN_ADD_ENTRADAS",p:added});
-    }else{
-      
-      dp({t:"FIN_CLEAR_ENTRADAS"});
-      if(next.length>0)setTimeout(function(){dp({t:"FIN_ADD_ENTRADAS",p:next})},0);
+    } else {
+      /* Substituição completa — usa REPLACE atômico (evita clear+setTimeout que causa race condition com Firestore) */
+      dp({t:"FIN_REPLACE_ENTRADAS",p:next});
     }
   };
   const sDespesas=function(updater){
@@ -26489,10 +26489,13 @@ function App({authUser}){
     try{localStorage.setItem("courinvest_data_v1",JSON.stringify(d))}
     catch(e){console.warn("localStorage save failed:",e)}
     if(isInitialLoadRef.current||skipNextSaveRef.current){
+      if(skipNextSaveRef.current) console.log("[Sync] Skip save (flag ativo). Entradas fin:",((d.fin&&d.fin.entradas)||[]).length);
       skipNextSaveRef.current=false;
       return;
     }
     
+    var nEntradas=((d.fin&&d.fin.entradas)||[]).length;
+    console.log("[Sync] Agendando save. Entradas fin:",nEntradas,"clientes:",d.cl.length);
     var timeoutId=setTimeout(function(){
       if(!window._fbDB)return;
       window._fbDB.collection("workspaces").doc("main").set({
@@ -26541,8 +26544,14 @@ function App({authUser}){
       if(!data||!Array.isArray(data.cl)||!Array.isArray(data.it))return;
       
       console.log("[Sync] Atualização recebida do Firestore: "+data.cl.length+" clientes");
+      /* Não sobrescreve dados financeiros locais se o local tem mais entradas
+         (evita apagar importações recentes que ainda não foram salvas no Firestore) */
+      var localEnt=((d.fin&&d.fin.entradas)||[]).length;
+      var remoteEnt=((data.fin&&data.fin.entradas)||[]).length;
+      var finParaUsar=(localEnt>remoteEnt)?(d.fin||{entradas:[],despesas:[]}):(data.fin||{entradas:[],despesas:[]});
+      if(localEnt>remoteEnt) console.log("[Sync] Mantendo fin local ("+localEnt+" > "+remoteEnt+" do Firestore)");
       skipNextSaveRef.current=true; 
-      dp({t:"REPLACE_ALL",p:{cl:data.cl,it:data.it,lds:data.lds||[],fin:data.fin||{entradas:[],despesas:[]},overviewMercado:data.overviewMercado||{},config:data.config||{},ag:data.ag||[],tpAg:data.tpAg||[]}});
+      dp({t:"REPLACE_ALL",p:{cl:data.cl,it:data.it,lds:data.lds||[],fin:finParaUsar,overviewMercado:data.overviewMercado||{},config:data.config||{},ag:data.ag||[],tpAg:data.tpAg||[]}});
     },function(err){
       console.warn("[Sync] Listener error:",err);
     });
@@ -27010,7 +27019,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '294';
+  var SW_VERSION = '295';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
