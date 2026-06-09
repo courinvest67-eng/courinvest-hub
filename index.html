@@ -18655,6 +18655,7 @@ function FinanceiroView({data:d,dispatch:dp}){
   const[selMonth,sSelMonth]=useState(null);
   const[selCliFin,sSelCliFin]=useState(null);
   const[selYear,sSelYear]=useState("todos");
+  const[catSel,sCatSel]=useState(null);
 
   
   var importPlanilha=function(file){
@@ -27254,7 +27255,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '308';
+  var SW_VERSION = '309';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
