@@ -10866,8 +10866,6 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
   if(isPat&&!isFin) tabs.push({id:"suc",l:"🏛 Sucessório"});
   if(isPat) tabs.push({id:"fire",l:"🏖 Aposentadoria"});
   
-  if(isPat||isFin) tabs.push({id:"rendafixa",l:"🏦 Renda Fixa"});
-  
   tabs.push({id:"contratos",l:"📎 Contratos"});
   tabs.push({id:"relatorio",l:"📄 Relatório"});
   /* Particularidades — config técnica do cliente (regras de fee, layout do relatório) */
@@ -27009,7 +27007,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '292';
+  var SW_VERSION = '293';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
