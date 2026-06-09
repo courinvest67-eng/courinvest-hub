@@ -1267,7 +1267,9 @@ function rd(st,ac){
   if(ac.t==="FIN_ADD_ENTRADAS") return {...st,fin:{...(st.fin||{}),entradas:[...((st.fin&&st.fin.entradas)||[]),...ac.p]}};
   if(ac.t==="FIN_REPLACE_ENTRADAS") return {...st,fin:{...(st.fin||{}),entradas:ac.p}};
   if(ac.t==="FIN_CLEAR_ENTRADAS") return {...st,fin:{...(st.fin||{}),entradas:[]}};
-  if(ac.t==="FIN_ADD_DESPESA") return {...st,fin:{...(st.fin||{}),despesas:[...((st.fin&&st.fin.despesas)||[]),ac.p]}};
+  if(ac.t==="FIN_ADD_DESPESA") return {...st,fin:{...(st.fin||{}),despesas:[...((st.fin&&st.fin.despesas)||[]),...(Array.isArray(ac.p)?ac.p:[ac.p])]}};
+  if(ac.t==="FIN_REPLACE_DESPESAS") return {...st,fin:{...(st.fin||{}),despesas:ac.p}};
+  if(ac.t==="FIN_CLEAR_DESPESAS") return {...st,fin:{...(st.fin||{}),despesas:[]}};
   if(ac.t==="FIN_DEL_DESPESA") return {...st,fin:{...(st.fin||{}),despesas:((st.fin&&st.fin.despesas)||[]).filter(function(d){return d.id!==ac.p})}};
   if(ac.t==="REPLACE_ALL") return {cl:ac.p.cl||[],it:ac.p.it||[],lds:ac.p.lds||[],fin:ac.p.fin||{entradas:[],despesas:[]},vistaLearning:ac.p.vistaLearning||[],overviewMercado:ac.p.overviewMercado||{},config:ac.p.config||{},ag:ac.p.ag||[],tpAg:ac.p.tpAg||[]};
   /* Configurações (API keys, etc) — chave/valor simples
@@ -18627,6 +18629,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
 function FinanceiroView({data:d,dispatch:dp}){
   const[fTab,sFTab]=useState("importar");
   const fileRef=useRef(null);
+  const fileDeспRef=useRef(null);
   
   const entradas=(d&&d.fin&&d.fin.entradas)||[];
   const despesas=(d&&d.fin&&d.fin.despesas)||[];
@@ -18645,11 +18648,19 @@ function FinanceiroView({data:d,dispatch:dp}){
   };
   const sDespesas=function(updater){
     var next=typeof updater==="function"?updater(despesas):updater;
-    
-    var existingIds=despesas.map(function(x){return x.id});
-    var nextIds=next.map(function(x){return x.id});
-    next.forEach(function(nd){if(existingIds.indexOf(nd.id)<0)dp({t:"FIN_ADD_DESPESA",p:nd})});
-    existingIds.forEach(function(id){if(nextIds.indexOf(id)<0)dp({t:"FIN_DEL_DESPESA",p:id})});
+    if(next.length===0){dp({t:"FIN_CLEAR_DESPESAS"});return;}
+    /* Verifica se é substituição completa ou adição incremental */
+    var existingIds=new Set(despesas.map(function(x){return x.id}));
+    var nextIds=new Set(next.map(function(x){return x.id}));
+    var added=next.filter(function(nd){return!existingIds.has(nd.id)});
+    var removed=despesas.filter(function(od){return!nextIds.has(od.id)});
+    if(removed.length>0||added.length>despesas.length*0.5){
+      /* Substituição grande — usa REPLACE atômico */
+      dp({t:"FIN_REPLACE_DESPESAS",p:next});
+    } else if(added.length>0){
+      dp({t:"FIN_ADD_DESPESA",p:added});
+      removed.forEach(function(od){dp({t:"FIN_DEL_DESPESA",p:od.id})});
+    }
   };
   const[showAddDesp,sShowAddDesp]=useState(false);
   const[selMonth,sSelMonth]=useState(null);
@@ -18846,6 +18857,80 @@ function FinanceiroView({data:d,dispatch:dp}){
             </Cd>
           )}
         </div>
+      )}
+
+      {/* IMPORTAR DESPESAS */}
+      {fTab==="importar" && (
+        <Cd style={{padding:24,marginTop:14}} hov={false}>
+          <div style={{fontSize:14,fontWeight:700,color:"#EF6461",marginBottom:4}}>💸 Importar Planilha de Despesas</div>
+          <div style={{fontSize:12,color:T.t3,marginBottom:14,lineHeight:1.7}}>
+            Formato esperado: <span style={{color:T.t2,fontFamily:"'JetBrains Mono'",fontSize:11}}>Data | Mês | Tipo Despesa | Meio de Pagamento | Meio de Recebimento | Valor</span><br/>
+            Valores negativos são aceitos (o sistema converte automaticamente para positivo).
+          </div>
+          <input ref={fileDeспRef} type="file" accept=".xlsx,.xls,.csv" onChange={function(e){
+            var file=e.target.files[0];if(!file)return;
+            e.target.value="";
+            var XLSX=window.XLSX;
+            if(!XLSX){alert("Biblioteca XLSX não carregada.");return;}
+            var reader=new FileReader();
+            reader.onload=function(ev){
+              try{
+                var wb=XLSX.read(ev.target.result,{type:"array",cellDates:true});
+                var ws=wb.Sheets[wb.SheetNames[0]];
+                var rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+                if(!rows||rows.length===0){alert("Planilha vazia ou formato não reconhecido.");return;}
+                // Detecta colunas
+                var keys=Object.keys(rows[0]);
+                var colData=keys.find(function(k){return /data/i.test(k)});
+                var colTipo=keys.find(function(k){return /tipo|categoria|cat/i.test(k)});
+                var colMeio=keys.find(function(k){return /meio.*pag|pagamento/i.test(k)});
+                var colDesc=keys.find(function(k){return /recebimento|descri|benefi|fornec|destino/i.test(k)});
+                var colValor=keys.find(function(k){return /valor/i.test(k)});
+                if(!colValor){alert("Coluna 'Valor' não encontrada.\nColunas encontradas: "+keys.join(", "));return;}
+                var parseD=function(v){
+                  if(!v)return"";
+                  if(v instanceof Date){var a=v.getFullYear(),m=String(v.getMonth()+1).padStart(2,"0"),d=String(v.getDate()).padStart(2,"0");return a+"-"+m+"-"+d;}
+                  var s=String(v).trim();
+                  // DD/MM/YYYY
+                  var m1=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+                  if(m1)return m1[3]+"-"+m1[2].padStart(2,"0")+"-"+m1[1].padStart(2,"0");
+                  // YYYY-MM-DD
+                  var m2=s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+                  if(m2)return m2[1]+"-"+m2[2].padStart(2,"0")+"-"+m2[3].padStart(2,"0");
+                  return s;
+                };
+                var parseV=function(v){
+                  if(typeof v==="number")return Math.abs(v);
+                  var n=parseFloat(String(v).replace(/[R$\s\.]/g,"").replace(",","."));
+                  return isNaN(n)?0:Math.abs(n);
+                };
+                var parsed=rows.map(function(r,i){
+                  var val=parseV(colValor?r[colValor]:0);
+                  if(val<=0)return null;
+                  return{
+                    id:Date.now()+i,
+                    data:parseD(colData?r[colData]:""),
+                    cat:String(colTipo?r[colTipo]:"Outros").trim(),
+                    meio:String(colMeio?r[colMeio]:"").trim(),
+                    desc:String(colDesc?r[colDesc]:"").trim(),
+                    valor:val,
+                    recorrente:false
+                  };
+                }).filter(function(r){return r!==null;});
+                if(parsed.length===0){alert("Nenhuma despesa encontrada com valor > 0.");return;}
+                sDespesas(function(prev){return prev.concat(parsed);});
+                alert("✅ "+parsed.length+" despesas importadas com sucesso!");
+                sFTab("despesas");
+              }catch(err){alert("Erro ao importar: "+err.message);console.error(err);}
+            };
+            reader.readAsArrayBuffer(file);
+          }} style={{display:"none"}}/>
+          <div style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
+            <Bt onClick={function(){fileDeспRef.current&&fileDeспRef.current.click()}} style={{fontSize:13,padding:"12px 24px",background:"rgba(239,100,97,0.12)",border:"1px solid rgba(239,100,97,0.3)",color:"#EF6461"}}>📂 Selecionar Planilha de Despesas</Bt>
+            {despesas.length>0&&<div style={{fontSize:12,color:"#EF6461",fontWeight:600}}>💸 {despesas.length} despesas carregadas • Total: {fm(despesas.reduce(function(s,d){return s+d.valor},0))}</div>}
+            {despesas.length>0&&<Bt v="secondary" onClick={function(){if(window.confirm("Limpar todas as "+despesas.length+" despesas?"))sDespesas([]);}} style={{fontSize:10,padding:"5px 10px",color:"#EF6461",borderColor:"rgba(239,100,97,0.3)"}}>🗑 Limpar despesas</Bt>}
+          </div>
+        </Cd>
       )}
 
       {/* RESUMO */}
@@ -27024,7 +27109,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '296';
+  var SW_VERSION = '297';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
