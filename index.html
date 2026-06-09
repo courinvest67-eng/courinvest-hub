@@ -19315,7 +19315,14 @@ function FinanceiroView({data:d,dispatch:dp}){
       {}
       {fTab==="dre" && (
         <Cd style={{padding:18}} hov={false}>
-          <h4 style={{margin:"0 0 14px",fontSize:14,fontWeight:700,color:T.gold}}>DRE — Resultado por Mês</h4>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+            <h4 style={{margin:0,fontSize:14,fontWeight:700,color:T.gold}}>DRE — Resultado por Mês</h4>
+            <div style={{display:"flex",gap:4}}>
+              {["todos",...anos].map(function(yr){return(
+                <button key={yr} onClick={function(){sSelYear(yr)}} style={{padding:"5px 12px",borderRadius:8,fontSize:11,fontWeight:600,cursor:"pointer",border:selYear===yr?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.06)",background:selYear===yr?T.goldD:"transparent",color:selYear===yr?T.gold:T.t3}}>{yr==="todos"?"Todos":yr}</button>
+              );})}
+            </div>
+          </div>
           {mesesOrdenados.length===0 ? <div style={{padding:20,textAlign:"center",color:T.t3}}>Importe dados primeiro</div> : (function(){
             /* Meses com despesas */
             var mesesDesp=Object.keys(byDespMonth);
@@ -27100,7 +27107,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '306';
+  var SW_VERSION = '307';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
