@@ -18796,6 +18796,31 @@ function FinanceiroView({data:d,dispatch:dp}){
   
   var byDespCat={};
   despesas.forEach(function(d){var c=d.cat||"Outros";byDespCat[c]=(byDespCat[c]||0)+d.valor});
+
+  /* byDespMonth — despesas filtradas por mês e categoria (escopo global do componente para uso na DRE) */
+  var byDespMonth={};
+  despesasFilt.forEach(function(d){
+    if(!d.data)return;
+    var mm=d.data.substring(0,7);
+    var cat=d.cat||"Outros";
+    if(!byDespMonth[mm])byDespMonth[mm]={total:0,operacional:0,remuneracao:0,cats:{}};
+    byDespMonth[mm].total+=d.valor;
+    if(ehRemuneracao(cat))byDespMonth[mm].remuneracao+=d.valor;
+    else byDespMonth[mm].operacional+=d.valor;
+    byDespMonth[mm].cats[cat]=(byDespMonth[mm].cats[cat]||0)+d.valor;
+  });
+  /* byDespYear — despesas por ano */
+  var byDespYear={};
+  despesas.forEach(function(d){
+    if(!d.data)return;
+    var yr=d.data.substring(0,4);
+    var cat=d.cat||"Outros";
+    if(!byDespYear[yr])byDespYear[yr]={total:0,operacional:0,remuneracao:0,cats:{}};
+    byDespYear[yr].total+=d.valor;
+    if(ehRemuneracao(cat))byDespYear[yr].remuneracao+=d.valor;
+    else byDespYear[yr].operacional+=d.valor;
+    byDespYear[yr].cats[cat]=(byDespYear[yr].cats[cat]||0)+d.valor;
+  });
   var despCatColors={Aluguel:T.red,Software:T.cyan,Contabilidade:T.orange,Marketing:T.purple,Telefonia:T.green,Impostos:T.gold,Outros:T.t3};
 
   var fmtMonth=function(m){var p=m.split("-");return(["","Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"][+p[1]]||p[1])+"/"+p[0].slice(2)};
@@ -27072,7 +27097,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '304';
+  var SW_VERSION = '305';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
