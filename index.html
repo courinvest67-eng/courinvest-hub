@@ -26452,10 +26452,13 @@ function App({authUser}){
              (ex: usei o Hub muito tempo antes do Firestore funcionar),
              então o local é mais recente. Faz UPLOAD do local ao invés de
              sobrescrever com Firestore vazio. */
+          var localEntradas=(d.fin&&d.fin.entradas&&d.fin.entradas.length)||0;
+          var remoteEntradas=(data.fin&&data.fin.entradas&&data.fin.entradas.length)||0;
           var localTemMaisDados=
             (d.cl.length>data.cl.length) ||
             (d.it.length>data.it.length) ||
-            ((d.lds||[]).length>(data.lds||[]).length);
+            ((d.lds||[]).length>(data.lds||[]).length) ||
+            (localEntradas>remoteEntradas);
           if(localTemMaisDados){
             console.log("[Sync] Local tem mais dados ("+d.cl.length+" clientes vs "+data.cl.length+" no Firestore). Fazendo UPLOAD do local.");
             docRef.set({cl:d.cl,it:d.it,lds:d.lds||[],fin:d.fin||{entradas:[],despesas:[]},updated:Date.now()}).catch(function(e){console.warn("Upload migration failed:",e)});
@@ -27007,7 +27010,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '293';
+  var SW_VERSION = '294';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
