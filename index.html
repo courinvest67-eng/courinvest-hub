@@ -18768,6 +18768,9 @@ function FinanceiroView({data:d,dispatch:dp}){
   var despesasFilt=selYear==="todos"?despesas:despesas.filter(function(d){return!d.data||d.data.substring(0,4)===selYear});
 
   var totalEntradas=entradasFilt.reduce(function(a,e){return a+e.valor},0);
+  var CAT_REMUNERACAO=["Pró-Labore","Pró Labore","Pro-Labore","Pro Labore","Distr. Lucro","Distribuição de Lucro","Dist. Lucro","Distribuicao de Lucro"];
+  var ehRemuneracao=function(cat){return CAT_REMUNERACAO.some(function(c){return cat&&cat.toLowerCase().indexOf(c.toLowerCase())>=0});};
+
   var totalDespesas=despesasFilt.reduce(function(a,d){return a+d.valor},0);
   var totalDespOperacional=despesasFilt.filter(function(d){return!ehRemuneracao(d.cat||"")}).reduce(function(a,d){return a+d.valor},0);
   var lucro=totalEntradas-totalDespesas;
@@ -18808,13 +18811,6 @@ function FinanceiroView({data:d,dispatch:dp}){
   entradasFilt.forEach(function(e){var c=e.cliente||"Desconhecido";if(!byCliente[c])byCliente[c]={total:0,count:0,servico:"",meio:"",meses:{},entries:[]};byCliente[c].total+=e.valor;byCliente[c].count++;byCliente[c].servico=e.servico;byCliente[c].meio=e.meio;byCliente[c].entries.push(e);var mm=e.data?e.data.substring(0,7):"";if(mm){byCliente[c].meses[mm]=(byCliente[c].meses[mm]||0)+e.valor}});
 
   
-  /* === CATEGORIAS DE REMUNERAÇÃO DOS SÓCIOS vs DESPESAS OPERACIONAIS === */
-  var CAT_REMUNERACAO=["Pró-Labore","Pró Labore","Pro-Labore","Pro Labore","Distr. Lucro","Distribuição de Lucro","Dist. Lucro","Distribuicao de Lucro"];
-  var ehRemuneracao=function(cat){return CAT_REMUNERACAO.some(function(c){return cat&&cat.toLowerCase().indexOf(c.toLowerCase())>=0});};
-
-  var byDespCat={};
-  despesas.forEach(function(d){var c=d.cat||"Outros";byDespCat[c]=(byDespCat[c]||0)+d.valor});
-
   /* Agrega despesas por ANO → CATEGORIA */
   var byDespYear={};
   despesas.forEach(function(d){
@@ -27323,7 +27319,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '301';
+  var SW_VERSION = '302';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
