@@ -24895,12 +24895,31 @@ function VindiView({data:d,dispatch:dp}){
 
   /* Helpers */
   var getPrice=function(s){
-    /* Vindi pode retornar price em plan.price, plan.billing_cycles, ou como array de pricing_schema */
-    if(!s||!s.plan)return 0;
+    if(!s)return 0;
+    /* Na Vindi, o preço da assinatura vem nas charges ou no plan_items */
+    if(s.amount)return parseFloat(s.amount)||0;
+    if(!s.plan)return 0;
     var p=s.plan;
-    return p.price||p.installments||(p.pricing_schema&&p.pricing_schema.price)||0;
+    if(p.pricing_schema&&p.pricing_schema.price)return parseFloat(p.pricing_schema.price)||0;
+    if(p.price)return parseFloat(p.price)||0;
+    /* Tenta pegar do histórico de cobranças do cliente */
+    var custId=s.customer&&s.customer.id;
+    if(custId){
+      var lastBill=bills.find(function(b){return b.customer&&b.customer.id===custId&&parseFloat(b.amount)>0});
+      if(lastBill)return parseFloat(lastBill.amount)||0;
+    }
+    if(p.plan_items&&p.plan_items.length>0){
+      return p.plan_items.reduce(function(acc,i){
+        return acc+parseFloat((i.pricing_schema&&i.pricing_schema.price)||i.price||0);
+      },0);
+    }
+    return 0;
   };
-  var getBillAmount=function(b){return b.amount||b.amount_with_tax||(b.bill_items&&b.bill_items.reduce(function(s,i){return s+(i.amount||0)},0))||0;};
+  var getBillAmount=function(b){
+    if(!b)return 0;
+    /* amount vem como string "270.0" na API da Vindi */
+    return parseFloat(b.amount||b.amount_with_tax||b.amount_due||0)||0;
+  };
   var billsOverdue=bills.filter(function(b){return b.status==="pending"&&b.due_at&&new Date(b.due_at)<new Date()});
   var billsPending=bills.filter(function(b){return b.status==="pending"||b.status==="waiting"});
   var recebidoMes=bills.filter(function(b){
