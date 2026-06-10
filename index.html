@@ -24851,7 +24851,6 @@ function PropostasView({data,dispatch}){
 }
 
 function VindiView({data:d,dispatch:dp}){
-  var fm=fmMoeda;
   var vindiKey=(d.config&&d.config.vindiKey)||"";
   var[tab,sTab]=useState("dashboard");
   var[apiKey,sApiKey]=useState(vindiKey);
