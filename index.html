@@ -24850,7 +24850,242 @@ function PropostasView({data,dispatch}){
   return null;
 }
 
-const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"fiscal",l:"Fiscal",i:"🧾"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"tutoriais",l:"Tutoriais",i:"📚"}];
+function VindiView({data:d,dispatch:dp}){
+  var savedKey=(d&&d.config&&d.config.vindiKey)||localStorage.getItem("courinvest_vindiKey")||"";
+  var[tab,sTab]=useState(savedKey?"dashboard":"config");
+  var[apiKey,sApiKey]=useState(savedKey);
+  var[saving,sSaving]=useState(false);
+  var[loading,sLoading]=useState(false);
+  var[error,sError]=useState(null);
+  var[customers,sCustomers]=useState([]);
+  var[bills,sBills]=useState([]);
+  var[subscriptions,sSubscriptions]=useState([]);
+  var[lastFetch,sLastFetch]=useState(null);
+  var[selCli,sSelCli]=useState(null);
+
+  var vindiGet=function(endpoint,page,key){
+    page=page||1;
+    if(!key)return Promise.reject(new Error("API Key não configurada"));
+    var auth=btoa(key+":");
+    var targetUrl="https://app.vindi.com.br/api/v1"+endpoint+(endpoint.indexOf("?")>=0?"&":"?")+"per_page=100&page="+page;
+    var proxyUrl="https://corsproxy.io/?url="+encodeURIComponent(targetUrl);
+    return fetch(proxyUrl,{headers:{"Authorization":"Basic "+auth,"Accept":"application/json"}})
+      .then(function(r){if(!r.ok)throw new Error("Erro "+r.status);return r.json();});
+  };
+
+  var carregarTudo=function(key){
+    if(!key){sError("Configure sua API Key primeiro");return;}
+    sLoading(true);sError(null);
+    Promise.all([
+      vindiGet("/customers",1,key),
+      vindiGet("/bills?status[]=paid&status[]=pending&status[]=waiting",1,key),
+      vindiGet("/subscriptions",1,key)
+    ]).then(function(res){
+      console.log("[Vindi] subscription sample:",JSON.stringify(res[2].subscriptions&&res[2].subscriptions[0]));
+      console.log("[Vindi] bill sample:",JSON.stringify(res[1].bills&&res[1].bills[0]));
+      sCustomers(res[0].customers||[]);
+      sBills(res[1].bills||[]);
+      sSubscriptions(res[2].subscriptions||[]);
+      sLastFetch(new Date().toLocaleTimeString("pt-BR"));
+      sLoading(false);sTab("dashboard");
+    }).catch(function(e){sError(e.message);sLoading(false);});
+  };
+
+  useEffect(function(){if(savedKey)carregarTudo(savedKey);},[savedKey]);
+
+  /* Helpers */
+  var getPrice=function(s){
+    /* Vindi pode retornar price em plan.price, plan.billing_cycles, ou como array de pricing_schema */
+    if(!s||!s.plan)return 0;
+    var p=s.plan;
+    return p.price||p.installments||(p.pricing_schema&&p.pricing_schema.price)||0;
+  };
+  var getBillAmount=function(b){return b.amount||b.amount_with_tax||(b.bill_items&&b.bill_items.reduce(function(s,i){return s+(i.amount||0)},0))||0;};
+  var billsOverdue=bills.filter(function(b){return b.status==="pending"&&b.due_at&&new Date(b.due_at)<new Date()});
+  var billsPending=bills.filter(function(b){return b.status==="pending"||b.status==="waiting"});
+  var recebidoMes=bills.filter(function(b){
+    if(b.status!=="paid"||!b.paid_at)return false;
+    var dt=new Date(b.paid_at);var n=new Date();
+    return dt.getMonth()===n.getMonth()&&dt.getFullYear()===n.getFullYear();
+  }).reduce(function(s,b){return s+getBillAmount(b)},0);
+  var mrrTotal=subscriptions.filter(function(s){return s.status==="active"}).reduce(function(s,sub){return s+getPrice(sub)},0);
+  var inadimplencia=bills.length>0?(billsOverdue.length/bills.length*100):0;
+  var matchCliente=function(n){
+    if(!d||!d.cl)return null;
+    var norm=function(s){return String(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim()};
+    var nn=norm(n);
+    return d.cl.find(function(c){var cn=norm(c.n||"");return cn===nn||(cn.split(" ")[0]===nn.split(" ")[0]&&cn.split(" ").slice(-1)[0]===nn.split(" ").slice(-1)[0]);})||null;
+  };
+  var SC={"active":T.green,"canceled":T.red,"suspended":T.gold,"paid":T.green,"pending":T.gold,"waiting":T.cyan,"overdue":T.red};
+  var SL={"active":"Ativo","canceled":"Cancelado","suspended":"Suspenso","paid":"Pago","pending":"Pendente","waiting":"Aguardando","overdue":"Vencido"};
+
+  return (
+    <div style={{padding:"0 0 40px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:10}}>
+        <div>
+          <h2 style={{margin:0,fontSize:20,fontWeight:800}}>⚡ Vindi</h2>
+          <div style={{fontSize:11,color:T.t3,marginTop:2}}>Cobrança recorrente{lastFetch&&<span style={{marginLeft:8,color:T.green}}>· Atualizado às {lastFetch}</span>}</div>
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          {savedKey&&<button onClick={function(){carregarTudo(savedKey)}} disabled={loading} style={{padding:"6px 14px",borderRadius:8,fontSize:11,fontWeight:600,cursor:"pointer",border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.04)",color:T.t2}}>{loading?"⏳...":"🔄 Atualizar"}</button>}
+          <button onClick={function(){sTab("config")}} style={{padding:"6px 14px",borderRadius:8,fontSize:11,fontWeight:600,cursor:"pointer",border:tab==="config"?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.08)",background:tab==="config"?T.goldD:"rgba(255,255,255,0.04)",color:tab==="config"?T.gold:T.t2}}>⚙️ API Key</button>
+        </div>
+      </div>
+      {tab==="config"&&(
+        <Cd style={{padding:24,marginBottom:20}} hov={false}>
+          <div style={{fontSize:14,fontWeight:700,color:T.gold,marginBottom:4}}>🔑 Configurar API Key da Vindi</div>
+          <div style={{fontSize:12,color:T.t3,marginBottom:16}}>Acesse <strong style={{color:T.t2}}>app.vindi.com.br → Configurações → Acesso via API</strong> e copie sua chave privada.</div>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+            <input value={apiKey} onChange={function(e){sApiKey(e.target.value)}} type="password" placeholder="API Key privada..." style={{flex:1,minWidth:260,padding:"10px 14px",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,color:T.t1,fontSize:13,fontFamily:"'JetBrains Mono'",outline:"none"}}/>
+            <Bt onClick={function(){
+              if(!apiKey.trim()){alert("Digite a API Key");return;}
+              sSaving(true);
+              localStorage.setItem("courinvest_vindiKey",apiKey.trim());
+              dp({t:"CONFIG_SET",p:{key:"vindiKey",value:apiKey.trim()}});
+              setTimeout(function(){sSaving(false);carregarTudo(apiKey.trim());},800);
+            }} disabled={saving}>{saving?"Salvando...":"✅ Salvar e Conectar"}</Bt>
+            {savedKey&&<Bt v="secondary" onClick={function(){if(window.confirm("Remover?")){{localStorage.removeItem("courinvest_vindiKey");dp({t:"CONFIG_SET",p:{key:"vindiKey",value:""}});}}}}>🗑</Bt>}
+          </div>
+          {savedKey&&<div style={{marginTop:10,fontSize:11,color:T.green}}>✅ Configurada · {savedKey.substring(0,8)}••••</div>}
+        </Cd>
+      )}
+      {error&&<div style={{padding:12,background:T.redD,border:"1px solid rgba(212,132,126,0.3)",borderRadius:10,color:T.red,fontSize:12,marginBottom:16}}>⚠️ {error}</div>}
+      {!savedKey&&tab!=="config"&&(
+        <Cd style={{padding:40,textAlign:"center"}} hov={false}>
+          <div style={{fontSize:32,marginBottom:12}}>⚡</div>
+          <div style={{fontSize:15,fontWeight:700,marginBottom:6}}>Conecte sua conta Vindi</div>
+          <div style={{fontSize:12,color:T.t3,marginBottom:20}}>Configure sua API Key para acompanhar cobranças e assinaturas.</div>
+          <Bt onClick={function(){sTab("config")}}>Configurar API Key</Bt>
+        </Cd>
+      )}
+      {savedKey&&tab!=="config"&&(
+        <>
+          <div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap"}}>
+            {[{id:"dashboard",l:"📊 Dashboard"},{id:"assinaturas",l:"🔄 Assinaturas"},{id:"cobrancas",l:"💳 Cobranças"},{id:"clientes",l:"👥 Clientes"}].map(function(t){return(
+              <button key={t.id} onClick={function(){sTab(t.id)}} style={{padding:"7px 16px",borderRadius:10,fontSize:11,fontWeight:600,cursor:"pointer",border:tab===t.id?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.06)",background:tab===t.id?T.goldD:"transparent",color:tab===t.id?T.gold:T.t3}}>{t.l}</button>
+            );})}
+          </div>
+          {tab==="dashboard"&&(
+            <div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12,marginBottom:20}}>
+                {[{l:"MRR",v:fm(mrrTotal),c:T.green,sub:"receita recorrente/mês"},{l:"RECEBIDO NO MÊS",v:fm(recebidoMes),c:T.cyan,sub:"faturas pagas"},{l:"ASSINATURAS ATIVAS",v:String(subscriptions.filter(function(s){return s.status==="active"}).length),c:T.gold,sub:"contratos ativos"},{l:"PENDENTE",v:fm(billsPending.reduce(function(s,b){return s+getBillAmount(b)},0)),c:T.gold,sub:billsPending.length+" cobranças"},{l:"INADIMPLÊNCIA",v:inadimplencia.toFixed(1)+"%",c:inadimplencia>5?T.red:T.green,sub:billsOverdue.length+" vencidas"},].map(function(k,i){return(
+                  <Cd key={i} style={{padding:"14px 16px"}} hov={false}>
+                    <div style={{fontSize:8,color:T.t3,fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>{k.l}</div>
+                    <div style={{fontSize:18,fontWeight:800,color:k.c,fontFamily:"'JetBrains Mono'"}}>{k.v}</div>
+                    <div style={{fontSize:9,color:T.t3,marginTop:2}}>{k.sub}</div>
+                  </Cd>
+                );})}
+              </div>
+              <Cd style={{padding:20}} hov={false}>
+                <div style={{fontSize:12,fontWeight:700,color:T.gold,marginBottom:14}}>👥 Clientes & Status</div>
+                {loading?<div style={{padding:20,textAlign:"center",color:T.t3}}>⏳ Carregando...</div>:(
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:10}}>
+                    {customers.slice(0,40).map(function(cust,i){
+                      var sub=subscriptions.find(function(s){return s.customer&&s.customer.id===cust.id});
+                      var match=matchCliente(cust.name);
+                      return(
+                        <div key={i} onClick={function(){sSelCli(selCli===cust.id?null:cust.id)}} style={{padding:14,borderRadius:12,background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.04)",cursor:"pointer"}}>
+                          <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:12,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cust.name}</div>
+                              <div style={{fontSize:10,color:T.t3}}>{cust.email}</div>
+                              {match&&<div style={{fontSize:9,color:T.green,marginTop:2}}>✓ na plataforma</div>}
+                            </div>
+                            <div style={{textAlign:"right",flexShrink:0}}>
+                              {sub&&<div style={{fontSize:9,fontWeight:700,color:SC[sub.status]||T.t3,background:"rgba(255,255,255,0.04)",padding:"2px 8px",borderRadius:6,marginBottom:4}}>{SL[sub.status]||sub.status}</div>}
+                              {sub&&<div style={{fontSize:12,fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(getPrice(sub))}</div>}
+                            </div>
+                          </div>
+                          {selCli===cust.id&&(
+                            <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid rgba(255,255,255,0.04)"}}>
+                              {bills.filter(function(b){return b.customer&&b.customer.id===cust.id}).slice(0,5).map(function(b,bi){
+                                var isOv=b.status==="pending"&&b.due_at&&new Date(b.due_at)<new Date();
+                                var st=isOv?"overdue":b.status;
+                                return(<div key={bi} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid rgba(255,255,255,0.02)",fontSize:10}}>
+                                  <span style={{color:T.t2}}>{b.due_at?new Date(b.due_at).toLocaleDateString("pt-BR"):"—"}</span>
+                                  <span style={{fontWeight:700,color:SC[st]||T.t3,fontFamily:"'JetBrains Mono'"}}>{fm(getBillAmount(b))}</span>
+                                  <span style={{color:SC[st]||T.t3,fontSize:9}}>{SL[st]||st}</span>
+                                </div>);
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Cd>
+            </div>
+          )}
+          {tab==="assinaturas"&&(
+            <Cd style={{padding:20}} hov={false}>
+              <div style={{fontSize:12,fontWeight:700,color:T.gold,marginBottom:14}}>🔄 Assinaturas — {subscriptions.length} total</div>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                <thead><tr style={{borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+                  {["Cliente","Plano","Valor/mês","Próx. cobrança","Status"].map(function(h,i){return<th key={i} style={{padding:"8px 10px",textAlign:i>=2?"right":"left",fontSize:9,color:T.t3,fontWeight:700}}>{h}</th>})}
+                </tr></thead>
+                <tbody>{subscriptions.sort(function(a,b){return getPrice(b)-getPrice(a)}).map(function(s,i){
+                  var cor=SC[s.status]||T.t3;
+                  return(<tr key={i} style={{borderBottom:"1px solid rgba(255,255,255,0.02)",background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
+                    <td style={{padding:"9px 10px",fontWeight:600}}>{s.customer&&s.customer.name||"—"}</td>
+                    <td style={{padding:"9px 10px",color:T.t2}}>{s.plan&&s.plan.name||"—"}</td>
+                    <td style={{padding:"9px 10px",textAlign:"right",fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(getPrice(s))}</td>
+                    <td style={{padding:"9px 10px",textAlign:"right",color:T.t3}}>{s.next_billing_at?new Date(s.next_billing_at).toLocaleDateString("pt-BR"):"—"}</td>
+                    <td style={{padding:"9px 10px",textAlign:"right"}}><span style={{fontSize:9,fontWeight:700,color:cor,background:"rgba(255,255,255,0.04)",padding:"2px 8px",borderRadius:6}}>{SL[s.status]||s.status}</span></td>
+                  </tr>);
+                })}</tbody>
+              </table>
+            </Cd>
+          )}
+          {tab==="cobrancas"&&(
+            <Cd style={{padding:20}} hov={false}>
+              <div style={{fontSize:12,fontWeight:700,color:T.gold,marginBottom:14}}>💳 Cobranças Recentes</div>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                <thead><tr style={{borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+                  {["Cliente","Vencimento","Pagamento","Valor","Status"].map(function(h,i){return<th key={i} style={{padding:"8px 10px",textAlign:i>=2?"right":"left",fontSize:9,color:T.t3,fontWeight:700}}>{h}</th>})}
+                </tr></thead>
+                <tbody>{bills.sort(function(a,b){return new Date(b.created_at)-new Date(a.created_at)}).slice(0,60).map(function(b,i){
+                  var isOv=b.status==="pending"&&b.due_at&&new Date(b.due_at)<new Date();
+                  var st=isOv?"overdue":b.status;var cor=SC[st]||T.t3;
+                  return(<tr key={i} style={{borderBottom:"1px solid rgba(255,255,255,0.02)",background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
+                    <td style={{padding:"9px 10px",fontWeight:600}}>{b.customer&&b.customer.name||"—"}</td>
+                    <td style={{padding:"9px 10px",color:isOv?T.red:T.t3}}>{b.due_at?new Date(b.due_at).toLocaleDateString("pt-BR"):"—"}</td>
+                    <td style={{padding:"9px 10px",textAlign:"right",color:T.t2}}>{b.paid_at?new Date(b.paid_at).toLocaleDateString("pt-BR"):"—"}</td>
+                    <td style={{padding:"9px 10px",textAlign:"right",fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(getBillAmount(b))}</td>
+                    <td style={{padding:"9px 10px",textAlign:"right"}}><span style={{fontSize:9,fontWeight:700,color:cor,background:"rgba(255,255,255,0.04)",padding:"2px 8px",borderRadius:6}}>{SL[st]||st}</span></td>
+                  </tr>);
+                })}</tbody>
+              </table>
+            </Cd>
+          )}
+          {tab==="clientes"&&(
+            <Cd style={{padding:20}} hov={false}>
+              <div style={{fontSize:12,fontWeight:700,color:T.gold,marginBottom:14}}>👥 Clientes — {customers.length}</div>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                <thead><tr style={{borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+                  {["Nome","Email","Assinatura","Valor","Na plataforma"].map(function(h){return<th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:9,color:T.t3,fontWeight:700}}>{h}</th>})}
+                </tr></thead>
+                <tbody>{customers.map(function(cust,i){
+                  var sub=subscriptions.find(function(s){return s.customer&&s.customer.id===cust.id});
+                  var match=matchCliente(cust.name);
+                  return(<tr key={i} style={{borderBottom:"1px solid rgba(255,255,255,0.02)",background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
+                    <td style={{padding:"9px 10px",fontWeight:600}}>{cust.name}</td>
+                    <td style={{padding:"9px 10px",color:T.t3,fontSize:10}}>{cust.email||"—"}</td>
+                    <td style={{padding:"9px 10px"}}>{sub?<span style={{fontSize:9,fontWeight:700,color:SC[sub.status]||T.t3,background:"rgba(255,255,255,0.04)",padding:"2px 8px",borderRadius:6}}>{sub.plan&&sub.plan.name||sub.status}</span>:<span style={{color:T.t3,fontSize:9}}>—</span>}</td>
+                    <td style={{padding:"9px 10px",fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{sub?fm(getPrice(sub)):"—"}</td>
+                    <td style={{padding:"9px 10px"}}>{match?<span style={{fontSize:9,color:T.green,fontWeight:700}}>✓ {match.n}</span>:<span style={{fontSize:9,color:T.t3}}>não vinculado</span>}</td>
+                  </tr>);
+                })}</tbody>
+              </table>
+            </Cd>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"vindi",l:"Vindi",i:"⚡"},{id:"fiscal",l:"Fiscal",i:"🧾"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"tutoriais",l:"Tutoriais",i:"📚"}];
 
 /* ============ AUTH + FIRESTORE SYNC ============ */
 
@@ -26903,6 +27138,7 @@ function App({authUser}){
           {pg==="clients" && !sel && <CL data={d} onSel={function(c){sSel(c)}} dispatch={dp}/>}
           {pg==="clients" && sel && <CD client={sel} data={d} dispatch={dp} onBack={function(){sSel(null)}} taxasBCB={taxasBCB} taxaBCBStatus={taxaBCBStatus}/>}
           {pg==="financeiro" && <FinanceiroView data={d} dispatch={dp}/>}
+          {pg==="vindi" && <VindiView data={d} dispatch={dp}/>}
           {pg==="fiscal" && <FiscalView data={d} dispatch={dp}/>}
           {pg==="metas" && <MetasConsultor/>}
           {pg==="comercial" && <ComercialView data={d} dispatch={dp}/>}
