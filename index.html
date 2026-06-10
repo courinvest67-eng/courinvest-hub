@@ -18627,7 +18627,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
 function FinanceiroView({data:d,dispatch:dp}){
   const[fTab,sFTab]=useState("importar");
   const fileRef=useRef(null);
-  
+  const fileDespRef=useRef(null);
   const entradas=(d&&d.fin&&d.fin.entradas)||[];
   const despesas=(d&&d.fin&&d.fin.despesas)||[];
   const sEntradas=function(updater){
@@ -18812,7 +18812,7 @@ function FinanceiroView({data:d,dispatch:dp}){
       {fTab==="importar" && (
         <div>
           <input ref={fileRef} type="file" accept=".csv,.txt,.tsv,.xlsx,.xls,*/*" multiple onChange={function(e){var files=e.target.files;for(var i=0;i<files.length;i++){importPlanilha(files[i])}e.target.value=""}} style={{display:"none"}}/>
-          <input ref={fileDeспRef} type="file" accept=".xlsx,.xls,.csv" onChange={function(e){
+          <input ref={fileDespRef} type="file" accept=".xlsx,.xls,.csv" onChange={function(e){
             var file=e.target.files[0];if(!file)return;e.target.value="";
             var XLSX=window.XLSX;if(!XLSX){alert("Biblioteca XLSX não carregada.");return;}
             var reader=new FileReader();
@@ -18882,7 +18882,7 @@ function FinanceiroView({data:d,dispatch:dp}){
                 Valores negativos são aceitos.<br/>
                 <span style={{color:T.t2,fontSize:10}}>Data · Tipo Despesa · Meio Pagamento · Recebimento · Valor</span>
               </div>
-              <Bt onClick={function(){fileDeспRef.current&&fileDeспRef.current.click()}} style={{fontSize:13,padding:"12px 24px",width:"100%",background:"rgba(239,100,97,0.12)",border:"1px solid rgba(239,100,97,0.3)",color:"#EF6461"}}>📂 Selecionar Planilha</Bt>
+              <Bt onClick={function(){fileDespRef.current&&fileDespRef.current.click()}} style={{fontSize:13,padding:"12px 24px",width:"100%",background:"rgba(239,100,97,0.12)",border:"1px solid rgba(239,100,97,0.3)",color:"#EF6461"}}>📂 Selecionar Planilha</Bt>
               {despesas.length>0&&(
                 <div style={{marginTop:14}}>
                   <div style={{padding:"8px 12px",background:"rgba(239,100,97,0.08)",borderRadius:8,fontSize:12,color:"#EF6461",fontWeight:600,marginBottom:8}}>✅ {despesas.length} despesas · {fm(despesas.reduce(function(s,d){return s+d.valor},0))}</div>
@@ -24956,41 +24956,50 @@ function VindiView({data:d,dispatch:dp}){
   var[subscriptions,sSubscriptions]=useState([]);
   var[lastFetch,sLastFetch]=useState(null);
   var[selCli,sSelCli]=useState(null);
-  var savedKey=(d.config&&d.config.vindiKey)||"";
+  var savedKey=(d&&d.config&&d.config.vindiKey)||"";
+  var[tab,sTab]=useState(savedKey?"dashboard":"config");
+  var[apiKey,sApiKey]=useState(savedKey);
+  var[saving,sSaving]=useState(false);
+  var[loading,sLoading]=useState(false);
+  var[error,sError]=useState(null);
+  var[customers,sCustomers]=useState([]);
+  var[bills,sBills]=useState([]);
+  var[subscriptions,sSubscriptions]=useState([]);
+  var[lastFetch,sLastFetch]=useState(null);
+  var[selCli,sSelCli]=useState(null);
 
-  var vindiGet=function(endpoint,page){
+  var vindiGet=function(endpoint,page,key){
     page=page||1;
-    var key=savedKey||apiKey;
     if(!key)return Promise.reject(new Error("API Key não configurada"));
     var auth=btoa(key+":");
     var targetUrl="https://app.vindi.com.br/api/v1"+endpoint+(endpoint.indexOf("?")>=0?"&":"?")+"per_page=100&page="+page;
     var proxyUrl="https://corsproxy.io/?url="+encodeURIComponent(targetUrl);
     return fetch(proxyUrl,{
-      headers:{"Authorization":"Basic "+auth,"Content-Type":"application/json","Accept":"application/json","x-cors-api-key":"temp_"+key.substring(0,8)}
+      headers:{"Authorization":"Basic "+auth,"Content-Type":"application/json","Accept":"application/json"}
     }).then(function(r){
       if(!r.ok)throw new Error("Erro "+r.status+": verifique sua API Key");
       return r.json();
     });
   };
 
-  var carregarTudo=function(){
-    var key=savedKey||apiKey;
+  var carregarTudo=function(key){
     if(!key){sError("Configure sua API Key primeiro");return;}
     sLoading(true);sError(null);
     Promise.all([
-      vindiGet("/customers"),
-      vindiGet("/bills?status[]=paid&status[]=pending&status[]=waiting"),
-      vindiGet("/subscriptions")
+      vindiGet("/customers",1,key),
+      vindiGet("/bills?status[]=paid&status[]=pending&status[]=waiting",1,key),
+      vindiGet("/subscriptions",1,key)
     ]).then(function(results){
       sCustomers(results[0].customers||[]);
       sBills(results[1].bills||[]);
       sSubscriptions(results[2].subscriptions||[]);
       sLastFetch(new Date().toLocaleTimeString("pt-BR"));
       sLoading(false);
+      sTab("dashboard");
     }).catch(function(e){sError(e.message);sLoading(false);});
   };
 
-  useEffect(function(){if(savedKey)carregarTudo();},[savedKey]);
+  useEffect(function(){if(savedKey)carregarTudo(savedKey);},[savedKey]);
 
   var billsPaid=bills.filter(function(b){return b.status==="paid"});
   var billsPending=bills.filter(function(b){return b.status==="pending"||b.status==="waiting"});
@@ -25021,7 +25030,7 @@ function VindiView({data:d,dispatch:dp}){
           <div style={{fontSize:11,color:T.t3,marginTop:2}}>Cobrança recorrente e assinaturas{lastFetch&&<span style={{marginLeft:8,color:T.green}}>· Atualizado às {lastFetch}</span>}</div>
         </div>
         <div style={{display:"flex",gap:8}}>
-          {savedKey&&<button onClick={carregarTudo} disabled={loading} style={{padding:"6px 14px",borderRadius:8,fontSize:11,fontWeight:600,cursor:"pointer",border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.04)",color:T.t2}}>{loading?"⏳ Carregando...":"🔄 Atualizar"}</button>}
+          {savedKey&&<button onClick={function(){carregarTudo(savedKey)}} disabled={loading} style={{padding:"6px 14px",borderRadius:8,fontSize:11,fontWeight:600,cursor:"pointer",border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.04)",color:T.t2}}>{loading?"⏳ Carregando...":"🔄 Atualizar"}</button>}
           <button onClick={function(){sTab("config")}} style={{padding:"6px 14px",borderRadius:8,fontSize:11,fontWeight:600,cursor:"pointer",border:tab==="config"?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.08)",background:tab==="config"?T.goldD:"rgba(255,255,255,0.04)",color:tab==="config"?T.gold:T.t2}}>⚙️ API Key</button>
         </div>
       </div>
@@ -25038,7 +25047,7 @@ function VindiView({data:d,dispatch:dp}){
               if(!apiKey.trim()){alert("Digite a API Key");return;}
               sSaving(true);
               dp({t:"CONFIG_SET",p:{key:"vindiKey",value:apiKey.trim()}});
-              setTimeout(function(){sSaving(false);sTab("dashboard");carregarTudo();},600);
+              setTimeout(function(){sSaving(false);carregarTudo(apiKey.trim());},800);
             }} disabled={saving}>{saving?"Salvando...":"✅ Salvar e Conectar"}</Bt>
             {savedKey&&<Bt v="secondary" onClick={function(){if(window.confirm("Remover API Key?"))dp({t:"CONFIG_SET",p:{key:"vindiKey",value:""}});}}>🗑 Remover</Bt>}
           </div>
