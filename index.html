@@ -24956,7 +24956,7 @@ function VindiView({data:d,dispatch:dp}){
   var[subscriptions,sSubscriptions]=useState([]);
   var[lastFetch,sLastFetch]=useState(null);
   var[selCli,sSelCli]=useState(null);
-  var savedKey=(d&&d.config&&d.config.vindiKey)||"";
+  var savedKey=(d&&d.config&&d.config.vindiKey)||localStorage.getItem("courinvest_vindiKey")||"";
   var[tab,sTab]=useState(savedKey?"dashboard":"config");
   var[apiKey,sApiKey]=useState(savedKey);
   var[saving,sSaving]=useState(false);
@@ -25046,10 +25046,11 @@ function VindiView({data:d,dispatch:dp}){
             <Bt onClick={function(){
               if(!apiKey.trim()){alert("Digite a API Key");return;}
               sSaving(true);
+              localStorage.setItem("courinvest_vindiKey",apiKey.trim());
               dp({t:"CONFIG_SET",p:{key:"vindiKey",value:apiKey.trim()}});
               setTimeout(function(){sSaving(false);carregarTudo(apiKey.trim());},800);
             }} disabled={saving}>{saving?"Salvando...":"✅ Salvar e Conectar"}</Bt>
-            {savedKey&&<Bt v="secondary" onClick={function(){if(window.confirm("Remover API Key?"))dp({t:"CONFIG_SET",p:{key:"vindiKey",value:""}});}}>🗑 Remover</Bt>}
+            {savedKey&&<Bt v="secondary" onClick={function(){if(window.confirm("Remover API Key?")){{localStorage.removeItem("courinvest_vindiKey");dp({t:"CONFIG_SET",p:{key:"vindiKey",value:""}});}}}}>🗑 Remover</Bt>}
           </div>
           {savedKey&&<div style={{marginTop:12,fontSize:11,color:T.green}}>✅ API Key configurada · {savedKey.substring(0,8)}••••••••</div>}
         </Cd>
