@@ -18627,7 +18627,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
 function FinanceiroView({data:d,dispatch:dp}){
   const[fTab,sFTab]=useState("importar");
   const fileRef=useRef(null);
-  const fileDespRef=useRef(null);
+  
   const entradas=(d&&d.fin&&d.fin.entradas)||[];
   const despesas=(d&&d.fin&&d.fin.despesas)||[];
   const sEntradas=function(updater){
@@ -18811,92 +18811,21 @@ function FinanceiroView({data:d,dispatch:dp}){
       {}
       {fTab==="importar" && (
         <div>
-          <input ref={fileRef} type="file" accept=".csv,.txt,.tsv,.xlsx,.xls,*/*" multiple onChange={function(e){var files=e.target.files;for(var i=0;i<files.length;i++){importPlanilha(files[i])}e.target.value=""}} style={{display:"none"}}/>
-          <input ref={fileDespRef} type="file" accept=".xlsx,.xls,.csv" onChange={function(e){
-            var file=e.target.files[0];if(!file)return;e.target.value="";
-            var XLSX=window.XLSX;if(!XLSX){alert("Biblioteca XLSX não carregada.");return;}
-            var reader=new FileReader();
-            reader.onload=function(ev){
-              try{
-                var wb=XLSX.read(ev.target.result,{type:"array",cellDates:true});
-                var ws=wb.Sheets[wb.SheetNames[0]];
-                var rows=XLSX.utils.sheet_to_json(ws,{defval:""});
-                if(!rows||rows.length===0){alert("Planilha vazia.");return;}
-                var keys=Object.keys(rows[0]);
-                var colData=keys.find(function(k){return /data/i.test(k)});
-                var colTipo=keys.find(function(k){return /tipo|categoria|cat/i.test(k)});
-                var colMeio=keys.find(function(k){return /meio.*pag|pagamento/i.test(k)});
-                var colDesc=keys.find(function(k){return /recebimento|descri|benefi|fornec|destino/i.test(k)});
-                var colValor=keys.find(function(k){return /valor/i.test(k)});
-                if(!colValor){alert("Coluna 'Valor' não encontrada.\nColunas: "+keys.join(", "));return;}
-                var parseD=function(v){
-                  if(!v)return"";
-                  if(v instanceof Date){return v.getFullYear()+"-"+String(v.getMonth()+1).padStart(2,"0")+"-"+String(v.getDate()).padStart(2,"0");}
-                  var s=String(v).trim();
-                  var m1=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-                  if(m1)return m1[3]+"-"+m1[2].padStart(2,"0")+"-"+m1[1].padStart(2,"0");
-                  return s;
-                };
-                var parseV=function(v){
-                  if(typeof v==="number")return Math.abs(v);
-                  var n=parseFloat(String(v).replace(/[R$\s\.]/g,"").replace(",","."));
-                  return isNaN(n)?0:Math.abs(n);
-                };
-                var parsed=rows.map(function(r,i){
-                  var val=parseV(colValor?r[colValor]:0);
-                  if(val<=0)return null;
-                  return{id:Date.now()+i,data:parseD(colData?r[colData]:""),cat:String(colTipo?r[colTipo]:"Outros").trim(),meio:String(colMeio?r[colMeio]:"").trim(),desc:String(colDesc?r[colDesc]:"").trim(),valor:val};
-                }).filter(Boolean);
-                if(parsed.length===0){alert("Nenhuma despesa com valor > 0.");return;}
-                sDespesas(function(prev){return prev.concat(parsed);});
-                alert("✅ "+parsed.length+" despesas importadas!");
-              }catch(err){alert("Erro: "+err.message);}
-            };
-            reader.readAsArrayBuffer(file);
-          }} style={{display:"none"}}/>
-
-          {/* CARDS LADO A LADO */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
-            {/* ENTRADAS */}
-            <Cd style={{padding:28,textAlign:"center"}} hov={false}>
-              <div style={{fontSize:36,marginBottom:10}}>💰</div>
-              <div style={{fontSize:15,fontWeight:700,color:T.gold,marginBottom:6}}>Planilha de Entradas</div>
-              <div style={{fontSize:11,color:T.t3,marginBottom:18,lineHeight:1.7}}>
-                Selecione uma ou <strong style={{color:T.t2}}>várias planilhas</strong> de uma vez.<br/>
-                <span style={{color:T.t2,fontSize:10}}>Data · Serviço · Meio · Cliente · Valor · NF · % Fat.</span>
-              </div>
-              <Bt onClick={function(){fileRef.current&&fileRef.current.click()}} style={{fontSize:13,padding:"12px 24px",width:"100%"}}>📥 Selecionar Planilha</Bt>
-              {entradas.length>0&&(
-                <div style={{marginTop:14}}>
-                  <div style={{padding:"8px 12px",background:T.greenD,borderRadius:8,fontSize:12,color:T.green,fontWeight:600,marginBottom:8}}>✅ {entradas.length} entradas · {fm(totalEntradas)}</div>
-                  <Bt v="secondary" onClick={function(){if(window.confirm("Limpar todas as entradas?"))sEntradas([]);}} style={{fontSize:10,padding:"5px 12px",width:"100%",color:T.red,borderColor:"rgba(212,132,126,0.3)"}}>🗑 Limpar entradas</Bt>
-                </div>
-              )}
-            </Cd>
-
-            {/* DESPESAS */}
-            <Cd style={{padding:28,textAlign:"center"}} hov={false}>
-              <div style={{fontSize:36,marginBottom:10}}>💸</div>
-              <div style={{fontSize:15,fontWeight:700,color:"#EF6461",marginBottom:6}}>Planilha de Despesas</div>
-              <div style={{fontSize:11,color:T.t3,marginBottom:18,lineHeight:1.7}}>
-                Valores negativos são aceitos.<br/>
-                <span style={{color:T.t2,fontSize:10}}>Data · Tipo Despesa · Meio Pagamento · Recebimento · Valor</span>
-              </div>
-              <Bt onClick={function(){fileDespRef.current&&fileDespRef.current.click()}} style={{fontSize:13,padding:"12px 24px",width:"100%",background:"rgba(239,100,97,0.12)",border:"1px solid rgba(239,100,97,0.3)",color:"#EF6461"}}>📂 Selecionar Planilha</Bt>
-              {despesas.length>0&&(
-                <div style={{marginTop:14}}>
-                  <div style={{padding:"8px 12px",background:"rgba(239,100,97,0.08)",borderRadius:8,fontSize:12,color:"#EF6461",fontWeight:600,marginBottom:8}}>✅ {despesas.length} despesas · {fm(despesas.reduce(function(s,d){return s+d.valor},0))}</div>
-                  <Bt v="secondary" onClick={function(){if(window.confirm("Limpar todas as despesas?"))sDespesas([]);}} style={{fontSize:10,padding:"5px 12px",width:"100%",color:T.red,borderColor:"rgba(212,132,126,0.3)"}}>🗑 Limpar despesas</Bt>
-                </div>
-              )}
-            </Cd>
-          </div>
-
-          {/* PREVIEW ENTRADAS */}
+          <Cd style={{padding:30,textAlign:"center"}} hov={false}>
+            <input ref={fileRef} type="file" accept=".csv,.txt,.tsv,.xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/plain,*/*" multiple onChange={function(e){var files=e.target.files;for(var i=0;i<files.length;i++){importPlanilha(files[i])}e.target.value=""}} style={{display:"none"}}/>
+            <div style={{fontSize:42,marginBottom:14,animation:"float 4s ease infinite"}}>📊</div>
+            <div style={{fontSize:18,fontWeight:700,color:T.gold,marginBottom:6}}>Importar Planilhas de Entradas</div>
+            <div style={{fontSize:13,color:T.t3,marginBottom:18,lineHeight:1.7}}>Selecione uma ou <strong style={{color:T.t2}}>várias planilhas de uma vez</strong>.<br/>Os dados são acumulados automaticamente.<br/><span style={{color:T.t2}}>Colunas: Data | Serviço | Meio de Recebimento | Cliente | Valor | NF | % Fat.</span></div>
+            <Bt onClick={function(){fileRef.current&&fileRef.current.click()}} style={{fontSize:14,padding:"14px 32px"}}>📥 Selecionar Planilhas (CSV ou Excel)</Bt>
+            {entradas.length>0 && <div style={{marginTop:16,padding:10,background:T.greenD,borderRadius:10,fontSize:12,color:T.green,fontWeight:600}}>✅ {entradas.length} entradas carregadas • Total: {fm(totalEntradas)}</div>}
+          </Cd>
           {entradas.length>0 && (
-            <Cd style={{padding:18}} hov={false}>
-              <div style={{fontSize:12,fontWeight:700,color:T.gold,marginBottom:12}}>Preview entradas ({Math.min(entradas.length,20)} de {entradas.length})</div>
-              <div style={{overflowX:"auto",borderRadius:10,border:"1px solid rgba(255,255,255,0.04)"}}>
+            <Cd style={{padding:18,marginTop:14}} hov={false}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <h4 style={{margin:0,fontSize:13,fontWeight:700,color:T.gold}}>Preview ({Math.min(entradas.length,20)} de {entradas.length})</h4>
+                <Bt v="secondary" onClick={function(){sEntradas([]);sFTab("importar")}} style={{fontSize:10,padding:"5px 10px"}}>🗑 Limpar</Bt>
+              </div>
+              <div style={{overflowX:"auto",borderRadius:12,border:"1px solid rgba(255,255,255,0.04)"}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:600}}>
                   <thead><tr style={{background:"rgba(255,255,255,0.02)"}}>
                     {["Data","Serviço","Meio","Cliente","Valor","NF","%"].map(function(h,i){return <th key={i} style={{padding:"8px 10px",textAlign:i>=4?"right":"left",fontWeight:700,color:T.gold,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)"}}>{h}</th>})}
@@ -18910,29 +18839,6 @@ function FinanceiroView({data:d,dispatch:dp}){
                       <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",textAlign:"right",fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(e.valor)}</td>
                       <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",textAlign:"right",color:e.nf==="OK"?T.green:T.t3}}>{e.nf}</td>
                       <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",textAlign:"right",color:T.t3,fontFamily:"'JetBrains Mono'"}}>{e.pctFat?e.pctFat.toFixed(2)+"%":""}</td>
-                    </tr>
-                  )})}</tbody>
-                </table>
-              </div>
-            </Cd>
-          )}
-
-          {/* PREVIEW DESPESAS */}
-          {despesas.length>0 && (
-            <Cd style={{padding:18,marginTop:14}} hov={false}>
-              <div style={{fontSize:12,fontWeight:700,color:"#EF6461",marginBottom:12}}>Preview despesas ({Math.min(despesas.length,20)} de {despesas.length})</div>
-              <div style={{overflowX:"auto",borderRadius:10,border:"1px solid rgba(255,255,255,0.04)"}}>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}>
-                  <thead><tr style={{background:"rgba(255,255,255,0.02)"}}>
-                    {["Data","Categoria","Meio Pag.","Destinatário","Valor"].map(function(h,i){return <th key={i} style={{padding:"8px 10px",textAlign:i>=4?"right":"left",fontWeight:700,color:"#EF6461",fontSize:9,borderBottom:"1px solid rgba(239,100,97,0.1)"}}>{h}</th>})}
-                  </tr></thead>
-                  <tbody>{despesas.slice(0,20).map(function(d,i){return (
-                    <tr key={d.id} style={{background:i%2===0?"transparent":"rgba(255,255,255,0.015)"}}>
-                      <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",whiteSpace:"nowrap"}}>{d.data?d.data.split("-").reverse().join("/"):""}</td>
-                      <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)"}}><Bg c="red">{d.cat||"Outros"}</Bg></td>
-                      <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",color:T.t2}}>{d.meio||"—"}</td>
-                      <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",color:T.t2,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.desc||"—"}</td>
-                      <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",textAlign:"right",fontWeight:700,color:"#EF6461",fontFamily:"'JetBrains Mono'"}}>{fm(d.valor)}</td>
                     </tr>
                   )})}</tbody>
                 </table>
@@ -24944,278 +24850,7 @@ function PropostasView({data,dispatch}){
   return null;
 }
 
-function VindiView({data:d,dispatch:dp}){
-  var vindiKey=(d.config&&d.config.vindiKey)||"";
-  var[tab,sTab]=useState("dashboard");
-  var[apiKey,sApiKey]=useState(vindiKey);
-  var[saving,sSaving]=useState(false);
-  var[loading,sLoading]=useState(false);
-  var[error,sError]=useState(null);
-  var[customers,sCustomers]=useState([]);
-  var[bills,sBills]=useState([]);
-  var[subscriptions,sSubscriptions]=useState([]);
-  var[lastFetch,sLastFetch]=useState(null);
-  var[selCli,sSelCli]=useState(null);
-  var savedKey=(d&&d.config&&d.config.vindiKey)||localStorage.getItem("courinvest_vindiKey")||"";
-  var[tab,sTab]=useState(savedKey?"dashboard":"config");
-  var[apiKey,sApiKey]=useState(savedKey);
-  var[saving,sSaving]=useState(false);
-  var[loading,sLoading]=useState(false);
-  var[error,sError]=useState(null);
-  var[customers,sCustomers]=useState([]);
-  var[bills,sBills]=useState([]);
-  var[subscriptions,sSubscriptions]=useState([]);
-  var[lastFetch,sLastFetch]=useState(null);
-  var[selCli,sSelCli]=useState(null);
-
-  var vindiGet=function(endpoint,page,key){
-    page=page||1;
-    if(!key)return Promise.reject(new Error("API Key não configurada"));
-    var auth=btoa(key+":");
-    var targetUrl="https://app.vindi.com.br/api/v1"+endpoint+(endpoint.indexOf("?")>=0?"&":"?")+"per_page=100&page="+page;
-    var proxyUrl="https://corsproxy.io/?url="+encodeURIComponent(targetUrl);
-    return fetch(proxyUrl,{
-      headers:{"Authorization":"Basic "+auth,"Content-Type":"application/json","Accept":"application/json"}
-    }).then(function(r){
-      if(!r.ok)throw new Error("Erro "+r.status+": verifique sua API Key");
-      return r.json();
-    });
-  };
-
-  var carregarTudo=function(key){
-    if(!key){sError("Configure sua API Key primeiro");return;}
-    sLoading(true);sError(null);
-    Promise.all([
-      vindiGet("/customers",1,key),
-      vindiGet("/bills?status[]=paid&status[]=pending&status[]=waiting",1,key),
-      vindiGet("/subscriptions",1,key)
-    ]).then(function(results){
-      sCustomers(results[0].customers||[]);
-      sBills(results[1].bills||[]);
-      sSubscriptions(results[2].subscriptions||[]);
-      sLastFetch(new Date().toLocaleTimeString("pt-BR"));
-      sLoading(false);
-      sTab("dashboard");
-    }).catch(function(e){sError(e.message);sLoading(false);});
-  };
-
-  useEffect(function(){if(savedKey)carregarTudo(savedKey);},[savedKey]);
-
-  var billsPaid=bills.filter(function(b){return b.status==="paid"});
-  var billsPending=bills.filter(function(b){return b.status==="pending"||b.status==="waiting"});
-  var billsOverdue=bills.filter(function(b){return b.status==="pending"&&b.due_at&&new Date(b.due_at)<new Date()});
-  var mrrTotal=subscriptions.filter(function(s){return s.status==="active"}).reduce(function(sum,s){return sum+(s.plan&&s.plan.interval==="months"&&s.plan.price?s.plan.price:0);},0);
-  var recebidoMes=billsPaid.filter(function(b){
-    if(!b.paid_at)return false;
-    var dt=new Date(b.paid_at);var n=new Date();
-    return dt.getMonth()===n.getMonth()&&dt.getFullYear()===n.getFullYear();
-  }).reduce(function(s,b){return s+(b.amount||0)},0);
-  var inadimplencia=bills.length>0?(billsOverdue.length/bills.length*100):0;
-
-  var matchCliente=function(vindiName){
-    if(!d||!d.cl)return null;
-    var norm=function(s){return String(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim();};
-    var n=norm(vindiName);
-    return d.cl.find(function(c){var cn=norm(c.n||"");return cn===n||(cn.split(" ")[0]===n.split(" ")[0]&&cn.split(" ").slice(-1)[0]===n.split(" ").slice(-1)[0]);})||null;
-  };
-
-  var statusColor={"active":T.green,"canceled":T.red,"suspended":T.gold,"paid":T.green,"pending":T.gold,"waiting":T.cyan,"overdue":T.red};
-  var statusLabel={"active":"Ativo","canceled":"Cancelado","suspended":"Suspenso","paid":"Pago","pending":"Pendente","waiting":"Aguardando","overdue":"Vencido"};
-
-  return (
-    <div style={{padding:"0 0 40px"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:10}}>
-        <div>
-          <h2 style={{margin:0,fontSize:20,fontWeight:800}}>⚡ Vindi</h2>
-          <div style={{fontSize:11,color:T.t3,marginTop:2}}>Cobrança recorrente e assinaturas{lastFetch&&<span style={{marginLeft:8,color:T.green}}>· Atualizado às {lastFetch}</span>}</div>
-        </div>
-        <div style={{display:"flex",gap:8}}>
-          {savedKey&&<button onClick={function(){carregarTudo(savedKey)}} disabled={loading} style={{padding:"6px 14px",borderRadius:8,fontSize:11,fontWeight:600,cursor:"pointer",border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.04)",color:T.t2}}>{loading?"⏳ Carregando...":"🔄 Atualizar"}</button>}
-          <button onClick={function(){sTab("config")}} style={{padding:"6px 14px",borderRadius:8,fontSize:11,fontWeight:600,cursor:"pointer",border:tab==="config"?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.08)",background:tab==="config"?T.goldD:"rgba(255,255,255,0.04)",color:tab==="config"?T.gold:T.t2}}>⚙️ API Key</button>
-        </div>
-      </div>
-
-      {tab==="config"&&(
-        <Cd style={{padding:24,marginBottom:20}} hov={false}>
-          <div style={{fontSize:14,fontWeight:700,color:T.gold,marginBottom:4}}>🔑 Configurar API Key da Vindi</div>
-          <div style={{fontSize:12,color:T.t3,marginBottom:16,lineHeight:1.7}}>
-            Acesse <strong style={{color:T.t2}}>app.vindi.com.br → Configurações → Acesso via API</strong> e copie sua chave privada.
-          </div>
-          <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-            <input value={apiKey} onChange={function(e){sApiKey(e.target.value)}} type="password" placeholder="Sua API Key privada da Vindi..." style={{flex:1,minWidth:260,padding:"10px 14px",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,color:T.t1,fontSize:13,fontFamily:"'JetBrains Mono'",outline:"none"}}/>
-            <Bt onClick={function(){
-              if(!apiKey.trim()){alert("Digite a API Key");return;}
-              sSaving(true);
-              localStorage.setItem("courinvest_vindiKey",apiKey.trim());
-              dp({t:"CONFIG_SET",p:{key:"vindiKey",value:apiKey.trim()}});
-              setTimeout(function(){sSaving(false);carregarTudo(apiKey.trim());},800);
-            }} disabled={saving}>{saving?"Salvando...":"✅ Salvar e Conectar"}</Bt>
-            {savedKey&&<Bt v="secondary" onClick={function(){if(window.confirm("Remover API Key?")){{localStorage.removeItem("courinvest_vindiKey");dp({t:"CONFIG_SET",p:{key:"vindiKey",value:""}});}}}}>🗑 Remover</Bt>}
-          </div>
-          {savedKey&&<div style={{marginTop:12,fontSize:11,color:T.green}}>✅ API Key configurada · {savedKey.substring(0,8)}••••••••</div>}
-        </Cd>
-      )}
-
-      {error&&<div style={{padding:14,background:T.redD,border:"1px solid rgba(212,132,126,0.3)",borderRadius:10,color:T.red,fontSize:12,marginBottom:16}}>⚠️ {error}</div>}
-
-      {!savedKey&&tab!=="config"&&(
-        <Cd style={{padding:40,textAlign:"center"}} hov={false}>
-          <div style={{fontSize:32,marginBottom:12}}>⚡</div>
-          <div style={{fontSize:15,fontWeight:700,marginBottom:6}}>Conecte sua conta Vindi</div>
-          <div style={{fontSize:12,color:T.t3,marginBottom:20}}>Configure sua API Key para acompanhar cobranças e assinaturas em tempo real.</div>
-          <Bt onClick={function(){sTab("config")}}>Configurar API Key</Bt>
-        </Cd>
-      )}
-
-      {savedKey&&tab!=="config"&&(
-        <>
-          <div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap"}}>
-            {[{id:"dashboard",l:"📊 Dashboard"},{id:"assinaturas",l:"🔄 Assinaturas"},{id:"cobrancas",l:"💳 Cobranças"},{id:"clientes",l:"👥 Clientes"}].map(function(t){return(
-              <button key={t.id} onClick={function(){sTab(t.id)}} style={{padding:"7px 16px",borderRadius:10,fontSize:11,fontWeight:600,cursor:"pointer",border:tab===t.id?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.06)",background:tab===t.id?T.goldD:"transparent",color:tab===t.id?T.gold:T.t3}}>{t.l}</button>
-            );})}
-          </div>
-
-          {tab==="dashboard"&&(
-            <div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12,marginBottom:20}}>
-                {[
-                  {l:"MRR",v:fm(mrrTotal),c:T.green,sub:"receita recorrente/mês"},
-                  {l:"RECEBIDO NO MÊS",v:fm(recebidoMes),c:T.cyan,sub:"faturas pagas este mês"},
-                  {l:"ASSINATURAS ATIVAS",v:String(subscriptions.filter(function(s){return s.status==="active"}).length),c:T.gold,sub:"contratos recorrentes"},
-                  {l:"PENDENTE",v:fm(billsPending.reduce(function(s,b){return s+(b.amount||0)},0)),c:T.gold,sub:billsPending.length+" cobranças"},
-                  {l:"INADIMPLÊNCIA",v:inadimplencia.toFixed(1)+"%",c:inadimplencia>5?T.red:T.green,sub:billsOverdue.length+" vencidas"},
-                ].map(function(k,i){return(
-                  <Cd key={i} style={{padding:"14px 16px"}} hov={false}>
-                    <div style={{fontSize:8,color:T.t3,fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>{k.l}</div>
-                    <div style={{fontSize:18,fontWeight:800,color:k.c,fontFamily:"'JetBrains Mono'"}}>{k.v}</div>
-                    <div style={{fontSize:9,color:T.t3,marginTop:2}}>{k.sub}</div>
-                  </Cd>
-                );})}
-              </div>
-              <Cd style={{padding:20}} hov={false}>
-                <div style={{fontSize:12,fontWeight:700,color:T.gold,marginBottom:14}}>👥 Clientes & Status</div>
-                {loading?<div style={{padding:20,textAlign:"center",color:T.t3}}>⏳ Carregando...</div>:(
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:10}}>
-                    {customers.slice(0,30).map(function(cust,i){
-                      var sub=subscriptions.find(function(s){return s.customer&&s.customer.id===cust.id});
-                      var match=matchCliente(cust.name);
-                      return(
-                        <div key={i} onClick={function(){sSelCli(selCli===cust.id?null:cust.id)}} style={{padding:14,borderRadius:12,background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.04)",cursor:"pointer"}}>
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-                            <div style={{flex:1,minWidth:0}}>
-                              <div style={{fontSize:12,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cust.name}</div>
-                              <div style={{fontSize:10,color:T.t3,marginTop:2}}>{cust.email}</div>
-                              {match&&<div style={{fontSize:9,color:T.green,marginTop:3}}>✓ vinculado na plataforma</div>}
-                            </div>
-                            <div style={{textAlign:"right",flexShrink:0}}>
-                              {sub&&<div style={{fontSize:9,fontWeight:700,color:statusColor[sub.status]||T.t3,background:"rgba(255,255,255,0.04)",padding:"2px 8px",borderRadius:6}}>{statusLabel[sub.status]||sub.status}</div>}
-                              {sub&&sub.plan&&<div style={{fontSize:11,fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'",marginTop:4}}>{fm(sub.plan.price||0)}</div>}
-                            </div>
-                          </div>
-                          {selCli===cust.id&&(
-                            <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid rgba(255,255,255,0.04)"}}>
-                              <div style={{fontSize:10,color:T.t3,marginBottom:6}}>Últimas cobranças</div>
-                              {bills.filter(function(b){return b.customer&&b.customer.id===cust.id}).slice(0,5).map(function(b,bi){
-                                var venc=b.due_at?new Date(b.due_at).toLocaleDateString("pt-BR"):"—";
-                                var pago=b.paid_at?new Date(b.paid_at).toLocaleDateString("pt-BR"):null;
-                                var cor=statusColor[b.status]||T.t3;
-                                return(<div key={bi} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.02)",fontSize:10}}>
-                                  <span style={{color:T.t2}}>{pago?"Pago "+pago:"Venc. "+venc}</span>
-                                  <span style={{color:cor,fontWeight:700,fontFamily:"'JetBrains Mono'"}}>{fm(b.amount||0)}</span>
-                                  <span style={{color:cor,fontSize:9}}>{statusLabel[b.status]||b.status}</span>
-                                </div>);
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </Cd>
-            </div>
-          )}
-
-          {tab==="assinaturas"&&(
-            <Cd style={{padding:20}} hov={false}>
-              <div style={{fontSize:12,fontWeight:700,color:T.gold,marginBottom:14}}>🔄 Assinaturas — {subscriptions.length} total</div>
-              {loading?<div style={{padding:20,textAlign:"center",color:T.t3}}>⏳ Carregando...</div>:(
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                  <thead><tr style={{borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
-                    {["Cliente","Plano","Valor/mês","Próx. cobrança","Status"].map(function(h,i){return<th key={i} style={{padding:"8px 10px",textAlign:i>=2?"right":"left",fontSize:9,color:T.t3,fontWeight:700,letterSpacing:1}}>{h}</th>})}
-                  </tr></thead>
-                  <tbody>{subscriptions.sort(function(a,b){return(b.plan&&b.plan.price||0)-(a.plan&&a.plan.price||0)}).map(function(s,i){
-                    var cor=statusColor[s.status]||T.t3;
-                    var proxData=s.next_billing_at?new Date(s.next_billing_at).toLocaleDateString("pt-BR"):"—";
-                    return(<tr key={i} style={{borderBottom:"1px solid rgba(255,255,255,0.02)",background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
-                      <td style={{padding:"9px 10px",fontWeight:600}}>{s.customer&&s.customer.name||"—"}</td>
-                      <td style={{padding:"9px 10px",color:T.t2}}>{s.plan&&s.plan.name||"—"}</td>
-                      <td style={{padding:"9px 10px",textAlign:"right",fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(s.plan&&s.plan.price||0)}</td>
-                      <td style={{padding:"9px 10px",textAlign:"right",color:T.t3}}>{proxData}</td>
-                      <td style={{padding:"9px 10px",textAlign:"right"}}><span style={{fontSize:9,fontWeight:700,color:cor,background:"rgba(255,255,255,0.04)",padding:"2px 8px",borderRadius:6}}>{statusLabel[s.status]||s.status}</span></td>
-                    </tr>);
-                  })}</tbody>
-                </table>
-              )}
-            </Cd>
-          )}
-
-          {tab==="cobrancas"&&(
-            <Cd style={{padding:20}} hov={false}>
-              <div style={{fontSize:12,fontWeight:700,color:T.gold,marginBottom:14}}>💳 Cobranças Recentes</div>
-              {loading?<div style={{padding:20,textAlign:"center",color:T.t3}}>⏳ Carregando...</div>:(
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                  <thead><tr style={{borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
-                    {["Cliente","Vencimento","Pagamento","Valor","Status"].map(function(h,i){return<th key={i} style={{padding:"8px 10px",textAlign:i>=2?"right":"left",fontSize:9,color:T.t3,fontWeight:700,letterSpacing:1}}>{h}</th>})}
-                  </tr></thead>
-                  <tbody>{bills.sort(function(a,b){return new Date(b.created_at)-new Date(a.created_at)}).slice(0,50).map(function(b,i){
-                    var venc=b.due_at?new Date(b.due_at).toLocaleDateString("pt-BR"):"—";
-                    var pago=b.paid_at?new Date(b.paid_at).toLocaleDateString("pt-BR"):"—";
-                    var isOverdue=b.status==="pending"&&b.due_at&&new Date(b.due_at)<new Date();
-                    var status=isOverdue?"overdue":b.status;
-                    var cor=statusColor[status]||T.t3;
-                    return(<tr key={i} style={{borderBottom:"1px solid rgba(255,255,255,0.02)",background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
-                      <td style={{padding:"9px 10px",fontWeight:600}}>{b.customer&&b.customer.name||"—"}</td>
-                      <td style={{padding:"9px 10px",color:isOverdue?T.red:T.t3}}>{venc}</td>
-                      <td style={{padding:"9px 10px",textAlign:"right",color:T.t2}}>{pago}</td>
-                      <td style={{padding:"9px 10px",textAlign:"right",fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(b.amount||0)}</td>
-                      <td style={{padding:"9px 10px",textAlign:"right"}}><span style={{fontSize:9,fontWeight:700,color:cor,background:"rgba(255,255,255,0.04)",padding:"2px 8px",borderRadius:6}}>{statusLabel[status]||status}</span></td>
-                    </tr>);
-                  })}</tbody>
-                </table>
-              )}
-            </Cd>
-          )}
-
-          {tab==="clientes"&&(
-            <Cd style={{padding:20}} hov={false}>
-              <div style={{fontSize:12,fontWeight:700,color:T.gold,marginBottom:14}}>👥 Clientes Vindi — {customers.length} cadastrados</div>
-              {loading?<div style={{padding:20,textAlign:"center",color:T.t3}}>⏳ Carregando...</div>:(
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                  <thead><tr style={{borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
-                    {["Nome","Email","Assinatura","Na plataforma"].map(function(h){return<th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:9,color:T.t3,fontWeight:700,letterSpacing:1}}>{h}</th>})}
-                  </tr></thead>
-                  <tbody>{customers.map(function(cust,i){
-                    var sub=subscriptions.find(function(s){return s.customer&&s.customer.id===cust.id});
-                    var match=matchCliente(cust.name);
-                    return(<tr key={i} style={{borderBottom:"1px solid rgba(255,255,255,0.02)",background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
-                      <td style={{padding:"9px 10px",fontWeight:600}}>{cust.name}</td>
-                      <td style={{padding:"9px 10px",color:T.t3,fontSize:10}}>{cust.email||"—"}</td>
-                      <td style={{padding:"9px 10px"}}>{sub?<span style={{fontSize:9,fontWeight:700,color:statusColor[sub.status]||T.t3,background:"rgba(255,255,255,0.04)",padding:"2px 8px",borderRadius:6}}>{sub.plan&&sub.plan.name||sub.status}</span>:<span style={{color:T.t3,fontSize:9}}>—</span>}</td>
-                      <td style={{padding:"9px 10px"}}>{match?<span style={{fontSize:9,color:T.green,fontWeight:700}}>✓ {match.n}</span>:<span style={{fontSize:9,color:T.t3}}>não vinculado</span>}</td>
-                    </tr>);
-                  })}</tbody>
-                </table>
-              )}
-            </Cd>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"vindi",l:"Vindi",i:"⚡"},{id:"fiscal",l:"Fiscal",i:"🧾"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"tutoriais",l:"Tutoriais",i:"📚"}];
+const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"fiscal",l:"Fiscal",i:"🧾"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"tutoriais",l:"Tutoriais",i:"📚"}];
 
 /* ============ AUTH + FIRESTORE SYNC ============ */
 
@@ -26711,6 +26346,14 @@ function App({authUser}){
         var parsed=JSON.parse(saved);
         if(parsed&&Array.isArray(parsed.cl)&&Array.isArray(parsed.it)){
           if(!parsed.fin)parsed.fin={entradas:[],despesas:[]};
+          /* Restaura fin do localStorage dedicado (evita limite 1MB do Firestore) */
+          try{
+            var finSaved=localStorage.getItem("courinvest_fin");
+            if(finSaved){
+              var finParsed=JSON.parse(finSaved);
+              if(finParsed&&Array.isArray(finParsed.entradas)){parsed.fin=finParsed;}
+            }
+          }catch(e){console.warn("fin localStorage read failed:",e);}
           if(!Array.isArray(parsed.lds))parsed.lds=[]; 
           if(!Array.isArray(parsed.vistaLearning))parsed.vistaLearning=[]; 
           if(!Array.isArray(parsed.ag))parsed.ag=[]; 
@@ -26835,9 +26478,7 @@ function App({authUser}){
           }
           
           skipNextSaveRef.current=true;
-          /* Mescla config: local tem prioridade (preserva vindiKey e outras chaves recentes) */
-          var configMesclado0=Object.assign({},data.config||{},d&&d.config?d.config:{});
-          dp({t:"REPLACE_ALL",p:{cl:data.cl,it:data.it,lds:data.lds||[],fin:data.fin||{entradas:[],despesas:[]},overviewMercado:data.overviewMercado||{},config:configMesclado0,ag:data.ag||[],tpAg:data.tpAg||[]}});
+          dp({t:"REPLACE_ALL",p:{cl:data.cl,it:data.it,lds:data.lds||[],fin:data.fin||{entradas:[],despesas:[]},overviewMercado:data.overviewMercado||{},config:data.config||{},ag:data.ag||[],tpAg:data.tpAg||[]}});
           console.log("[Sync] Carregado do Firestore: "+data.cl.length+" clientes, "+data.it.length+" interações");
         }
       }else{
@@ -26867,10 +26508,13 @@ function App({authUser}){
     console.log("[Sync] Agendando save. Entradas fin:",nEntradas,"clientes:",d.cl.length);
     var timeoutId=setTimeout(function(){
       if(!window._fbDB)return;
+      /* Salva fin no localStorage (dados grandes — evita limite 1MB do Firestore) */
       var finToSave=finRef.current||{entradas:[],despesas:[]};
-      console.log("[Sync] Salvando no Firestore. Entradas fin:",((finToSave.entradas)||[]).length);
+      try{localStorage.setItem("courinvest_fin",JSON.stringify(finToSave));}catch(e){console.warn("localStorage fin failed:",e);}
+      console.log("[Sync] Salvando no Firestore. Entradas fin:",nEntradas,"(no localStorage)");
+      /* Salva no Firestore SEM o fin */
       window._fbDB.collection("workspaces").doc("main").set({
-        cl:d.cl,it:d.it,lds:d.lds||[],fin:finToSave,overviewMercado:d.overviewMercado||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[],updated:Date.now()
+        cl:d.cl,it:d.it,lds:d.lds||[],fin:{entradas:[],despesas:[]},overviewMercado:d.overviewMercado||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[],updated:Date.now()
       }).then(function(){sSyncState("synced")}).catch(function(e){
         console.warn("Firestore save failed:",e);
         sSyncState("offline");
@@ -26922,12 +26566,8 @@ function App({authUser}){
       var finParaUsar=(localEnt>remoteEnt)?(finRef.current||{entradas:[],despesas:[]}):(data.fin||{entradas:[],despesas:[]});
       if(localEnt>remoteEnt) console.log("[Sync] onSnapshot: mantendo fin local ("+localEnt+" > "+remoteEnt+" do Firestore)");
       else console.log("[Sync] onSnapshot: usando fin do Firestore ("+remoteEnt+" entradas)");
-      skipNextSaveRef.current=true;
-      /* Mescla config: local tem prioridade para chaves que o remoto não tem (ex: vindiKey salvo recentemente) */
-      var configLocal=d&&d.config?d.config:{};
-      var configRemoto=data.config||{};
-      var configMesclado=Object.assign({},configRemoto,configLocal);
-      dp({t:"REPLACE_ALL",p:{cl:data.cl,it:data.it,lds:data.lds||[],fin:finParaUsar,overviewMercado:data.overviewMercado||{},config:configMesclado,ag:data.ag||[],tpAg:data.tpAg||[]}});
+      skipNextSaveRef.current=true; 
+      dp({t:"REPLACE_ALL",p:{cl:data.cl,it:data.it,lds:data.lds||[],fin:finParaUsar,overviewMercado:data.overviewMercado||{},config:data.config||{},ag:data.ag||[],tpAg:data.tpAg||[]}});
     },function(err){
       console.warn("[Sync] Listener error:",err);
     });
@@ -27263,7 +26903,6 @@ function App({authUser}){
           {pg==="clients" && !sel && <CL data={d} onSel={function(c){sSel(c)}} dispatch={dp}/>}
           {pg==="clients" && sel && <CD client={sel} data={d} dispatch={dp} onBack={function(){sSel(null)}} taxasBCB={taxasBCB} taxaBCBStatus={taxaBCBStatus}/>}
           {pg==="financeiro" && <FinanceiroView data={d} dispatch={dp}/>}
-          {pg==="vindi" && <VindiView data={d} dispatch={dp}/>}
           {pg==="fiscal" && <FiscalView data={d} dispatch={dp}/>}
           {pg==="metas" && <MetasConsultor/>}
           {pg==="comercial" && <ComercialView data={d} dispatch={dp}/>}
