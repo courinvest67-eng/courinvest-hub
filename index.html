@@ -18627,7 +18627,6 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
 function FinanceiroView({data:d,dispatch:dp}){
   const[fTab,sFTab]=useState("importar");
   const fileRef=useRef(null);
-  const fileDeспRef=useRef(null);
   
   const entradas=(d&&d.fin&&d.fin.entradas)||[];
   const despesas=(d&&d.fin&&d.fin.despesas)||[];
@@ -18656,7 +18655,6 @@ function FinanceiroView({data:d,dispatch:dp}){
   const[selMonth,sSelMonth]=useState(null);
   const[selCliFin,sSelCliFin]=useState(null);
   const[selYear,sSelYear]=useState("todos");
-  const[catSel,sCatSel]=useState(null);
 
   
   var importPlanilha=function(file){
@@ -18758,9 +18756,6 @@ function FinanceiroView({data:d,dispatch:dp}){
   var despesasFilt=selYear==="todos"?despesas:despesas.filter(function(d){return!d.data||d.data.substring(0,4)===selYear});
 
   var totalEntradas=entradasFilt.reduce(function(a,e){return a+e.valor},0);
-  var CAT_REMUNERACAO=["Pró-Labore","Pró Labore","Pro-Labore","Pro Labore","Distr. Lucro","Distribuição de Lucro","Dist. Lucro","Distribuicao de Lucro"];
-  var ehRemuneracao=function(cat){return CAT_REMUNERACAO.some(function(c){return cat&&cat.toLowerCase().indexOf(c.toLowerCase())>=0});};
-
   var totalDespesas=despesasFilt.reduce(function(a,d){return a+d.valor},0);
   var lucro=totalEntradas-totalDespesas;
   var margem=totalEntradas>0?((lucro/totalEntradas)*100):0;
@@ -18801,36 +18796,6 @@ function FinanceiroView({data:d,dispatch:dp}){
   
   var byDespCat={};
   despesas.forEach(function(d){var c=d.cat||"Outros";byDespCat[c]=(byDespCat[c]||0)+d.valor});
-  var despCatColors={"DAS":"#F59E0B","INSS":"#FBBF24","Meu Vista":"#38BDF8","Plano de saúde":"#34D399","Plano de Saúde":"#34D399","Cartão de Crédito":"#F87171","Reembolso":"#94A3B8","Certificado Digital":"#60A5FA","Coworking":"#818CF8","Estacionamento":"#A78BFA","Patrocinio":"#FB923C","Programador Site":"#F472B6"};
-  var getCatColor=function(cat){
-    if(ehRemuneracao(cat))return cat.toLowerCase().indexOf("lucro")>=0?"#C084FC":"#A78BFA";
-    return despCatColors[cat]||T.gold;
-  };
-
-  /* byDespMonth — despesas filtradas por mês e categoria (escopo global do componente para uso na DRE) */
-  var byDespMonth={};
-  despesasFilt.forEach(function(d){
-    if(!d.data)return;
-    var mm=d.data.substring(0,7);
-    var cat=d.cat||"Outros";
-    if(!byDespMonth[mm])byDespMonth[mm]={total:0,operacional:0,remuneracao:0,cats:{}};
-    byDespMonth[mm].total+=d.valor;
-    if(ehRemuneracao(cat))byDespMonth[mm].remuneracao+=d.valor;
-    else byDespMonth[mm].operacional+=d.valor;
-    byDespMonth[mm].cats[cat]=(byDespMonth[mm].cats[cat]||0)+d.valor;
-  });
-  /* byDespYear — despesas por ano */
-  var byDespYear={};
-  despesas.forEach(function(d){
-    if(!d.data)return;
-    var yr=d.data.substring(0,4);
-    var cat=d.cat||"Outros";
-    if(!byDespYear[yr])byDespYear[yr]={total:0,operacional:0,remuneracao:0,cats:{}};
-    byDespYear[yr].total+=d.valor;
-    if(ehRemuneracao(cat))byDespYear[yr].remuneracao+=d.valor;
-    else byDespYear[yr].operacional+=d.valor;
-    byDespYear[yr].cats[cat]=(byDespYear[yr].cats[cat]||0)+d.valor;
-  });
   var despCatColors={Aluguel:T.red,Software:T.cyan,Contabilidade:T.orange,Marketing:T.purple,Telefonia:T.green,Impostos:T.gold,Outros:T.t3};
 
   var fmtMonth=function(m){var p=m.split("-");return(["","Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"][+p[1]]||p[1])+"/"+p[0].slice(2)};
@@ -18881,68 +18846,6 @@ function FinanceiroView({data:d,dispatch:dp}){
             </Cd>
           )}
         </div>
-      )}
-
-      {/* IMPORTAR DESPESAS */}
-      {fTab==="importar" && (
-        <Cd style={{padding:24,marginTop:14}} hov={false}>
-          <div style={{fontSize:14,fontWeight:700,color:"#EF6461",marginBottom:4}}>💸 Importar Planilha de Despesas</div>
-          <div style={{fontSize:12,color:T.t3,marginBottom:14,lineHeight:1.7}}>
-            Formato esperado: <span style={{color:T.t2,fontFamily:"'JetBrains Mono'",fontSize:11}}>Data | Mês | Tipo Despesa | Meio de Pagamento | Meio de Recebimento | Valor</span><br/>
-            Valores negativos são aceitos automaticamente.
-          </div>
-          <input ref={fileDeспRef} type="file" accept=".xlsx,.xls,.csv" onChange={function(e){
-            var file=e.target.files[0];if(!file)return;
-            e.target.value="";
-            var XLSX=window.XLSX;if(!XLSX){alert("Biblioteca XLSX não carregada.");return;}
-            var reader=new FileReader();
-            reader.onload=function(ev){
-              try{
-                var wb=XLSX.read(ev.target.result,{type:"array",cellDates:true});
-                var ws=wb.Sheets[wb.SheetNames[0]];
-                var rows=XLSX.utils.sheet_to_json(ws,{defval:""});
-                if(!rows||rows.length===0){alert("Planilha vazia ou formato não reconhecido.");return;}
-                var keys=Object.keys(rows[0]);
-                var colData=keys.find(function(k){return /data/i.test(k)});
-                var colTipo=keys.find(function(k){return /tipo|categoria|cat/i.test(k)});
-                var colMeio=keys.find(function(k){return /meio.*pag|pagamento/i.test(k)});
-                var colDesc=keys.find(function(k){return /recebimento|descri|benefi|fornec|destino/i.test(k)});
-                var colValor=keys.find(function(k){return /valor/i.test(k)});
-                if(!colValor){alert("Coluna 'Valor' não encontrada.\nColunas: "+keys.join(", "));return;}
-                var parseD=function(v){
-                  if(!v)return"";
-                  if(v instanceof Date){return v.getFullYear()+"-"+String(v.getMonth()+1).padStart(2,"0")+"-"+String(v.getDate()).padStart(2,"0");}
-                  var s=String(v).trim();
-                  var m1=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-                  if(m1)return m1[3]+"-"+m1[2].padStart(2,"0")+"-"+m1[1].padStart(2,"0");
-                  var m2=s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
-                  if(m2)return m2[1]+"-"+m2[2].padStart(2,"0")+"-"+m2[3].padStart(2,"0");
-                  return s;
-                };
-                var parseV=function(v){
-                  if(typeof v==="number")return Math.abs(v);
-                  var n=parseFloat(String(v).replace(/[R$\s\.]/g,"").replace(",","."));
-                  return isNaN(n)?0:Math.abs(n);
-                };
-                var parsed=rows.map(function(r,i){
-                  var val=parseV(colValor?r[colValor]:0);
-                  if(val<=0)return null;
-                  return{id:Date.now()+i,data:parseD(colData?r[colData]:""),cat:String(colTipo?r[colTipo]:"Outros").trim(),meio:String(colMeio?r[colMeio]:"").trim(),desc:String(colDesc?r[colDesc]:"").trim(),valor:val,recorrente:false};
-                }).filter(Boolean);
-                if(parsed.length===0){alert("Nenhuma despesa encontrada com valor > 0.");return;}
-                sDespesas(function(prev){return prev.concat(parsed);});
-                alert("✅ "+parsed.length+" despesas importadas!");
-                sFTab("despesas");
-              }catch(err){alert("Erro ao importar: "+err.message);console.error(err);}
-            };
-            reader.readAsArrayBuffer(file);
-          }} style={{display:"none"}}/>
-          <div style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
-            <Bt onClick={function(){fileDeспRef.current&&fileDeспRef.current.click()}} style={{fontSize:13,padding:"12px 24px",background:"rgba(239,100,97,0.12)",border:"1px solid rgba(239,100,97,0.3)",color:"#EF6461"}}>📂 Selecionar Planilha de Despesas</Bt>
-            {despesas.length>0&&<div style={{fontSize:12,color:"#EF6461",fontWeight:600}}>💸 {despesas.length} despesas • Total: {fm(despesas.reduce(function(s,d){return s+d.valor},0))}</div>}
-            {despesas.length>0&&<Bt v="secondary" onClick={function(){if(window.confirm("Limpar todas as "+despesas.length+" despesas?"))sDespesas([]);}} style={{fontSize:10,padding:"5px 10px",color:"#EF6461",borderColor:"rgba(239,100,97,0.3)"}}>🗑 Limpar despesas</Bt>}
-          </div>
-        </Cd>
       )}
 
       {/* RESUMO */}
@@ -19137,148 +19040,6 @@ function FinanceiroView({data:d,dispatch:dp}){
                   </div>
                 </Cd>
               )}
-              {}
-              {/* ===== BLOCO DE DESPESAS ===== */}
-              {despesasFilt.length>0&&(function(){
-                var totalDesp=despesasFilt.reduce(function(s,d){return s+d.valor},0);
-                var totalRem=despesasFilt.filter(function(d){return ehRemuneracao(d.cat||"")}).reduce(function(s,d){return s+d.valor},0);
-                var totalOp=totalDesp-totalRem;
-                var catMap={};
-                despesasFilt.forEach(function(d){
-                  var cat=d.cat||"Outros";
-                  if(!catMap[cat])catMap[cat]={total:0,count:0,tipo:ehRemuneracao(cat)?"rem":"op"};
-                  catMap[cat].total+=d.valor;catMap[cat].count++;
-                });
-                var catsRem=Object.entries(catMap).filter(function(e){return e[1].tipo==="rem"}).sort(function(a,b){return b[1].total-a[1].total});
-                var catsOp=Object.entries(catMap).filter(function(e){return e[1].tipo==="op"}).sort(function(a,b){return b[1].total-a[1].total});
-                var maxCatVal=Math.max.apply(null,Object.values(catMap).map(function(c){return c.total}).concat([1]));
-                var mesesDesp=Object.keys(byDespMonth).filter(function(m){return selYear==="todos"||m.startsWith(selYear);}).sort();
-                return (
-                  <div style={{marginBottom:16}}>
-                    <Cd style={{padding:22}} hov={false}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,flexWrap:"wrap",gap:8}}>
-                        <h4 style={{margin:0,fontSize:14,fontWeight:700,color:"#EF6461"}}>💸 Despesas {selYear!=="todos"?selYear:""}</h4>
-                        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                          <Cd style={{padding:"6px 14px"}} hov={false}><span style={{fontSize:9,color:T.t3}}>TOTAL</span><div style={{fontSize:14,fontWeight:800,color:"#EF6461",fontFamily:"'JetBrains Mono'"}}>{fm(totalDesp)}</div></Cd>
-                          <Cd style={{padding:"6px 14px"}} hov={false}><span style={{fontSize:9,color:T.t3}}>OPERACIONAL</span><div style={{fontSize:14,fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(totalOp)}</div></Cd>
-                          <Cd style={{padding:"6px 14px"}} hov={false}><span style={{fontSize:9,color:T.t3}}>REMUNERAÇÃO SÓCIOS</span><div style={{fontSize:14,fontWeight:800,color:"#C084FC",fontFamily:"'JetBrains Mono'"}}>{fm(totalRem)}</div></Cd>
-                        </div>
-                      </div>
-                      {catsRem.length>0&&(
-                        <div style={{marginBottom:20}}>
-                          <div style={{fontSize:10,fontWeight:800,color:"#C084FC",letterSpacing:1.5,textTransform:"uppercase",marginBottom:10,paddingBottom:6,borderBottom:"1px solid rgba(192,132,252,0.15)"}}>👥 Remuneração dos Sócios</div>
-                          {catsRem.map(function(e,i){
-                            var cat=e[0],info=e[1];
-                            var pct=totalDesp>0?(info.total/totalDesp*100):0;
-                            var isSel=catSel===cat;
-                            return (
-                              <div key={i}>
-                                <div onClick={function(){sCatSel(isSel?null:cat)}} style={{cursor:"pointer",padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}>
-                                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                                    <span style={{fontSize:12,fontWeight:600,color:isSel?"#C084FC":T.t1}}>{cat}</span>
-                                    <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                                      <span style={{fontSize:10,color:T.t3}}>{pct.toFixed(1)}% do total</span>
-                                      <span style={{fontSize:13,fontWeight:800,color:"#C084FC",fontFamily:"'JetBrains Mono'"}}>{fm(info.total)}</span>
-                                    </div>
-                                  </div>
-                                  <div style={{height:4,borderRadius:4,background:"rgba(255,255,255,0.04)"}}>
-                                    <div style={{height:4,borderRadius:4,width:(info.total/maxCatVal*100)+"%",background:"linear-gradient(90deg,#A78BFA,#C084FC)"}}/>
-                                  </div>
-                                </div>
-                                {isSel&&(
-                                  <div style={{margin:"8px 0 12px 12px",padding:14,background:"rgba(192,132,252,0.05)",borderRadius:10,borderLeft:"3px solid rgba(192,132,252,0.3)"}}>
-                                    <div style={{fontSize:10,fontWeight:700,color:"#C084FC",marginBottom:8}}>Por sócio — {cat}</div>
-                                    {(function(){
-                                      var socios={};
-                                      despesasFilt.filter(function(d){return(d.cat||"")===cat}).forEach(function(d){var s=d.desc||"Outros";socios[s]=(socios[s]||0)+d.valor;});
-                                      var totalCat=Object.values(socios).reduce(function(a,b){return a+b},0);
-                                      var cols=["#C084FC","#A78BFA","#818CF8","#60A5FA"];
-                                      return Object.entries(socios).sort(function(a,b){return b[1]-a[1]}).map(function(e,si){
-                                        var nome=e[0],val=e[1];
-                                        var cor=cols[si%cols.length];
-                                        return (
-                                          <div key={si} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}>
-                                            <div style={{width:24,height:24,borderRadius:8,background:"rgba(192,132,252,0.12)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:800,color:cor,flexShrink:0}}>{nome.split(" ").map(function(n){return n[0]}).join("").substring(0,2).toUpperCase()}</div>
-                                            <span style={{fontSize:11,fontWeight:600,color:T.t1,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{nome}</span>
-                                            <span style={{fontSize:12,fontWeight:800,color:cor,fontFamily:"'JetBrains Mono'"}}>{fm(val)}</span>
-                                            <span style={{fontSize:10,color:T.t3}}>({totalCat>0?(val/totalCat*100).toFixed(0):0}%)</span>
-                                          </div>
-                                        );
-                                      });
-                                    })()}
-                                    <div style={{height:1,background:"rgba(255,255,255,0.04)",margin:"10px 0"}}/>
-                                    <div style={{fontSize:10,fontWeight:700,color:"#C084FC",marginBottom:8}}>Por mês</div>
-                                    {mesesDesp.filter(function(m){return byDespMonth[m]&&byDespMonth[m].cats[cat]}).map(function(m,mi){
-                                      var v=byDespMonth[m].cats[cat]||0;
-                                      var maxV=Math.max.apply(null,mesesDesp.map(function(mm){return(byDespMonth[mm]&&byDespMonth[mm].cats[cat])||0}).concat([1]));
-                                      var sociosMes={};
-                                      despesasFilt.filter(function(d){return(d.cat||"")===cat&&d.data&&d.data.substring(0,7)===m}).forEach(function(d){var s=d.desc||"Outros";sociosMes[s]=(sociosMes[s]||0)+d.valor;});
-                                      var cols=["#C084FC","#A78BFA","#818CF8","#60A5FA"];
-                                      return (
-                                        <div key={mi} style={{padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.02)"}}>
-                                          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
-                                            <span style={{fontSize:10,color:T.t3,width:46,flexShrink:0}}>{fmtMonth(m)}</span>
-                                            <div style={{flex:1,height:6,borderRadius:3,background:"rgba(255,255,255,0.04)"}}><div style={{height:6,borderRadius:3,width:(v/maxV*100)+"%",background:"rgba(192,132,252,0.6)"}}/></div>
-                                            <span style={{fontSize:11,fontWeight:700,color:"#C084FC",fontFamily:"'JetBrains Mono'",width:90,textAlign:"right"}}>{fm(v)}</span>
-                                          </div>
-                                          <div style={{paddingLeft:54,display:"flex",flexWrap:"wrap",gap:"2px 12px"}}>
-                                            {Object.entries(sociosMes).sort(function(a,b){return b[1]-a[1]}).map(function(e,si){return <span key={si} style={{fontSize:9,color:cols[si%cols.length]}}>{e[0].split(" ")[0]}: {fm(e[1])}</span>;})}
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                      {catsOp.length>0&&(
-                        <div>
-                          <div style={{fontSize:10,fontWeight:800,color:T.gold,letterSpacing:1.5,textTransform:"uppercase",marginBottom:10,paddingBottom:6,borderBottom:"1px solid rgba(212,163,40,0.15)"}}>🏢 Despesas Operacionais</div>
-                          {catsOp.map(function(e,i){
-                            var cat=e[0],info=e[1];
-                            var pct=totalDesp>0?(info.total/totalDesp*100):0;
-                            var isSel=catSel===cat;
-                            var cor=getCatColor(cat);
-                            return (
-                              <div key={i}>
-                                <div onClick={function(){sCatSel(isSel?null:cat)}} style={{cursor:"pointer",padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}>
-                                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                                    <span style={{fontSize:12,fontWeight:600,color:isSel?cor:T.t1}}>{cat}</span>
-                                    <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                                      <span style={{fontSize:10,color:T.t3}}>{pct.toFixed(1)}% do total</span>
-                                      <span style={{fontSize:13,fontWeight:800,color:cor,fontFamily:"'JetBrains Mono'"}}>{fm(info.total)}</span>
-                                    </div>
-                                  </div>
-                                  <div style={{height:4,borderRadius:4,background:"rgba(255,255,255,0.04)"}}><div style={{height:4,borderRadius:4,width:(info.total/maxCatVal*100)+"%",background:cor,opacity:0.8}}/></div>
-                                </div>
-                                {isSel&&(
-                                  <div style={{margin:"8px 0 12px 12px",padding:14,background:"rgba(212,163,40,0.04)",borderRadius:10,borderLeft:"3px solid rgba(212,163,40,0.2)"}}>
-                                    <div style={{fontSize:10,fontWeight:700,color:cor,marginBottom:8}}>Evolução mensal — {cat}</div>
-                                    {mesesDesp.filter(function(m){return byDespMonth[m]&&byDespMonth[m].cats[cat]}).map(function(m,mi){
-                                      var v=byDespMonth[m].cats[cat]||0;
-                                      var maxV=Math.max.apply(null,mesesDesp.map(function(mm){return(byDespMonth[mm]&&byDespMonth[mm].cats[cat])||0}).concat([1]));
-                                      return (
-                                        <div key={mi} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 0",borderBottom:"1px solid rgba(255,255,255,0.02)"}}>
-                                          <span style={{fontSize:10,color:T.t3,width:46,flexShrink:0}}>{fmtMonth(m)}</span>
-                                          <div style={{flex:1,height:6,borderRadius:3,background:"rgba(255,255,255,0.04)"}}><div style={{height:6,borderRadius:3,width:(v/maxV*100)+"%",background:cor,opacity:0.7}}/></div>
-                                          <span style={{fontSize:11,fontWeight:700,color:cor,fontFamily:"'JetBrains Mono'",width:90,textAlign:"right"}}>{fm(v)}</span>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </Cd>
-                  </div>
-                );
-              })()}
               {}
               {/* ═══════════ PROJEÇÃO DE RECEITA ═══════════ */}
               {(function(){
@@ -19526,88 +19287,33 @@ function FinanceiroView({data:d,dispatch:dp}){
       {}
       {fTab==="dre" && (
         <Cd style={{padding:18}} hov={false}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
-            <h4 style={{margin:0,fontSize:14,fontWeight:700,color:T.gold}}>DRE — Resultado por Mês</h4>
-            <div style={{display:"flex",gap:4}}>
-              {["todos",...anos].map(function(yr){return(
-                <button key={yr} onClick={function(){sSelYear(yr)}} style={{padding:"5px 12px",borderRadius:8,fontSize:11,fontWeight:600,cursor:"pointer",border:selYear===yr?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.06)",background:selYear===yr?T.goldD:"transparent",color:selYear===yr?T.gold:T.t3}}>{yr==="todos"?"Todos":yr}</button>
-              );})}
+          <h4 style={{margin:"0 0 14px",fontSize:14,fontWeight:700,color:T.gold}}>DRE — Resultado por Mês</h4>
+          {mesesOrdenados.length===0 ? <div style={{padding:20,textAlign:"center",color:T.t3}}>Importe dados primeiro</div> : (
+            <div style={{overflowX:"auto",borderRadius:12,border:"1px solid rgba(255,255,255,0.04)"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:10,minWidth:500}}>
+                <thead><tr style={{background:"rgba(255,255,255,0.02)"}}>
+                  <th style={{padding:"8px 10px",textAlign:"left",color:T.gold,fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)",position:"sticky",left:0,background:"rgba(12,24,48,0.95)",zIndex:1}}>MÊS</th>
+                  <th style={{padding:"8px 10px",textAlign:"right",color:T.green,fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)"}}>RECEITA</th>
+                  <th style={{padding:"8px 10px",textAlign:"right",color:T.t3,fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)"}}>ENTRADAS</th>
+                  {Object.keys(byServico).map(function(s){return <th key={s} style={{padding:"8px 6px",textAlign:"right",color:svcColors[s]||T.t3,fontWeight:600,fontSize:8,borderBottom:"1px solid rgba(212,163,40,0.1)",whiteSpace:"nowrap"}}>{s.replace("Gestão de ","").replace("Financeira","Fin.")}</th>})}
+                </tr></thead>
+                <tbody>{mesesOrdenados.map(function(m,i){var d=byMonth[m];return (
+                  <tr key={m} style={{background:i%2===0?"transparent":"rgba(255,255,255,0.015)"}}>
+                    <td style={{padding:"8px 10px",fontWeight:600,borderBottom:"1px solid rgba(255,255,255,0.02)",position:"sticky",left:0,background:"rgba(12,24,48,0.95)",zIndex:1}}>{fmtMonth(m)}</td>
+                    <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:T.green,fontFamily:"'JetBrains Mono'",borderBottom:"1px solid rgba(255,255,255,0.02)"}}>{fm(d.rec)}</td>
+                    <td style={{padding:"8px 10px",textAlign:"right",color:T.t3,borderBottom:"1px solid rgba(255,255,255,0.02)"}}>{d.entries.length}</td>
+                    {Object.keys(byServico).map(function(s){return <td key={s} style={{padding:"8px 6px",textAlign:"right",color:T.t2,fontFamily:"'JetBrains Mono'",fontSize:10,borderBottom:"1px solid rgba(255,255,255,0.02)"}}>{d.servicos[s]?fm(d.servicos[s]):"—"}</td>})}
+                  </tr>
+                )})}</tbody>
+                <tfoot><tr style={{borderTop:"2px solid rgba(212,163,40,0.15)"}}>
+                  <td style={{padding:"10px",fontWeight:800,color:T.gold,position:"sticky",left:0,background:"rgba(12,24,48,0.95)",zIndex:1}}>TOTAL</td>
+                  <td style={{padding:"10px",textAlign:"right",fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(totalEntradas)}</td>
+                  <td style={{padding:"10px",textAlign:"right",color:T.t3}}>{entradas.length}</td>
+                  {Object.keys(byServico).map(function(s){return <td key={s} style={{padding:"10px 6px",textAlign:"right",fontWeight:700,color:svcColors[s]||T.t2,fontFamily:"'JetBrains Mono'",fontSize:10}}>{fm(byServico[s])}</td>})}
+                </tr></tfoot>
+              </table>
             </div>
-          </div>
-          {mesesOrdenados.length===0 ? <div style={{padding:20,textAlign:"center",color:T.t3}}>Importe dados primeiro</div> : (function(){
-            /* Meses com despesas */
-            var mesesDesp=Object.keys(byDespMonth);
-            var todosMeses=[...new Set([...mesesOrdenados,...mesesDesp])].filter(function(m){
-              return selYear==="todos"||m.startsWith(selYear);
-            }).sort();
-
-            /* Categorias de despesa */
-            var catsDespOp=[],catsDespRem=[];
-            var allCats={};
-            despesasFilt.forEach(function(d){allCats[d.cat||"Outros"]=true});
-            Object.keys(allCats).forEach(function(c){
-              if(ehRemuneracao(c))catsDespRem.push(c);
-              else catsDespOp.push(c);
-            });
-            catsDespOp.sort();catsDespRem.sort();
-
-            var totalRecDRE=todosMeses.reduce(function(s,m){return s+(byMonth[m]?byMonth[m].rec:0)},0);
-            var totalDespOpDRE=despesasFilt.filter(function(d){return!ehRemuneracao(d.cat||"")}).reduce(function(s,d){return s+d.valor},0);
-            var totalDespRemDRE=despesasFilt.filter(function(d){return ehRemuneracao(d.cat||"")}).reduce(function(s,d){return s+d.valor},0);
-
-            var th=function(label,color,extra){return <th key={label} style={{padding:"8px 8px",textAlign:"right",color:color||T.t3,fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)",whiteSpace:"nowrap",...(extra||{})}}>{label}</th>};
-            var td=function(val,color,bold,key){return <td key={key} style={{padding:"7px 8px",textAlign:"right",color:color||T.t2,fontWeight:bold?700:400,fontFamily:"'JetBrains Mono'",fontSize:10,borderBottom:"1px solid rgba(255,255,255,0.02)"}}>{val}</td>};
-            var sep=function(label,color){return <tr><td colSpan={99} style={{padding:"6px 10px",fontSize:8,fontWeight:800,letterSpacing:1.5,textTransform:"uppercase",color:color||T.t3,background:"rgba(255,255,255,0.02)",borderTop:"1px solid rgba(255,255,255,0.04)"}}>{label}</td></tr>};
-
-            return (
-              <div style={{overflowX:"auto",borderRadius:12,border:"1px solid rgba(255,255,255,0.04)"}}>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:10,minWidth:500}}>
-                  <thead><tr style={{background:"rgba(255,255,255,0.02)"}}>
-                    <th style={{padding:"8px 10px",textAlign:"left",color:T.gold,fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)",position:"sticky",left:0,background:"rgba(12,24,48,0.98)",zIndex:2,minWidth:70}}>MÊS</th>
-                    {th("RECEITA",T.green)}
-                    {catsDespOp.map(function(c){return th(c,"#F87171")})}
-                    {th("= LUCRO OP.",T.gold)}
-                    {catsDespRem.map(function(c){return th(c,"#C084FC")})}
-                    {th("= RESULTADO","#34D399")}
-                  </tr></thead>
-                  <tbody>
-                    {todosMeses.map(function(m,i){
-                      var rec=byMonth[m]?byMonth[m].rec:0;
-                      var despMes=byDespMonth[m]||{cats:{}};
-                      var despOpMes=catsDespOp.reduce(function(s,c){return s+(despMes.cats[c]||0)},0);
-                      var despRemMes=catsDespRem.reduce(function(s,c){return s+(despMes.cats[c]||0)},0);
-                      var lucroOp=rec-despOpMes;
-                      var resultado=rec-despOpMes-despRemMes;
-                      return (
-                        <tr key={m} style={{background:i%2===0?"transparent":"rgba(255,255,255,0.015)"}}>
-                          <td style={{padding:"7px 10px",fontWeight:600,borderBottom:"1px solid rgba(255,255,255,0.02)",position:"sticky",left:0,background:"rgba(12,24,48,0.95)",zIndex:1}}>{fmtMonth(m)}</td>
-                          {td(rec>0?fm(rec):"—",T.green,true,"r")}
-                          {catsDespOp.map(function(c){var v=despMes.cats[c]||0;return td(v>0?("-"+fm(v)):"—","#F87171",false,c)})}
-                          {td(fm(lucroOp),lucroOp>=0?T.gold:"#F87171",true,"lo")}
-                          {catsDespRem.map(function(c){var v=despMes.cats[c]||0;return td(v>0?("-"+fm(v)):"—","#C084FC",false,c)})}
-                          {td(fm(resultado),resultado>=0?"#34D399":"#F87171",true,"res")}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                  <tfoot><tr style={{borderTop:"2px solid rgba(212,163,40,0.2)",background:"rgba(12,24,48,0.98)"}}>
-                    <td style={{padding:"10px 10px",fontWeight:800,color:T.gold,position:"sticky",left:0,background:"rgba(12,24,48,0.98)",zIndex:1,fontSize:11}}>TOTAL</td>
-                    <td style={{padding:"10px 8px",textAlign:"right",fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'",fontSize:11,whiteSpace:"nowrap"}}>{fm(totalRecDRE)}</td>
-                    {catsDespOp.map(function(c){
-                      var tot=despesasFilt.filter(function(d){return(d.cat||"")===c&&!ehRemuneracao(c)}).reduce(function(s,d){return s+d.valor},0);
-                      return <td key={c} style={{padding:"10px 8px",textAlign:"right",fontWeight:700,color:"#F87171",fontFamily:"'JetBrains Mono'",fontSize:11,whiteSpace:"nowrap"}}>{tot>0?("-"+fm(tot)):"—"}</td>;
-                    })}
-                    <td style={{padding:"10px 8px",textAlign:"right",fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'",fontSize:11,whiteSpace:"nowrap"}}>{fm(totalRecDRE-totalDespOpDRE)}</td>
-                    {catsDespRem.map(function(c){
-                      var tot=despesasFilt.filter(function(d){return(d.cat||"")===c}).reduce(function(s,d){return s+d.valor},0);
-                      return <td key={c} style={{padding:"10px 8px",textAlign:"right",fontWeight:700,color:"#C084FC",fontFamily:"'JetBrains Mono'",fontSize:11,whiteSpace:"nowrap"}}>{tot>0?("-"+fm(tot)):"—"}</td>;
-                    })}
-                    <td style={{padding:"10px 8px",textAlign:"right",fontWeight:800,color:(totalRecDRE-totalDespOpDRE-totalDespRemDRE)>=0?"#34D399":"#F87171",fontFamily:"'JetBrains Mono'",fontSize:11,whiteSpace:"nowrap"}}>{fm(totalRecDRE-totalDespOpDRE-totalDespRemDRE)}</td>
-                  </tr></tfoot>
-                </table>
-              </div>
-            );
-          })()}
+          )}
         </Cd>
       )}
 
@@ -25144,7 +24850,316 @@ function PropostasView({data,dispatch}){
   return null;
 }
 
-const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"fiscal",l:"Fiscal",i:"🧾"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"tutoriais",l:"Tutoriais",i:"📚"}];
+/* ============================================================
+   VINDI VIEW — Integração com API Vindi
+   Auth: Basic com apiKey como usuário, senha vazia
+   Proxy: usa cors-anywhere ou chamada direta (Vindi suporta CORS)
+   ============================================================ */
+function VindiView({data:d,dispatch:dp}){
+  var T=THEME;
+  var fm=fmMoeda;
+  var vindiKey=(d.config&&d.config.vindiKey)||"";
+  var[tab,sTab]=useState("dashboard");
+  var[apiKey,sApiKey]=useState(vindiKey);
+  var[saving,sSaving]=useState(false);
+  var[loading,sLoading]=useState(false);
+  var[error,sError]=useState(null);
+  var[customers,sCustomers]=useState([]);
+  var[bills,sBills]=useState([]);
+  var[subscriptions,sSubscriptions]=useState([]);
+  var[lastFetch,sLastFetch]=useState(null);
+  var[selCli,sSelCli]=useState(null);
+
+  var savedKey=(d.config&&d.config.vindiKey)||"";
+
+  /* ── Chama API Vindi ── */
+  var vindiGet=function(endpoint,page){
+    page=page||1;
+    var key=savedKey||apiKey;
+    if(!key)return Promise.reject(new Error("API Key não configurada"));
+    var auth=btoa(key+":");
+    return fetch("https://app.vindi.com.br/api/v1"+endpoint+(endpoint.indexOf("?")>=0?"&":"?")+"per_page=100&page="+page,{
+      headers:{"Authorization":"Basic "+auth,"Content-Type":"application/json","Accept":"application/json"}
+    }).then(function(r){
+      if(!r.ok)throw new Error("Erro "+r.status+": verifique sua API Key");
+      return r.json();
+    });
+  };
+
+  /* ── Carrega todos os dados ── */
+  var carregarTudo=function(){
+    var key=savedKey||apiKey;
+    if(!key){sError("Configure sua API Key primeiro");return;}
+    sLoading(true);sError(null);
+    Promise.all([
+      vindiGet("/customers"),
+      vindiGet("/bills?status[]=paid&status[]=pending&status[]=waiting"),
+      vindiGet("/subscriptions")
+    ]).then(function(results){
+      sCustomers(results[0].customers||[]);
+      sBills(results[1].bills||[]);
+      sSubscriptions(results[2].subscriptions||[]);
+      sLastFetch(new Date().toLocaleTimeString("pt-BR"));
+      sLoading(false);
+    }).catch(function(e){
+      sError(e.message);sLoading(false);
+    });
+  };
+
+  useEffect(function(){if(savedKey)carregarTudo();},[savedKey]);
+
+  /* ── Métricas ── */
+  var billsPaid=bills.filter(function(b){return b.status==="paid"});
+  var billsPending=bills.filter(function(b){return b.status==="pending"||b.status==="waiting"});
+  var billsOverdue=bills.filter(function(b){return b.status==="pending"&&b.due_at&&new Date(b.due_at)<new Date()});
+  var mrrTotal=subscriptions.filter(function(s){return s.status==="active"}).reduce(function(sum,s){
+    return sum+(s.plan&&s.plan.interval==="months"&&s.plan.price?s.plan.price:0);
+  },0);
+  var recebidoMes=billsPaid.filter(function(b){
+    if(!b.paid_at)return false;
+    var d=new Date(b.paid_at);var n=new Date();
+    return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear();
+  }).reduce(function(s,b){return s+(b.amount||0)},0);
+  var inadimplencia=bills.length>0?(billsOverdue.length/bills.length*100):0;
+
+  /* ── Vincula cliente Vindi com cliente da plataforma ── */
+  var matchCliente=function(vindiName){
+    if(!d||!d.cl)return null;
+    var norm=function(s){return String(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim();};
+    var n=norm(vindiName);
+    return d.cl.find(function(c){
+      var cn=norm(c.n||"");
+      return cn===n||cn.split(" ")[0]===n.split(" ")[0]&&cn.split(" ").slice(-1)[0]===n.split(" ").slice(-1)[0];
+    })||null;
+  };
+
+  /* ── STATUS COLORS ── */
+  var statusColor={"active":T.green,"canceled":"#EF6461","suspended":T.gold,"paid":T.green,"pending":T.gold,"waiting":"#38BDF8","overdue":"#EF6461"};
+  var statusLabel={"active":"Ativo","canceled":"Cancelado","suspended":"Suspenso","paid":"Pago","pending":"Pendente","waiting":"Aguardando","overdue":"Vencido"};
+
+  /* ─────────── RENDER ─────────── */
+  return (
+    <div style={{padding:"0 0 40px"}}>
+      {/* HEADER */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:10}}>
+        <div>
+          <h2 style={{margin:0,fontSize:20,fontWeight:800}}>⚡ Vindi</h2>
+          <div style={{fontSize:11,color:T.t3,marginTop:2}}>Cobrança recorrente e assinaturas{lastFetch&&<span style={{marginLeft:8,color:T.green}}>· Atualizado às {lastFetch}</span>}</div>
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          {savedKey&&<button onClick={carregarTudo} disabled={loading} style={{padding:"6px 14px",borderRadius:8,fontSize:11,fontWeight:600,cursor:"pointer",border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.04)",color:T.t2}}>{loading?"⏳ Carregando...":"🔄 Atualizar"}</button>}
+          <button onClick={function(){sTab("config")}} style={{padding:"6px 14px",borderRadius:8,fontSize:11,fontWeight:600,cursor:"pointer",border:tab==="config"?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.08)",background:tab==="config"?T.goldD:"rgba(255,255,255,0.04)",color:tab==="config"?T.gold:T.t2}}>⚙️ API Key</button>
+        </div>
+      </div>
+
+      {/* CONFIG TAB */}
+      {tab==="config"&&(
+        <Cd style={{padding:24,marginBottom:20}} hov={false}>
+          <div style={{fontSize:14,fontWeight:700,color:T.gold,marginBottom:4}}>🔑 Configurar API Key da Vindi</div>
+          <div style={{fontSize:12,color:T.t3,marginBottom:16,lineHeight:1.7}}>
+            Acesse <strong style={{color:T.t2}}>app.vindi.com.br → Configurações → Chaves de API</strong> e copie sua chave privada.<br/>
+            A chave fica salva na sua conta e é usada para autenticar as requisições.
+          </div>
+          <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+            <input value={apiKey} onChange={function(e){sApiKey(e.target.value)}} type="password" placeholder="Sua API Key privada da Vindi..." style={{flex:1,minWidth:260,padding:"10px 14px",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,color:T.t1,fontSize:13,fontFamily:"'JetBrains Mono'",outline:"none"}}/>
+            <Bt onClick={function(){
+              if(!apiKey.trim()){alert("Digite a API Key");return;}
+              sSaving(true);
+              dp({t:"CONFIG_SET",p:{key:"vindiKey",value:apiKey.trim()}});
+              setTimeout(function(){sSaving(false);sTab("dashboard");carregarTudo();},600);
+            }} disabled={saving}>{saving?"Salvando...":"✅ Salvar e Conectar"}</Bt>
+            {savedKey&&<Bt v="secondary" onClick={function(){if(window.confirm("Remover API Key da Vindi?"))dp({t:"CONFIG_SET",p:{key:"vindiKey",value:""}});}}>🗑 Remover</Bt>}
+          </div>
+          {savedKey&&<div style={{marginTop:12,fontSize:11,color:T.green}}>✅ API Key configurada · {savedKey.substring(0,8)}••••••••</div>}
+        </Cd>
+      )}
+
+      {error&&<div style={{padding:14,background:"rgba(239,100,97,0.08)",border:"1px solid rgba(239,100,97,0.2)",borderRadius:10,color:"#EF6461",fontSize:12,marginBottom:16}}>⚠️ {error}</div>}
+
+      {!savedKey&&tab!=="config"&&(
+        <Cd style={{padding:40,textAlign:"center"}} hov={false}>
+          <div style={{fontSize:32,marginBottom:12}}>⚡</div>
+          <div style={{fontSize:15,fontWeight:700,marginBottom:6}}>Conecte sua conta Vindi</div>
+          <div style={{fontSize:12,color:T.t3,marginBottom:20}}>Configure sua API Key para acompanhar cobranças e assinaturas em tempo real.</div>
+          <Bt onClick={function(){sTab("config")}}>Configurar API Key</Bt>
+        </Cd>
+      )}
+
+      {savedKey&&tab!=="config"&&(
+        <>
+          {/* TABS */}
+          <div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap"}}>
+            {[{id:"dashboard",l:"📊 Dashboard"},{id:"assinaturas",l:"🔄 Assinaturas"},{id:"cobranças",l:"💳 Cobranças"},{id:"clientes",l:"👥 Clientes"}].map(function(t){return(
+              <button key={t.id} onClick={function(){sTab(t.id)}} style={{padding:"7px 16px",borderRadius:10,fontSize:11,fontWeight:600,cursor:"pointer",border:tab===t.id?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.06)",background:tab===t.id?T.goldD:"transparent",color:tab===t.id?T.gold:T.t3}}>{t.l}</button>
+            );})}
+          </div>
+
+          {/* ── DASHBOARD ── */}
+          {tab==="dashboard"&&(
+            <div>
+              {/* KPIs */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12,marginBottom:20}}>
+                {[
+                  {l:"MRR",v:fm(mrrTotal),c:T.green,sub:"receita recorrente/mês"},
+                  {l:"RECEBIDO NO MÊS",v:fm(recebidoMes),c:T.cyan,sub:"faturas pagas este mês"},
+                  {l:"ASSINATURAS ATIVAS",v:String(subscriptions.filter(function(s){return s.status==="active"}).length),c:T.gold,sub:"contratos recorrentes"},
+                  {l:"PENDENTE",v:fm(billsPending.reduce(function(s,b){return s+(b.amount||0)},0)),c:T.gold,sub:billsPending.length+" cobranças"},
+                  {l:"INADIMPLÊNCIA",v:inadimplencia.toFixed(1)+"%",c:inadimplencia>5?"#EF6461":T.green,sub:billsOverdue.length+" cobranças vencidas"},
+                ].map(function(k,i){return(
+                  <Cd key={i} style={{padding:"14px 16px"}} hov={false}>
+                    <div style={{fontSize:8,color:T.t3,fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>{k.l}</div>
+                    <div style={{fontSize:18,fontWeight:800,color:k.c,fontFamily:"'JetBrains Mono'"}}>{k.v}</div>
+                    <div style={{fontSize:9,color:T.t3,marginTop:2}}>{k.sub}</div>
+                  </Cd>
+                );})}
+              </div>
+
+              {/* CLIENTES COM STATUS */}
+              <Cd style={{padding:20}} hov={false}>
+                <div style={{fontSize:12,fontWeight:700,color:T.gold,marginBottom:14}}>👥 Clientes & Status de Assinatura</div>
+                {loading?<div style={{textAlign:"center",padding:20,color:T.t3}}>⏳ Carregando...</div>:(
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:10}}>
+                    {customers.slice(0,30).map(function(cust,i){
+                      var sub=subscriptions.find(function(s){return s.customer&&s.customer.id===cust.id});
+                      var clientePlataforma=matchCliente(cust.name);
+                      var ultimaCobranca=bills.filter(function(b){return b.customer&&b.customer.id===cust.id}).sort(function(a,b){return new Date(b.created_at)-new Date(a.created_at)})[0];
+                      return(
+                        <div key={i} onClick={function(){sSelCli(selCli===cust.id?null:cust.id)}} style={{padding:14,borderRadius:12,background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.04)",cursor:"pointer",transition:"all 0.2s"}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:12,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cust.name}</div>
+                              <div style={{fontSize:10,color:T.t3,marginTop:2}}>{cust.email}</div>
+                              {clientePlataforma&&<div style={{fontSize:9,color:T.green,marginTop:3}}>✓ vinculado na plataforma</div>}
+                            </div>
+                            <div style={{textAlign:"right",flexShrink:0}}>
+                              {sub&&<div style={{fontSize:9,fontWeight:700,color:statusColor[sub.status]||T.t3,background:"rgba(255,255,255,0.04)",padding:"2px 8px",borderRadius:6}}>{statusLabel[sub.status]||sub.status}</div>}
+                              {sub&&sub.plan&&<div style={{fontSize:11,fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'",marginTop:4}}>{fm(sub.plan.price||0)}</div>}
+                            </div>
+                          </div>
+                          {selCli===cust.id&&(
+                            <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid rgba(255,255,255,0.04)"}}>
+                              <div style={{fontSize:10,color:T.t3,marginBottom:6}}>Últimas cobranças</div>
+                              {bills.filter(function(b){return b.customer&&b.customer.id===cust.id}).slice(0,5).map(function(b,bi){
+                                var venc=b.due_at?new Date(b.due_at).toLocaleDateString("pt-BR"):"—";
+                                var pago=b.paid_at?new Date(b.paid_at).toLocaleDateString("pt-BR"):null;
+                                var cor=statusColor[b.status]||T.t3;
+                                return(
+                                  <div key={bi} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.02)",fontSize:10}}>
+                                    <span style={{color:T.t2}}>{pago?"Pago "+pago:"Venc. "+venc}</span>
+                                    <span style={{color:cor,fontWeight:700,fontFamily:"'JetBrains Mono'"}}>{fm(b.amount||0)}</span>
+                                    <span style={{color:cor,fontSize:9}}>{statusLabel[b.status]||b.status}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Cd>
+            </div>
+          )}
+
+          {/* ── ASSINATURAS ── */}
+          {tab==="assinaturas"&&(
+            <Cd style={{padding:20}} hov={false}>
+              <div style={{fontSize:12,fontWeight:700,color:T.gold,marginBottom:14}}>🔄 Assinaturas Ativas — {subscriptions.filter(function(s){return s.status==="active"}).length} contratos</div>
+              {loading?<div style={{textAlign:"center",padding:20,color:T.t3}}>⏳ Carregando...</div>:(
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                  <thead><tr style={{borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+                    {["Cliente","Plano","Valor/mês","Próx. cobrança","Status"].map(function(h,i){return<th key={i} style={{padding:"8px 10px",textAlign:i>=2?"right":"left",fontSize:9,color:T.t3,fontWeight:700,letterSpacing:1}}>{h}</th>})}
+                  </tr></thead>
+                  <tbody>{subscriptions.sort(function(a,b){return(b.plan&&b.plan.price||0)-(a.plan&&a.plan.price||0)}).map(function(s,i){
+                    var cor=statusColor[s.status]||T.t3;
+                    var proximaData=s.next_billing_at?new Date(s.next_billing_at).toLocaleDateString("pt-BR"):"—";
+                    return(
+                      <tr key={i} style={{borderBottom:"1px solid rgba(255,255,255,0.02)",background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
+                        <td style={{padding:"9px 10px",fontWeight:600}}>{s.customer&&s.customer.name||"—"}</td>
+                        <td style={{padding:"9px 10px",color:T.t2}}>{s.plan&&s.plan.name||"—"}</td>
+                        <td style={{padding:"9px 10px",textAlign:"right",fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(s.plan&&s.plan.price||0)}</td>
+                        <td style={{padding:"9px 10px",textAlign:"right",color:T.t3}}>{proximaData}</td>
+                        <td style={{padding:"9px 10px",textAlign:"right"}}><span style={{fontSize:9,fontWeight:700,color:cor,background:"rgba(255,255,255,0.04)",padding:"2px 8px",borderRadius:6}}>{statusLabel[s.status]||s.status}</span></td>
+                      </tr>
+                    );
+                  })}</tbody>
+                </table>
+              )}
+            </Cd>
+          )}
+
+          {/* ── COBRANÇAS ── */}
+          {tab==="cobranças"&&(
+            <Cd style={{padding:20}} hov={false}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+                <div style={{fontSize:12,fontWeight:700,color:T.gold}}>💳 Cobranças Recentes</div>
+                <div style={{display:"flex",gap:6}}>
+                  {[{l:"Todos",v:"all"},{l:"Pagos",v:"paid"},{l:"Pendentes",v:"pending"},{l:"Vencidos",v:"overdue"}].map(function(f,i){
+                    var[filtro,sFiltro]=useState("all");
+                    return null; // handled below
+                  })}
+                </div>
+              </div>
+              {loading?<div style={{textAlign:"center",padding:20,color:T.t3}}>⏳ Carregando...</div>:(
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                  <thead><tr style={{borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+                    {["Cliente","Vencimento","Pagamento","Valor","Status"].map(function(h,i){return<th key={i} style={{padding:"8px 10px",textAlign:i>=2?"right":"left",fontSize:9,color:T.t3,fontWeight:700,letterSpacing:1}}>{h}</th>})}
+                  </tr></thead>
+                  <tbody>{bills.sort(function(a,b){return new Date(b.created_at)-new Date(a.created_at)}).slice(0,50).map(function(b,i){
+                    var venc=b.due_at?new Date(b.due_at).toLocaleDateString("pt-BR"):"—";
+                    var pago=b.paid_at?new Date(b.paid_at).toLocaleDateString("pt-BR"):"—";
+                    var isOverdue=b.status==="pending"&&b.due_at&&new Date(b.due_at)<new Date();
+                    var status=isOverdue?"overdue":b.status;
+                    var cor=statusColor[status]||T.t3;
+                    return(
+                      <tr key={i} style={{borderBottom:"1px solid rgba(255,255,255,0.02)",background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
+                        <td style={{padding:"9px 10px",fontWeight:600}}>{b.customer&&b.customer.name||"—"}</td>
+                        <td style={{padding:"9px 10px",color:isOverdue?"#EF6461":T.t3}}>{venc}</td>
+                        <td style={{padding:"9px 10px",textAlign:"right",color:T.t2}}>{pago}</td>
+                        <td style={{padding:"9px 10px",textAlign:"right",fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(b.amount||0)}</td>
+                        <td style={{padding:"9px 10px",textAlign:"right"}}><span style={{fontSize:9,fontWeight:700,color:cor,background:"rgba(255,255,255,0.04)",padding:"2px 8px",borderRadius:6}}>{statusLabel[status]||status}</span></td>
+                      </tr>
+                    );
+                  })}</tbody>
+                </table>
+              )}
+            </Cd>
+          )}
+
+          {/* ── CLIENTES ── */}
+          {tab==="clientes"&&(
+            <Cd style={{padding:20}} hov={false}>
+              <div style={{fontSize:12,fontWeight:700,color:T.gold,marginBottom:14}}>👥 Clientes Vindi — {customers.length} cadastrados</div>
+              {loading?<div style={{textAlign:"center",padding:20,color:T.t3}}>⏳ Carregando...</div>:(
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                  <thead><tr style={{borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+                    {["Nome","Email","Telefone","Assinatura","Na plataforma"].map(function(h,i){return<th key={i} style={{padding:"8px 10px",textAlign:"left",fontSize:9,color:T.t3,fontWeight:700,letterSpacing:1}}>{h}</th>})}
+                  </tr></thead>
+                  <tbody>{customers.map(function(cust,i){
+                    var sub=subscriptions.find(function(s){return s.customer&&s.customer.id===cust.id});
+                    var match=matchCliente(cust.name);
+                    return(
+                      <tr key={i} style={{borderBottom:"1px solid rgba(255,255,255,0.02)",background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
+                        <td style={{padding:"9px 10px",fontWeight:600}}>{cust.name}</td>
+                        <td style={{padding:"9px 10px",color:T.t3,fontSize:10}}>{cust.email||"—"}</td>
+                        <td style={{padding:"9px 10px",color:T.t3,fontSize:10}}>{(cust.phones&&cust.phones[0]&&cust.phones[0].number)||"—"}</td>
+                        <td style={{padding:"9px 10px"}}>{sub?<span style={{fontSize:9,fontWeight:700,color:statusColor[sub.status]||T.t3,background:"rgba(255,255,255,0.04)",padding:"2px 8px",borderRadius:6}}>{sub.plan&&sub.plan.name||sub.status}</span>:<span style={{color:T.t3,fontSize:9}}>—</span>}</td>
+                        <td style={{padding:"9px 10px"}}>{match?<span style={{fontSize:9,color:T.green,fontWeight:700}}>✓ {match.n}</span>:<span style={{fontSize:9,color:T.t3}}>não vinculado</span>}</td>
+                      </tr>
+                    );
+                  })}</tbody>
+                </table>
+              )}
+            </Cd>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"vindi",l:"Vindi",i:"⚡"},{id:"fiscal",l:"Fiscal",i:"🧾"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"tutoriais",l:"Tutoriais",i:"📚"}];
 
 /* ============ AUTH + FIRESTORE SYNC ============ */
 
@@ -27186,6 +27201,7 @@ function App({authUser}){
           {pg==="clients" && !sel && <CL data={d} onSel={function(c){sSel(c)}} dispatch={dp}/>}
           {pg==="clients" && sel && <CD client={sel} data={d} dispatch={dp} onBack={function(){sSel(null)}} taxasBCB={taxasBCB} taxaBCBStatus={taxaBCBStatus}/>}
           {pg==="financeiro" && <FinanceiroView data={d} dispatch={dp}/>}
+          {pg==="vindi" && <VindiView data={d} dispatch={dp}/>}
           {pg==="fiscal" && <FiscalView data={d} dispatch={dp}/>}
           {pg==="metas" && <MetasConsultor/>}
           {pg==="comercial" && <ComercialView data={d} dispatch={dp}/>}
@@ -27318,7 +27334,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '311';
+  var SW_VERSION = '296';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
