@@ -19135,6 +19135,117 @@ function FinanceiroView({data:d,dispatch:dp}){
                 </Cd>
               )}
               {}
+              {/* ═══════════ BLOCO DE DESPESAS ═══════════ */}
+              {despesasFilt.length>0&&(function(){
+                var totalDesp=despesasFilt.reduce(function(s,d){return s+d.valor},0);
+                var totalRem=despesasFilt.filter(function(d){return ehRemuneracao(d.cat||"")}).reduce(function(s,d){return s+d.valor},0);
+                var totalOp=totalDesp-totalRem;
+                var catMap={};
+                despesasFilt.forEach(function(d){var cat=d.cat||"Outros";if(!catMap[cat])catMap[cat]={total:0,tipo:ehRemuneracao(cat)?"rem":"op"};catMap[cat].total+=d.valor;});
+                var catsRem=Object.entries(catMap).filter(function(e){return e[1].tipo==="rem"}).sort(function(a,b){return b[1].total-a[1].total});
+                var catsOp=Object.entries(catMap).filter(function(e){return e[1].tipo==="op"}).sort(function(a,b){return b[1].total-a[1].total});
+                var maxVal=Math.max.apply(null,Object.values(catMap).map(function(c){return c.total}).concat([1]));
+                var mesesDesp=Object.keys(byDespMonth).filter(function(m){return selYear==="todos"||m.startsWith(selYear);}).sort();
+                return (
+                  <div style={{marginBottom:16}}>
+                    <Cd style={{padding:22}} hov={false}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,flexWrap:"wrap",gap:8}}>
+                        <h4 style={{margin:0,fontSize:14,fontWeight:700,color:"#EF6461"}}>💸 Despesas {selYear!=="todos"?selYear:""}</h4>
+                        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                          <Cd style={{padding:"6px 14px"}} hov={false}><span style={{fontSize:9,color:T.t3}}>TOTAL</span><div style={{fontSize:14,fontWeight:800,color:"#EF6461",fontFamily:"'JetBrains Mono'"}}>{fm(totalDesp)}</div></Cd>
+                          <Cd style={{padding:"6px 14px"}} hov={false}><span style={{fontSize:9,color:T.t3}}>OPERACIONAL</span><div style={{fontSize:14,fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(totalOp)}</div></Cd>
+                          <Cd style={{padding:"6px 14px"}} hov={false}><span style={{fontSize:9,color:T.t3}}>REMUNERAÇÃO SÓCIOS</span><div style={{fontSize:14,fontWeight:800,color:"#C084FC",fontFamily:"'JetBrains Mono'"}}>{fm(totalRem)}</div></Cd>
+                        </div>
+                      </div>
+                      {catsRem.length>0&&(
+                        <div style={{marginBottom:20}}>
+                          <div style={{fontSize:10,fontWeight:800,color:"#C084FC",letterSpacing:1.5,textTransform:"uppercase",marginBottom:10,paddingBottom:6,borderBottom:"1px solid rgba(192,132,252,0.15)"}}>👥 Remuneração dos Sócios</div>
+                          {catsRem.map(function(e,i){
+                            var cat=e[0],info=e[1];
+                            var isSel=catSel===cat;
+                            return(
+                              <div key={i}>
+                                <div onClick={function(){sCatSel(isSel?null:cat)}} style={{cursor:"pointer",padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}>
+                                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                                    <span style={{fontSize:12,fontWeight:600,color:isSel?"#C084FC":T.t1}}>{cat}</span>
+                                    <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                                      <span style={{fontSize:10,color:T.t3}}>{totalDesp>0?(info.total/totalDesp*100).toFixed(1):0}%</span>
+                                      <span style={{fontSize:13,fontWeight:800,color:"#C084FC",fontFamily:"'JetBrains Mono'"}}>{fm(info.total)}</span>
+                                    </div>
+                                  </div>
+                                  <div style={{height:4,borderRadius:4,background:"rgba(255,255,255,0.04)"}}><div style={{height:4,borderRadius:4,width:(info.total/maxVal*100)+"%",background:"linear-gradient(90deg,#A78BFA,#C084FC)"}}/></div>
+                                </div>
+                                {isSel&&(
+                                  <div style={{margin:"8px 0 12px 12px",padding:14,background:"rgba(192,132,252,0.05)",borderRadius:10,borderLeft:"3px solid rgba(192,132,252,0.3)"}}>
+                                    <div style={{fontSize:10,fontWeight:700,color:"#C084FC",marginBottom:8}}>Por sócio</div>
+                                    {(function(){var socios={};despesasFilt.filter(function(d){return(d.cat||"")===cat}).forEach(function(d){var s=d.desc||"Outros";socios[s]=(socios[s]||0)+d.valor;});var totalCat=Object.values(socios).reduce(function(a,b){return a+b},0);var cols=["#C084FC","#A78BFA","#818CF8","#60A5FA"];return Object.entries(socios).sort(function(a,b){return b[1]-a[1]}).map(function(e,si){return(<div key={si} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}><div style={{width:24,height:24,borderRadius:8,background:"rgba(192,132,252,0.12)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:800,color:cols[si%4],flexShrink:0}}>{e[0].split(" ").map(function(n){return n[0]}).join("").substring(0,2).toUpperCase()}</div><span style={{fontSize:11,fontWeight:600,color:T.t1,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e[0]}</span><span style={{fontSize:12,fontWeight:800,color:cols[si%4],fontFamily:"'JetBrains Mono'"}}>{fm(e[1])}</span><span style={{fontSize:10,color:T.t3}}>({totalCat>0?(e[1]/totalCat*100).toFixed(0):0}%)</span></div>);});})()}
+                                    <div style={{height:1,background:"rgba(255,255,255,0.04)",margin:"10px 0"}}/>
+                                    <div style={{fontSize:10,fontWeight:700,color:"#C084FC",marginBottom:8}}>Por mês</div>
+                                    {mesesDesp.filter(function(m){return byDespMonth[m]&&byDespMonth[m].cats[cat]}).map(function(m,mi){
+                                      var v=byDespMonth[m].cats[cat]||0;
+                                      var maxV=Math.max.apply(null,mesesDesp.map(function(mm){return(byDespMonth[mm]&&byDespMonth[mm].cats[cat])||0}).concat([1]));
+                                      var sociosMes={};despesasFilt.filter(function(d){return(d.cat||"")===cat&&d.data&&d.data.substring(0,7)===m}).forEach(function(d){var s=d.desc||"Outros";sociosMes[s]=(sociosMes[s]||0)+d.valor;});
+                                      return(<div key={mi} style={{padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.02)"}}>
+                                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+                                          <span style={{fontSize:10,color:T.t3,width:46,flexShrink:0}}>{fmtMonth(m)}</span>
+                                          <div style={{flex:1,height:5,borderRadius:3,background:"rgba(255,255,255,0.04)"}}><div style={{height:5,borderRadius:3,width:(v/maxV*100)+"%",background:"rgba(192,132,252,0.5)"}}/></div>
+                                          <span style={{fontSize:11,fontWeight:700,color:"#C084FC",fontFamily:"'JetBrains Mono'",width:90,textAlign:"right"}}>{fm(v)}</span>
+                                        </div>
+                                        <div style={{paddingLeft:54,display:"flex",flexWrap:"wrap",gap:"2px 10px"}}>
+                                          {Object.entries(sociosMes).sort(function(a,b){return b[1]-a[1]}).map(function(e,si){return <span key={si} style={{fontSize:9,color:["#C084FC","#A78BFA","#818CF8","#60A5FA"][si%4]}}>{e[0].split(" ")[0]}: {fm(e[1])}</span>;})}
+                                        </div>
+                                      </div>);
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {catsOp.length>0&&(
+                        <div>
+                          <div style={{fontSize:10,fontWeight:800,color:T.gold,letterSpacing:1.5,textTransform:"uppercase",marginBottom:10,paddingBottom:6,borderBottom:"1px solid rgba(212,163,40,0.15)"}}>🏢 Despesas Operacionais</div>
+                          {catsOp.map(function(e,i){
+                            var cat=e[0],info=e[1];
+                            var isSel=catSel===cat;
+                            var cor=getCatColor(cat);
+                            return(
+                              <div key={i}>
+                                <div onClick={function(){sCatSel(isSel?null:cat)}} style={{cursor:"pointer",padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}>
+                                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                                    <span style={{fontSize:12,fontWeight:600,color:isSel?cor:T.t1}}>{cat}</span>
+                                    <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                                      <span style={{fontSize:10,color:T.t3}}>{totalDesp>0?(info.total/totalDesp*100).toFixed(1):0}%</span>
+                                      <span style={{fontSize:13,fontWeight:800,color:cor,fontFamily:"'JetBrains Mono'"}}>{fm(info.total)}</span>
+                                    </div>
+                                  </div>
+                                  <div style={{height:4,borderRadius:4,background:"rgba(255,255,255,0.04)"}}><div style={{height:4,borderRadius:4,width:(info.total/maxVal*100)+"%",background:cor,opacity:0.8}}/></div>
+                                </div>
+                                {isSel&&(
+                                  <div style={{margin:"8px 0 12px 12px",padding:14,background:"rgba(212,163,40,0.04)",borderRadius:10,borderLeft:"3px solid rgba(212,163,40,0.2)"}}>
+                                    <div style={{fontSize:10,fontWeight:700,color:cor,marginBottom:8}}>Evolução mensal — {cat}</div>
+                                    {mesesDesp.filter(function(m){return byDespMonth[m]&&byDespMonth[m].cats[cat]}).map(function(m,mi){
+                                      var v=byDespMonth[m].cats[cat]||0;
+                                      var maxV=Math.max.apply(null,mesesDesp.map(function(mm){return(byDespMonth[mm]&&byDespMonth[mm].cats[cat])||0}).concat([1]));
+                                      return(<div key={mi} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 0",borderBottom:"1px solid rgba(255,255,255,0.02)"}}>
+                                        <span style={{fontSize:10,color:T.t3,width:46,flexShrink:0}}>{fmtMonth(m)}</span>
+                                        <div style={{flex:1,height:5,borderRadius:3,background:"rgba(255,255,255,0.04)"}}><div style={{height:5,borderRadius:3,width:(v/maxV*100)+"%",background:cor,opacity:0.7}}/></div>
+                                        <span style={{fontSize:11,fontWeight:700,color:cor,fontFamily:"'JetBrains Mono'",width:90,textAlign:"right"}}>{fm(v)}</span>
+                                      </div>);
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </Cd>
+                  </div>
+                );
+              })()}
+
               {/* ═══════════ PROJEÇÃO DE RECEITA ═══════════ */}
               {(function(){
                 if(mesesOrdenados.length < 3) return null;
@@ -19381,33 +19492,67 @@ function FinanceiroView({data:d,dispatch:dp}){
       {}
       {fTab==="dre" && (
         <Cd style={{padding:18}} hov={false}>
-          <h4 style={{margin:"0 0 14px",fontSize:14,fontWeight:700,color:T.gold}}>DRE — Resultado por Mês</h4>
-          {mesesOrdenados.length===0 ? <div style={{padding:20,textAlign:"center",color:T.t3}}>Importe dados primeiro</div> : (
-            <div style={{overflowX:"auto",borderRadius:12,border:"1px solid rgba(255,255,255,0.04)"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:10,minWidth:500}}>
-                <thead><tr style={{background:"rgba(255,255,255,0.02)"}}>
-                  <th style={{padding:"8px 10px",textAlign:"left",color:T.gold,fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)",position:"sticky",left:0,background:"rgba(12,24,48,0.95)",zIndex:1}}>MÊS</th>
-                  <th style={{padding:"8px 10px",textAlign:"right",color:T.green,fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)"}}>RECEITA</th>
-                  <th style={{padding:"8px 10px",textAlign:"right",color:T.t3,fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)"}}>ENTRADAS</th>
-                  {Object.keys(byServico).map(function(s){return <th key={s} style={{padding:"8px 6px",textAlign:"right",color:svcColors[s]||T.t3,fontWeight:600,fontSize:8,borderBottom:"1px solid rgba(212,163,40,0.1)",whiteSpace:"nowrap"}}>{s.replace("Gestão de ","").replace("Financeira","Fin.")}</th>})}
-                </tr></thead>
-                <tbody>{mesesOrdenados.map(function(m,i){var d=byMonth[m];return (
-                  <tr key={m} style={{background:i%2===0?"transparent":"rgba(255,255,255,0.015)"}}>
-                    <td style={{padding:"8px 10px",fontWeight:600,borderBottom:"1px solid rgba(255,255,255,0.02)",position:"sticky",left:0,background:"rgba(12,24,48,0.95)",zIndex:1}}>{fmtMonth(m)}</td>
-                    <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:T.green,fontFamily:"'JetBrains Mono'",borderBottom:"1px solid rgba(255,255,255,0.02)"}}>{fm(d.rec)}</td>
-                    <td style={{padding:"8px 10px",textAlign:"right",color:T.t3,borderBottom:"1px solid rgba(255,255,255,0.02)"}}>{d.entries.length}</td>
-                    {Object.keys(byServico).map(function(s){return <td key={s} style={{padding:"8px 6px",textAlign:"right",color:T.t2,fontFamily:"'JetBrains Mono'",fontSize:10,borderBottom:"1px solid rgba(255,255,255,0.02)"}}>{d.servicos[s]?fm(d.servicos[s]):"—"}</td>})}
-                  </tr>
-                )})}</tbody>
-                <tfoot><tr style={{borderTop:"2px solid rgba(212,163,40,0.15)"}}>
-                  <td style={{padding:"10px",fontWeight:800,color:T.gold,position:"sticky",left:0,background:"rgba(12,24,48,0.95)",zIndex:1}}>TOTAL</td>
-                  <td style={{padding:"10px",textAlign:"right",fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(totalEntradas)}</td>
-                  <td style={{padding:"10px",textAlign:"right",color:T.t3}}>{entradas.length}</td>
-                  {Object.keys(byServico).map(function(s){return <td key={s} style={{padding:"10px 6px",textAlign:"right",fontWeight:700,color:svcColors[s]||T.t2,fontFamily:"'JetBrains Mono'",fontSize:10}}>{fm(byServico[s])}</td>})}
-                </tr></tfoot>
-              </table>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+            <h4 style={{margin:0,fontSize:14,fontWeight:700,color:T.gold}}>DRE — Resultado por Mês</h4>
+            <div style={{display:"flex",gap:4}}>
+              {["todos",...anos].map(function(yr){return(
+                <button key={yr} onClick={function(){sSelYear(yr);sSelMonth(null)}} style={{padding:"5px 12px",borderRadius:8,fontSize:11,fontWeight:600,cursor:"pointer",border:selYear===yr?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.06)",background:selYear===yr?T.goldD:"transparent",color:selYear===yr?T.gold:T.t3}}>{yr==="todos"?"Todos":yr}</button>
+              );})}
             </div>
-          )}
+          </div>
+          {mesesOrdenados.length===0 ? <div style={{padding:20,textAlign:"center",color:T.t3}}>Importe dados primeiro</div> : (function(){
+            var mesesFilt=mesesOrdenados.filter(function(m){return selYear==="todos"||m.startsWith(selYear)});
+            var mesesDesp=Object.keys(byDespMonth).filter(function(m){return selYear==="todos"||m.startsWith(selYear)});
+            var todosMeses=[...new Set([...mesesFilt,...mesesDesp])].sort();
+            var catsDespOp=[],catsDespRem=[];
+            var allCats={};
+            despesasFilt.forEach(function(d){allCats[d.cat||"Outros"]=true});
+            Object.keys(allCats).forEach(function(c){if(ehRemuneracao(c))catsDespRem.push(c);else catsDespOp.push(c);});
+            catsDespOp.sort();catsDespRem.sort();
+            var totalRecDRE=todosMeses.reduce(function(s,m){return s+(byMonth[m]?byMonth[m].rec:0)},0);
+            var totalDespOpDRE=despesasFilt.filter(function(d){return!ehRemuneracao(d.cat||"")}).reduce(function(s,d){return s+d.valor},0);
+            var totalDespRemDRE=despesasFilt.filter(function(d){return ehRemuneracao(d.cat||"")}).reduce(function(s,d){return s+d.valor},0);
+            return (
+              <div style={{overflowX:"auto",borderRadius:12,border:"1px solid rgba(255,255,255,0.04)"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:10,minWidth:500}}>
+                  <thead><tr style={{background:"rgba(255,255,255,0.02)"}}>
+                    <th style={{padding:"8px 10px",textAlign:"left",color:T.gold,fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)",position:"sticky",left:0,background:"rgba(12,24,48,0.98)",zIndex:2,minWidth:70}}>MÊS</th>
+                    <th style={{padding:"8px 8px",textAlign:"right",color:T.green,fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)",whiteSpace:"nowrap"}}>RECEITA</th>
+                    {catsDespOp.map(function(c){return <th key={c} style={{padding:"8px 8px",textAlign:"right",color:"#F87171",fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)",whiteSpace:"nowrap"}}>{c}</th>})}
+                    <th style={{padding:"8px 8px",textAlign:"right",color:T.gold,fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)",whiteSpace:"nowrap"}}>= LUCRO OP.</th>
+                    {catsDespRem.map(function(c){return <th key={c} style={{padding:"8px 8px",textAlign:"right",color:"#C084FC",fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)",whiteSpace:"nowrap"}}>{c}</th>})}
+                    <th style={{padding:"8px 8px",textAlign:"right",color:"#34D399",fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)",whiteSpace:"nowrap"}}>= RESULTADO</th>
+                  </tr></thead>
+                  <tbody>{todosMeses.map(function(m,i){
+                    var rec=byMonth[m]?byMonth[m].rec:0;
+                    var despMes=byDespMonth[m]||{cats:{}};
+                    var despOpMes=catsDespOp.reduce(function(s,c){return s+(despMes.cats[c]||0)},0);
+                    var despRemMes=catsDespRem.reduce(function(s,c){return s+(despMes.cats[c]||0)},0);
+                    var lucroOp=rec-despOpMes;
+                    var resultado=rec-despOpMes-despRemMes;
+                    return(
+                      <tr key={m} style={{background:i%2===0?"transparent":"rgba(255,255,255,0.015)"}}>
+                        <td style={{padding:"7px 10px",fontWeight:600,borderBottom:"1px solid rgba(255,255,255,0.02)",position:"sticky",left:0,background:"rgba(12,24,48,0.95)",zIndex:1,whiteSpace:"nowrap"}}>{fmtMonth(m)}</td>
+                        <td style={{padding:"7px 8px",textAlign:"right",fontWeight:700,color:T.green,fontFamily:"'JetBrains Mono'",fontSize:11,borderBottom:"1px solid rgba(255,255,255,0.02)",whiteSpace:"nowrap"}}>{rec>0?fm(rec):"—"}</td>
+                        {catsDespOp.map(function(c){var v=despMes.cats[c]||0;return <td key={c} style={{padding:"7px 8px",textAlign:"right",color:"#F87171",fontFamily:"'JetBrains Mono'",fontSize:11,borderBottom:"1px solid rgba(255,255,255,0.02)",whiteSpace:"nowrap"}}>{v>0?("-"+fm(v)):"—"}</td>})}
+                        <td style={{padding:"7px 8px",textAlign:"right",fontWeight:700,color:lucroOp>=0?T.gold:"#F87171",fontFamily:"'JetBrains Mono'",fontSize:11,borderBottom:"1px solid rgba(255,255,255,0.02)",whiteSpace:"nowrap"}}>{fm(lucroOp)}</td>
+                        {catsDespRem.map(function(c){var v=despMes.cats[c]||0;return <td key={c} style={{padding:"7px 8px",textAlign:"right",color:"#C084FC",fontFamily:"'JetBrains Mono'",fontSize:11,borderBottom:"1px solid rgba(255,255,255,0.02)",whiteSpace:"nowrap"}}>{v>0?("-"+fm(v)):"—"}</td>})}
+                        <td style={{padding:"7px 8px",textAlign:"right",fontWeight:700,color:resultado>=0?"#34D399":"#F87171",fontFamily:"'JetBrains Mono'",fontSize:11,borderBottom:"1px solid rgba(255,255,255,0.02)",whiteSpace:"nowrap"}}>{fm(resultado)}</td>
+                      </tr>
+                    );
+                  })}</tbody>
+                  <tfoot><tr style={{borderTop:"2px solid rgba(212,163,40,0.2)",background:"rgba(12,24,48,0.98)"}}>
+                    <td style={{padding:"10px 10px",fontWeight:800,color:T.gold,position:"sticky",left:0,background:"rgba(12,24,48,0.98)",zIndex:1,fontSize:11}}>TOTAL</td>
+                    <td style={{padding:"10px 8px",textAlign:"right",fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'",fontSize:11,whiteSpace:"nowrap"}}>{fm(totalRecDRE)}</td>
+                    {catsDespOp.map(function(c){var tot=despesasFilt.filter(function(d){return(d.cat||"")===c}).reduce(function(s,d){return s+d.valor},0);return <td key={c} style={{padding:"10px 8px",textAlign:"right",fontWeight:700,color:"#F87171",fontFamily:"'JetBrains Mono'",fontSize:11,whiteSpace:"nowrap"}}>{tot>0?("-"+fm(tot)):"—"}</td>;})}
+                    <td style={{padding:"10px 8px",textAlign:"right",fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'",fontSize:11,whiteSpace:"nowrap"}}>{fm(totalRecDRE-totalDespOpDRE)}</td>
+                    {catsDespRem.map(function(c){var tot=despesasFilt.filter(function(d){return(d.cat||"")===c}).reduce(function(s,d){return s+d.valor},0);return <td key={c} style={{padding:"10px 8px",textAlign:"right",fontWeight:700,color:"#C084FC",fontFamily:"'JetBrains Mono'",fontSize:11,whiteSpace:"nowrap"}}>{tot>0?("-"+fm(tot)):"—"}</td>;})}
+                    <td style={{padding:"10px 8px",textAlign:"right",fontWeight:800,color:(totalRecDRE-totalDespOpDRE-totalDespRemDRE)>=0?"#34D399":"#F87171",fontFamily:"'JetBrains Mono'",fontSize:11,whiteSpace:"nowrap"}}>{fm(totalRecDRE-totalDespOpDRE-totalDespRemDRE)}</td>
+                  </tr></tfoot>
+                </table>
+              </div>
+            );
+          })()}
         </Cd>
       )}
 
