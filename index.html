@@ -26834,7 +26834,9 @@ function App({authUser}){
           }
           
           skipNextSaveRef.current=true;
-          dp({t:"REPLACE_ALL",p:{cl:data.cl,it:data.it,lds:data.lds||[],fin:data.fin||{entradas:[],despesas:[]},overviewMercado:data.overviewMercado||{},config:data.config||{},ag:data.ag||[],tpAg:data.tpAg||[]}});
+          /* Mescla config: local tem prioridade (preserva vindiKey e outras chaves recentes) */
+          var configMesclado0=Object.assign({},data.config||{},d&&d.config?d.config:{});
+          dp({t:"REPLACE_ALL",p:{cl:data.cl,it:data.it,lds:data.lds||[],fin:data.fin||{entradas:[],despesas:[]},overviewMercado:data.overviewMercado||{},config:configMesclado0,ag:data.ag||[],tpAg:data.tpAg||[]}});
           console.log("[Sync] Carregado do Firestore: "+data.cl.length+" clientes, "+data.it.length+" interações");
         }
       }else{
@@ -26919,8 +26921,12 @@ function App({authUser}){
       var finParaUsar=(localEnt>remoteEnt)?(finRef.current||{entradas:[],despesas:[]}):(data.fin||{entradas:[],despesas:[]});
       if(localEnt>remoteEnt) console.log("[Sync] onSnapshot: mantendo fin local ("+localEnt+" > "+remoteEnt+" do Firestore)");
       else console.log("[Sync] onSnapshot: usando fin do Firestore ("+remoteEnt+" entradas)");
-      skipNextSaveRef.current=true; 
-      dp({t:"REPLACE_ALL",p:{cl:data.cl,it:data.it,lds:data.lds||[],fin:finParaUsar,overviewMercado:data.overviewMercado||{},config:data.config||{},ag:data.ag||[],tpAg:data.tpAg||[]}});
+      skipNextSaveRef.current=true;
+      /* Mescla config: local tem prioridade para chaves que o remoto não tem (ex: vindiKey salvo recentemente) */
+      var configLocal=d&&d.config?d.config:{};
+      var configRemoto=data.config||{};
+      var configMesclado=Object.assign({},configRemoto,configLocal);
+      dp({t:"REPLACE_ALL",p:{cl:data.cl,it:data.it,lds:data.lds||[],fin:finParaUsar,overviewMercado:data.overviewMercado||{},config:configMesclado,ag:data.ag||[],tpAg:data.tpAg||[]}});
     },function(err){
       console.warn("[Sync] Listener error:",err);
     });
