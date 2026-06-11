@@ -18627,7 +18627,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
 function FinanceiroView({data:d,dispatch:dp}){
   const[fTab,sFTab]=useState("importar");
   const fileRef=useRef(null);
-  const fileDespRef=useRef(null);
+  
   const entradas=(d&&d.fin&&d.fin.entradas)||[];
   const despesas=(d&&d.fin&&d.fin.despesas)||[];
   const sEntradas=function(updater){
@@ -18655,7 +18655,6 @@ function FinanceiroView({data:d,dispatch:dp}){
   const[selMonth,sSelMonth]=useState(null);
   const[selCliFin,sSelCliFin]=useState(null);
   const[selYear,sSelYear]=useState("todos");
-  const[catSel,sCatSel]=useState(null);
 
   
   var importPlanilha=function(file){
@@ -18756,10 +18755,47 @@ function FinanceiroView({data:d,dispatch:dp}){
   var entradasFilt=selYear==="todos"?entradas:entradas.filter(function(e){return e.data&&e.data.substring(0,4)===selYear});
   var despesasFilt=selYear==="todos"?despesas:despesas.filter(function(d){return!d.data||d.data.substring(0,4)===selYear});
 
+  /* ── Classificação de remuneração dos sócios ── */
+  var CAT_REMUNERACAO=["Pró-Labore","Pró Labore","Pro-Labore","Pro Labore","Prolabore","Pró labore",
+    "Distr. Lucro","Distr.Lucro","Distribuição de Lucro","Distribuicao de Lucro",
+    "Dist. Lucro","Dist.Lucro","Distrib. Lucro","Distribuição Lucro","Distr Lucro"];
+  var ehRemuneracao=function(cat){
+    if(!cat)return false;
+    var c=cat.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+    return CAT_REMUNERACAO.some(function(k){
+      var kn=k.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+      return c===kn||c.indexOf(kn)>=0||kn.indexOf(c)>=0;
+    })||c.indexOf("lucro")>=0||c.indexOf("pro labore")>=0||c.indexOf("prolabore")>=0;
+  };
+
   var totalEntradas=entradasFilt.reduce(function(a,e){return a+e.valor},0);
   var totalDespesas=despesasFilt.reduce(function(a,d){return a+d.valor},0);
+  var totalDespOperacional=despesasFilt.filter(function(d){return!ehRemuneracao(d.cat||"")}).reduce(function(a,d){return a+d.valor},0);
+  var totalDespRemuneracao=despesasFilt.filter(function(d){return ehRemuneracao(d.cat||"")}).reduce(function(a,d){return a+d.valor},0);
   var lucro=totalEntradas-totalDespesas;
+  var lucroOperacional=totalEntradas-totalDespOperacional;
   var margem=totalEntradas>0?((lucro/totalEntradas)*100):0;
+  var margemOperacional=totalEntradas>0?((lucroOperacional/totalEntradas)*100):0;
+
+  /* ── Despesas por mês ── */
+  var byDespMonth={};
+  despesasFilt.forEach(function(d){
+    if(!d.data)return;
+    var mm=d.data.substring(0,7);
+    var cat=d.cat||"Outros";
+    if(!byDespMonth[mm])byDespMonth[mm]={total:0,operacional:0,remuneracao:0,cats:{}};
+    byDespMonth[mm].total+=d.valor;
+    if(ehRemuneracao(cat))byDespMonth[mm].remuneracao+=d.valor;
+    else byDespMonth[mm].operacional+=d.valor;
+    byDespMonth[mm].cats[cat]=(byDespMonth[mm].cats[cat]||0)+d.valor;
+  });
+
+  /* ── Cores por categoria ── */
+  var despCatColors={"DAS":"#F59E0B","INSS":"#FBBF24","Meu Vista":"#38BDF8","Plano de saúde":"#34D399","Plano de Saúde":"#34D399","Cartão de Crédito":"#F87171","Reembolso":"#94A3B8","Certificado Digital":"#60A5FA","Coworking":"#818CF8","Estacionamento":"#A78BFA","Patrocinio":"#FB923C","Patrocínio":"#FB923C","Site":"#F472B6","Programador Site":"#F472B6"};
+  var getCatColor=function(cat){
+    if(ehRemuneracao(cat))return cat&&cat.toLowerCase().indexOf("lucro")>=0?"#C084FC":"#A78BFA";
+    return despCatColors[cat]||T.gold;
+  };
 
   
   var byMonth={};
@@ -18795,34 +18831,8 @@ function FinanceiroView({data:d,dispatch:dp}){
   entradasFilt.forEach(function(e){var c=e.cliente||"Desconhecido";if(!byCliente[c])byCliente[c]={total:0,count:0,servico:"",meio:"",meses:{},entries:[]};byCliente[c].total+=e.valor;byCliente[c].count++;byCliente[c].servico=e.servico;byCliente[c].meio=e.meio;byCliente[c].entries.push(e);var mm=e.data?e.data.substring(0,7):"";if(mm){byCliente[c].meses[mm]=(byCliente[c].meses[mm]||0)+e.valor}});
 
   
-  var CAT_REMUNERACAO=["Pró-Labore","Pró Labore","Pro-Labore","Pro Labore","Distr. Lucro","Distribuição de Lucro","Dist. Lucro","Distribuicao de Lucro"];
-  var ehRemuneracao=function(cat){return CAT_REMUNERACAO.some(function(c){return cat&&cat.toLowerCase().indexOf(c.toLowerCase())>=0});};
-  var totalDespOperacional=despesasFilt.filter(function(d){return!ehRemuneracao(d.cat||"")}).reduce(function(a,d){return a+d.valor},0);
-  var totalDespRemuneracao=despesasFilt.filter(function(d){return ehRemuneracao(d.cat||"")}).reduce(function(a,d){return a+d.valor},0);
-  var lucroOperacional=totalEntradas-totalDespOperacional;
-  var margemOperacional=totalEntradas>0?((lucroOperacional/totalEntradas)*100):0;
-
   var byDespCat={};
   despesas.forEach(function(d){var c=d.cat||"Outros";byDespCat[c]=(byDespCat[c]||0)+d.valor});
-
-  var despCatColors={"DAS":"#F59E0B","INSS":"#FBBF24","Meu Vista":"#38BDF8","Plano de saúde":"#34D399","Plano de Saúde":"#34D399","Cartão de Crédito":"#F87171","Reembolso":"#94A3B8","Certificado Digital":"#60A5FA","Coworking":"#818CF8","Estacionamento":"#A78BFA","Patrocinio":"#FB923C","Programador Site":"#F472B6"};
-  var getCatColor=function(cat){
-    if(ehRemuneracao(cat))return cat.toLowerCase().indexOf("lucro")>=0?"#C084FC":"#A78BFA";
-    return despCatColors[cat]||T.gold;
-  };
-
-  /* byDespMonth — despesas por mês filtradas */
-  var byDespMonth={};
-  despesasFilt.forEach(function(d){
-    if(!d.data)return;
-    var mm=d.data.substring(0,7);
-    var cat=d.cat||"Outros";
-    if(!byDespMonth[mm])byDespMonth[mm]={total:0,operacional:0,remuneracao:0,cats:{}};
-    byDespMonth[mm].total+=d.valor;
-    if(ehRemuneracao(cat))byDespMonth[mm].remuneracao+=d.valor;
-    else byDespMonth[mm].operacional+=d.valor;
-    byDespMonth[mm].cats[cat]=(byDespMonth[mm].cats[cat]||0)+d.valor;
-  });
 
   var fmtMonth=function(m){var p=m.split("-");return(["","Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"][+p[1]]||p[1])+"/"+p[0].slice(2)};
 
@@ -18837,92 +18847,21 @@ function FinanceiroView({data:d,dispatch:dp}){
       {}
       {fTab==="importar" && (
         <div>
-          <input ref={fileRef} type="file" accept=".csv,.txt,.tsv,.xlsx,.xls,*/*" multiple onChange={function(e){var files=e.target.files;for(var i=0;i<files.length;i++){importPlanilha(files[i])}e.target.value=""}} style={{display:"none"}}/>
-          <input ref={fileDespRef} type="file" accept=".xlsx,.xls,.csv" onChange={function(e){
-            var file=e.target.files[0];if(!file)return;e.target.value="";
-            var XLSX=window.XLSX;if(!XLSX){alert("Biblioteca XLSX não carregada.");return;}
-            var reader=new FileReader();
-            reader.onload=function(ev){
-              try{
-                var wb=XLSX.read(ev.target.result,{type:"array",cellDates:true});
-                var ws=wb.Sheets[wb.SheetNames[0]];
-                var rows=XLSX.utils.sheet_to_json(ws,{defval:""});
-                if(!rows||rows.length===0){alert("Planilha vazia.");return;}
-                var keys=Object.keys(rows[0]);
-                var colData=keys.find(function(k){return /data/i.test(k)});
-                var colTipo=keys.find(function(k){return /tipo|categoria|cat/i.test(k)});
-                var colMeio=keys.find(function(k){return /meio.*pag|pagamento/i.test(k)});
-                var colDesc=keys.find(function(k){return /recebimento|descri|benefi|fornec|destino/i.test(k)});
-                var colValor=keys.find(function(k){return /valor/i.test(k)});
-                if(!colValor){alert("Coluna 'Valor' não encontrada.\nColunas: "+keys.join(", "));return;}
-                var parseD=function(v){
-                  if(!v)return"";
-                  if(v instanceof Date){return v.getFullYear()+"-"+String(v.getMonth()+1).padStart(2,"0")+"-"+String(v.getDate()).padStart(2,"0");}
-                  var s=String(v).trim();
-                  var m1=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-                  if(m1)return m1[3]+"-"+m1[2].padStart(2,"0")+"-"+m1[1].padStart(2,"0");
-                  return s;
-                };
-                var parseV=function(v){
-                  if(typeof v==="number")return Math.abs(v);
-                  var n=parseFloat(String(v).replace(/[R$\s\.]/g,"").replace(",","."));
-                  return isNaN(n)?0:Math.abs(n);
-                };
-                var parsed=rows.map(function(r,idx){
-                  var val=parseV(colValor?r[colValor]:0);
-                  if(val<=0)return null;
-                  return{id:Date.now()+idx,data:parseD(colData?r[colData]:""),cat:String(colTipo?r[colTipo]:"Outros").trim(),meio:String(colMeio?r[colMeio]:"").trim(),desc:String(colDesc?r[colDesc]:"").trim(),valor:val};
-                }).filter(Boolean);
-                if(parsed.length===0){alert("Nenhuma despesa com valor > 0.");return;}
-                sDespesas(function(prev){return prev.concat(parsed);});
-                alert("✅ "+parsed.length+" despesas importadas!");
-              }catch(err){alert("Erro: "+err.message);}
-            };
-            reader.readAsArrayBuffer(file);
-          }} style={{display:"none"}}/>
-
-          {/* CARDS LADO A LADO */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
-            {/* ENTRADAS */}
-            <Cd style={{padding:28,textAlign:"center"}} hov={false}>
-              <div style={{fontSize:36,marginBottom:10}}>💰</div>
-              <div style={{fontSize:15,fontWeight:700,color:T.gold,marginBottom:6}}>Planilha de Entradas</div>
-              <div style={{fontSize:11,color:T.t3,marginBottom:18,lineHeight:1.7}}>
-                Selecione uma ou <strong style={{color:T.t2}}>várias planilhas</strong> de uma vez.<br/>
-                <span style={{color:T.t2,fontSize:10}}>Data · Serviço · Meio · Cliente · Valor · NF · % Fat.</span>
+          <Cd style={{padding:30,textAlign:"center"}} hov={false}>
+            <input ref={fileRef} type="file" accept=".csv,.txt,.tsv,.xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/plain,*/*" multiple onChange={function(e){var files=e.target.files;for(var i=0;i<files.length;i++){importPlanilha(files[i])}e.target.value=""}} style={{display:"none"}}/>
+            <div style={{fontSize:42,marginBottom:14,animation:"float 4s ease infinite"}}>📊</div>
+            <div style={{fontSize:18,fontWeight:700,color:T.gold,marginBottom:6}}>Importar Planilhas de Entradas</div>
+            <div style={{fontSize:13,color:T.t3,marginBottom:18,lineHeight:1.7}}>Selecione uma ou <strong style={{color:T.t2}}>várias planilhas de uma vez</strong>.<br/>Os dados são acumulados automaticamente.<br/><span style={{color:T.t2}}>Colunas: Data | Serviço | Meio de Recebimento | Cliente | Valor | NF | % Fat.</span></div>
+            <Bt onClick={function(){fileRef.current&&fileRef.current.click()}} style={{fontSize:14,padding:"14px 32px"}}>📥 Selecionar Planilhas (CSV ou Excel)</Bt>
+            {entradas.length>0 && <div style={{marginTop:16,padding:10,background:T.greenD,borderRadius:10,fontSize:12,color:T.green,fontWeight:600}}>✅ {entradas.length} entradas carregadas • Total: {fm(totalEntradas)}</div>}
+          </Cd>
+          {entradas.length>0 && (
+            <Cd style={{padding:18,marginTop:14}} hov={false}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <h4 style={{margin:0,fontSize:13,fontWeight:700,color:T.gold}}>Preview ({Math.min(entradas.length,20)} de {entradas.length})</h4>
+                <Bt v="secondary" onClick={function(){sEntradas([]);sFTab("importar")}} style={{fontSize:10,padding:"5px 10px"}}>🗑 Limpar</Bt>
               </div>
-              <Bt onClick={function(){fileRef.current&&fileRef.current.click()}} style={{fontSize:13,padding:"12px 24px",width:"100%"}}>📥 Selecionar Planilha</Bt>
-              {entradas.length>0&&(
-                <div style={{marginTop:14}}>
-                  <div style={{padding:"8px 12px",background:T.greenD,borderRadius:8,fontSize:12,color:T.green,fontWeight:600,marginBottom:8}}>✅ {entradas.length} entradas · {fm(totalEntradas)}</div>
-                  <Bt v="secondary" onClick={function(){if(window.confirm("Limpar todas as entradas?"))sEntradas([]);}} style={{fontSize:10,padding:"5px 12px",width:"100%",color:T.red,borderColor:"rgba(212,132,126,0.3)"}}>🗑 Limpar entradas</Bt>
-                </div>
-              )}
-            </Cd>
-
-            {/* DESPESAS */}
-            <Cd style={{padding:28,textAlign:"center"}} hov={false}>
-              <div style={{fontSize:36,marginBottom:10}}>💸</div>
-              <div style={{fontSize:15,fontWeight:700,color:"#EF6461",marginBottom:6}}>Planilha de Despesas</div>
-              <div style={{fontSize:11,color:T.t3,marginBottom:18,lineHeight:1.7}}>
-                Valores negativos são aceitos.<br/>
-                <span style={{color:T.t2,fontSize:10}}>Data · Tipo Despesa · Meio Pagamento · Recebimento · Valor</span>
-              </div>
-              <Bt onClick={function(){fileDespRef.current&&fileDespRef.current.click()}} style={{fontSize:13,padding:"12px 24px",width:"100%",background:"rgba(239,100,97,0.12)",border:"1px solid rgba(239,100,97,0.3)",color:"#EF6461"}}>📂 Selecionar Planilha</Bt>
-              {despesas.length>0&&(
-                <div style={{marginTop:14}}>
-                  <div style={{padding:"8px 12px",background:"rgba(239,100,97,0.08)",borderRadius:8,fontSize:12,color:"#EF6461",fontWeight:600,marginBottom:8}}>✅ {despesas.length} despesas · {fm(despesas.reduce(function(s,d){return s+d.valor},0))}</div>
-                  <Bt v="secondary" onClick={function(){if(window.confirm("Limpar todas as despesas?"))sDespesas([]);}} style={{fontSize:10,padding:"5px 12px",width:"100%",color:T.red,borderColor:"rgba(212,132,126,0.3)"}}>🗑 Limpar despesas</Bt>
-                </div>
-              )}
-            </Cd>
-          </div>
-
-          {/* PREVIEW ENTRADAS */}
-          {entradas.length>0&&(
-            <Cd style={{padding:18,marginBottom:14}} hov={false}>
-              <div style={{fontSize:12,fontWeight:700,color:T.gold,marginBottom:12}}>Preview entradas ({Math.min(entradas.length,20)} de {entradas.length})</div>
-              <div style={{overflowX:"auto",borderRadius:10,border:"1px solid rgba(255,255,255,0.04)"}}>
+              <div style={{overflowX:"auto",borderRadius:12,border:"1px solid rgba(255,255,255,0.04)"}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:600}}>
                   <thead><tr style={{background:"rgba(255,255,255,0.02)"}}>
                     {["Data","Serviço","Meio","Cliente","Valor","NF","%"].map(function(h,i){return <th key={i} style={{padding:"8px 10px",textAlign:i>=4?"right":"left",fontWeight:700,color:T.gold,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)"}}>{h}</th>})}
@@ -18936,29 +18875,6 @@ function FinanceiroView({data:d,dispatch:dp}){
                       <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",textAlign:"right",fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(e.valor)}</td>
                       <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",textAlign:"right",color:e.nf==="OK"?T.green:T.t3}}>{e.nf}</td>
                       <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",textAlign:"right",color:T.t3,fontFamily:"'JetBrains Mono'"}}>{e.pctFat?e.pctFat.toFixed(2)+"%":""}</td>
-                    </tr>
-                  )})}</tbody>
-                </table>
-              </div>
-            </Cd>
-          )}
-
-          {/* PREVIEW DESPESAS */}
-          {despesas.length>0&&(
-            <Cd style={{padding:18}} hov={false}>
-              <div style={{fontSize:12,fontWeight:700,color:"#EF6461",marginBottom:12}}>Preview despesas ({Math.min(despesas.length,20)} de {despesas.length})</div>
-              <div style={{overflowX:"auto",borderRadius:10,border:"1px solid rgba(255,255,255,0.04)"}}>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}>
-                  <thead><tr style={{background:"rgba(255,255,255,0.02)"}}>
-                    {["Data","Categoria","Meio Pag.","Destinatário","Valor"].map(function(h,i){return <th key={i} style={{padding:"8px 10px",textAlign:i>=4?"right":"left",fontWeight:700,color:"#EF6461",fontSize:9,borderBottom:"1px solid rgba(239,100,97,0.1)"}}>{h}</th>})}
-                  </tr></thead>
-                  <tbody>{despesas.slice(0,20).map(function(d,i){return (
-                    <tr key={d.id} style={{background:i%2===0?"transparent":"rgba(255,255,255,0.015)"}}>
-                      <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",whiteSpace:"nowrap"}}>{d.data?d.data.split("-").reverse().join("/"):""}</td>
-                      <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)"}}><Bg c="red">{d.cat||"Outros"}</Bg></td>
-                      <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",color:T.t2}}>{d.meio||"—"}</td>
-                      <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",color:T.t2,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.desc||"—"}</td>
-                      <td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",textAlign:"right",fontWeight:700,color:"#EF6461",fontFamily:"'JetBrains Mono'"}}>{fm(d.valor)}</td>
                     </tr>
                   )})}</tbody>
                 </table>
@@ -19008,130 +18924,16 @@ function FinanceiroView({data:d,dispatch:dp}){
                   {l:"RECEITA "+(selYear==="todos"?"TOTAL":selYear),v:fm(totalEntradas),c:T.green},
                   {l:"DESPESA "+(selYear==="todos"?"TOTAL":selYear),v:fm(totalDespesas),c:T.red},
                   {l:"LUCRO "+(selYear==="todos"?"":""+selYear),v:fm(lucro),c:lucro>=0?T.green:T.red},
-                  {l:"MARGEM OPERACIONAL",v:margemOperacional.toFixed(0)+"%",c:margemOperacional>=70?T.green:T.gold,hint:"excl. remuneração sócios"},
-                  {l:"MARGEM LÍQUIDA",v:(totalEntradas>0?((lucro/totalEntradas)*100):0).toFixed(0)+"%",c:(lucro/Math.max(totalEntradas,1)*100)>=10?T.green:T.gold,hint:"após todas as despesas"},
+                  {l:"MARGEM",v:margem.toFixed(0)+"%",c:margem>=50?T.green:T.gold},
                   {l:"ENTRADAS",v:String(entradasFilt.length),c:T.cyan},
                   {l:"MESES",v:String(mesesOrdenados.length),c:T.purple},
                 ].map(function(k,i){return (
                   <Cd key={i} style={{padding:"12px 16px",flex:1,minWidth:120}} hov={false} glow={i===2}>
                     <div style={{fontSize:7,color:T.t3,fontWeight:600,letterSpacing:1}}>{k.l}</div>
                     <div style={{fontSize:17,fontWeight:800,color:k.c,marginTop:2,fontFamily:"'JetBrains Mono'"}}>{k.v}</div>
-                    {k.hint&&<div style={{fontSize:8,color:T.t3,marginTop:2}}>{k.hint}</div>}
                   </Cd>
                 )})}
               </div>
-              {}
-              {/* ═══════════ BLOCO DE DESPESAS ═══════════ */}
-              {despesasFilt.length>0&&(function(){
-                var totalDesp=despesasFilt.reduce(function(s,d){return s+d.valor},0);
-                var totalRem=despesasFilt.filter(function(d){return ehRemuneracao(d.cat||"")}).reduce(function(s,d){return s+d.valor},0);
-                var totalOp=totalDesp-totalRem;
-                var catMap={};
-                despesasFilt.forEach(function(d){var cat=d.cat||"Outros";if(!catMap[cat])catMap[cat]={total:0,tipo:ehRemuneracao(cat)?"rem":"op"};catMap[cat].total+=d.valor;});
-                var catsRem=Object.entries(catMap).filter(function(e){return e[1].tipo==="rem"}).sort(function(a,b){return b[1].total-a[1].total});
-                var catsOp=Object.entries(catMap).filter(function(e){return e[1].tipo==="op"}).sort(function(a,b){return b[1].total-a[1].total});
-                var maxVal=Math.max.apply(null,Object.values(catMap).map(function(c){return c.total}).concat([1]));
-                var mesesDesp=Object.keys(byDespMonth).filter(function(m){return selYear==="todos"||m.startsWith(selYear);}).sort();
-                return (
-                  <div style={{marginBottom:16}}>
-                    <Cd style={{padding:22}} hov={false}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,flexWrap:"wrap",gap:8}}>
-                        <h4 style={{margin:0,fontSize:14,fontWeight:700,color:"#EF6461"}}>💸 Despesas {selYear!=="todos"?selYear:""}</h4>
-                        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                          <Cd style={{padding:"6px 14px"}} hov={false}><span style={{fontSize:9,color:T.t3}}>TOTAL</span><div style={{fontSize:14,fontWeight:800,color:"#EF6461",fontFamily:"'JetBrains Mono'"}}>{fm(totalDesp)}</div></Cd>
-                          <Cd style={{padding:"6px 14px"}} hov={false}><span style={{fontSize:9,color:T.t3}}>OPERACIONAL</span><div style={{fontSize:14,fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(totalOp)}</div></Cd>
-                          <Cd style={{padding:"6px 14px"}} hov={false}><span style={{fontSize:9,color:T.t3}}>REMUNERAÇÃO SÓCIOS</span><div style={{fontSize:14,fontWeight:800,color:"#C084FC",fontFamily:"'JetBrains Mono'"}}>{fm(totalRem)}</div></Cd>
-                        </div>
-                      </div>
-                      {catsRem.length>0&&(
-                        <div style={{marginBottom:20}}>
-                          <div style={{fontSize:10,fontWeight:800,color:"#C084FC",letterSpacing:1.5,textTransform:"uppercase",marginBottom:10,paddingBottom:6,borderBottom:"1px solid rgba(192,132,252,0.15)"}}>👥 Remuneração dos Sócios</div>
-                          {catsRem.map(function(e,i){
-                            var cat=e[0],info=e[1];
-                            var isSel=catSel===cat;
-                            return(
-                              <div key={i}>
-                                <div onClick={function(){sCatSel(isSel?null:cat)}} style={{cursor:"pointer",padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}>
-                                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                                    <span style={{fontSize:12,fontWeight:600,color:isSel?"#C084FC":T.t1}}>{cat}</span>
-                                    <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                                      <span style={{fontSize:10,color:T.t3}}>{totalDesp>0?(info.total/totalDesp*100).toFixed(1):0}%</span>
-                                      <span style={{fontSize:13,fontWeight:800,color:"#C084FC",fontFamily:"'JetBrains Mono'"}}>{fm(info.total)}</span>
-                                    </div>
-                                  </div>
-                                  <div style={{height:4,borderRadius:4,background:"rgba(255,255,255,0.04)"}}><div style={{height:4,borderRadius:4,width:(info.total/maxVal*100)+"%",background:"linear-gradient(90deg,#A78BFA,#C084FC)"}}/></div>
-                                </div>
-                                {isSel&&(
-                                  <div style={{margin:"8px 0 12px 12px",padding:14,background:"rgba(192,132,252,0.05)",borderRadius:10,borderLeft:"3px solid rgba(192,132,252,0.3)"}}>
-                                    <div style={{fontSize:10,fontWeight:700,color:"#C084FC",marginBottom:8}}>Por sócio</div>
-                                    {(function(){var socios={};despesasFilt.filter(function(d){return(d.cat||"")===cat}).forEach(function(d){var s=d.desc||"Outros";socios[s]=(socios[s]||0)+d.valor;});var totalCat=Object.values(socios).reduce(function(a,b){return a+b},0);var cols=["#C084FC","#A78BFA","#818CF8","#60A5FA"];return Object.entries(socios).sort(function(a,b){return b[1]-a[1]}).map(function(e,si){return(<div key={si} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}><div style={{width:24,height:24,borderRadius:8,background:"rgba(192,132,252,0.12)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:800,color:cols[si%4],flexShrink:0}}>{e[0].split(" ").map(function(n){return n[0]}).join("").substring(0,2).toUpperCase()}</div><span style={{fontSize:11,fontWeight:600,color:T.t1,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e[0]}</span><span style={{fontSize:12,fontWeight:800,color:cols[si%4],fontFamily:"'JetBrains Mono'"}}>{fm(e[1])}</span><span style={{fontSize:10,color:T.t3}}>({totalCat>0?(e[1]/totalCat*100).toFixed(0):0}%)</span></div>);});})()}
-                                    <div style={{height:1,background:"rgba(255,255,255,0.04)",margin:"10px 0"}}/>
-                                    <div style={{fontSize:10,fontWeight:700,color:"#C084FC",marginBottom:8}}>Por mês</div>
-                                    {mesesDesp.filter(function(m){return byDespMonth[m]&&byDespMonth[m].cats[cat]}).map(function(m,mi){
-                                      var v=byDespMonth[m].cats[cat]||0;
-                                      var maxV=Math.max.apply(null,mesesDesp.map(function(mm){return(byDespMonth[mm]&&byDespMonth[mm].cats[cat])||0}).concat([1]));
-                                      var sociosMes={};despesasFilt.filter(function(d){return(d.cat||"")===cat&&d.data&&d.data.substring(0,7)===m}).forEach(function(d){var s=d.desc||"Outros";sociosMes[s]=(sociosMes[s]||0)+d.valor;});
-                                      return(<div key={mi} style={{padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.02)"}}>
-                                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
-                                          <span style={{fontSize:10,color:T.t3,width:46,flexShrink:0}}>{fmtMonth(m)}</span>
-                                          <div style={{flex:1,height:5,borderRadius:3,background:"rgba(255,255,255,0.04)"}}><div style={{height:5,borderRadius:3,width:(v/maxV*100)+"%",background:"rgba(192,132,252,0.5)"}}/></div>
-                                          <span style={{fontSize:11,fontWeight:700,color:"#C084FC",fontFamily:"'JetBrains Mono'",width:90,textAlign:"right"}}>{fm(v)}</span>
-                                        </div>
-                                        <div style={{paddingLeft:54,display:"flex",flexWrap:"wrap",gap:"2px 10px"}}>
-                                          {Object.entries(sociosMes).sort(function(a,b){return b[1]-a[1]}).map(function(e,si){return <span key={si} style={{fontSize:9,color:["#C084FC","#A78BFA","#818CF8","#60A5FA"][si%4]}}>{e[0].split(" ")[0]}: {fm(e[1])}</span>;})}
-                                        </div>
-                                      </div>);
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                      {catsOp.length>0&&(
-                        <div>
-                          <div style={{fontSize:10,fontWeight:800,color:T.gold,letterSpacing:1.5,textTransform:"uppercase",marginBottom:10,paddingBottom:6,borderBottom:"1px solid rgba(212,163,40,0.15)"}}>🏢 Despesas Operacionais</div>
-                          {catsOp.map(function(e,i){
-                            var cat=e[0],info=e[1];
-                            var isSel=catSel===cat;
-                            var cor=getCatColor(cat);
-                            return(
-                              <div key={i}>
-                                <div onClick={function(){sCatSel(isSel?null:cat)}} style={{cursor:"pointer",padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}>
-                                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                                    <span style={{fontSize:12,fontWeight:600,color:isSel?cor:T.t1}}>{cat}</span>
-                                    <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                                      <span style={{fontSize:10,color:T.t3}}>{totalDesp>0?(info.total/totalDesp*100).toFixed(1):0}%</span>
-                                      <span style={{fontSize:13,fontWeight:800,color:cor,fontFamily:"'JetBrains Mono'"}}>{fm(info.total)}</span>
-                                    </div>
-                                  </div>
-                                  <div style={{height:4,borderRadius:4,background:"rgba(255,255,255,0.04)"}}><div style={{height:4,borderRadius:4,width:(info.total/maxVal*100)+"%",background:cor,opacity:0.8}}/></div>
-                                </div>
-                                {isSel&&(
-                                  <div style={{margin:"8px 0 12px 12px",padding:14,background:"rgba(212,163,40,0.04)",borderRadius:10,borderLeft:"3px solid rgba(212,163,40,0.2)"}}>
-                                    <div style={{fontSize:10,fontWeight:700,color:cor,marginBottom:8}}>Evolução mensal — {cat}</div>
-                                    {mesesDesp.filter(function(m){return byDespMonth[m]&&byDespMonth[m].cats[cat]}).map(function(m,mi){
-                                      var v=byDespMonth[m].cats[cat]||0;
-                                      var maxV=Math.max.apply(null,mesesDesp.map(function(mm){return(byDespMonth[mm]&&byDespMonth[mm].cats[cat])||0}).concat([1]));
-                                      return(<div key={mi} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 0",borderBottom:"1px solid rgba(255,255,255,0.02)"}}>
-                                        <span style={{fontSize:10,color:T.t3,width:46,flexShrink:0}}>{fmtMonth(m)}</span>
-                                        <div style={{flex:1,height:5,borderRadius:3,background:"rgba(255,255,255,0.04)"}}><div style={{height:5,borderRadius:3,width:(v/maxV*100)+"%",background:cor,opacity:0.7}}/></div>
-                                        <span style={{fontSize:11,fontWeight:700,color:cor,fontFamily:"'JetBrains Mono'",width:90,textAlign:"right"}}>{fm(v)}</span>
-                                      </div>);
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </Cd>
-                  </div>
-                );
-              })()}
-
               {}
               <Cd style={{padding:22}} hov={false}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:6}}>
@@ -19274,7 +19076,7 @@ function FinanceiroView({data:d,dispatch:dp}){
                   </div>
                 </Cd>
               )}
-
+              {}
               {/* ═══════════ PROJEÇÃO DE RECEITA ═══════════ */}
               {(function(){
                 if(mesesOrdenados.length < 3) return null;
@@ -19521,67 +19323,33 @@ function FinanceiroView({data:d,dispatch:dp}){
       {}
       {fTab==="dre" && (
         <Cd style={{padding:18}} hov={false}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
-            <h4 style={{margin:0,fontSize:14,fontWeight:700,color:T.gold}}>DRE — Resultado por Mês</h4>
-            <div style={{display:"flex",gap:4}}>
-              {["todos",...anos].map(function(yr){return(
-                <button key={yr} onClick={function(){sSelYear(yr);sSelMonth(null)}} style={{padding:"5px 12px",borderRadius:8,fontSize:11,fontWeight:600,cursor:"pointer",border:selYear===yr?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.06)",background:selYear===yr?T.goldD:"transparent",color:selYear===yr?T.gold:T.t3}}>{yr==="todos"?"Todos":yr}</button>
-              );})}
+          <h4 style={{margin:"0 0 14px",fontSize:14,fontWeight:700,color:T.gold}}>DRE — Resultado por Mês</h4>
+          {mesesOrdenados.length===0 ? <div style={{padding:20,textAlign:"center",color:T.t3}}>Importe dados primeiro</div> : (
+            <div style={{overflowX:"auto",borderRadius:12,border:"1px solid rgba(255,255,255,0.04)"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:10,minWidth:500}}>
+                <thead><tr style={{background:"rgba(255,255,255,0.02)"}}>
+                  <th style={{padding:"8px 10px",textAlign:"left",color:T.gold,fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)",position:"sticky",left:0,background:"rgba(12,24,48,0.95)",zIndex:1}}>MÊS</th>
+                  <th style={{padding:"8px 10px",textAlign:"right",color:T.green,fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)"}}>RECEITA</th>
+                  <th style={{padding:"8px 10px",textAlign:"right",color:T.t3,fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)"}}>ENTRADAS</th>
+                  {Object.keys(byServico).map(function(s){return <th key={s} style={{padding:"8px 6px",textAlign:"right",color:svcColors[s]||T.t3,fontWeight:600,fontSize:8,borderBottom:"1px solid rgba(212,163,40,0.1)",whiteSpace:"nowrap"}}>{s.replace("Gestão de ","").replace("Financeira","Fin.")}</th>})}
+                </tr></thead>
+                <tbody>{mesesOrdenados.map(function(m,i){var d=byMonth[m];return (
+                  <tr key={m} style={{background:i%2===0?"transparent":"rgba(255,255,255,0.015)"}}>
+                    <td style={{padding:"8px 10px",fontWeight:600,borderBottom:"1px solid rgba(255,255,255,0.02)",position:"sticky",left:0,background:"rgba(12,24,48,0.95)",zIndex:1}}>{fmtMonth(m)}</td>
+                    <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:T.green,fontFamily:"'JetBrains Mono'",borderBottom:"1px solid rgba(255,255,255,0.02)"}}>{fm(d.rec)}</td>
+                    <td style={{padding:"8px 10px",textAlign:"right",color:T.t3,borderBottom:"1px solid rgba(255,255,255,0.02)"}}>{d.entries.length}</td>
+                    {Object.keys(byServico).map(function(s){return <td key={s} style={{padding:"8px 6px",textAlign:"right",color:T.t2,fontFamily:"'JetBrains Mono'",fontSize:10,borderBottom:"1px solid rgba(255,255,255,0.02)"}}>{d.servicos[s]?fm(d.servicos[s]):"—"}</td>})}
+                  </tr>
+                )})}</tbody>
+                <tfoot><tr style={{borderTop:"2px solid rgba(212,163,40,0.15)"}}>
+                  <td style={{padding:"10px",fontWeight:800,color:T.gold,position:"sticky",left:0,background:"rgba(12,24,48,0.95)",zIndex:1}}>TOTAL</td>
+                  <td style={{padding:"10px",textAlign:"right",fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(totalEntradas)}</td>
+                  <td style={{padding:"10px",textAlign:"right",color:T.t3}}>{entradas.length}</td>
+                  {Object.keys(byServico).map(function(s){return <td key={s} style={{padding:"10px 6px",textAlign:"right",fontWeight:700,color:svcColors[s]||T.t2,fontFamily:"'JetBrains Mono'",fontSize:10}}>{fm(byServico[s])}</td>})}
+                </tr></tfoot>
+              </table>
             </div>
-          </div>
-          {mesesOrdenados.length===0 ? <div style={{padding:20,textAlign:"center",color:T.t3}}>Importe dados primeiro</div> : (function(){
-            var mesesFilt=mesesOrdenados.filter(function(m){return selYear==="todos"||m.startsWith(selYear)});
-            var mesesDesp=Object.keys(byDespMonth).filter(function(m){return selYear==="todos"||m.startsWith(selYear)});
-            var todosMeses=[...new Set([...mesesFilt,...mesesDesp])].sort();
-            var catsDespOp=[],catsDespRem=[];
-            var allCats={};
-            despesasFilt.forEach(function(d){allCats[d.cat||"Outros"]=true});
-            Object.keys(allCats).forEach(function(c){if(ehRemuneracao(c))catsDespRem.push(c);else catsDespOp.push(c);});
-            catsDespOp.sort();catsDespRem.sort();
-            var totalRecDRE=todosMeses.reduce(function(s,m){return s+(byMonth[m]?byMonth[m].rec:0)},0);
-            var totalDespOpDRE=despesasFilt.filter(function(d){return!ehRemuneracao(d.cat||"")}).reduce(function(s,d){return s+d.valor},0);
-            var totalDespRemDRE=despesasFilt.filter(function(d){return ehRemuneracao(d.cat||"")}).reduce(function(s,d){return s+d.valor},0);
-            return (
-              <div style={{overflowX:"auto",borderRadius:12,border:"1px solid rgba(255,255,255,0.04)"}}>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:10,minWidth:500}}>
-                  <thead><tr style={{background:"rgba(255,255,255,0.02)"}}>
-                    <th style={{padding:"8px 10px",textAlign:"left",color:T.gold,fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)",position:"sticky",left:0,background:"rgba(12,24,48,0.98)",zIndex:2,minWidth:70}}>MÊS</th>
-                    <th style={{padding:"8px 8px",textAlign:"right",color:T.green,fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)",whiteSpace:"nowrap"}}>RECEITA</th>
-                    {catsDespOp.map(function(c){return <th key={c} style={{padding:"8px 8px",textAlign:"right",color:"#F87171",fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)",whiteSpace:"nowrap"}}>{c}</th>})}
-                    <th style={{padding:"8px 8px",textAlign:"right",color:T.gold,fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)",whiteSpace:"nowrap"}}>= LUCRO OP.</th>
-                    {catsDespRem.map(function(c){return <th key={c} style={{padding:"8px 8px",textAlign:"right",color:"#C084FC",fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)",whiteSpace:"nowrap"}}>{c}</th>})}
-                    <th style={{padding:"8px 8px",textAlign:"right",color:"#34D399",fontWeight:700,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)",whiteSpace:"nowrap"}}>= RESULTADO</th>
-                  </tr></thead>
-                  <tbody>{todosMeses.map(function(m,i){
-                    var rec=byMonth[m]?byMonth[m].rec:0;
-                    var despMes=byDespMonth[m]||{cats:{}};
-                    var despOpMes=catsDespOp.reduce(function(s,c){return s+(despMes.cats[c]||0)},0);
-                    var despRemMes=catsDespRem.reduce(function(s,c){return s+(despMes.cats[c]||0)},0);
-                    var lucroOp=rec-despOpMes;
-                    var resultado=rec-despOpMes-despRemMes;
-                    return(
-                      <tr key={m} style={{background:i%2===0?"transparent":"rgba(255,255,255,0.015)"}}>
-                        <td style={{padding:"7px 10px",fontWeight:600,borderBottom:"1px solid rgba(255,255,255,0.02)",position:"sticky",left:0,background:"rgba(12,24,48,0.95)",zIndex:1,whiteSpace:"nowrap"}}>{fmtMonth(m)}</td>
-                        <td style={{padding:"7px 8px",textAlign:"right",fontWeight:700,color:T.green,fontFamily:"'JetBrains Mono'",fontSize:11,borderBottom:"1px solid rgba(255,255,255,0.02)",whiteSpace:"nowrap"}}>{rec>0?fm(rec):"—"}</td>
-                        {catsDespOp.map(function(c){var v=despMes.cats[c]||0;return <td key={c} style={{padding:"7px 8px",textAlign:"right",color:"#F87171",fontFamily:"'JetBrains Mono'",fontSize:11,borderBottom:"1px solid rgba(255,255,255,0.02)",whiteSpace:"nowrap"}}>{v>0?("-"+fm(v)):"—"}</td>})}
-                        <td style={{padding:"7px 8px",textAlign:"right",fontWeight:700,color:lucroOp>=0?T.gold:"#F87171",fontFamily:"'JetBrains Mono'",fontSize:11,borderBottom:"1px solid rgba(255,255,255,0.02)",whiteSpace:"nowrap"}}>{fm(lucroOp)}</td>
-                        {catsDespRem.map(function(c){var v=despMes.cats[c]||0;return <td key={c} style={{padding:"7px 8px",textAlign:"right",color:"#C084FC",fontFamily:"'JetBrains Mono'",fontSize:11,borderBottom:"1px solid rgba(255,255,255,0.02)",whiteSpace:"nowrap"}}>{v>0?("-"+fm(v)):"—"}</td>})}
-                        <td style={{padding:"7px 8px",textAlign:"right",fontWeight:700,color:resultado>=0?"#34D399":"#F87171",fontFamily:"'JetBrains Mono'",fontSize:11,borderBottom:"1px solid rgba(255,255,255,0.02)",whiteSpace:"nowrap"}}>{fm(resultado)}</td>
-                      </tr>
-                    );
-                  })}</tbody>
-                  <tfoot><tr style={{borderTop:"2px solid rgba(212,163,40,0.2)",background:"rgba(12,24,48,0.98)"}}>
-                    <td style={{padding:"10px 10px",fontWeight:800,color:T.gold,position:"sticky",left:0,background:"rgba(12,24,48,0.98)",zIndex:1,fontSize:11}}>TOTAL</td>
-                    <td style={{padding:"10px 8px",textAlign:"right",fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'",fontSize:11,whiteSpace:"nowrap"}}>{fm(totalRecDRE)}</td>
-                    {catsDespOp.map(function(c){var tot=despesasFilt.filter(function(d){return(d.cat||"")===c}).reduce(function(s,d){return s+d.valor},0);return <td key={c} style={{padding:"10px 8px",textAlign:"right",fontWeight:700,color:"#F87171",fontFamily:"'JetBrains Mono'",fontSize:11,whiteSpace:"nowrap"}}>{tot>0?("-"+fm(tot)):"—"}</td>;})}
-                    <td style={{padding:"10px 8px",textAlign:"right",fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'",fontSize:11,whiteSpace:"nowrap"}}>{fm(totalRecDRE-totalDespOpDRE)}</td>
-                    {catsDespRem.map(function(c){var tot=despesasFilt.filter(function(d){return(d.cat||"")===c}).reduce(function(s,d){return s+d.valor},0);return <td key={c} style={{padding:"10px 8px",textAlign:"right",fontWeight:700,color:"#C084FC",fontFamily:"'JetBrains Mono'",fontSize:11,whiteSpace:"nowrap"}}>{tot>0?("-"+fm(tot)):"—"}</td>;})}
-                    <td style={{padding:"10px 8px",textAlign:"right",fontWeight:800,color:(totalRecDRE-totalDespOpDRE-totalDespRemDRE)>=0?"#34D399":"#F87171",fontFamily:"'JetBrains Mono'",fontSize:11,whiteSpace:"nowrap"}}>{fm(totalRecDRE-totalDespOpDRE-totalDespRemDRE)}</td>
-                  </tr></tfoot>
-                </table>
-              </div>
-            );
-          })()}
+          )}
         </Cd>
       )}
 
@@ -25118,261 +24886,7 @@ function PropostasView({data,dispatch}){
   return null;
 }
 
-function VindiView({data:d,dispatch:dp}){
-  var savedKey=(d&&d.config&&d.config.vindiKey)||localStorage.getItem("courinvest_vindiKey")||"";
-  var[tab,sTab]=useState(savedKey?"dashboard":"config");
-  var[apiKey,sApiKey]=useState(savedKey);
-  var[saving,sSaving]=useState(false);
-  var[loading,sLoading]=useState(false);
-  var[error,sError]=useState(null);
-  var[customers,sCustomers]=useState([]);
-  var[bills,sBills]=useState([]);
-  var[subscriptions,sSubscriptions]=useState([]);
-  var[lastFetch,sLastFetch]=useState(null);
-  var[selCli,sSelCli]=useState(null);
-
-  var vindiGet=function(endpoint,page,key){
-    page=page||1;
-    if(!key)return Promise.reject(new Error("API Key não configurada"));
-    var auth=btoa(key+":");
-    var targetUrl="https://app.vindi.com.br/api/v1"+endpoint+(endpoint.indexOf("?")>=0?"&":"?")+"per_page=100&page="+page;
-    var proxyUrl="https://corsproxy.io/?url="+encodeURIComponent(targetUrl);
-    return fetch(proxyUrl,{headers:{"Authorization":"Basic "+auth,"Accept":"application/json"}})
-      .then(function(r){if(!r.ok)throw new Error("Erro "+r.status);return r.json();});
-  };
-
-  var carregarTudo=function(key){
-    if(!key){sError("Configure sua API Key primeiro");return;}
-    sLoading(true);sError(null);
-    Promise.all([
-      vindiGet("/customers",1,key),
-      vindiGet("/bills?status[]=paid&status[]=pending&status[]=waiting",1,key),
-      vindiGet("/subscriptions",1,key)
-    ]).then(function(res){
-      console.log("[Vindi] subscription sample:",JSON.stringify(res[2].subscriptions&&res[2].subscriptions[0]));
-      console.log("[Vindi] bill sample:",JSON.stringify(res[1].bills&&res[1].bills[0]));
-      sCustomers(res[0].customers||[]);
-      sBills(res[1].bills||[]);
-      sSubscriptions(res[2].subscriptions||[]);
-      sLastFetch(new Date().toLocaleTimeString("pt-BR"));
-      sLoading(false);sTab("dashboard");
-    }).catch(function(e){sError(e.message);sLoading(false);});
-  };
-
-  useEffect(function(){if(savedKey)carregarTudo(savedKey);},[savedKey]);
-
-  /* Helpers */
-  var getPrice=function(s){
-    if(!s)return 0;
-    /* Na Vindi, o preço da assinatura vem nas charges ou no plan_items */
-    if(s.amount)return parseFloat(s.amount)||0;
-    if(!s.plan)return 0;
-    var p=s.plan;
-    if(p.pricing_schema&&p.pricing_schema.price)return parseFloat(p.pricing_schema.price)||0;
-    if(p.price)return parseFloat(p.price)||0;
-    /* Tenta pegar do histórico de cobranças do cliente */
-    var custId=s.customer&&s.customer.id;
-    if(custId){
-      var lastBill=bills.find(function(b){return b.customer&&b.customer.id===custId&&parseFloat(b.amount)>0});
-      if(lastBill)return parseFloat(lastBill.amount)||0;
-    }
-    if(p.plan_items&&p.plan_items.length>0){
-      return p.plan_items.reduce(function(acc,i){
-        return acc+parseFloat((i.pricing_schema&&i.pricing_schema.price)||i.price||0);
-      },0);
-    }
-    return 0;
-  };
-  var getBillAmount=function(b){
-    if(!b)return 0;
-    /* amount vem como string "270.0" na API da Vindi */
-    return parseFloat(b.amount||b.amount_with_tax||b.amount_due||0)||0;
-  };
-  var billsOverdue=bills.filter(function(b){return b.status==="pending"&&b.due_at&&new Date(b.due_at)<new Date()});
-  var billsPending=bills.filter(function(b){return b.status==="pending"||b.status==="waiting"});
-  var recebidoMes=bills.filter(function(b){
-    if(b.status!=="paid"||!b.paid_at)return false;
-    var dt=new Date(b.paid_at);var n=new Date();
-    return dt.getMonth()===n.getMonth()&&dt.getFullYear()===n.getFullYear();
-  }).reduce(function(s,b){return s+getBillAmount(b)},0);
-  var mrrTotal=subscriptions.filter(function(s){return s.status==="active"}).reduce(function(s,sub){return s+getPrice(sub)},0);
-  var inadimplencia=bills.length>0?(billsOverdue.length/bills.length*100):0;
-  var matchCliente=function(n){
-    if(!d||!d.cl)return null;
-    var norm=function(s){return String(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim()};
-    var nn=norm(n);
-    return d.cl.find(function(c){var cn=norm(c.n||"");return cn===nn||(cn.split(" ")[0]===nn.split(" ")[0]&&cn.split(" ").slice(-1)[0]===nn.split(" ").slice(-1)[0]);})||null;
-  };
-  var SC={"active":T.green,"canceled":T.red,"suspended":T.gold,"paid":T.green,"pending":T.gold,"waiting":T.cyan,"overdue":T.red};
-  var SL={"active":"Ativo","canceled":"Cancelado","suspended":"Suspenso","paid":"Pago","pending":"Pendente","waiting":"Aguardando","overdue":"Vencido"};
-
-  return (
-    <div style={{padding:"0 0 40px"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:10}}>
-        <div>
-          <h2 style={{margin:0,fontSize:20,fontWeight:800}}>⚡ Vindi</h2>
-          <div style={{fontSize:11,color:T.t3,marginTop:2}}>Cobrança recorrente{lastFetch&&<span style={{marginLeft:8,color:T.green}}>· Atualizado às {lastFetch}</span>}</div>
-        </div>
-        <div style={{display:"flex",gap:8}}>
-          {savedKey&&<button onClick={function(){carregarTudo(savedKey)}} disabled={loading} style={{padding:"6px 14px",borderRadius:8,fontSize:11,fontWeight:600,cursor:"pointer",border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.04)",color:T.t2}}>{loading?"⏳...":"🔄 Atualizar"}</button>}
-          <button onClick={function(){sTab("config")}} style={{padding:"6px 14px",borderRadius:8,fontSize:11,fontWeight:600,cursor:"pointer",border:tab==="config"?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.08)",background:tab==="config"?T.goldD:"rgba(255,255,255,0.04)",color:tab==="config"?T.gold:T.t2}}>⚙️ API Key</button>
-        </div>
-      </div>
-      {tab==="config"&&(
-        <Cd style={{padding:24,marginBottom:20}} hov={false}>
-          <div style={{fontSize:14,fontWeight:700,color:T.gold,marginBottom:4}}>🔑 Configurar API Key da Vindi</div>
-          <div style={{fontSize:12,color:T.t3,marginBottom:16}}>Acesse <strong style={{color:T.t2}}>app.vindi.com.br → Configurações → Acesso via API</strong> e copie sua chave privada.</div>
-          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-            <input value={apiKey} onChange={function(e){sApiKey(e.target.value)}} type="password" placeholder="API Key privada..." style={{flex:1,minWidth:260,padding:"10px 14px",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,color:T.t1,fontSize:13,fontFamily:"'JetBrains Mono'",outline:"none"}}/>
-            <Bt onClick={function(){
-              if(!apiKey.trim()){alert("Digite a API Key");return;}
-              sSaving(true);
-              localStorage.setItem("courinvest_vindiKey",apiKey.trim());
-              dp({t:"CONFIG_SET",p:{key:"vindiKey",value:apiKey.trim()}});
-              setTimeout(function(){sSaving(false);carregarTudo(apiKey.trim());},800);
-            }} disabled={saving}>{saving?"Salvando...":"✅ Salvar e Conectar"}</Bt>
-            {savedKey&&<Bt v="secondary" onClick={function(){if(window.confirm("Remover?")){{localStorage.removeItem("courinvest_vindiKey");dp({t:"CONFIG_SET",p:{key:"vindiKey",value:""}});}}}}>🗑</Bt>}
-          </div>
-          {savedKey&&<div style={{marginTop:10,fontSize:11,color:T.green}}>✅ Configurada · {savedKey.substring(0,8)}••••</div>}
-        </Cd>
-      )}
-      {error&&<div style={{padding:12,background:T.redD,border:"1px solid rgba(212,132,126,0.3)",borderRadius:10,color:T.red,fontSize:12,marginBottom:16}}>⚠️ {error}</div>}
-      {!savedKey&&tab!=="config"&&(
-        <Cd style={{padding:40,textAlign:"center"}} hov={false}>
-          <div style={{fontSize:32,marginBottom:12}}>⚡</div>
-          <div style={{fontSize:15,fontWeight:700,marginBottom:6}}>Conecte sua conta Vindi</div>
-          <div style={{fontSize:12,color:T.t3,marginBottom:20}}>Configure sua API Key para acompanhar cobranças e assinaturas.</div>
-          <Bt onClick={function(){sTab("config")}}>Configurar API Key</Bt>
-        </Cd>
-      )}
-      {savedKey&&tab!=="config"&&(
-        <>
-          <div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap"}}>
-            {[{id:"dashboard",l:"📊 Dashboard"},{id:"assinaturas",l:"🔄 Assinaturas"},{id:"cobrancas",l:"💳 Cobranças"},{id:"clientes",l:"👥 Clientes"}].map(function(t){return(
-              <button key={t.id} onClick={function(){sTab(t.id)}} style={{padding:"7px 16px",borderRadius:10,fontSize:11,fontWeight:600,cursor:"pointer",border:tab===t.id?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.06)",background:tab===t.id?T.goldD:"transparent",color:tab===t.id?T.gold:T.t3}}>{t.l}</button>
-            );})}
-          </div>
-          {tab==="dashboard"&&(
-            <div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12,marginBottom:20}}>
-                {[{l:"MRR",v:fm(mrrTotal),c:T.green,sub:"receita recorrente/mês"},{l:"RECEBIDO NO MÊS",v:fm(recebidoMes),c:T.cyan,sub:"faturas pagas"},{l:"ASSINATURAS ATIVAS",v:String(subscriptions.filter(function(s){return s.status==="active"}).length),c:T.gold,sub:"contratos ativos"},{l:"PENDENTE",v:fm(billsPending.reduce(function(s,b){return s+getBillAmount(b)},0)),c:T.gold,sub:billsPending.length+" cobranças"},{l:"INADIMPLÊNCIA",v:inadimplencia.toFixed(1)+"%",c:inadimplencia>5?T.red:T.green,sub:billsOverdue.length+" vencidas"},].map(function(k,i){return(
-                  <Cd key={i} style={{padding:"14px 16px"}} hov={false}>
-                    <div style={{fontSize:8,color:T.t3,fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>{k.l}</div>
-                    <div style={{fontSize:18,fontWeight:800,color:k.c,fontFamily:"'JetBrains Mono'"}}>{k.v}</div>
-                    <div style={{fontSize:9,color:T.t3,marginTop:2}}>{k.sub}</div>
-                  </Cd>
-                );})}
-              </div>
-              <Cd style={{padding:20}} hov={false}>
-                <div style={{fontSize:12,fontWeight:700,color:T.gold,marginBottom:14}}>👥 Clientes & Status</div>
-                {loading?<div style={{padding:20,textAlign:"center",color:T.t3}}>⏳ Carregando...</div>:(
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:10}}>
-                    {customers.slice(0,40).map(function(cust,i){
-                      var sub=subscriptions.find(function(s){return s.customer&&s.customer.id===cust.id});
-                      var match=matchCliente(cust.name);
-                      return(
-                        <div key={i} onClick={function(){sSelCli(selCli===cust.id?null:cust.id)}} style={{padding:14,borderRadius:12,background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.04)",cursor:"pointer"}}>
-                          <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
-                            <div style={{flex:1,minWidth:0}}>
-                              <div style={{fontSize:12,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cust.name}</div>
-                              <div style={{fontSize:10,color:T.t3}}>{cust.email}</div>
-                              {match&&<div style={{fontSize:9,color:T.green,marginTop:2}}>✓ na plataforma</div>}
-                            </div>
-                            <div style={{textAlign:"right",flexShrink:0}}>
-                              {sub&&<div style={{fontSize:9,fontWeight:700,color:SC[sub.status]||T.t3,background:"rgba(255,255,255,0.04)",padding:"2px 8px",borderRadius:6,marginBottom:4}}>{SL[sub.status]||sub.status}</div>}
-                              {sub&&<div style={{fontSize:12,fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(getPrice(sub))}</div>}
-                            </div>
-                          </div>
-                          {selCli===cust.id&&(
-                            <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid rgba(255,255,255,0.04)"}}>
-                              {bills.filter(function(b){return b.customer&&b.customer.id===cust.id}).slice(0,5).map(function(b,bi){
-                                var isOv=b.status==="pending"&&b.due_at&&new Date(b.due_at)<new Date();
-                                var st=isOv?"overdue":b.status;
-                                return(<div key={bi} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid rgba(255,255,255,0.02)",fontSize:10}}>
-                                  <span style={{color:T.t2}}>{b.due_at?new Date(b.due_at).toLocaleDateString("pt-BR"):"—"}</span>
-                                  <span style={{fontWeight:700,color:SC[st]||T.t3,fontFamily:"'JetBrains Mono'"}}>{fm(getBillAmount(b))}</span>
-                                  <span style={{color:SC[st]||T.t3,fontSize:9}}>{SL[st]||st}</span>
-                                </div>);
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </Cd>
-            </div>
-          )}
-          {tab==="assinaturas"&&(
-            <Cd style={{padding:20}} hov={false}>
-              <div style={{fontSize:12,fontWeight:700,color:T.gold,marginBottom:14}}>🔄 Assinaturas — {subscriptions.length} total</div>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                <thead><tr style={{borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
-                  {["Cliente","Plano","Valor/mês","Próx. cobrança","Status"].map(function(h,i){return<th key={i} style={{padding:"8px 10px",textAlign:i>=2?"right":"left",fontSize:9,color:T.t3,fontWeight:700}}>{h}</th>})}
-                </tr></thead>
-                <tbody>{subscriptions.sort(function(a,b){return getPrice(b)-getPrice(a)}).map(function(s,i){
-                  var cor=SC[s.status]||T.t3;
-                  return(<tr key={i} style={{borderBottom:"1px solid rgba(255,255,255,0.02)",background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
-                    <td style={{padding:"9px 10px",fontWeight:600}}>{s.customer&&s.customer.name||"—"}</td>
-                    <td style={{padding:"9px 10px",color:T.t2}}>{s.plan&&s.plan.name||"—"}</td>
-                    <td style={{padding:"9px 10px",textAlign:"right",fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(getPrice(s))}</td>
-                    <td style={{padding:"9px 10px",textAlign:"right",color:T.t3}}>{s.next_billing_at?new Date(s.next_billing_at).toLocaleDateString("pt-BR"):"—"}</td>
-                    <td style={{padding:"9px 10px",textAlign:"right"}}><span style={{fontSize:9,fontWeight:700,color:cor,background:"rgba(255,255,255,0.04)",padding:"2px 8px",borderRadius:6}}>{SL[s.status]||s.status}</span></td>
-                  </tr>);
-                })}</tbody>
-              </table>
-            </Cd>
-          )}
-          {tab==="cobrancas"&&(
-            <Cd style={{padding:20}} hov={false}>
-              <div style={{fontSize:12,fontWeight:700,color:T.gold,marginBottom:14}}>💳 Cobranças Recentes</div>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                <thead><tr style={{borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
-                  {["Cliente","Vencimento","Pagamento","Valor","Status"].map(function(h,i){return<th key={i} style={{padding:"8px 10px",textAlign:i>=2?"right":"left",fontSize:9,color:T.t3,fontWeight:700}}>{h}</th>})}
-                </tr></thead>
-                <tbody>{bills.sort(function(a,b){return new Date(b.created_at)-new Date(a.created_at)}).slice(0,60).map(function(b,i){
-                  var isOv=b.status==="pending"&&b.due_at&&new Date(b.due_at)<new Date();
-                  var st=isOv?"overdue":b.status;var cor=SC[st]||T.t3;
-                  return(<tr key={i} style={{borderBottom:"1px solid rgba(255,255,255,0.02)",background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
-                    <td style={{padding:"9px 10px",fontWeight:600}}>{b.customer&&b.customer.name||"—"}</td>
-                    <td style={{padding:"9px 10px",color:isOv?T.red:T.t3}}>{b.due_at?new Date(b.due_at).toLocaleDateString("pt-BR"):"—"}</td>
-                    <td style={{padding:"9px 10px",textAlign:"right",color:T.t2}}>{b.paid_at?new Date(b.paid_at).toLocaleDateString("pt-BR"):"—"}</td>
-                    <td style={{padding:"9px 10px",textAlign:"right",fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(getBillAmount(b))}</td>
-                    <td style={{padding:"9px 10px",textAlign:"right"}}><span style={{fontSize:9,fontWeight:700,color:cor,background:"rgba(255,255,255,0.04)",padding:"2px 8px",borderRadius:6}}>{SL[st]||st}</span></td>
-                  </tr>);
-                })}</tbody>
-              </table>
-            </Cd>
-          )}
-          {tab==="clientes"&&(
-            <Cd style={{padding:20}} hov={false}>
-              <div style={{fontSize:12,fontWeight:700,color:T.gold,marginBottom:14}}>👥 Clientes — {customers.length}</div>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                <thead><tr style={{borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
-                  {["Nome","Email","Assinatura","Valor","Na plataforma"].map(function(h){return<th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:9,color:T.t3,fontWeight:700}}>{h}</th>})}
-                </tr></thead>
-                <tbody>{customers.map(function(cust,i){
-                  var sub=subscriptions.find(function(s){return s.customer&&s.customer.id===cust.id});
-                  var match=matchCliente(cust.name);
-                  return(<tr key={i} style={{borderBottom:"1px solid rgba(255,255,255,0.02)",background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
-                    <td style={{padding:"9px 10px",fontWeight:600}}>{cust.name}</td>
-                    <td style={{padding:"9px 10px",color:T.t3,fontSize:10}}>{cust.email||"—"}</td>
-                    <td style={{padding:"9px 10px"}}>{sub?<span style={{fontSize:9,fontWeight:700,color:SC[sub.status]||T.t3,background:"rgba(255,255,255,0.04)",padding:"2px 8px",borderRadius:6}}>{sub.plan&&sub.plan.name||sub.status}</span>:<span style={{color:T.t3,fontSize:9}}>—</span>}</td>
-                    <td style={{padding:"9px 10px",fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{sub?fm(getPrice(sub)):"—"}</td>
-                    <td style={{padding:"9px 10px"}}>{match?<span style={{fontSize:9,color:T.green,fontWeight:700}}>✓ {match.n}</span>:<span style={{fontSize:9,color:T.t3}}>não vinculado</span>}</td>
-                  </tr>);
-                })}</tbody>
-              </table>
-            </Cd>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"vindi",l:"Vindi",i:"⚡"},{id:"fiscal",l:"Fiscal",i:"🧾"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"tutoriais",l:"Tutoriais",i:"📚"}];
+const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"fiscal",l:"Fiscal",i:"🧾"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"tutoriais",l:"Tutoriais",i:"📚"}];
 
 /* ============ AUTH + FIRESTORE SYNC ============ */
 
@@ -26868,14 +26382,6 @@ function App({authUser}){
         var parsed=JSON.parse(saved);
         if(parsed&&Array.isArray(parsed.cl)&&Array.isArray(parsed.it)){
           if(!parsed.fin)parsed.fin={entradas:[],despesas:[]};
-          /* Restaura fin do localStorage dedicado (evita limite 1MB do Firestore) */
-          try{
-            var finSaved=localStorage.getItem("courinvest_fin");
-            if(finSaved){
-              var finParsed=JSON.parse(finSaved);
-              if(finParsed&&Array.isArray(finParsed.entradas)){parsed.fin=finParsed;}
-            }
-          }catch(e){console.warn("fin localStorage read failed:",e);}
           if(!Array.isArray(parsed.lds))parsed.lds=[]; 
           if(!Array.isArray(parsed.vistaLearning))parsed.vistaLearning=[]; 
           if(!Array.isArray(parsed.ag))parsed.ag=[]; 
@@ -27030,13 +26536,10 @@ function App({authUser}){
     console.log("[Sync] Agendando save. Entradas fin:",nEntradas,"clientes:",d.cl.length);
     var timeoutId=setTimeout(function(){
       if(!window._fbDB)return;
-      /* Salva fin no localStorage (dados grandes — evita limite 1MB do Firestore) */
       var finToSave=finRef.current||{entradas:[],despesas:[]};
-      try{localStorage.setItem("courinvest_fin",JSON.stringify(finToSave));}catch(e){console.warn("localStorage fin failed:",e);}
-      console.log("[Sync] Salvando no Firestore. Entradas fin:",nEntradas,"(no localStorage)");
-      /* Salva no Firestore SEM o fin */
+      console.log("[Sync] Salvando no Firestore. Entradas fin:",((finToSave.entradas)||[]).length);
       window._fbDB.collection("workspaces").doc("main").set({
-        cl:d.cl,it:d.it,lds:d.lds||[],fin:{entradas:[],despesas:[]},overviewMercado:d.overviewMercado||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[],updated:Date.now()
+        cl:d.cl,it:d.it,lds:d.lds||[],fin:finToSave,overviewMercado:d.overviewMercado||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[],updated:Date.now()
       }).then(function(){sSyncState("synced")}).catch(function(e){
         console.warn("Firestore save failed:",e);
         sSyncState("offline");
@@ -27425,7 +26928,6 @@ function App({authUser}){
           {pg==="clients" && !sel && <CL data={d} onSel={function(c){sSel(c)}} dispatch={dp}/>}
           {pg==="clients" && sel && <CD client={sel} data={d} dispatch={dp} onBack={function(){sSel(null)}} taxasBCB={taxasBCB} taxaBCBStatus={taxaBCBStatus}/>}
           {pg==="financeiro" && <FinanceiroView data={d} dispatch={dp}/>}
-          {pg==="vindi" && <VindiView data={d} dispatch={dp}/>}
           {pg==="fiscal" && <FiscalView data={d} dispatch={dp}/>}
           {pg==="metas" && <MetasConsultor/>}
           {pg==="comercial" && <ComercialView data={d} dispatch={dp}/>}
