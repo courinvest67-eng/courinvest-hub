@@ -18769,6 +18769,18 @@ function FinanceiroView({data:d,dispatch:dp}){
       return c===kn||c.indexOf(kn)>=0||kn.indexOf(c)>=0;
     })||c.indexOf("lucro")>=0||c.indexOf("pro labore")>=0||c.indexOf("prolabore")>=0;
   };
+  /* Normaliza nomes de categorias para evitar duplicatas por espaço/pontuação */
+  var normalizarCat=function(cat){
+    if(!cat)return"Outros";
+    var c=cat.trim();
+    /* Unifica variações de Distribuição de Lucro */
+    var cl=c.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+    if(cl.indexOf("lucro")>=0)return"Distr. Lucro";
+    if(cl.indexOf("pro labore")>=0||cl.indexOf("prolabore")>=0||cl.indexOf("pro-labore")>=0)return"Pró-Labore";
+    if(cl==="plano de saude"||cl==="plano saude")return"Plano de Saúde";
+    /* Remove espaços duplos e normaliza pontuação */
+    return c.replace(/\s+/g," ");
+  };
 
   var totalEntradas=entradasFilt.reduce(function(a,e){return a+e.valor},0);
   var totalDespesas=despesasFilt.reduce(function(a,d){return a+d.valor},0);
@@ -18784,7 +18796,7 @@ function FinanceiroView({data:d,dispatch:dp}){
   despesasFilt.forEach(function(d){
     if(!d.data)return;
     var mm=d.data.substring(0,7);
-    var cat=d.cat||"Outros";
+    var cat=normalizarCat(d.cat||"Outros");
     if(!byDespMonth[mm])byDespMonth[mm]={total:0,operacional:0,remuneracao:0,cats:{}};
     byDespMonth[mm].total+=d.valor;
     if(ehRemuneracao(cat))byDespMonth[mm].remuneracao+=d.valor;
@@ -18954,7 +18966,7 @@ function FinanceiroView({data:d,dispatch:dp}){
                 var totalRem=despesasFilt.filter(function(d){return ehRemuneracao(d.cat||"")}).reduce(function(s,d){return s+d.valor},0);
                 var totalOp=totalDesp-totalRem;
                 var catMap={};
-                despesasFilt.forEach(function(d){var cat=d.cat||"Outros";if(!catMap[cat])catMap[cat]={total:0,tipo:ehRemuneracao(cat)?"rem":"op"};catMap[cat].total+=d.valor;});
+                despesasFilt.forEach(function(d){var cat=normalizarCat(d.cat||"Outros");if(!catMap[cat])catMap[cat]={total:0,tipo:ehRemuneracao(cat)?"rem":"op"};catMap[cat].total+=d.valor;});
                 var catsRem=Object.entries(catMap).filter(function(e){return e[1].tipo==="rem"}).sort(function(a,b){return b[1].total-a[1].total});
                 var catsOp=Object.entries(catMap).filter(function(e){return e[1].tipo==="op"}).sort(function(a,b){return b[1].total-a[1].total});
                 var maxVal=Math.max.apply(null,Object.values(catMap).map(function(c){return c.total}).concat([1]));
@@ -19417,7 +19429,7 @@ function FinanceiroView({data:d,dispatch:dp}){
             var mesesDespKeys=Object.keys(byDespMonth).filter(function(m){return selYear==="todos"||m.startsWith(selYear)});
             var todosMeses=[...new Set([...mesesFilt,...mesesDespKeys])].sort();
             var allCats={};
-            despesasFilt.forEach(function(d){allCats[d.cat||"Outros"]=true});
+            despesasFilt.forEach(function(d){allCats[normalizarCat(d.cat||"Outros")]=true});
             var catsDespOp=[],catsDespRem=[];
             Object.keys(allCats).forEach(function(c){if(ehRemuneracao(c))catsDespRem.push(c);else catsDespOp.push(c);});
             catsDespOp.sort();catsDespRem.sort();
