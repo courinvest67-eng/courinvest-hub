@@ -3260,7 +3260,6 @@ function Dash({data:d,onSel:os,goTo}){
    registrar nova interação diretamente da tela.
    ============================================================ */
 function InteracoesView({data:d, dispatch:dp, onGoClient:goClient}){
-  var T=THEME;
   var fm=function(v){return new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL",minimumFractionDigits:0,maximumFractionDigits:0}).format(v||0)};
   var hoje=new Date();hoje.setHours(0,0,0,0);
 
