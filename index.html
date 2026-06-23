@@ -1112,6 +1112,31 @@ function gerarNotificacoesReais(d){
     });
   });
 
+
+  /* 5b. SEM CONTATO HÁ MAIS DE 15 DIAS */
+  d.cl.forEach(function(c){
+    if((c.status||"ativo")!=="ativo")return;
+    var intCli=(d.it||[]).filter(function(i){return i.cid===c.id}).sort(function(a,b){return (b.data||"").localeCompare(a.data|"")});
+    var dtRef=intCli.length>0?new Date(intCli[0].data):new Date(c.dtCaptacao||"2024-01-01");
+    var diasSemContato=Math.floor((hoje-dtRef)/86400000);
+    if(diasSemContato<15)return;
+    var primeiroNome=String(c.nome||"").split(" ")[0];
+    var ic=diasSemContato>=30?"🔴":"🟠";
+    var urgencia=diasSemContato>=30?-300:-250;
+    nots.push({
+      id:"sem_contato_"+idCounter++,
+      msg:ic+" "+primeiroNome+" está há "+diasSemContato+" dias sem contato · Registre uma interação",
+      ic:ic,
+      lido:false,
+      tp:"há "+diasSemContato+"d",
+      ordem:urgencia+diasSemContato,
+      cliId:c.id,
+      cliNome:c.nome,
+      tipo:"sem_contato",
+      _diasSemContato:diasSemContato
+    });
+  });
+
   /* 6. RENTABILIDADE MUITO NEGATIVA no mês */
   d.cl.forEach(function(c){
     if(!c._gorilaRent||!c._gorilaRent.periods)return;
@@ -4587,6 +4612,67 @@ function CL({data:d,onSel:os,dispatch:dp}){
           );
         })()}
       </Mo>
+
+      
+      {/* ===== PAINEL: RANKING DE INTERAÇÕES ===== */}
+      {(function(){
+        var hoje=new Date();hoje.setHours(0,0,0,0);
+        var clAtivos=(d.cl||[]).filter(function(c){return (c.status||"ativo")==="ativo"});
+        var ranking=clAtivos.map(function(c){
+          var ints=(d.it||[]).filter(function(i){return i.cid===c.id}).sort(function(a,b){return (b.data||"").localeCompare(a.data||"")});
+          var dtRef=ints.length>0?new Date(ints[0].data):new Date(c.dtCaptacao||"2024-01-01");
+          var dias=Math.floor((hoje-dtRef)/86400000);
+          var ultimaInt=ints[0]||null;
+          return {c:c,dias:dias,ultima:ultimaInt,total:ints.length};
+        }).sort(function(a,b){return b.dias-a.dias});
+        var criticos=ranking.filter(function(r){return r.dias>=15});
+        if(criticos.length===0)return null;
+        var corDias=function(d){return d>=30?T.red:d>=20?T.orange:T.gold};
+        return (
+          <div style={{marginBottom:20,background:T.card,border:"1px solid "+T.red+"33",borderRadius:16,overflow:"hidden"}}>
+            <div style={{padding:"14px 18px 10px",borderBottom:"1px solid "+T.bdrL,display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:18}}>📡</span>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:700,color:T.t1}}>Ranking de Interações</div>
+                <div style={{fontSize:10,color:T.t3,marginTop:1}}>{criticos.length} cliente{criticos.length>1?"s":""} sem contato há mais de 15 dias</div>
+              </div>
+              <span style={{fontSize:10,fontWeight:700,color:T.red,background:T.red+"15",padding:"3px 8px",borderRadius:6}}>⚠ ATENÇÃO</span>
+            </div>
+            <div style={{padding:"8px 12px"}}>
+              {ranking.filter(function(r){return r.dias>=15}).map(function(r,idx){
+                var cor=corDias(r.dias);
+                var barPct=Math.min(100,(r.dias/60)*100);
+                return (
+                  <div key={r.c.id} onClick={function(){os(r.c)}} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 8px",borderRadius:10,cursor:"pointer",marginBottom:idx<criticos.length-1?4:0,transition:"background 0.15s"}}
+                    onMouseEnter={function(e){e.currentTarget.style.background="rgba(255,255,255,0.04)"}}
+                    onMouseLeave={function(e){e.currentTarget.style.background="transparent"}}>
+                    <div style={{fontSize:11,fontWeight:700,color:T.t3,width:18,textAlign:"right",flexShrink:0}}>#{idx+1}</div>
+                    <Av name={r.c.nome} sz={32}/>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                        <span style={{fontSize:12,fontWeight:700,color:T.t1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.c.nome}</span>
+                        {r.c.sv&&r.c.sv.map(function(s){
+                          var lb={patrimonio:"GP",planejamento:"GF",assessoria:"AS"}[s];
+                          if(!lb)return null;
+                          return <span key={s} style={{fontSize:8,fontWeight:700,color:T.t3,background:"rgba(255,255,255,0.06)",padding:"1px 5px",borderRadius:4,flexShrink:0}}>{lb}</span>;
+                        })}
+                      </div>
+                      <div style={{height:4,background:"rgba(255,255,255,0.06)",borderRadius:4,overflow:"hidden"}}>
+                        <div style={{height:"100%",width:barPct+"%",background:cor,borderRadius:4,transition:"width 0.4s"}}/>
+                      </div>
+                    </div>
+                    <div style={{textAlign:"right",flexShrink:0}}>
+                      <div style={{fontSize:15,fontWeight:800,color:cor,fontFamily:"'JetBrains Mono'"}}>{r.dias}d</div>
+                      <div style={{fontSize:9,color:T.t3,marginTop:1}}>{r.ultima?"últ: "+(r.ultima.tipo||"contato"):"sem registro"}</div>
+                    </div>
+                    <span style={{fontSize:14,color:T.t3,flexShrink:0}}>›</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>
         {fl.map(c=>(
@@ -20015,7 +20101,8 @@ function PipelineView({data:d,dispatch:dp}){
       dtStatusChange:dtStatus,
       _lastInt:lastInt,
       _mSinceContact:monthsSinceContact,
-      _semContato:status==="ativo"&&monthsSinceContact>=6,
+      _diasSemContato:Math.floor((hojeRef-new Date(lastInt))/86400000),
+      _semContato:status==="ativo"&&Math.floor((hojeRef-new Date(lastInt))/86400000)>=15,
       _temGorila:temImport
     });
   });
@@ -20281,7 +20368,7 @@ function PipelineView({data:d,dispatch:dp}){
                   </div>
                   <div style={{display:"flex",gap:3,marginBottom:6,flexWrap:"wrap"}}>
                     {svArr.map(function(s){return SL[s]?<Bg key={s} c={SC[s]}>{SL[s].replace("Gestão de ","").replace("Couri ","")}</Bg>:null})}
-                    {c._semContato && <span style={{fontSize:8,fontWeight:700,color:T.orange,background:T.orangeD,padding:"2px 5px",borderRadius:4}}>⚠️ {c._mSinceContact}m sem contato</span>}
+                    {c._semContato && <span style={{fontSize:8,fontWeight:700,color:c._diasSemContato>=30?T.red:T.orange,background:c._diasSemContato>=30?T.red+"22":T.orangeD,padding:"2px 5px",borderRadius:4}}>⚠️ {c._diasSemContato<30?c._diasSemContato+"d":c._mSinceContact+"m"} sem contato</span>}
                   </div>
                   {recMes>0 && <div style={{fontSize:11,color:T.gold,fontWeight:700,fontFamily:"'JetBrains Mono'",marginBottom:6}}>{fm(recMes)}/mês</div>}
                   <div style={{display:"flex",gap:3}}>
@@ -23176,8 +23263,8 @@ var ApresentacaoGP=function(){
           <div style={{fontSize:12,color:T.t3,marginTop:4}}>Material institucional para prospecção e primeiros contatos</div>
         </div>
         <Bt onClick={function(){
-  var el=document.getElementById("gf-apresentacao")||document.getElementById("proposta-print");
-  if(!el){alert("Apresentação não encontrada — tente recarregar a página.");return;}
+  var el=document.getElementById("gf-apresentacao");
+  if(!el){alert("Apresentação não encontrada");return;}
   var clone=el.cloneNode(true);
   var children=Array.from(clone.children);
   // CAPA: full page, break after. Others: remove minHeight to avoid whitespace
