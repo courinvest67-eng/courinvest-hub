@@ -26832,18 +26832,52 @@ function App({authUser}){
   const ovRef=useRef(d.overviewMercado||{}); /* FIX: ref para overviewMercado — evita closure stale no merge */
   useEffect(function(){ovRef.current=d.overviewMercado||{};},[d.overviewMercado]);
   
+  /* helper: strip campos pesados antes de salvar no Firestore */
+  var _clParaFirestore=function(clientes){
+    var ativosMap={};
+    var clLight=clientes.map(function(c){
+      var cp=Object.assign({},c);
+      delete cp._backupAntesImport; /* ~50% do tamanho — nunca precisa ir pro Firestore */
+      if(cp._ativosImport&&cp._ativosImport.length>0){
+        ativosMap[c.id]={ativos:cp._ativosImport,ts:c._ativosTs||Date.now()};
+      }
+      delete cp._ativosImport; /* vai pro doc separado main_ativos */
+      return cp;
+    });
+    return {clLight:clLight,ativosMap:ativosMap};
+  };
+  var _salvarFirestore=function(clientes,extras){
+    var mainRef=window._fbDB.collection("workspaces").doc("main");
+    var ativosRef=window._fbDB.collection("workspaces").doc("main_ativos");
+    var split=_clParaFirestore(clientes);
+    var mainPayload=Object.assign({cl:split.clLight,updated:Date.now()},extras);
+    var ops=[mainRef.set(mainPayload)];
+    if(Object.keys(split.ativosMap).length>0)ops.push(ativosRef.set(split.ativosMap));
+    return Promise.all(ops);
+  };
+
   useEffect(function(){
     if(!window._fbDB){sSyncState("error");return}
-    var docRef=window._fbDB.collection("workspaces").doc("main");
-    docRef.get().then(function(snap){
+    var mainRef=window._fbDB.collection("workspaces").doc("main");
+    var ativosRef=window._fbDB.collection("workspaces").doc("main_ativos");
+    /* FIX DOC SIZE: lê doc principal + doc de ativos em paralelo e faz merge */
+    Promise.all([mainRef.get(),ativosRef.get()]).then(function(results){
+      var snap=results[0];
+      var ativosSnap=results[1];
       if(snap.exists){
         var data=snap.data();
+        /* Merge _ativosImport de volta nos clientes a partir do doc separado */
+        if(ativosSnap&&ativosSnap.exists){
+          var ativosData=ativosSnap.data()||{};
+          data.cl=(data.cl||[]).map(function(c){
+            var at=ativosData[c.id];
+            if(at&&at.ativos&&at.ativos.length>0){
+              return Object.assign({},c,{_ativosImport:at.ativos,_ativosTs:at.ts||c._ativosTs});
+            }
+            return c;
+          });
+        }
         if(data&&Array.isArray(data.cl)&&Array.isArray(data.it)){
-          /* === MIGRAÇÃO INTELIGENTE ===
-             Se Firestore tem dados, mas localmente eu tenho MAIS dados
-             (ex: usei o Hub muito tempo antes do Firestore funcionar),
-             então o local é mais recente. Faz UPLOAD do local ao invés de
-             sobrescrever com Firestore vazio. */
           var localEntradas=((finRef.current&&finRef.current.entradas)||[]).length;
           var remoteEntradas=(data.fin&&data.fin.entradas&&data.fin.entradas.length)||0;
           var localTemMaisDados=
@@ -26852,38 +26886,27 @@ function App({authUser}){
             ((d.lds||[]).length>(data.lds||[]).length) ||
             (localEntradas>remoteEntradas);
           if(localTemMaisDados){
-            console.log("[Sync] Local tem mais dados. clientes:"+d.cl.length+" vs "+data.cl.length+", entradas:"+localEntradas+" vs "+remoteEntradas+". Fazendo UPLOAD do local.");
-            /* FIX: inclui overviewMercado/config/ag no upload — antes eram omitidos */
-            docRef.set({cl:d.cl,it:d.it,lds:d.lds||[],fin:finRef.current||{entradas:[],despesas:[]},overviewMercado:ovRef.current||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[],updated:Date.now()}).catch(function(e){console.warn("Upload migration failed:",e)});
+            console.log("[Sync] Local tem mais dados. Fazendo UPLOAD.");
+            _salvarFirestore(d.cl,{it:d.it,lds:d.lds||[],fin:finRef.current||{entradas:[],despesas:[]},overviewMercado:ovRef.current||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[]}).catch(function(e){console.warn("Upload migration failed:",e)});
             sSyncState("synced");
             isInitialLoadRef.current=false;
             return;
           }
-          
           skipNextSaveRef.current=true;
-          /* FIX: merge overviewMercado e config — local ganha em caso de conflito.
-             Evita race condition onde REPLACE_ALL apaga overview/config salvo
-             na memória antes do Firestore terminar de carregar.
-             Usa ovRef.current (sempre atualizado) em vez de d.overviewMercado (stale closure). */
           var _localOv=ovRef.current||{};
-          var _remoteOv=data.overviewMercado||{};
-          var _mergedOv=Object.assign({},_remoteOv,_localOv);
-          var _localCfg=d.config||{};
-          var _remoteCfg=data.config||{};
-          var _mergedCfg=Object.assign({},_remoteCfg,_localCfg);
+          var _mergedOv=Object.assign({},data.overviewMercado||{},_localOv);
+          var _mergedCfg=Object.assign({},data.config||{},d.config||{});
           dp({t:"REPLACE_ALL",p:{cl:data.cl,it:data.it,lds:data.lds||[],fin:data.fin||{entradas:[],despesas:[]},overviewMercado:_mergedOv,config:_mergedCfg,ag:data.ag||[],tpAg:data.tpAg||[]}});
-          console.log("[Sync] Carregado do Firestore: "+data.cl.length+" clientes, "+data.it.length+" interações");
+          console.log("[Sync] Carregado do Firestore: "+data.cl.length+" clientes");
         }
       }else{
-        /* Primeira vez: envia o estado ATUAL (que pode ter dados do localStorage) pro Firestore */
-        console.log("[Sync] Workspace vazio no Firestore. Fazendo upload inicial dos dados locais.");
-        /* FIX: inclui todos os campos no upload inicial */
-        docRef.set({cl:d.cl,it:d.it,lds:d.lds||[],fin:d.fin||{entradas:[],despesas:[]},overviewMercado:d.overviewMercado||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[],updated:Date.now()}).catch(function(e){console.warn("Initial sync failed:",e)});
+        console.log("[Sync] Workspace vazio. Upload inicial.");
+        _salvarFirestore(d.cl,{it:d.it,lds:d.lds||[],fin:d.fin||{entradas:[],despesas:[]},overviewMercado:ovRef.current||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[]}).catch(function(e){console.warn("Initial sync failed:",e)});
       }
       sSyncState("synced");
       isInitialLoadRef.current=false;
     }).catch(function(err){
-      console.warn("Firestore read failed, using local cache:",err);
+      console.warn("Firestore read failed:",err);
       sSyncError((err&&(err.message||err.code))||"Erro desconhecido ao ler Firestore");
       sSyncState("offline");
       isInitialLoadRef.current=false;
@@ -26904,10 +26927,9 @@ function App({authUser}){
     var timeoutId=setTimeout(function(){
       if(!window._fbDB)return;
       var finToSave=finRef.current||{entradas:[],despesas:[]};
-      console.log("[Sync] Salvando no Firestore. Entradas fin:",((finToSave.entradas)||[]).length);
-      window._fbDB.collection("workspaces").doc("main").set({
-        cl:d.cl,it:d.it,lds:d.lds||[],fin:finToSave,overviewMercado:d.overviewMercado||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[],updated:Date.now()
-      }).then(function(){sSyncState("synced");sSyncError("");}).catch(function(e){
+      console.log("[Sync] Salvando no Firestore. clientes:",d.cl.length);
+      _salvarFirestore(d.cl,{it:d.it,lds:d.lds||[],fin:finToSave,overviewMercado:ovRef.current||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[]})
+      .then(function(){sSyncState("synced");sSyncError("");console.log("[Sync] ✅ Salvo com sucesso");}).catch(function(e){
         console.warn("Firestore save failed:",e);
         sSyncError((e&&(e.message||e.code))||"Erro ao gravar no Firestore");
         sSyncState("offline");
@@ -27444,7 +27466,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '300';
+  var SW_VERSION = '301';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
