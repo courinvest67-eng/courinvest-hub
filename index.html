@@ -8500,6 +8500,38 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
         +'<td style="text-align:right;font-family:\'JetBrains Mono\',monospace;color:'+(totalRentPer>=0?"#2DD4A0":"#EF6461")+'">'+(totalRentPer>=0?"+":"")+totalRentPer.toFixed(2)+'%</td>'
         +'<td style="text-align:right;font-family:\'JetBrains Mono\',monospace;color:'+(totalGanhoExib>=0?"#2DD4A0":"#EF6461")+'">'+(totalGanhoExib>=0?"+":"")+fmF(totalGanhoExib)+'</td></tr>';
       body+='</table>';
+      /* === NOTA ESPECÍFICA: Tesouro de Longo Prazo com variação negativa no mês ===
+         Detecta IPCA+, RENDA+, EDUCA+, Prefixado longo, NTN-B e mostra nota tranquilizadora
+         apenas se houver pelo menos 1 título com rentabilidade negativa no período. */
+      (function(){
+        var tesourosLP=enr.filter(function(a){
+          if(a.tp!=="tesouro")return false;
+          var tk=(a.tk||"").toUpperCase();
+          var nm=(a.nm||"").toUpperCase();
+          var combined=tk+" "+nm;
+          /* Títulos de longo prazo: IPCA+, RENDA+, EDUCA+, NTN-B, Prefixado, LTN, NTN-F */
+          return combined.match(/IPCA|RENDA\+|EDUCA\+|NTN-?B|NTNB|PREFIXADO|LTN|NTN-?F|NTNF/);
+        });
+        if(tesourosLP.length===0)return;
+        var temNegativo=tesourosLP.some(function(a){
+          var rp=getRentAtivoPer(a);
+          return rp.pct<0;
+        });
+        if(!temNegativo)return;
+        /* Monta lista dos títulos negativos para citar */
+        var negativos=tesourosLP.filter(function(a){return getRentAtivoPer(a).pct<0;});
+        var listaAtivos=negativos.map(function(a){
+          var rp=getRentAtivoPer(a);
+          return '<li><strong>'+a.tk+'</strong> — variação de <strong style="color:#D4A328">'+rp.pct.toFixed(2)+'%</strong> no período</li>';
+        }).join("");
+        body+='<div style="margin-top:18px;padding:18px 20px;border-radius:12px;background:rgba(56,189,248,0.05);border:1px solid rgba(56,189,248,0.2);border-left:4px solid #38BDF8">'
+          +'<div style="font-size:10px;font-weight:800;color:#38BDF8;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px">💡 Sobre a Oscilação dos Títulos do Tesouro de Longo Prazo</div>'
+          +'<p style="font-size:11px;color:#1e3a5f;line-height:1.75;margin:0 0 10px">Os títulos de Tesouro Direto de longo prazo (IPCA+, Prefixados, RENDA+ e EDUCA+) são precificados diariamente pelo mercado — um mecanismo chamado <strong>marcação a mercado</strong>. Isso significa que, em períodos de elevação das taxas de juros futuras ou de maior incerteza econômica, o valor do título <em>no extrato do mês</em> pode oscilar para baixo.</p>'
+          +'<ul style="margin:0 0 10px;padding-left:18px;font-size:11px;color:#1e3a5f;line-height:1.9">'+listaAtivos+'</ul>'
+          +'<p style="font-size:11px;color:#1e3a5f;line-height:1.75;margin:0 0 10px"><strong>Isso é completamente normal e esperado</strong> para esta classe de ativo. A oscilação negativa <u>não representa perda realizada</u> — o título continua rendendo a taxa contratada no momento da compra. Se mantido até o vencimento, o retorno acordado será integralmente entregue, independentemente do que acontecer com os juros no curto prazo.</p>'
+          +'<p style="font-size:10.5px;color:#3a4a6b;line-height:1.65;margin:0;padding:10px 12px;background:rgba(56,189,248,0.06);border-radius:7px;border-left:3px solid rgba(56,189,248,0.3)">🎯 <strong>Estratégia recomendada:</strong> manter a posição até o vencimento e continuar com os aportes regulares. A marcação a mercado pode inclusive criar oportunidades de aumentar a exposição a taxas atrativas durante esses momentos de oscilação.</p>'
+          +'</div>';
+      })();
       (function(){var cv={};enr.forEach(function(a){var tp=a.tp||"";
         if(tp==="tesouro"){var tk=(a.tk||"").toUpperCase();if(/LTN|NTNB|NTNF|PRE/.test(tk))cv["tv"]=true;}
         else if(tp==="debi"||tp==="deb")cv["db"]=true;else if(tp==="fundo_infra")cv["fi"]=true;
@@ -27466,7 +27498,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '301';
+  var SW_VERSION = '303';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
