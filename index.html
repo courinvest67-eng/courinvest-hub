@@ -1255,7 +1255,7 @@ const TIPOS_AGENDA_DEFAULT=[
 function rd(st,ac){
   if(ac.t==="AC") return {...st,cl:[...st.cl,{...ac.p,id:ac.p.id||("c"+Date.now())}]};
   if(ac.t==="UC") return {...st,cl:st.cl.map(c=>c.id===ac.p.id?{...c,...ac.p}:c)};
-  if(ac.t==="RC") return {...st,cl:[...st.cl.filter(c=>c.nome.toLowerCase()!==ac.p.nome.toLowerCase()),ac.p]};
+  if(ac.t==="RC"){var _rcId=ac.p.id,_rcNm=ac.p.nome.toLowerCase();return {...st,cl:[...st.cl.filter(function(c){return c.id!==_rcId&&c.nome.toLowerCase()!==_rcNm;}),ac.p]};}
   if(ac.t==="AI") return {...st,it:[{...ac.p,id:"i"+Date.now()},...st.it]};
   if(ac.t==="DC") return {...st,cl:st.cl.filter(c=>c.id!==ac.p),it:st.it.filter(i=>i.cid!==ac.p)};
   
@@ -4143,7 +4143,12 @@ function CL({data:d,onSel:os,dispatch:dp}){
 
         
         var nomeCliente=String(aoa[0][1]||"").trim();
-        if(!nomeCliente){sGMsg("⚠ Nome do cliente não encontrado na planilha");return}
+        /* Fallback: extrai nome do filename se cell B1 estiver vazia (Gorila mudou formato) */
+        if(!nomeCliente){
+          var _fnParsed=parseFilenameGorila(file.name);
+          if(_fnParsed&&_fnParsed.nomeCliente)nomeCliente=_fnParsed.nomeCliente;
+        }
+        if(!nomeCliente){sGMsg("⚠ Nome do cliente não encontrado na planilha (verifique célula B1)");return}
 
         /* Patrimônio + Resultado do Período + Data inicial/final + Configs extras do cliente.
            Os 6 primeiros são clássicos do Gorila. Os "configs extras" são aceitos opcionalmente
@@ -5561,11 +5566,12 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
   const tCTFilt=enrFilt.reduce((a,x)=>a+x.cT,0);
 
   
+  const _ativosKey=ativos.map(function(a){return a.tk+":"+(a.posR||0)}).join("|");
   useEffect(function(){
     if(ativos.length>0){
       dp({t:"UC",p:{id:c.id,_ativosImport:ativos,_ativosTs:Date.now()}});
     }
-  },[ativos.length]);
+  },[_ativosKey]);
   const upAt=(tk,f,v)=>sAtivos(p=>p.map(a=>a.tk===tk?{...a,[f]:v}:a));
   const delAt=tk=>sAtivos(p=>p.filter(a=>a.tk!==tk));
   const[showAddAt,sShowAddAt]=useState(false);
@@ -5844,6 +5850,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
         }
 
         
+        var _mergedFinal=[];
         sAtivos(function(prev){
           var merged=[].concat(prev);
           imported.forEach(function(imp){
@@ -5854,8 +5861,16 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
               merged.push(imp);
             }
           });
+          _mergedFinal=merged;
           return merged;
         });
+        /* Salva diretamente — não depende só do useEffect [ativos.length],
+           que não dispara quando o número de ativos permanece igual na reimportação */
+        setTimeout(function(){
+          if(_mergedFinal.length>0){
+            dp({t:"UC",p:{id:c.id,_ativosImport:_mergedFinal,_ativosTs:Date.now()}});
+          }
+        },50);
         
         if(patBruto>0){
           /* Salva no histórico patrimonial (até 36 meses) */
@@ -22195,7 +22210,8 @@ function NewsView({data,dispatch}){
                 alert("✅ Overview salvo! Já aparece nos relatórios mensais.");
               }} style={{background:"rgba(45,212,160,0.1)",border:"1px solid rgba(45,212,160,0.3)",color:T.green}}>💾 Salvar e publicar nos relatórios</Bt>
             )}
-          </div> && <div style={{padding:40,textAlign:"center"}}><div style={{fontSize:32,animation:"pulse 1.5s infinite"}}>{iaLoad?"✨":"🤖"}</div><div style={{fontSize:14,fontWeight:600,color:T.gold,marginTop:8}}>{iaLoad?"Claude está reescrevendo...":"Analisando mercado..."}</div></div>}
+          </div>
+          {(aiLoad||iaLoad) && <div style={{padding:40,textAlign:"center"}}><div style={{fontSize:32,animation:"pulse 1.5s infinite"}}>{iaLoad?"✨":"🤖"}</div><div style={{fontSize:14,fontWeight:600,color:T.gold,marginTop:8}}>{iaLoad?"Claude está reescrevendo...":"Analisando mercado..."}</div></div>}
 
           {aiText && !aiLoad && !iaLoad && (
             <div>
@@ -27379,7 +27395,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '296';
+  var SW_VERSION = '297';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
