@@ -21632,6 +21632,18 @@ function NewsView({data,dispatch}){
   };
 
   
+
+  /* FIX: restaura o texto do editor a partir do overview salvo no mês atual.
+     Resolve o problema de "voltar pra aba e o texto sumiu".
+     Roda na montagem e quando data.overviewMercado muda (ex: REPLACE_ALL do Firestore). */
+  React.useEffect(function(){
+    if(aiText)return; // já tem texto no editor, não sobrescreve
+    var hojeChk=new Date();
+    var chaveChk=hojeChk.getFullYear()+"-"+String(hojeChk.getMonth()+1).padStart(2,"0");
+    var ovChk=data&&data.overviewMercado&&data.overviewMercado[chaveChk];
+    if(ovChk&&ovChk.texto){sAiText(ovChk.texto);}
+  },[data&&data.overviewMercado]);
+
   React.useEffect(function(){
     if((ntab==="overview"||ntab==="mercado") && !macroData.atualizadoEm){
       carregarMacro();
@@ -26807,6 +26819,7 @@ function App({authUser}){
     }catch(e){console.warn("Migration orcamento falhou:",e)}
   },[d.cl.length]);
   const[syncState,sSyncState]=useState("loading"); 
+  const[syncError,sSyncError]=useState(""); /* guarda a mensagem de erro do Firestore para diagnóstico */
   const isInitialLoadRef=useRef(true);
   const skipNextSaveRef=useRef(false);
   const finRef=useRef(d.fin); /* Sempre aponta para o fin atual — evita closures stale no sync */
@@ -26833,25 +26846,37 @@ function App({authUser}){
             (localEntradas>remoteEntradas);
           if(localTemMaisDados){
             console.log("[Sync] Local tem mais dados. clientes:"+d.cl.length+" vs "+data.cl.length+", entradas:"+localEntradas+" vs "+remoteEntradas+". Fazendo UPLOAD do local.");
-            docRef.set({cl:d.cl,it:d.it,lds:d.lds||[],fin:finRef.current||{entradas:[],despesas:[]},updated:Date.now()}).catch(function(e){console.warn("Upload migration failed:",e)});
+            /* FIX: inclui overviewMercado/config/ag no upload — antes eram omitidos */
+            docRef.set({cl:d.cl,it:d.it,lds:d.lds||[],fin:finRef.current||{entradas:[],despesas:[]},overviewMercado:d.overviewMercado||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[],updated:Date.now()}).catch(function(e){console.warn("Upload migration failed:",e)});
             sSyncState("synced");
             isInitialLoadRef.current=false;
             return;
           }
           
           skipNextSaveRef.current=true;
-          dp({t:"REPLACE_ALL",p:{cl:data.cl,it:data.it,lds:data.lds||[],fin:data.fin||{entradas:[],despesas:[]},overviewMercado:data.overviewMercado||{},config:data.config||{},ag:data.ag||[],tpAg:data.tpAg||[]}});
+          /* FIX: merge overviewMercado e config — local ganha em caso de conflito.
+             Evita race condition onde REPLACE_ALL apaga overview/config salvo
+             na memória antes do Firestore terminar de carregar. */
+          var _localOv=d.overviewMercado||{};
+          var _remoteOv=data.overviewMercado||{};
+          var _mergedOv=Object.assign({},_remoteOv,_localOv);
+          var _localCfg=d.config||{};
+          var _remoteCfg=data.config||{};
+          var _mergedCfg=Object.assign({},_remoteCfg,_localCfg);
+          dp({t:"REPLACE_ALL",p:{cl:data.cl,it:data.it,lds:data.lds||[],fin:data.fin||{entradas:[],despesas:[]},overviewMercado:_mergedOv,config:_mergedCfg,ag:data.ag||[],tpAg:data.tpAg||[]}});
           console.log("[Sync] Carregado do Firestore: "+data.cl.length+" clientes, "+data.it.length+" interações");
         }
       }else{
         /* Primeira vez: envia o estado ATUAL (que pode ter dados do localStorage) pro Firestore */
         console.log("[Sync] Workspace vazio no Firestore. Fazendo upload inicial dos dados locais.");
-        docRef.set({cl:d.cl,it:d.it,lds:d.lds||[],fin:d.fin||{entradas:[],despesas:[]},updated:Date.now()}).catch(function(e){console.warn("Initial sync failed:",e)});
+        /* FIX: inclui todos os campos no upload inicial */
+        docRef.set({cl:d.cl,it:d.it,lds:d.lds||[],fin:d.fin||{entradas:[],despesas:[]},overviewMercado:d.overviewMercado||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[],updated:Date.now()}).catch(function(e){console.warn("Initial sync failed:",e)});
       }
       sSyncState("synced");
       isInitialLoadRef.current=false;
     }).catch(function(err){
       console.warn("Firestore read failed, using local cache:",err);
+      sSyncError((err&&(err.message||err.code))||"Erro desconhecido ao ler Firestore");
       sSyncState("offline");
       isInitialLoadRef.current=false;
     });
@@ -26874,8 +26899,9 @@ function App({authUser}){
       console.log("[Sync] Salvando no Firestore. Entradas fin:",((finToSave.entradas)||[]).length);
       window._fbDB.collection("workspaces").doc("main").set({
         cl:d.cl,it:d.it,lds:d.lds||[],fin:finToSave,overviewMercado:d.overviewMercado||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[],updated:Date.now()
-      }).then(function(){sSyncState("synced")}).catch(function(e){
+      }).then(function(){sSyncState("synced");sSyncError("");}).catch(function(e){
         console.warn("Firestore save failed:",e);
+        sSyncError((e&&(e.message||e.code))||"Erro ao gravar no Firestore");
         sSyncState("offline");
       });
     },800);
@@ -27136,9 +27162,24 @@ function App({authUser}){
                 </div>
               )}
               {}
-              <div title={syncState==="synced"?"Sincronizado com nuvem":syncState==="loading"?"Sincronizando…":syncState==="offline"?"Offline — mudanças salvas localmente":"Erro de sincronização"} style={{display:"flex",alignItems:"center",gap:6,fontSize:10,color:syncState==="synced"?T.green:syncState==="loading"?T.gold:T.orange,padding:"4px 10px",background:syncState==="synced"?T.greenD:syncState==="loading"?T.goldD:T.orangeD,border:"1px solid "+(syncState==="synced"?T.green+"22":syncState==="loading"?T.gold+"22":T.orange+"22"),borderRadius:20,fontWeight:700}}>
+              <div
+                title={syncState==="synced"?"Sincronizado com nuvem":syncState==="loading"?"Sincronizando…":syncState==="offline"?"Offline — clique para ver o erro e tentar novamente":"Erro de sincronização"}
+                onClick={syncState==="offline"?function(){
+                  var msg="⚠️ OFFLINE — Firestore não está respondendo.\n\n";
+                  if(syncError)msg+="Erro: "+syncError+"\n\n";
+                  msg+="Possíveis causas:\n";
+                  msg+="• Extensão bloqueando (AdBlock, uBlock, Brave Shield)\n";
+                  msg+="• VPN interferindo na conexão\n";
+                  msg+="• Regras do Firestore no console Firebase\n";
+                  msg+="• Conexão instável\n\n";
+                  msg+="Tente: abrir em aba anônima (Ctrl+Shift+N) ou outro navegador.\n\n";
+                  msg+="Seus dados estão salvos no localStorage e serão sincronizados quando a conexão for restabelecida.\n\nRecarregar a página agora?";
+                  if(window.confirm(msg))window.location.reload();
+                }:undefined}
+                style={{display:"flex",alignItems:"center",gap:6,fontSize:10,color:syncState==="synced"?T.green:syncState==="loading"?T.gold:T.orange,padding:"4px 10px",background:syncState==="synced"?T.greenD:syncState==="loading"?T.goldD:T.orangeD,border:"1px solid "+(syncState==="synced"?T.green+"22":syncState==="loading"?T.gold+"22":T.orange+"22"),borderRadius:20,fontWeight:700,cursor:syncState==="offline"?"pointer":"default"}}
+              >
                 <span style={{width:6,height:6,borderRadius:"50%",background:syncState==="synced"?T.green:syncState==="loading"?T.gold:T.orange,animation:syncState==="loading"?"pulse 1.5s ease-in-out infinite":"none"}}/>
-                {syncState==="synced"?"SYNC":syncState==="loading"?"SINCRONIZANDO":"OFFLINE"}
+                {syncState==="synced"?"SYNC":syncState==="loading"?"SINCRONIZANDO":"● OFFLINE"}
               </div>
               <div style={{position:"relative"}}>
                 <button onClick={function(){sShowN(!showN)}} style={{background:showN?"rgba(212,163,40,0.08)":"transparent",border:"1px solid "+(showN?"rgba(212,163,40,0.15)":"transparent"),borderRadius:11,padding:"7px 9px",cursor:"pointer",fontSize:17,transition:"all 0.2s"}}>🔔
@@ -27395,7 +27436,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '297';
+  var SW_VERSION = '299';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
