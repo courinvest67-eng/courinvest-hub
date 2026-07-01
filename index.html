@@ -22195,13 +22195,18 @@ function NewsView({data,dispatch}){
             var hojeOv=new Date();
             var chaveOv=hojeOv.getFullYear()+"-"+String(hojeOv.getMonth()+1).padStart(2,"0");
             var ovSalvo=(data&&data.overviewMercado&&data.overviewMercado[chaveOv])||null;
+            /* FIX: se state foi limpo pelo REPLACE_ALL mas aiText ainda tem conteúdo,
+               trata como "salvo localmente" para não confundir o usuário */
+            var ovLocal=!ovSalvo&&aiText?{texto:aiText,atualizadoEm:Date.now(),_pendente:true}:null;
+            var ovEfetivo=ovSalvo||ovLocal;
             var MESES_OV=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
             var nomeMesOv=MESES_OV[hojeOv.getMonth()]+"/"+hojeOv.getFullYear();
             return (
-              <div style={{padding:"12px 14px",background:ovSalvo?"rgba(45,212,160,0.08)":"rgba(212,163,40,0.08)",border:"1px solid "+(ovSalvo?"rgba(45,212,160,0.25)":"rgba(212,163,40,0.25)"),borderRadius:10,marginBottom:14,fontSize:11,color:ovSalvo?T.green:T.gold}}>
-                <strong>{ovSalvo?"✅ Overview publicado para "+nomeMesOv:"⚠️ Sem overview para "+nomeMesOv}</strong>
+              <div style={{padding:"12px 14px",background:ovSalvo?"rgba(45,212,160,0.08)":ovLocal?"rgba(56,189,248,0.08)":"rgba(212,163,40,0.08)",border:"1px solid "+(ovSalvo?"rgba(45,212,160,0.25)":ovLocal?"rgba(56,189,248,0.25)":"rgba(212,163,40,0.25)"),borderRadius:10,marginBottom:14,fontSize:11,color:ovSalvo?T.green:ovLocal?T.cyan:T.gold}}>
+                <strong>{ovSalvo?"✅ Overview publicado para "+nomeMesOv:ovLocal?"📝 Overview gerado (clique em 'Salvar e publicar')":"⚠️ Sem overview para "+nomeMesOv}</strong>
                 {ovSalvo&&<div style={{fontSize:10,color:T.t3,marginTop:3}}>Publicado em {new Date(ovSalvo.atualizadoEm).toLocaleString("pt-BR")} · aparece automaticamente nos relatórios mensais de todos os clientes</div>}
-                {!ovSalvo&&<div style={{fontSize:10,color:T.t3,marginTop:3}}>Clique em "Gerar via Template" — o overview será salvo automaticamente e aparecerá nos relatórios mensais</div>}
+                {ovLocal&&<div style={{fontSize:10,color:T.t3,marginTop:3}}>Texto no editor — clique em 💾 Salvar para publicar nos relatórios mensais</div>}
+                {!ovEfetivo&&<div style={{fontSize:10,color:T.t3,marginTop:3}}>Clique em "Gerar via Template" — o overview será salvo automaticamente e aparecerá nos relatórios mensais</div>}
               </div>
             );
           })()}
@@ -26824,6 +26829,8 @@ function App({authUser}){
   const skipNextSaveRef=useRef(false);
   const finRef=useRef(d.fin); /* Sempre aponta para o fin atual — evita closures stale no sync */
   useEffect(function(){finRef.current=d.fin;},[d.fin]);
+  const ovRef=useRef(d.overviewMercado||{}); /* FIX: ref para overviewMercado — evita closure stale no merge */
+  useEffect(function(){ovRef.current=d.overviewMercado||{};},[d.overviewMercado]);
   
   useEffect(function(){
     if(!window._fbDB){sSyncState("error");return}
@@ -26847,7 +26854,7 @@ function App({authUser}){
           if(localTemMaisDados){
             console.log("[Sync] Local tem mais dados. clientes:"+d.cl.length+" vs "+data.cl.length+", entradas:"+localEntradas+" vs "+remoteEntradas+". Fazendo UPLOAD do local.");
             /* FIX: inclui overviewMercado/config/ag no upload — antes eram omitidos */
-            docRef.set({cl:d.cl,it:d.it,lds:d.lds||[],fin:finRef.current||{entradas:[],despesas:[]},overviewMercado:d.overviewMercado||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[],updated:Date.now()}).catch(function(e){console.warn("Upload migration failed:",e)});
+            docRef.set({cl:d.cl,it:d.it,lds:d.lds||[],fin:finRef.current||{entradas:[],despesas:[]},overviewMercado:ovRef.current||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[],updated:Date.now()}).catch(function(e){console.warn("Upload migration failed:",e)});
             sSyncState("synced");
             isInitialLoadRef.current=false;
             return;
@@ -26856,8 +26863,9 @@ function App({authUser}){
           skipNextSaveRef.current=true;
           /* FIX: merge overviewMercado e config — local ganha em caso de conflito.
              Evita race condition onde REPLACE_ALL apaga overview/config salvo
-             na memória antes do Firestore terminar de carregar. */
-          var _localOv=d.overviewMercado||{};
+             na memória antes do Firestore terminar de carregar.
+             Usa ovRef.current (sempre atualizado) em vez de d.overviewMercado (stale closure). */
+          var _localOv=ovRef.current||{};
           var _remoteOv=data.overviewMercado||{};
           var _mergedOv=Object.assign({},_remoteOv,_localOv);
           var _localCfg=d.config||{};
@@ -27436,7 +27444,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '299';
+  var SW_VERSION = '300';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
