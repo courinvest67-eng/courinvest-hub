@@ -6734,7 +6734,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       var secAtiva=function(k){return sec[k]!==false};
       /* Mapeamento macro-classe reusado em várias seções (Currency, Composição Detalhada) */
       var TP_MACRO={cdb:"rf",lci:"rf",lca:"rf",lc:"rf",cri:"rf",cra:"rf",tesouro:"rf",deb:"rf",debi:"rf",fundo_rf:"rf",fundo_mm:"rf",fundo_camb:"rf",coe:"rf",poupanca:"rf",acao:"rv",fii:"rv",fiagro:"rv",fip:"rv",etf_br:"rv",bdr:"rv",fundo_acoes:"rv",ouro:"rv",fundo_infra:"rv",stock_us:"ext",etf_int:"ext",etf_eu:"ext",reit:"ext",caixa:"caixa",cripto:"cripto",prev:"prev"};
-      var MACRO_ORDEM=["rf","rv","ext","prev","caixa","outros"];
+      var MACRO_ORDEM=["rf","rv","ext","prev","caixa","cripto","outros"];
       var MACRO_LBL={rf:{l:"Renda Fixa",c:"#38BDF8"},rv:{l:"Renda Variável",c:"#2DD4A0"},ext:{l:"Exterior",c:"#A78BFA"},prev:{l:"Previdência",c:"#F472B6"},caixa:{l:"Caixa",c:"#FBBF24"},cripto:{l:"Cripto",c:"#F59E0B"},outros:{l:"Outros",c:"#94A3B8"}};
       var tituloRel=tipo==="anual"?"Relatório Anual":(tipo==="trimestral"?"Relatório Trimestral":(tipo==="completo"?"Relatório Completo":"Relatório Mensal"));
       
@@ -27498,7 +27498,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '304';
+  var SW_VERSION = '305';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
