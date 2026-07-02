@@ -782,6 +782,9 @@ const tipoBdg=t=>t==="fii"||t==="fiagro"||t==="fip"?"cyan":t.includes("etf")?"pu
 const UCITS_TICKERS="CSBGE3,IBCI,IE15,IEAC,UEEH,VGEA,IUSA,EUNL,SXR8,VEUR,VWRL,VUSA,VWCE,VHYL,IWDA,EIMI,EMIM,SXRG,SXRV,SWRD,EQAC,LCWD,IDVY,EXSA,XDWD".split(",");
 const tipoAtivoDisplay=function(a){
   if(!a||!a.tp)return "outros";
+  /* Override: FI-Agro importados como cra/cri pelo Gorila → corrige para fiagro */
+  var tkUp=String(a.tk||"").toUpperCase();
+  if((a.tp==="cra"||a.tp==="cri")&&/^(GCRA|RZAG|RZEO|SNAG|SNFZ|VCRA|VGIA|BBGO|CCFA|CPTR|DCRA|EGAF|AGRX|JGPX|FGAA|HGAG|LSAG|NCRA|OIAG|PLCA|IAGR|XPCA|BTAG|FZDA|FZDB|GRWA|SMRT|BIDB|CRAA|CPCA|DEVA|FICA|FZCA|GAIA|HABT|JGPA|KGUA|MVCA|PCAR|SNCA|TRCE|URCA|VICA)11$/.test(tkUp))return "fiagro";
   
   if(a.tp==="etf_int" && a.tk && UCITS_TICKERS.indexOf(String(a.tk).toUpperCase())>=0){
     return "etf_eu";
@@ -27503,7 +27506,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '306';
+  var SW_VERSION = '307';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
