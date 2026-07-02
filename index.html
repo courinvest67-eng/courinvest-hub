@@ -5340,6 +5340,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
   const moedaCliC=moedaCli(c);
   const ehClienteExterior=moedaCliC.code!=="BRL";
   
+  /* Tickers de FI-Agro que o Gorila importa com tp errado (cra/cri).
+     Override para garantir classificação correta em todo o sistema. */
+  const FIAGRO_TICKERS_OVERRIDE={"GCRA11":1,"RZAG11":1,"RZEO11":1,"SNAG11":1,"SNFZ11":1,"VCRA11":1,"VGIA11":1,"BBGO11":1,"CCFA11":1,"CPTR11":1,"DCRA11":1,"EGAF11":1,"AGRX11":1,"JGPX11":1,"FGAA11":1,"HGAG11":1,"LSAG11":1,"NCRA11":1,"OIAG11":1,"PLCA11":1,"IAGR11":1,"XPCA11":1,"BTAG11":1,"FZDA11":1,"FZDB11":1,"GRWA11":1,"SMRT11":1,"BIDB11":1,"CRAA11":1,"CPCA11":1,"DEVA11":1,"FICA11":1,"FZCA11":1,"GAIA11":1,"HABT11":1,"JGPA11":1,"KGUA11":1,"MVCA11":1,"PCAR11":1,"SNCA11":1,"TRCE11":1,"URCA11":1,"VICA11":1,"XPCA11":1};
   const ativosBase=(function(){
     var t=c._ativosImport||[];
     if(!c.isCasal)return t;
@@ -5412,7 +5415,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       gPct=0;
     }
     var ni=normInst(a.inst);
-    return{...a,inst:ni,col:["#D4A328","#2DD4A0","#38BDF8","#A78BFA","#F59E0B","#F472B6","#6EE7B7","#93C5FD","#FCA5A1","#FBBF24","#818CF8","#34D399"][i%12],vA:vA,cT:cT,ganho:g,gPct:gPct,gPctValido:gPctValido,ehUSD:ehUSD,_rendYield:rendimentoYield};
+    /* Override tp para tickers FI-Agro importados erroneamente como cra/cri pelo Gorila */
+    var tpEfetivo=(FIAGRO_TICKERS_OVERRIDE[String(a.tk||"").toUpperCase()] && (a.tp==="cra"||a.tp==="cri"))?"fiagro":a.tp;
+    return{...a,tp:tpEfetivo,inst:ni,col:["#D4A328","#2DD4A0","#38BDF8","#A78BFA","#F59E0B","#F472B6","#6EE7B7","#93C5FD","#FCA5A1","#FBBF24","#818CF8","#34D399"][i%12],vA:vA,cT:cT,ganho:g,gPct:gPct,gPctValido:gPctValido,ehUSD:ehUSD,_rendYield:rendimentoYield};
   });
   
   /* Sincroniza Tabela de Aportes com a Sugestão de Rebalanceamento
@@ -27498,7 +27503,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '305';
+  var SW_VERSION = '306';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
