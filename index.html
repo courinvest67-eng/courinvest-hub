@@ -7931,88 +7931,6 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       }
       } /* fim secAtiva("proventos") — Proventos & Renda Passiva (antes da Evolução Mensal) */
 
-      /* ===== MOVIMENTAÇÕES DO PERÍODO — aportes e retiradas do Gorila ===== */
-      if(secAtiva("metas")){
-        
-        var apValor=0, retValor=0, captLiq=0;
-        var temMovGorila=temGorila && (c._gorilaRent.aportes>0 || c._gorilaRent.retiradas>0 || (c._gorilaRent.captacao||0)!==0);
-        var movManuaisDoMes=[];
-        if(temMovGorila){
-          apValor=c._gorilaRent.aportes||0;
-          retValor=c._gorilaRent.retiradas||0;
-          captLiq=c._gorilaRent.captacao||(apValor-retValor);
-        }
-        
-        if(c.movimentacoes && c.movimentacoes.length>0){
-          var _movRef=dataRef||new Date();
-          var mesMovRel=_movRef.getFullYear()+"-"+String(_movRef.getMonth()+1).padStart(2,"0");
-          movManuaisDoMes=c.movimentacoes.filter(function(m){
-            return m.data && m.data.startsWith(mesMovRel);
-          });
-          
-          if(!temMovGorila && movManuaisDoMes.length>0){
-            movManuaisDoMes.forEach(function(m){
-              if(m.tipo==="aporte"||(m.valor||0)>0){apValor+=(m.valor||0);}
-              else if(m.tipo==="resgate"||(m.valor||0)<0){retValor+=Math.abs(m.valor||0);}
-            });
-            captLiq=apValor-retValor;
-          }
-        }
-        var temMovs=temMovGorila || apValor>0 || retValor>0 || movManuaisDoMes.length>0;
-        if(tipo==="mensal" && secAtiva("movimentacao")){
-        body+='<!-- PAGE_BREAK -->';
-        body+=secTitle('🔄','Movimentações do Período');
-        body+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:12px 0">';
-        
-        body+='<div style="background:linear-gradient(145deg,#f0fdf9,#e6faf5);border:1px solid rgba(45,212,160,0.35);border-radius:12px;padding:14px">'
-          +'<div style="font-size:9px;color:#2DD4A0;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">↓ Aportes</div>'
-          +'<div style="font-size:18px;font-weight:800;color:'+(apValor>0?"#2DD4A0":"#6B7489")+';font-family:\'JetBrains Mono\',monospace">+'+fmF(apValor)+'</div>'
-          +'<div style="font-size:9px;color:#8B94A7;margin-top:4px">dinheiro novo aplicado</div>'
-          +'</div>';
-        
-        body+='<div style="background:linear-gradient(145deg,#fff5f5,#fee2e2);border:1px solid rgba(239,100,97,0.35);border-radius:12px;padding:14px">'
-          +'<div style="font-size:9px;color:#EF6461;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">↑ Retiradas</div>'
-          +'<div style="font-size:18px;font-weight:800;color:'+(retValor>0?"#EF6461":"#6B7489")+';font-family:\'JetBrains Mono\',monospace">'+(retValor>0?"-":"")+fmF(retValor)+'</div>'
-          +'<div style="font-size:9px;color:#8B94A7;margin-top:4px">resgates e saques</div>'
-          +'</div>';
-        
-        var captCor=captLiq>0?"#2DD4A0":captLiq<0?"#EF6461":"#6B7489";
-        var captBorder=captLiq>0?"rgba(45,212,160,0.3)":captLiq<0?"rgba(239,100,97,0.3)":"rgba(255,255,255,0.08)";
-        body+='<div style="background:linear-gradient(145deg,rgba(212,163,40,0.08),rgba(212,163,40,0.02));border:1px solid '+captBorder+';border-radius:12px;padding:14px">'
-          +'<div style="font-size:9px;color:#D4A328;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">= Captação Líquida</div>'
-          +'<div style="font-size:18px;font-weight:800;color:'+captCor+';font-family:\'JetBrains Mono\',monospace">'+(captLiq>=0?"+":"")+fmF(captLiq)+'</div>'
-          +'<div style="font-size:9px;color:#8B94A7;margin-top:4px">aportes − retiradas</div>'
-          +'</div>';
-        body+='</div>';
-        
-        var narrMov='';
-        if(captLiq>0){
-          narrMov='<strong style="color:#2DD4A0">Captação líquida positiva</strong> — o patrimônio aumentou '+fmF(captLiq)+' por novos aportes além do crescimento dos ativos.';
-        }else if(captLiq<0){
-          narrMov='<strong style="color:#EF6461">Captação líquida negativa</strong> — houve saída de '+fmF(Math.abs(captLiq))+' no período. A variação do patrimônio reflete rentabilidade líquida dessas retiradas.';
-        }else{
-          narrMov='Movimentação neutra no período — aportes e retiradas se equilibraram.';
-        }
-        body+='<div class="nota-inline" style="margin-top:4px">'+narrMov+(temMovGorila?' Valores extraídos diretamente do relatório Gorila.':' Valores baseados em movimentações cadastradas manualmente.')+'</div>';
-        
-        if(movManuaisDoMes.length>0){
-          body+='<div style="margin-top:14px">';
-          body+='<div style="font-size:10px;color:#6B7489;font-weight:700;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">📋 Movimentações do mês</div>';
-          body+='<table><tr><th>Data</th><th>Descrição</th><th>Tipo</th><th style="text-align:right">Valor</th></tr>';
-          movManuaisDoMes.slice(0,15).forEach(function(m){
-            var isAporte=m.tipo==="aporte"||(m.valor||0)>0;
-            var cor=isAporte?"#0F9D58":"#EF6461";
-            var sinal=isAporte?"+":"-";
-            var dataFmt=m.data?m.data.split("-").reverse().join("/"):"—";
-            body+='<tr><td>'+dataFmt+'</td><td>'+(m.descricao||m.nome||"—")+'</td>';
-            body+='<td><span style="color:'+cor+';font-weight:700;font-size:10px">'+(isAporte?"Aporte":"Resgate")+'</span></td>';
-            body+='<td style="text-align:right;color:'+cor+';font-weight:700;font-family:JetBrains Mono,monospace">'+sinal+fmF(Math.abs(m.valor||0))+'</td></tr>';
-          });
-          body+='</table>';
-          body+='</div>';
-        }
-        }} 
-
       /* ===== EVOLUÇÃO MENSAL REAL — 12 meses rolling, valores históricos =====
          Substitui o gráfico antigo de barras uniformes. */
       if(secAtiva("proventos") && c.proventos && c.proventos.length>0){
@@ -8178,9 +8096,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
               +'<title>'+MN_CURTO_PROV[d.mes-1]+"/"+d.ano+"\nTotal: R$ "+d.total.toLocaleString("pt-BR",{maximumFractionDigits:0})+"\n"+ttLines+'</title></rect>';
 
             
-            if(isMelhor){
-              svg+='<rect x="'+(x-2).toFixed(1)+'" y="'+(padT-4)+'" width="'+(bwReal+4).toFixed(1)+'" height="'+(chartH+4)+'" fill="none" stroke="#D4A328" stroke-width="1.5" stroke-dasharray="3,2" rx="4" opacity="0.5"/>';
-            }
+            /* pontilhado do melhor mês removido a pedido */
 
             
             var mesLbl=MN_CURTO_PROV[d.mes-1];
@@ -8210,6 +8126,90 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
           body+='<div class="nota-inline" style="margin-top:10px"><strong>📊 Período:</strong> '+desdeTxt+' até '+ateTxt+' · <strong>Valores reais</strong> baseados nos proventos cadastrados, com barras empilhadas por classe.</div>';
         }
       }
+
+
+      /* ===== MOVIMENTAÇÕES DO PERÍODO — aportes e retiradas do Gorila ===== */
+      if(secAtiva("metas")){
+        
+        var apValor=0, retValor=0, captLiq=0;
+        var temMovGorila=temGorila && (c._gorilaRent.aportes>0 || c._gorilaRent.retiradas>0 || (c._gorilaRent.captacao||0)!==0);
+        var movManuaisDoMes=[];
+        if(temMovGorila){
+          apValor=c._gorilaRent.aportes||0;
+          retValor=c._gorilaRent.retiradas||0;
+          captLiq=c._gorilaRent.captacao||(apValor-retValor);
+        }
+        
+        if(c.movimentacoes && c.movimentacoes.length>0){
+          var _movRef=dataRef||new Date();
+          var mesMovRel=_movRef.getFullYear()+"-"+String(_movRef.getMonth()+1).padStart(2,"0");
+          movManuaisDoMes=c.movimentacoes.filter(function(m){
+            return m.data && m.data.startsWith(mesMovRel);
+          });
+          
+          if(!temMovGorila && movManuaisDoMes.length>0){
+            movManuaisDoMes.forEach(function(m){
+              if(m.tipo==="aporte"||(m.valor||0)>0){apValor+=(m.valor||0);}
+              else if(m.tipo==="resgate"||(m.valor||0)<0){retValor+=Math.abs(m.valor||0);}
+            });
+            captLiq=apValor-retValor;
+          }
+        }
+        var temMovs=temMovGorila || apValor>0 || retValor>0 || movManuaisDoMes.length>0;
+        if(tipo==="mensal" && secAtiva("movimentacao")){
+        body+='<!-- PAGE_BREAK -->';
+        body+=secTitle('🔄','Movimentações do Período');
+        body+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:12px 0">';
+        
+        body+='<div style="background:linear-gradient(145deg,#f0fdf9,#e6faf5);border:1px solid rgba(45,212,160,0.35);border-radius:12px;padding:14px">'
+          +'<div style="font-size:9px;color:#2DD4A0;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">↓ Aportes</div>'
+          +'<div style="font-size:18px;font-weight:800;color:'+(apValor>0?"#2DD4A0":"#6B7489")+';font-family:\'JetBrains Mono\',monospace">+'+fmF(apValor)+'</div>'
+          +'<div style="font-size:9px;color:#8B94A7;margin-top:4px">dinheiro novo aplicado</div>'
+          +'</div>';
+        
+        body+='<div style="background:linear-gradient(145deg,#fff5f5,#fee2e2);border:1px solid rgba(239,100,97,0.35);border-radius:12px;padding:14px">'
+          +'<div style="font-size:9px;color:#EF6461;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">↑ Retiradas</div>'
+          +'<div style="font-size:18px;font-weight:800;color:'+(retValor>0?"#EF6461":"#6B7489")+';font-family:\'JetBrains Mono\',monospace">'+(retValor>0?"-":"")+fmF(retValor)+'</div>'
+          +'<div style="font-size:9px;color:#8B94A7;margin-top:4px">resgates e saques</div>'
+          +'</div>';
+        
+        var captCor=captLiq>0?"#2DD4A0":captLiq<0?"#EF6461":"#6B7489";
+        var captBorder=captLiq>0?"rgba(45,212,160,0.3)":captLiq<0?"rgba(239,100,97,0.3)":"rgba(255,255,255,0.08)";
+        body+='<div style="background:linear-gradient(145deg,rgba(212,163,40,0.08),rgba(212,163,40,0.02));border:1px solid '+captBorder+';border-radius:12px;padding:14px">'
+          +'<div style="font-size:9px;color:#D4A328;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">= Captação Líquida</div>'
+          +'<div style="font-size:18px;font-weight:800;color:'+captCor+';font-family:\'JetBrains Mono\',monospace">'+(captLiq>=0?"+":"")+fmF(captLiq)+'</div>'
+          +'<div style="font-size:9px;color:#8B94A7;margin-top:4px">aportes − retiradas</div>'
+          +'</div>';
+        body+='</div>';
+        
+        var narrMov='';
+        if(captLiq>0){
+          narrMov='<strong style="color:#2DD4A0">Captação líquida positiva</strong> — o patrimônio aumentou '+fmF(captLiq)+' por novos aportes além do crescimento dos ativos.';
+        }else if(captLiq<0){
+          narrMov='<strong style="color:#EF6461">Captação líquida negativa</strong> — houve saída de '+fmF(Math.abs(captLiq))+' no período. A variação do patrimônio reflete rentabilidade líquida dessas retiradas.';
+        }else{
+          narrMov='Movimentação neutra no período — aportes e retiradas se equilibraram.';
+        }
+        body+='<div class="nota-inline" style="margin-top:4px">'+narrMov+(temMovGorila?' Valores extraídos diretamente do relatório Gorila.':' Valores baseados em movimentações cadastradas manualmente.')+'</div>';
+        
+        if(movManuaisDoMes.length>0){
+          body+='<div style="margin-top:14px">';
+          body+='<div style="font-size:10px;color:#6B7489;font-weight:700;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">📋 Movimentações do mês</div>';
+          body+='<table><tr><th>Data</th><th>Descrição</th><th>Tipo</th><th style="text-align:right">Valor</th></tr>';
+          movManuaisDoMes.slice(0,15).forEach(function(m){
+            var isAporte=m.tipo==="aporte"||(m.valor||0)>0;
+            var cor=isAporte?"#0F9D58":"#EF6461";
+            var sinal=isAporte?"+":"-";
+            var dataFmt=m.data?m.data.split("-").reverse().join("/"):"—";
+            body+='<tr><td>'+dataFmt+'</td><td>'+(m.descricao||m.nome||"—")+'</td>';
+            body+='<td><span style="color:'+cor+';font-weight:700;font-size:10px">'+(isAporte?"Aporte":"Resgate")+'</span></td>';
+            body+='<td style="text-align:right;color:'+cor+';font-weight:700;font-family:JetBrains Mono,monospace">'+sinal+fmF(Math.abs(m.valor||0))+'</td></tr>';
+          });
+          body+='</table>';
+          body+='</div>';
+        }
+        }} 
+
 
       /* ===== 🎯 OBJETIVOS & METAS — só aparece se cliente tem objetivos cadastrados ===== */
       if(secAtiva("objetivos") && c.objetivos && c.objetivos.length>0){
@@ -27498,7 +27498,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '303';
+  var SW_VERSION = '304';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
