@@ -8555,6 +8555,108 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
         +'<p style="font-size:10.5px;color:#3a3a4a;line-height:1.65;margin-bottom:6px">Sua carteira inclui classes com <strong>oscilação natural de mercado</strong>, compatível com seu perfil <strong>'+(c.risco||"Moderado")+'</strong>.</p>'
         +'<ul style="margin:0;padding-left:18px;font-size:10.5px;color:#3a3a4a;line-height:1.8">'+nv.map(function(n){return"<li>"+n+"</li>";}).join("")+'</ul></div>';
       })();
+
+      /* ===== 📊 PERFORMANCE HISTÓRICA — RESUMO 12 MESES COM BENCHMARKS =====
+         Aparece no relatório mensal quando o cliente tem _gorilaRent com periods (importado do Gorila).
+         Mostra tabela + gráfico de barras horizontal comparando Carteira vs CDI vs IBOV vs IPCA. */
+      if(tipo==="mensal" && c._gorilaRent && c._gorilaRent.periods && c._gorilaRent.periods.length>0){
+        var _rp_perf=c._gorilaRent.periods;
+        var _findP=function(keys){
+          for(var ki=0;ki<keys.length;ki++){
+            var k=keys[ki].toLowerCase();
+            var found=_rp_perf.find(function(p){var pn=(p.p||"").toLowerCase();return pn===k||pn.indexOf(k)>=0||k.indexOf(pn)>=0;});
+            if(found)return found;
+          }
+          return null;
+        };
+        var _pMes=_findP(["último mês","ultimo mes","últimomes"]);
+        var _p12m=_findP(["12m","12 m","12 meses","últimos 12"]);
+        var _pAno=_findP(["ano","ytd"]);
+        var _pIni=_findP(["início da carteira","inicio da carteira","início da","desde o início","início"]);
+        var _pPer=_findP(["periodo","período"]);
+        var _pRef=_p12m||_pPer;
+        var _fmt=function(v){if(v===null||v===undefined||isNaN(v))return"—";var pct=(v*100);return(pct>=0?"+":"")+pct.toFixed(2)+"%";};
+        var _cor2=function(v){if(v===null||v===undefined||isNaN(v))return"#8B94A7";return v>=0?"#34D399":"#EF6461";};
+        var _rows=[];
+        if(_pMes)_rows.push({lbl:"Último Mês",p:_pMes});
+        if(_pAno)_rows.push({lbl:"No Ano (YTD)",p:_pAno});
+        if(_p12m)_rows.push({lbl:"12 Meses",p:_p12m,dest:true});
+        if(_pIni)_rows.push({lbl:"Desde o Início",p:_pIni});
+        if(_rows.length===0&&_pPer)_rows.push({lbl:"Período",p:_pPer});
+        if(_rows.length>0){
+          var _dataIni2=c._gorilaRent.dataIni?new Date(c._gorilaRent.dataIni):null;
+          var _dataFim2=c._gorilaRent.dataFim?new Date(c._gorilaRent.dataFim):null;
+          var _fmtD=function(d){if(!d)return"";return String(d.getDate()).padStart(2,"0")+"/"+(d.getMonth()+1).toString().padStart(2,"0")+"/"+d.getFullYear();};
+          body+="<!-- PAGE_BREAK -->";
+          body+=secTitle("📊","Performance Histórica da Carteira");
+          body+='<p class="cv-lead">Rentabilidade acumulada extraída do relatório Gorila'
+            +(_dataIni2&&_dataFim2?' (<span class="cv-lead-strong">'+_fmtD(_dataIni2)+' → '+_fmtD(_dataFim2)+'</span>)':"")
+            +'. Comparativo com benchmarks CDI, Ibovespa e IPCA.</p>';
+          /* Tabela de períodos */
+          body+='<div style="border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,0.06);margin-bottom:20px">';
+          body+='<table style="width:100%;border-collapse:collapse;font-size:10px">';
+          body+='<thead><tr style="background:rgba(212,163,40,0.08)">'
+            +'<th style="padding:10px 14px;text-align:left;color:#D4A328;font-weight:800;font-size:9px;letter-spacing:.8px;text-transform:uppercase">PERÍODO</th>'
+            +'<th style="padding:10px 10px;text-align:center;color:#D4A328;font-weight:800;font-size:9px;letter-spacing:.8px">CARTEIRA</th>'
+            +'<th style="padding:10px 10px;text-align:center;color:#34D399;font-weight:800;font-size:9px;letter-spacing:.8px">CDI</th>'
+            +'<th style="padding:10px 10px;text-align:center;color:#38BDF8;font-weight:800;font-size:9px;letter-spacing:.8px">IBOV</th>'
+            +'<th style="padding:10px 10px;text-align:center;color:#A78BFA;font-weight:800;font-size:9px;letter-spacing:.8px">IPCA</th>'
+            +'<th style="padding:10px 10px;text-align:center;color:#8B94A7;font-weight:800;font-size:9px;letter-spacing:.8px">VS CDI</th>'
+            +'</tr></thead><tbody>';
+          _rows.forEach(function(row,ri){
+            var p=row.p;
+            var vsCD=(!isNaN(p.rent)&&!isNaN(p.cdi))?(p.rent-p.cdi):null;
+            var dest=row.dest;
+            var bg=dest?"background:rgba(212,163,40,0.06);":"background:"+(ri%2===0?"transparent":"rgba(255,255,255,0.015)")+";";
+            var bdr=dest?"border-top:1px solid rgba(212,163,40,0.2);border-bottom:1px solid rgba(212,163,40,0.2);":"";
+            body+='<tr style="'+bg+bdr+'">'
+              +'<td style="padding:10px 14px;font-weight:'+(dest?"800":"600")+';color:'+(dest?"#D4A328":"#C5CDD8")+';font-size:'+(dest?"11":"10")+'px">'+row.lbl+'</td>'
+              +'<td style="padding:10px 10px;text-align:center;font-weight:800;font-family:\'JetBrains Mono\',monospace;color:'+_cor2(p.rent)+';font-size:'+(dest?"12":"11")+'px">'+_fmt(p.rent)+'</td>'
+              +'<td style="padding:10px 10px;text-align:center;font-weight:700;font-family:\'JetBrains Mono\',monospace;color:'+_cor2(p.cdi)+';font-size:11px">'+_fmt(p.cdi)+'</td>'
+              +'<td style="padding:10px 10px;text-align:center;font-weight:700;font-family:\'JetBrains Mono\',monospace;color:'+_cor2(p.ibov)+';font-size:11px">'+_fmt(p.ibov)+'</td>'
+              +'<td style="padding:10px 10px;text-align:center;font-weight:700;font-family:\'JetBrains Mono\',monospace;color:'+_cor2(p.ipca)+';font-size:11px">'+_fmt(p.ipca)+'</td>'
+              +'<td style="padding:10px 10px;text-align:center;font-weight:800;font-family:\'JetBrains Mono\',monospace;color:'+_cor2(vsCD)+';font-size:11px">'+(vsCD!==null?(vsCD>=0?"+":"")+((vsCD)*100).toFixed(2)+"pp":"—")+'</td>'
+              +'</tr>';
+          });
+          body+='</tbody></table></div>';
+          /* Gráfico de barras horizontal — referência: 12m ou período */
+          if(_pRef){
+            var _barVals=[
+              {lbl:"Carteira",v:_pRef.rent,cor:"#D4A328"},
+              {lbl:"CDI",v:_pRef.cdi,cor:"#34D399"},
+              {lbl:"IBOV",v:_pRef.ibov,cor:"#38BDF8"},
+              {lbl:"IPCA",v:_pRef.ipca,cor:"#A78BFA"},
+            ].filter(function(x){return x.v!==null&&x.v!==undefined&&!isNaN(x.v)});
+            var _maxAbsV=Math.max.apply(null,_barVals.map(function(x){return Math.abs(x.v||0)}).concat([0.001]));
+            var _periodoLbl=_p12m?"Últimos 12 Meses":(_dataIni2&&_dataFim2?_fmtD(_dataIni2)+" → "+_fmtD(_dataFim2):"Período");
+            body+='<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:18px 20px;margin-bottom:14px">';
+            body+='<div style="font-size:10px;font-weight:800;color:#8B94A7;text-transform:uppercase;letter-spacing:.8px;margin-bottom:14px">'+_periodoLbl+' — Comparativo Visual</div>';
+            _barVals.forEach(function(x){
+              var pct=x.v*100;
+              var bw=Math.min(Math.abs(x.v/_maxAbsV)*100,100);
+              body+='<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.04)">'
+                +'<div style="width:65px;font-size:10px;font-weight:700;color:#8B94A7;text-align:right;flex-shrink:0">'+x.lbl+'</div>'
+                +'<div style="flex:1;height:20px;background:rgba(255,255,255,0.04);border-radius:4px;overflow:hidden">'
+                +'<div style="height:100%;width:'+bw.toFixed(1)+'%;background:'+x.cor+';border-radius:4px"></div></div>'
+                +'<div style="width:64px;font-size:12px;font-weight:800;font-family:\'JetBrains Mono\',monospace;color:'+(pct>=0?x.cor:"#EF6461")+';text-align:right;flex-shrink:0">'+(pct>=0?"+":"")+pct.toFixed(2)+'%</div>'
+                +'</div>';
+            });
+            /* Sharpe + Volatilidade se disponíveis */
+            if(!isNaN(_pRef.sharpe)||!isNaN(_pRef.vol)){
+              body+='<div style="display:flex;gap:24px;margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06)">';
+              if(!isNaN(_pRef.sharpe))body+='<div><div style="font-size:9px;color:#8B94A7;font-weight:700;text-transform:uppercase;letter-spacing:.8px">Sharpe</div><div style="font-size:15px;font-weight:800;color:#D4A328;font-family:\'JetBrains Mono\',monospace">'+(_pRef.sharpe||0).toFixed(2)+'</div></div>';
+              if(!isNaN(_pRef.vol))body+='<div><div style="font-size:9px;color:#8B94A7;font-weight:700;text-transform:uppercase;letter-spacing:.8px">Volatilidade</div><div style="font-size:15px;font-weight:800;color:#38BDF8;font-family:\'JetBrains Mono\',monospace">'+(_pRef.vol*100).toFixed(2)+'%</div></div>';
+              body+='</div>';
+            }
+            body+='</div>';
+          }
+          body+='<div style="font-size:9px;color:#6B7489;line-height:1.6;padding:10px 12px;background:rgba(107,116,137,0.06);border-radius:8px">'
+            +'📥 Rentabilidades extraídas do relatório Gorila. Rentabilidades passadas não garantem rentabilidades futuras. '
+            +'Benchmarks: CDI · IBOV (Ibovespa) · IPCA. '
+            +'Dados importados em '+(c._gorilaRent.importedAt?new Date(c._gorilaRent.importedAt).toLocaleDateString("pt-BR"):"—")+'.'
+            +'</div>';
+        }
+      }
       } 
     }else if(isDarkReport && isFin){
       
@@ -27507,7 +27609,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '308';
+  var SW_VERSION = '309';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
