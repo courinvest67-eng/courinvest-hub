@@ -5640,8 +5640,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
         }
         if(periods.length===0){sCorrMsg("⚠ Nenhum período encontrado");setTimeout(function(){sCorrMsg("")},3000);return;}
         dp({t:"UC",p:{id:c.id,_gorila12mPerf:{periods:periods,dataIni:dataIni,dataFim:dataFim,atribuicao:atribuicao,importedAt:Date.now()}}});
-        sCorrMsg("✅ Performance 12M salva ("+periods.length+" períodos)");
-        setTimeout(function(){sCorrMsg("")},3000);
+        sCorrMsg("✅ 12M Performance salva ("+periods.length+" períodos)");
+        setTimeout(function(){sCorrMsg("")},4000);
       }catch(e){console.error("importPerf12m",e);sCorrMsg("⚠ Erro ao ler arquivo");setTimeout(function(){sCorrMsg("")},3000);}
     };
     reader.readAsArrayBuffer(file);
@@ -8709,11 +8709,6 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
             }
             body+='</div>';
           }
-          body+='<div style="font-size:9px;color:#6B7489;line-height:1.6;padding:10px 12px;background:rgba(107,116,137,0.06);border-radius:8px">'
-            +'📥 Rentabilidades extraídas do relatório Gorila. Rentabilidades passadas não garantem rentabilidades futuras. '
-            +'Benchmarks: CDI · IBOV (Ibovespa) · IPCA. '
-            +'Dados importados em '+(c._gorila12mPerf.importedAt?new Date(c._gorila12mPerf.importedAt).toLocaleDateString("pt-BR"):"—")+'.'
-            +'</div>';
         }
       }
       } 
@@ -17756,6 +17751,22 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
               {c.sv&&c.sv.includes("patrimonio")&&(
                 <>
                   <div style={{fontSize:10,color:T.t3,fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>📊 Performance da Carteira</div>
+                  {/* Importar Performance 12M — separado do import mensal */}
+                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,padding:"12px 16px",background:"rgba(56,189,248,0.04)",borderRadius:10,border:"1px solid rgba(56,189,248,0.15)"}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:11,fontWeight:700,color:T.cyan,marginBottom:3}}>📊 Performance Histórica (12 meses)</div>
+                      <div style={{fontSize:10,color:T.t3}}>
+                        {c._gorila12mPerf
+                          ? "✅ Importado: "+new Date(c._gorila12mPerf.dataIni||Date.now()).toLocaleDateString("pt-BR")+" → "+new Date(c._gorila12mPerf.dataFim||Date.now()).toLocaleDateString("pt-BR")+" ("+((c._gorila12mPerf.periods||[]).length)+" períodos)"
+                          : "Importe o relatório Gorila de 12 meses para adicionar comparativo no final do relatório mensal."}
+                      </div>
+                    </div>
+                    <input ref={perf12mRef} type="file" accept=".xlsx,.xls" onChange={function(e){if(e.target.files[0])importPerf12m(e.target.files[0]);e.target.value=""}} style={{display:"none"}}/>
+                    <Bt v="secondary" onClick={function(){perf12mRef.current&&perf12mRef.current.click()}} style={{fontSize:10,padding:"8px 14px",color:T.cyan,border:"1px solid rgba(56,189,248,0.3)",flexShrink:0}}>
+                      {c._gorila12mPerf?"🔄 Reimportar 12M":"📥 Importar 12M"}
+                    </Bt>
+                    {corrMsg&&corrMsg.indexOf("12M")>=0&&<span style={{fontSize:10,color:corrMsg.indexOf("✅")>=0?T.green:T.orange,flexShrink:0}}>{corrMsg}</span>}
+                  </div>
                   {/* Campo para override manual do câmbio USD/BRL */}
                   <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,padding:"10px 14px",background:T.w3,borderRadius:8,border:"1px solid "+T.bdrL}}>
                     <span style={{fontSize:11,color:T.t2,fontWeight:600}}>💱 Câmbio fechamento (USD/BRL):</span>
@@ -27670,7 +27681,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '310';
+  var SW_VERSION = '312';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
