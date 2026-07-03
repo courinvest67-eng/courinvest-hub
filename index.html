@@ -5586,7 +5586,66 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
   const[atSearch,sAtSearch]=useState("");
   const corrFileRef=useRef(null);
   const gorilaConjRef=useRef(null); 
+  const perf12mRef=useRef(null); /* Import exclusivo de performance 12m — NÃO altera ativos/pat */
   const[corrMsg,sCorrMsg]=useState("");
+
+  /* Importa SOMENTE os dados de rentabilidade/benchmarks do Gorila anual.
+     Não toca em _ativosImport, pat, patGorila — preserva os dados mensais intactos. */
+  var importPerf12m=function(file){
+    if(!file)return;
+    var reader=new FileReader();
+    reader.onload=function(ev){
+      try{
+        var wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array",cellDates:true});
+        var ws=wb.Sheets[wb.SheetNames[0]];
+        var aoa=XLSX.utils.sheet_to_json(ws,{header:1,defval:null,raw:false,dateNF:"yyyy-mm-dd"});
+        var pv=function(v){if(typeof v==="number")return v;if(!v)return null;var s=String(v).replace(",",".").replace("%","").trim();var n=parseFloat(s);return isNaN(n)?null:(s.indexOf("%")>=0||Math.abs(n)>1?n/100:n);};
+        /* Extrai cabeçalho: dataIni, dataFim */
+        var dataIni=null,dataFim=null;
+        for(var i=0;i<Math.min(aoa.length,10);i++){
+          var r=aoa[i];if(!r)continue;
+          var c0=String(r[0]||"").toLowerCase();
+          if(c0.indexOf("data inicial")>=0&&r[1]){var d=new Date(r[1]);if(!isNaN(d))dataIni=d.toISOString();}
+          if(c0.indexOf("data final")>=0&&r[1]){var d2=new Date(r[1]);if(!isNaN(d2))dataFim=d2.toISOString();}
+        }
+        /* Localiza seção de rentabilidade */
+        var rentRow=-1;
+        for(var i=0;i<Math.min(aoa.length,30);i++){
+          if(String(aoa[i][0]||"").toLowerCase().indexOf("rentabilidade da carteira")>=0){rentRow=i;break;}
+        }
+        if(rentRow<0){sCorrMsg("⚠ Seção de rentabilidade não encontrada");setTimeout(function(){sCorrMsg("")},3000);return;}
+        var periods=[];
+        for(var i=rentRow+2;i<Math.min(rentRow+12,aoa.length);i++){
+          var r=aoa[i];if(!r)continue;
+          var per=String(r[0]||"").trim();
+          if(!per||per.toLowerCase().indexOf("atribui")>=0||per.toLowerCase().indexOf("posição")>=0)break;
+          var sharpe=pv(r[1]),vol=pv(r[2]),rent=pv(r[3]),ibov=pv(r[4]),cdi=pv(r[5]),ipca=pv(r[6]);
+          if(per.toLowerCase()!=="periodo"&&per.toLowerCase()!=="período")
+            periods.push({p:per,sharpe:sharpe,vol:vol,rent:rent,ibov:ibov,cdi:cdi,ipca:ipca});
+        }
+        /* Atribuição por classe */
+        var atribRow=-1;
+        for(var i=0;i<Math.min(aoa.length,35);i++){
+          if(String(aoa[i][0]||"").toLowerCase().indexOf("atribuição de performance")>=0){atribRow=i;break;}
+        }
+        var atribuicao=[];
+        if(atribRow>=0){
+          for(var i=atribRow+2;i<Math.min(atribRow+12,aoa.length);i++){
+            var r=aoa[i];if(!r)continue;
+            var cl=String(r[0]||"").trim();
+            if(!cl||cl.toLowerCase()==="total"||cl.toLowerCase()==="posição")break;
+            var pct=pv(r[1]);
+            if(cl&&cl.toLowerCase()!=="classe"&&pct!==null)atribuicao.push({classe:cl,pct:pct});
+          }
+        }
+        if(periods.length===0){sCorrMsg("⚠ Nenhum período encontrado");setTimeout(function(){sCorrMsg("")},3000);return;}
+        dp({t:"UC",p:{id:c.id,_gorila12mPerf:{periods:periods,dataIni:dataIni,dataFim:dataFim,atribuicao:atribuicao,importedAt:Date.now()}}});
+        sCorrMsg("✅ Performance 12M salva ("+periods.length+" períodos)");
+        setTimeout(function(){sCorrMsg("")},3000);
+      }catch(e){console.error("importPerf12m",e);sCorrMsg("⚠ Erro ao ler arquivo");setTimeout(function(){sCorrMsg("")},3000);}
+    };
+    reader.readAsArrayBuffer(file);
+  };
 
   
   var importarGorilaConjuge=function(file){
@@ -8559,8 +8618,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       /* ===== 📊 PERFORMANCE HISTÓRICA — RESUMO 12 MESES COM BENCHMARKS =====
          Aparece no relatório mensal quando o cliente tem _gorilaRent com periods (importado do Gorila).
          Mostra tabela + gráfico de barras horizontal comparando Carteira vs CDI vs IBOV vs IPCA. */
-      if(tipo==="mensal" && c._gorilaRent && c._gorilaRent.periods && c._gorilaRent.periods.length>0){
-        var _rp_perf=c._gorilaRent.periods;
+      if(tipo==="mensal" && c._gorila12mPerf && c._gorila12mPerf.periods && c._gorila12mPerf.periods.length>0){
+        var _rp_perf=c._gorila12mPerf.periods;
         var _findP=function(keys){
           for(var ki=0;ki<keys.length;ki++){
             var k=keys[ki].toLowerCase();
@@ -8584,8 +8643,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
         if(_pIni)_rows.push({lbl:"Desde o Início",p:_pIni});
         if(_rows.length===0&&_pPer)_rows.push({lbl:"Período",p:_pPer});
         if(_rows.length>0){
-          var _dataIni2=c._gorilaRent.dataIni?new Date(c._gorilaRent.dataIni):null;
-          var _dataFim2=c._gorilaRent.dataFim?new Date(c._gorilaRent.dataFim):null;
+          var _dataIni2=c._gorila12mPerf.dataIni?new Date(c._gorila12mPerf.dataIni):null;
+          var _dataFim2=c._gorila12mPerf.dataFim?new Date(c._gorila12mPerf.dataFim):null;
           var _fmtD=function(d){if(!d)return"";return String(d.getDate()).padStart(2,"0")+"/"+(d.getMonth()+1).toString().padStart(2,"0")+"/"+d.getFullYear();};
           body+="<!-- PAGE_BREAK -->";
           body+=secTitle("📊","Performance Histórica da Carteira");
@@ -8653,7 +8712,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
           body+='<div style="font-size:9px;color:#6B7489;line-height:1.6;padding:10px 12px;background:rgba(107,116,137,0.06);border-radius:8px">'
             +'📥 Rentabilidades extraídas do relatório Gorila. Rentabilidades passadas não garantem rentabilidades futuras. '
             +'Benchmarks: CDI · IBOV (Ibovespa) · IPCA. '
-            +'Dados importados em '+(c._gorilaRent.importedAt?new Date(c._gorilaRent.importedAt).toLocaleDateString("pt-BR"):"—")+'.'
+            +'Dados importados em '+(c._gorila12mPerf.importedAt?new Date(c._gorila12mPerf.importedAt).toLocaleDateString("pt-BR"):"—")+'.'
             +'</div>';
         }
       }
@@ -12846,6 +12905,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
                   {corrMsg && <span style={{fontSize:9,fontWeight:600,color:corrMsg.indexOf("✅")>=0?T.green:T.orange}}>{corrMsg}</span>}
                   <input ref={corrFileRef} type="file" accept=".csv,.txt,.tsv,.xlsx,.xls,.pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf,text/csv,text/plain,*/*" onChange={function(e){if(e.target.files[0])importCorretora(e.target.files[0]);e.target.value=""}} style={{display:"none"}}/>
                   <Bt v="secondary" onClick={function(){corrFileRef.current&&corrFileRef.current.click()}} style={{fontSize:9,padding:"4px 8px"}}>📥 Gorila</Bt>
+                  <input ref={perf12mRef} type="file" accept=".xlsx,.xls" onChange={function(e){if(e.target.files[0])importPerf12m(e.target.files[0]);e.target.value=""}} style={{display:"none"}}/>
+                  <Bt v="secondary" onClick={function(){perf12mRef.current&&perf12mRef.current.click()}} title="Importa SOMENTE performance/benchmarks (12m, 24m, Início). Não altera ativos nem patrimônio do mês." style={{fontSize:9,padding:"4px 8px",color:T.cyan,border:"1px solid rgba(56,189,248,0.3)"}}>📊 12M</Bt>
                   {c.isCasal && <React.Fragment>
                     <input ref={gorilaConjRef} type="file" accept=".xlsx,.xls" onChange={function(e){if(e.target.files[0])importarGorilaConjuge(e.target.files[0]);e.target.value="";}} style={{display:"none"}}/>
                     <Bt v="secondary" onClick={function(){gorilaConjRef.current&&gorilaConjRef.current.click()}} style={{fontSize:9,padding:"4px 8px",color:T.purple,border:"1px solid rgba(167,139,250,0.3)"}}>👤 Cônjuge</Bt>
@@ -27609,7 +27670,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '309';
+  var SW_VERSION = '310';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
