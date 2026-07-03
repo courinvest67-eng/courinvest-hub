@@ -7453,9 +7453,32 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
             }
           });
           if(algumValido&&somaPosIniUSD>0){
-            rentUSDpct=(somaRsUSD/somaPosIniUSD)*100;
-            somaRsUSD_brl=somaRsUSD;
-            fonteRentUSD="Gorila (estimado)";
+            /* somaRsUSD e somaPosIniUSD são em BRL — inclui efeito cambial.
+               Tenta estimar a variação cambial do mês usando a posição "Dólar" do caixa,
+               que sobe/desce exclusivamente por FX (sem risco de ativo). */
+            var fxChangeMes=null;
+            var dolarCaixa=enr.find(function(a){return(a.tp==="caixa"||(a.nm||"").toLowerCase().indexOf("dólar")>=0||(a.nm||"").toLowerCase().indexOf("dollar")>=0||(a.tk||"").toLowerCase()==="dólar"||(a.tk||"").toLowerCase()==="usd")&&a.ehUSD!==true;});
+            if(!dolarCaixa)dolarCaixa=enr.find(function(a){return(a.nm||"").toLowerCase().indexOf("dolar")>=0||(a.tk||"").toLowerCase().indexOf("usd")>=0;});
+            if(dolarCaixa){
+              var rDolar=getRentAtivoPer(dolarCaixa);
+              if(rDolar&&rDolar.doPeriodo&&rDolar.pct!=null&&Math.abs(rDolar.pct)>0.001){
+                fxChangeMes=rDolar.pct/100; /* ex: 0.0231 para +2.31% de valorização do dólar */
+              }
+            }
+            /* BRL return inclui efeito cambial: retBRL ≈ (1+retUSD)×(1+retFX)-1
+               Portanto: retUSD ≈ (1+retBRL)/(1+retFX) - 1 */
+            var retBRL_bruto=somaRsUSD/somaPosIniUSD;
+            if(fxChangeMes!==null&&Math.abs(fxChangeMes)>0.0001){
+              rentUSDpct=((1+retBRL_bruto)/(1+fxChangeMes)-1)*100;
+              fonteRentUSD="Gorila (estimado)";
+              /* Valor em USD: ganho BRL / taxa fim de mês */
+              somaRsUSD_brl=somaRsUSD;
+            }else{
+              /* Sem dado cambial — reporta BRL e avisa que inclui câmbio */
+              rentUSDpct=retBRL_bruto*100;
+              somaRsUSD_brl=somaRsUSD;
+              fonteRentUSD="Gorila (estimado, inclui câmbio)";
+            }
           }
         }
         var labelC='color:#374151';
@@ -7555,6 +7578,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
               body+=' <span style="font-size:12px;font-weight:700;color:'+corRentUSD+';opacity:.85">('+(rentUSDvalor>=0?'+':'')+'US$ '+Math.abs(rentUSDvalor).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})+')</span>';
             }
             body+='</div></div>';
+            /* Mostra efeito cambial estimado quando temos os dois valores */
+            if(rentUSD_brl_pct!==null&&Math.abs(rentUSD_brl_pct-rentUSDpct)>0.05){
+              var efeitoFX=((1+rentUSD_brl_pct/100)/(1+rentUSDpct/100)-1)*100;
+              if(Math.abs(efeitoFX)>0.05){
+                var corFX=efeitoFX>=0?'#0F9D58':'#D93025';
+                body+='<div><div style="'+labelS+'">Efeito Cambial</div>';
+                body+='<div style="font-size:14px;font-weight:700;color:'+corFX+'">'+(efeitoFX>=0?'+':'')+efeitoFX.toFixed(2)+'% <span style="font-size:9px;color:#9CA3AF;font-weight:400">(valorização do USD no mês)</span></div></div>';
+              }
+            }
           }
           /* Rentabilidade em BRL (inclui variação cambial) */
           if(rentUSD_brl_pct!==null){
@@ -27689,7 +27721,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '313';
+  var SW_VERSION = '314';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
