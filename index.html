@@ -5599,7 +5599,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
         var wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array",cellDates:true});
         var ws=wb.Sheets[wb.SheetNames[0]];
         var aoa=XLSX.utils.sheet_to_json(ws,{header:1,defval:null,raw:false,dateNF:"yyyy-mm-dd"});
-        var pv=function(v){if(typeof v==="number")return v;if(!v)return null;var s=String(v).replace(",",".").replace("%","").trim();var n=parseFloat(s);return isNaN(n)?null:(s.indexOf("%")>=0||Math.abs(n)>1?n/100:n);};
+        var pv=function(v){
+          if(typeof v==="number")return v;
+          if(!v)return null;
+          var orig=String(v).trim();
+          var isPercent=orig.indexOf("%")>=0; /* FIX: checar ANTES de remover % */
+          var s=orig.replace(",",".").replace("%","").trim();
+          var n=parseFloat(s);
+          return isNaN(n)?null:(isPercent||Math.abs(n)>1?n/100:n);
+        };
         /* Extrai cabeçalho: dataIni, dataFim */
         var dataIni=null,dataFim=null;
         for(var i=0;i<Math.min(aoa.length,10);i++){
@@ -27681,7 +27689,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '312';
+  var SW_VERSION = '313';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
