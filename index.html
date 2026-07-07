@@ -25136,11 +25136,31 @@ function PropostasView({data,dispatch}){
                     <div style={{fontSize:10,color:T.t3}}>{precoLabel}</div>
                   </div>
                   {form.servico!==sugerido&&(
-                    <Bt v="secondary" onClick={function(){upF("servico",sugerido);upF("_servicoAutoSugerido",true);}} style={{marginLeft:"auto",fontSize:9,padding:"4px 10px",color:cor,border:"1px solid "+cor+"44"}}>Aplicar</Bt>
+                    <Bt v="secondary" onClick={function(){upF("servico",sugerido);upF("_servicoAutoSugerido",true);upF("_forcarConsultoria",false);}} style={{marginLeft:"auto",fontSize:9,padding:"4px 10px",color:cor,border:"1px solid "+cor+"44"}}>Aplicar</Bt>
                   )}
                 </div>
               );
             })()}
+
+            {/* Opção especial: forçar consultoria pontual mesmo com pat > R$200k */}
+            {form.valorPatrimonio>200000 && (
+              <div style={{marginBottom:16,padding:"10px 14px",background:"rgba(45,212,160,0.05)",border:"1px solid rgba(45,212,160,0.2)",borderRadius:10}}>
+                <label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer"}}>
+                  <input type="checkbox" checked={!!form._forcarConsultoria} onChange={function(e){
+                    var fc=e.target.checked;
+                    upF("_forcarConsultoria",fc);
+                    upF("servico",fc?"consultoria":"patrimonio");
+                    upF("_servicoAutoSugerido",false);
+                  }} style={{marginTop:2,accentColor:"#2DD4A0",width:16,height:16,flexShrink:0}}/>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:T.cyan,marginBottom:2}}>🎯 Cliente prefere Consultoria Pontual (mesmo com patrimônio acima de R$200k)</div>
+                    <div style={{fontSize:10,color:T.t3,lineHeight:1.5}}>
+                      Neste caso, cobrar <strong style={{color:T.t1}}>1% do patrimônio total</strong> ({fm(form.valorPatrimonio*0.01)}) como pagamento único, conforme tabela de preços.
+                    </div>
+                  </div>
+                </label>
+              </div>
+            )}
 
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:12,marginBottom:20}}>
               {Object.values(SERVICOS_CI).map(function(s){
@@ -27871,7 +27891,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '322';
+  var SW_VERSION = '323';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
