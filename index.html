@@ -27383,6 +27383,7 @@ function App({authUser}){
 
       {}
       {isMobile && (
+        <>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <button onClick={function(){sShowMenu(!showMenu)}} style={{background:"none",border:"none",color:T.gold,fontSize:22,cursor:"pointer",padding:4}}>☰</button>
             <Logo sz={28} full={false}/>
@@ -27396,7 +27397,7 @@ function App({authUser}){
               </button>
             </div>
           </div>
-        </div>
+        </>
       )}
 
       {}
@@ -27766,7 +27767,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '320';
+  var SW_VERSION = '321';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
