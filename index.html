@@ -22528,29 +22528,52 @@ function NewsView({data,dispatch}){
 
 /* ============ PROPOSTAS COMERCIAIS ============ */
 
+/* === TABELA DE PREÇOS COURINVEST (vigente) ===
+   R$1 – R$100.000        → Consultoria Financeira Pontual → R$ 990 fixo
+   R$100.001 – R$200.000  → Consultoria Financeira Pontual → 1% do patrimônio
+   R$200.001 – R$1.000.000→ Gestão de Patrimônio          → 0,15% a.m. (sobre o total)
+   Acima de R$1.000.000   → Gestão de Patrimônio          → 0,10% a.m. (sobre o total)
+   Obs: cliente com pat > R$200k que opte por Consultoria → cobra 1% (pontual)
+*/
+var TABELA_PRECOS_CI=[
+  {de:0,        ate:100000,  servico:"consultoria", tipo:"fixo",       valor:990,    label:"Consultoria Financeira (pontual)",pct:null,  txMes:null},
+  {de:100000,   ate:200000,  servico:"consultoria", tipo:"percentual",  valor:null,   label:"Consultoria Financeira (pontual)",pct:1.0,   txMes:null},
+  {de:200000,   ate:1000000, servico:"patrimonio",  tipo:"taxa_mensal", valor:null,   label:"Gestão de Patrimônio",            pct:null,  txMes:0.15},
+  {de:1000000,  ate:null,    servico:"patrimonio",  tipo:"taxa_mensal", valor:null,   label:"Gestão de Patrimônio",            pct:null,  txMes:0.10},
+];
+
+function faixaPrecoCI(patrimonio){
+  var p=patrimonio||0;
+  for(var i=0;i<TABELA_PRECOS_CI.length;i++){
+    var f=TABELA_PRECOS_CI[i];
+    if(p>f.de&&(f.ate===null||p<=f.ate))return f;
+  }
+  return TABELA_PRECOS_CI[TABELA_PRECOS_CI.length-1];
+}
+
+function servicoSugeridoCI(patrimonio){
+  var f=faixaPrecoCI(patrimonio||0);
+  return f?f.servico:"consultoria";
+}
+
 function txGestaoRegressiva(patrimonio){
   if(!patrimonio||patrimonio<=0)return null;
-  if(patrimonio<=200000)return 0.200;
-  if(patrimonio<=600000)return 0.175;
-  if(patrimonio<=1500000)return 0.150;
-  if(patrimonio<=3000000)return 0.125;
-  return 0.100;
+  if(patrimonio<=1000000)return 0.15;
+  return 0.10;
 }
 /* Consultoria Financeira (trabalho pontual, 2 sessões):
-   - patrimônio < R$ 100k: valor fixo de R$ 990
-   - patrimônio >= R$ 100k: 1% sobre o patrimônio
+   - patrimônio <= R$ 100k: valor fixo de R$ 990
+   - patrimônio > R$ 100k: 1% sobre o patrimônio (inclusive para pat > R$200k que escolha consultoria)
 */
 function precoConsultoria(patrimonio){
   var p=patrimonio||0;
-  if(p<100000)return{tipo:"fixo",valor:990,base:0,pct:0};
+  if(p<=100000)return{tipo:"fixo",valor:990,base:0,pct:0};
   return{tipo:"percentual",valor:p*0.01,base:p,pct:1.0};
 }
 const TABELA_TX_GP=[
-  {de:0,ate:200000,tx:0.200,label:"Até R$ 200 mil"},
-  {de:200000,ate:600000,tx:0.175,label:"R$ 200 mil a R$ 600 mil"},
-  {de:600000,ate:1500000,tx:0.150,label:"R$ 600 mil a R$ 1,5 mi"},
-  {de:1500000,ate:3000000,tx:0.125,label:"R$ 1,5 mi a R$ 3 mi"},
-  {de:3000000,ate:null,tx:0.100,label:"Acima de R$ 3 milhões"}
+  {de:0,ate:200000,tx:0.15,label:"Até R$ 200 mil"},
+  {de:200000,ate:1000000,tx:0.15,label:"R$ 200 mil a R$ 1 milhão"},
+  {de:1000000,ate:null,tx:0.10,label:"Acima de R$ 1 milhão"}
 ];
 const SERVICOS_CI={
   patrimonio:{
@@ -24042,12 +24065,25 @@ function PropostasView({data,dispatch}){
   
   
   useEffect(function(){
-    if(!form||form.servico!=="patrimonio")return;
-    var tx=txGestaoRegressiva(form.valorPatrimonio);
-    if(tx!==null&&Math.abs((form.taxaMensal||0)-tx)>0.0001){
-      sForm(function(p){return{...p,taxaMensal:tx}});
+    if(!form||!form.valorPatrimonio)return;
+    var pat=form.valorPatrimonio||0;
+    var faixa=faixaPrecoCI(pat);
+    if(!faixa)return;
+    var updates={};
+    /* Auto-sugere serviço baseado no patrimônio (só se usuário não alterou manualmente) */
+    if(form._servicoAutoSugerido!==false){
+      if(faixa.servico!==form.servico){
+        updates.servico=faixa.servico;
+        updates._servicoAutoSugerido=true;
+      }
     }
-  },[form&&form.valorPatrimonio,form&&form.servico]);
+    /* Taxa mensal para GP */
+    if((updates.servico||form.servico)==="patrimonio"){
+      var tx=txGestaoRegressiva(pat);
+      if(tx!==null&&Math.abs((form.taxaMensal||0)-tx)>0.0001)updates.taxaMensal=tx;
+    }
+    if(Object.keys(updates).length>0)sForm(function(p){return{...p,...updates}});
+  },[form&&form.valorPatrimonio]);
 
   const novaProposta=function(){
     var p={
@@ -24989,14 +25025,17 @@ function PropostasView({data,dispatch}){
               <select value={form.clienteId||""} onChange={function(e){
                 var c=clientes.find(function(x){return x.id===e.target.value});
                 if(c){
+                  var patC=c.patGorila||c.pat||0;
                   upF("clienteId",c.id);
                   upF("clienteNome",c.nome);
                   upF("clienteEmail",c.email||"");
                   upF("clienteTel",c.tel||"");
-                  upF("valorPatrimonio",c.patGorila||c.pat||0);
-                  upF("taxaMensal",c.txGestao||0.083);
+                  upF("valorPatrimonio",patC);
+                  upF("taxaMensal",patC>0?txGestaoRegressiva(patC):0.15);
                   upF("feeFixo",c.feeFixo||0);
                   upF("perfilRisco",c.risco||"Moderado");
+                  /* auto-sugere serviço baseado no patrimônio */
+                  if(patC>0)upF("servico",servicoSugeridoCI(patC));
                 }else{
                   upF("clienteId",null);
                 }
@@ -25037,12 +25076,77 @@ function PropostasView({data,dispatch}){
         {wizard===2 && (
           <Cd style={{padding:24}} hov={false}>
             <div style={{fontSize:14,fontWeight:700,color:T.gold,marginBottom:16}}>2. Serviço Oferecido</div>
-            
+
+            {/* Tabela de preços */}
+            <div style={{marginBottom:18,borderRadius:10,overflow:"hidden",border:"1px solid "+T.bdrL}}>
+              <div style={{padding:"8px 14px",background:"rgba(212,163,40,0.08)",fontSize:10,fontWeight:800,color:T.gold,letterSpacing:1}}>📋 TABELA DE PREÇOS COURINVEST</div>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
+                <thead>
+                  <tr style={{background:"rgba(255,255,255,0.02)"}}>
+                    <th style={{padding:"7px 12px",textAlign:"left",color:T.t3,fontWeight:600,fontSize:9,letterSpacing:.5}}>FAIXA DE PATRIMÔNIO</th>
+                    <th style={{padding:"7px 12px",textAlign:"left",color:T.t3,fontWeight:600,fontSize:9,letterSpacing:.5}}>SERVIÇO</th>
+                    <th style={{padding:"7px 12px",textAlign:"right",color:T.t3,fontWeight:600,fontSize:9,letterSpacing:.5}}>PREÇO</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    {de:"R$ 1",ate:"R$ 100.000",srv:"Consultoria Financeira (pontual)",preco:"R$ 990 fixo",cor:T.cyan},
+                    {de:"R$ 100.000,01",ate:"R$ 200.000",srv:"Consultoria Financeira (pontual)",preco:"1% do patrimônio",cor:T.cyan},
+                    {de:"R$ 200.000,01",ate:"R$ 1.000.000",srv:"Gestão de Patrimônio",preco:"0,15% a.m. (sobre o total)",cor:T.gold},
+                    {de:"Acima de",ate:"R$ 1.000.000",srv:"Gestão de Patrimônio",preco:"0,10% a.m. (sobre o total)",cor:T.gold},
+                  ].map(function(row,i){
+                    var ativo=form.valorPatrimonio>0&&(function(){
+                      if(i===0)return form.valorPatrimonio<=100000;
+                      if(i===1)return form.valorPatrimonio>100000&&form.valorPatrimonio<=200000;
+                      if(i===2)return form.valorPatrimonio>200000&&form.valorPatrimonio<=1000000;
+                      if(i===3)return form.valorPatrimonio>1000000;
+                    })();
+                    return (
+                      <tr key={i} style={{borderTop:"1px solid "+T.bdrL,background:ativo?"rgba(212,163,40,0.06)":"transparent"}}>
+                        <td style={{padding:"8px 12px",color:T.t2,fontSize:10}}>
+                          {i===3?"Acima de R$ 1.000.000":row.de+" → "+row.ate}
+                          {ativo&&<span style={{marginLeft:6,fontSize:8,color:T.gold,fontWeight:700,padding:"1px 5px",background:"rgba(212,163,40,0.15)",borderRadius:4}}>← VOCÊ</span>}
+                        </td>
+                        <td style={{padding:"8px 12px",color:row.cor,fontWeight:700,fontSize:10}}>{row.srv}</td>
+                        <td style={{padding:"8px 12px",textAlign:"right",color:T.t1,fontWeight:800,fontFamily:"'JetBrains Mono'",fontSize:10}}>{row.preco}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <div style={{padding:"6px 12px 8px",fontSize:9,color:T.t3,lineHeight:1.5,borderTop:"1px solid "+T.bdrL}}>
+                ⚠️ Cliente com patrimônio acima de R$200k que opte por Consultoria pontual: cobra 1% do patrimônio total.
+              </div>
+            </div>
+
+            {/* Auto-sugestão */}
+            {form.valorPatrimonio>0 && (function(){
+              var faixa=faixaPrecoCI(form.valorPatrimonio);
+              if(!faixa)return null;
+              var sugerido=faixa.servico;
+              var precoLabel=faixa.tipo==="fixo"?"R$ 990 fixo":faixa.tipo==="percentual"?"1% = "+fm(form.valorPatrimonio*0.01):"Taxa: "+faixa.txMes+"% a.m. = "+fm(form.valorPatrimonio*faixa.txMes/100)+"/mês";
+              var cor=sugerido==="patrimonio"?T.gold:T.cyan;
+              return (
+                <div style={{marginBottom:16,padding:"10px 14px",background:cor+"11",border:"1px solid "+cor+"33",borderRadius:10,display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontSize:16}}>{sugerido==="patrimonio"?"💎":"🎯"}</span>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:800,color:cor}}>
+                      Sugestão para {fm(form.valorPatrimonio)}: <strong>{sugerido==="patrimonio"?"Gestão de Patrimônio":"Consultoria Financeira"}</strong>
+                    </div>
+                    <div style={{fontSize:10,color:T.t3}}>{precoLabel}</div>
+                  </div>
+                  {form.servico!==sugerido&&(
+                    <Bt v="secondary" onClick={function(){upF("servico",sugerido);upF("_servicoAutoSugerido",true);}} style={{marginLeft:"auto",fontSize:9,padding:"4px 10px",color:cor,border:"1px solid "+cor+"44"}}>Aplicar</Bt>
+                  )}
+                </div>
+              );
+            })()}
+
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:12,marginBottom:20}}>
               {Object.values(SERVICOS_CI).map(function(s){
                 var sel=form.servico===s.id;
                 return (
-                  <div key={s.id} onClick={function(){upF("servico",s.id)}} style={{padding:20,borderRadius:12,border:sel?"2px solid "+s.cor:"1px solid "+T.bdrL,background:sel?s.cor+"11":T.w3,cursor:"pointer",transition:"all 0.2s"}}>
+                  <div key={s.id} onClick={function(){upF("servico",s.id);upF("_servicoAutoSugerido",false);}} style={{padding:20,borderRadius:12,border:sel?"2px solid "+s.cor:"1px solid "+T.bdrL,background:sel?s.cor+"11":T.w3,cursor:"pointer",transition:"all 0.2s"}}>
                     <div style={{fontSize:28,marginBottom:8}}>{s.icone}</div>
                     <div style={{fontSize:15,fontWeight:800,color:sel?s.cor:T.t1,marginBottom:4}}>{s.nome}</div>
                     <div style={{fontSize:10,color:T.t3,lineHeight:1.4}}>{s.publico}</div>
@@ -27767,7 +27871,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '321';
+  var SW_VERSION = '322';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
