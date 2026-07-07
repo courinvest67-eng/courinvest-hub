@@ -2091,6 +2091,8 @@ function Dash({data:d,onSel:os,goTo}){
 
                   </div>
                 )}
+
+
               </div>
             );
           })()}
@@ -3059,6 +3061,12 @@ function Dash({data:d,onSel:os,goTo}){
                     <div style={{fontSize:10,color:T.cyan,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",marginBottom:5}}>📊 Gestão Financeira</div>
                     <div style={{fontSize:24,fontWeight:900,color:T.cyan,fontFamily:"'JetBrains Mono',monospace"}}>{fm(mrrFin)}</div>
                     <div style={{fontSize:9,color:T.t3,marginTop:3}}>{clFin.length} cliente{clFin.length!==1?"s":""} · fee fixo mensal</div>
+                    {clFin.length>0 && (
+                      <div style={{marginTop:6,display:"inline-flex",alignItems:"center",gap:5,padding:"3px 8px",background:"rgba(56,189,248,0.08)",borderRadius:6,border:"1px solid rgba(56,189,248,0.18)"}}>
+                        <span style={{fontSize:9,color:T.t3,fontWeight:600}}>TICKET MÉDIO</span>
+                        <span style={{fontSize:11,fontWeight:800,color:T.cyan,fontFamily:"'JetBrains Mono',monospace"}}>{fm(mrrFin/clFin.length)}</span>
+                      </div>
+                    )}
                   </div>
                   <div style={{fontSize:28,opacity:.4}}>📊</div>
                 </div>
@@ -5586,7 +5594,74 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
   const[atSearch,sAtSearch]=useState("");
   const corrFileRef=useRef(null);
   const gorilaConjRef=useRef(null); 
+  const perf12mRef=useRef(null); /* Import exclusivo de performance 12m — NÃO altera ativos/pat */
   const[corrMsg,sCorrMsg]=useState("");
+
+  /* Importa SOMENTE os dados de rentabilidade/benchmarks do Gorila anual.
+     Não toca em _ativosImport, pat, patGorila — preserva os dados mensais intactos. */
+  var importPerf12m=function(file){
+    if(!file)return;
+    var reader=new FileReader();
+    reader.onload=function(ev){
+      try{
+        var wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array",cellDates:true});
+        var ws=wb.Sheets[wb.SheetNames[0]];
+        var aoa=XLSX.utils.sheet_to_json(ws,{header:1,defval:null,raw:false,dateNF:"yyyy-mm-dd"});
+        var pv=function(v){
+          if(typeof v==="number")return v;
+          if(!v)return null;
+          var orig=String(v).trim();
+          var isPercent=orig.indexOf("%")>=0; /* FIX: checar ANTES de remover % */
+          var s=orig.replace(",",".").replace("%","").trim();
+          var n=parseFloat(s);
+          return isNaN(n)?null:(isPercent||Math.abs(n)>1?n/100:n);
+        };
+        /* Extrai cabeçalho: dataIni, dataFim */
+        var dataIni=null,dataFim=null;
+        for(var i=0;i<Math.min(aoa.length,10);i++){
+          var r=aoa[i];if(!r)continue;
+          var c0=String(r[0]||"").toLowerCase();
+          if(c0.indexOf("data inicial")>=0&&r[1]){var d=new Date(r[1]);if(!isNaN(d))dataIni=d.toISOString();}
+          if(c0.indexOf("data final")>=0&&r[1]){var d2=new Date(r[1]);if(!isNaN(d2))dataFim=d2.toISOString();}
+        }
+        /* Localiza seção de rentabilidade */
+        var rentRow=-1;
+        for(var i=0;i<Math.min(aoa.length,30);i++){
+          if(String(aoa[i][0]||"").toLowerCase().indexOf("rentabilidade da carteira")>=0){rentRow=i;break;}
+        }
+        if(rentRow<0){sCorrMsg("⚠ Seção de rentabilidade não encontrada");setTimeout(function(){sCorrMsg("")},3000);return;}
+        var periods=[];
+        for(var i=rentRow+2;i<Math.min(rentRow+12,aoa.length);i++){
+          var r=aoa[i];if(!r)continue;
+          var per=String(r[0]||"").trim();
+          if(!per||per.toLowerCase().indexOf("atribui")>=0||per.toLowerCase().indexOf("posição")>=0)break;
+          var sharpe=pv(r[1]),vol=pv(r[2]),rent=pv(r[3]),ibov=pv(r[4]),cdi=pv(r[5]),ipca=pv(r[6]);
+          if(per.toLowerCase()!=="periodo"&&per.toLowerCase()!=="período")
+            periods.push({p:per,sharpe:sharpe,vol:vol,rent:rent,ibov:ibov,cdi:cdi,ipca:ipca});
+        }
+        /* Atribuição por classe */
+        var atribRow=-1;
+        for(var i=0;i<Math.min(aoa.length,35);i++){
+          if(String(aoa[i][0]||"").toLowerCase().indexOf("atribuição de performance")>=0){atribRow=i;break;}
+        }
+        var atribuicao=[];
+        if(atribRow>=0){
+          for(var i=atribRow+2;i<Math.min(atribRow+12,aoa.length);i++){
+            var r=aoa[i];if(!r)continue;
+            var cl=String(r[0]||"").trim();
+            if(!cl||cl.toLowerCase()==="total"||cl.toLowerCase()==="posição")break;
+            var pct=pv(r[1]);
+            if(cl&&cl.toLowerCase()!=="classe"&&pct!==null)atribuicao.push({classe:cl,pct:pct});
+          }
+        }
+        if(periods.length===0){sCorrMsg("⚠ Nenhum período encontrado");setTimeout(function(){sCorrMsg("")},3000);return;}
+        dp({t:"UC",p:{id:c.id,_gorila12mPerf:{periods:periods,dataIni:dataIni,dataFim:dataFim,atribuicao:atribuicao,importedAt:Date.now()}}});
+        sCorrMsg("✅ 12M Performance salva ("+periods.length+" períodos)");
+        setTimeout(function(){sCorrMsg("")},4000);
+      }catch(e){console.error("importPerf12m",e);sCorrMsg("⚠ Erro ao ler arquivo");setTimeout(function(){sCorrMsg("")},3000);}
+    };
+    reader.readAsArrayBuffer(file);
+  };
 
   
   var importarGorilaConjuge=function(file){
@@ -7386,9 +7461,32 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
             }
           });
           if(algumValido&&somaPosIniUSD>0){
-            rentUSDpct=(somaRsUSD/somaPosIniUSD)*100;
-            somaRsUSD_brl=somaRsUSD;
-            fonteRentUSD="Gorila (estimado)";
+            /* somaRsUSD e somaPosIniUSD são em BRL — inclui efeito cambial.
+               Tenta estimar a variação cambial do mês usando a posição "Dólar" do caixa,
+               que sobe/desce exclusivamente por FX (sem risco de ativo). */
+            var fxChangeMes=null;
+            var dolarCaixa=enr.find(function(a){return(a.tp==="caixa"||(a.nm||"").toLowerCase().indexOf("dólar")>=0||(a.nm||"").toLowerCase().indexOf("dollar")>=0||(a.tk||"").toLowerCase()==="dólar"||(a.tk||"").toLowerCase()==="usd")&&a.ehUSD!==true;});
+            if(!dolarCaixa)dolarCaixa=enr.find(function(a){return(a.nm||"").toLowerCase().indexOf("dolar")>=0||(a.tk||"").toLowerCase().indexOf("usd")>=0;});
+            if(dolarCaixa){
+              var rDolar=getRentAtivoPer(dolarCaixa);
+              if(rDolar&&rDolar.doPeriodo&&rDolar.pct!=null&&Math.abs(rDolar.pct)>0.001){
+                fxChangeMes=rDolar.pct/100; /* ex: 0.0231 para +2.31% de valorização do dólar */
+              }
+            }
+            /* BRL return inclui efeito cambial: retBRL ≈ (1+retUSD)×(1+retFX)-1
+               Portanto: retUSD ≈ (1+retBRL)/(1+retFX) - 1 */
+            var retBRL_bruto=somaRsUSD/somaPosIniUSD;
+            if(fxChangeMes!==null&&Math.abs(fxChangeMes)>0.0001){
+              rentUSDpct=((1+retBRL_bruto)/(1+fxChangeMes)-1)*100;
+              fonteRentUSD="Gorila (estimado)";
+              /* Valor em USD: ganho BRL / taxa fim de mês */
+              somaRsUSD_brl=somaRsUSD;
+            }else{
+              /* Sem dado cambial — reporta BRL e avisa que inclui câmbio */
+              rentUSDpct=retBRL_bruto*100;
+              somaRsUSD_brl=somaRsUSD;
+              fonteRentUSD="Gorila (estimado, inclui câmbio)";
+            }
           }
         }
         var labelC='color:#374151';
@@ -7488,6 +7586,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
               body+=' <span style="font-size:12px;font-weight:700;color:'+corRentUSD+';opacity:.85">('+(rentUSDvalor>=0?'+':'')+'US$ '+Math.abs(rentUSDvalor).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})+')</span>';
             }
             body+='</div></div>';
+            /* Mostra efeito cambial estimado quando temos os dois valores */
+            if(rentUSD_brl_pct!==null&&Math.abs(rentUSD_brl_pct-rentUSDpct)>0.05){
+              var efeitoFX=((1+rentUSD_brl_pct/100)/(1+rentUSDpct/100)-1)*100;
+              if(Math.abs(efeitoFX)>0.05){
+                var corFX=efeitoFX>=0?'#0F9D58':'#D93025';
+                body+='<div><div style="'+labelS+'">Efeito Cambial</div>';
+                body+='<div style="font-size:14px;font-weight:700;color:'+corFX+'">'+(efeitoFX>=0?'+':'')+efeitoFX.toFixed(2)+'% <span style="font-size:9px;color:#9CA3AF;font-weight:400">(valorização do USD no mês)</span></div></div>';
+              }
+            }
           }
           /* Rentabilidade em BRL (inclui variação cambial) */
           if(rentUSD_brl_pct!==null){
@@ -8555,6 +8662,103 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
         +'<p style="font-size:10.5px;color:#3a3a4a;line-height:1.65;margin-bottom:6px">Sua carteira inclui classes com <strong>oscilação natural de mercado</strong>, compatível com seu perfil <strong>'+(c.risco||"Moderado")+'</strong>.</p>'
         +'<ul style="margin:0;padding-left:18px;font-size:10.5px;color:#3a3a4a;line-height:1.8">'+nv.map(function(n){return"<li>"+n+"</li>";}).join("")+'</ul></div>';
       })();
+
+      /* ===== 📊 PERFORMANCE HISTÓRICA — RESUMO 12 MESES COM BENCHMARKS =====
+         Aparece no relatório mensal quando o cliente tem _gorilaRent com periods (importado do Gorila).
+         Mostra tabela + gráfico de barras horizontal comparando Carteira vs CDI vs IBOV vs IPCA. */
+      if(tipo==="mensal" && c._gorila12mPerf && c._gorila12mPerf.periods && c._gorila12mPerf.periods.length>0){
+        var _rp_perf=c._gorila12mPerf.periods;
+        var _findP=function(keys){
+          for(var ki=0;ki<keys.length;ki++){
+            var k=keys[ki].toLowerCase();
+            var found=_rp_perf.find(function(p){var pn=(p.p||"").toLowerCase();return pn===k||pn.indexOf(k)>=0||k.indexOf(pn)>=0;});
+            if(found)return found;
+          }
+          return null;
+        };
+        var _pMes=_findP(["último mês","ultimo mes","últimomes"]);
+        var _p12m=_findP(["12m","12 m","12 meses","últimos 12"]);
+        var _pAno=_findP(["ano","ytd"]);
+        var _pIni=_findP(["início da carteira","inicio da carteira","início da","desde o início","início"]);
+        var _pPer=_findP(["periodo","período"]);
+        var _pRef=_p12m||_pPer;
+        var _fmt=function(v){if(v===null||v===undefined||isNaN(v))return"—";var pct=(v*100);return(pct>=0?"+":"")+pct.toFixed(2)+"%";};
+        var _cor2=function(v){if(v===null||v===undefined||isNaN(v))return"#8B94A7";return v>=0?"#34D399":"#EF6461";};
+        var _rows=[];
+        if(_pMes)_rows.push({lbl:"Último Mês",p:_pMes});
+        if(_pAno)_rows.push({lbl:"No Ano (YTD)",p:_pAno});
+        if(_p12m)_rows.push({lbl:"12 Meses",p:_p12m,dest:true});
+        if(_pIni)_rows.push({lbl:"Desde o Início",p:_pIni});
+        if(_rows.length===0&&_pPer)_rows.push({lbl:"Período",p:_pPer});
+        if(_rows.length>0){
+          var _dataIni2=c._gorila12mPerf.dataIni?new Date(c._gorila12mPerf.dataIni):null;
+          var _dataFim2=c._gorila12mPerf.dataFim?new Date(c._gorila12mPerf.dataFim):null;
+          var _fmtD=function(d){if(!d)return"";return String(d.getDate()).padStart(2,"0")+"/"+(d.getMonth()+1).toString().padStart(2,"0")+"/"+d.getFullYear();};
+          body+="<!-- PAGE_BREAK -->";
+          body+=secTitle("📊","Performance Histórica da Carteira");
+          body+='<p class="cv-lead">Rentabilidade acumulada extraída do relatório Gorila'
+            +(_dataIni2&&_dataFim2?' (<span class="cv-lead-strong">'+_fmtD(_dataIni2)+' → '+_fmtD(_dataFim2)+'</span>)':"")
+            +'. Comparativo com benchmarks CDI, Ibovespa e IPCA.</p>';
+          /* Tabela de períodos */
+          body+='<div style="border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,0.06);margin-bottom:20px">';
+          body+='<table style="width:100%;border-collapse:collapse;font-size:10px">';
+          body+='<thead><tr style="background:rgba(212,163,40,0.08)">'
+            +'<th style="padding:10px 14px;text-align:left;color:#D4A328;font-weight:800;font-size:9px;letter-spacing:.8px;text-transform:uppercase">PERÍODO</th>'
+            +'<th style="padding:10px 10px;text-align:center;color:#D4A328;font-weight:800;font-size:9px;letter-spacing:.8px">CARTEIRA</th>'
+            +'<th style="padding:10px 10px;text-align:center;color:#34D399;font-weight:800;font-size:9px;letter-spacing:.8px">CDI</th>'
+            +'<th style="padding:10px 10px;text-align:center;color:#38BDF8;font-weight:800;font-size:9px;letter-spacing:.8px">IBOV</th>'
+            +'<th style="padding:10px 10px;text-align:center;color:#A78BFA;font-weight:800;font-size:9px;letter-spacing:.8px">IPCA</th>'
+            +'<th style="padding:10px 10px;text-align:center;color:#8B94A7;font-weight:800;font-size:9px;letter-spacing:.8px">VS CDI</th>'
+            +'</tr></thead><tbody>';
+          _rows.forEach(function(row,ri){
+            var p=row.p;
+            var vsCD=(!isNaN(p.rent)&&!isNaN(p.cdi))?(p.rent-p.cdi):null;
+            var dest=row.dest;
+            var bg=dest?"background:rgba(212,163,40,0.06);":"background:"+(ri%2===0?"transparent":"rgba(255,255,255,0.015)")+";";
+            var bdr=dest?"border-top:1px solid rgba(212,163,40,0.2);border-bottom:1px solid rgba(212,163,40,0.2);":"";
+            body+='<tr style="'+bg+bdr+'">'
+              +'<td style="padding:10px 14px;font-weight:'+(dest?"800":"600")+';color:'+(dest?"#D4A328":"#C5CDD8")+';font-size:'+(dest?"11":"10")+'px">'+row.lbl+'</td>'
+              +'<td style="padding:10px 10px;text-align:center;font-weight:800;font-family:\'JetBrains Mono\',monospace;color:'+_cor2(p.rent)+';font-size:'+(dest?"12":"11")+'px">'+_fmt(p.rent)+'</td>'
+              +'<td style="padding:10px 10px;text-align:center;font-weight:700;font-family:\'JetBrains Mono\',monospace;color:'+_cor2(p.cdi)+';font-size:11px">'+_fmt(p.cdi)+'</td>'
+              +'<td style="padding:10px 10px;text-align:center;font-weight:700;font-family:\'JetBrains Mono\',monospace;color:'+_cor2(p.ibov)+';font-size:11px">'+_fmt(p.ibov)+'</td>'
+              +'<td style="padding:10px 10px;text-align:center;font-weight:700;font-family:\'JetBrains Mono\',monospace;color:'+_cor2(p.ipca)+';font-size:11px">'+_fmt(p.ipca)+'</td>'
+              +'<td style="padding:10px 10px;text-align:center;font-weight:800;font-family:\'JetBrains Mono\',monospace;color:'+_cor2(vsCD)+';font-size:11px">'+(vsCD!==null?(vsCD>=0?"+":"")+((vsCD)*100).toFixed(2)+"pp":"—")+'</td>'
+              +'</tr>';
+          });
+          body+='</tbody></table></div>';
+          /* Gráfico de barras horizontal — referência: 12m ou período */
+          if(_pRef){
+            var _barVals=[
+              {lbl:"Carteira",v:_pRef.rent,cor:"#D4A328"},
+              {lbl:"CDI",v:_pRef.cdi,cor:"#34D399"},
+              {lbl:"IBOV",v:_pRef.ibov,cor:"#38BDF8"},
+              {lbl:"IPCA",v:_pRef.ipca,cor:"#A78BFA"},
+            ].filter(function(x){return x.v!==null&&x.v!==undefined&&!isNaN(x.v)});
+            var _maxAbsV=Math.max.apply(null,_barVals.map(function(x){return Math.abs(x.v||0)}).concat([0.001]));
+            var _periodoLbl=_p12m?"Últimos 12 Meses":(_dataIni2&&_dataFim2?_fmtD(_dataIni2)+" → "+_fmtD(_dataFim2):"Período");
+            body+='<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:18px 20px;margin-bottom:14px">';
+            body+='<div style="font-size:10px;font-weight:800;color:#8B94A7;text-transform:uppercase;letter-spacing:.8px;margin-bottom:14px">'+_periodoLbl+' — Comparativo Visual</div>';
+            _barVals.forEach(function(x){
+              var pct=x.v*100;
+              var bw=Math.min(Math.abs(x.v/_maxAbsV)*100,100);
+              body+='<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.04)">'
+                +'<div style="width:65px;font-size:10px;font-weight:700;color:#8B94A7;text-align:right;flex-shrink:0">'+x.lbl+'</div>'
+                +'<div style="flex:1;height:20px;background:rgba(255,255,255,0.04);border-radius:4px;overflow:hidden">'
+                +'<div style="height:100%;width:'+bw.toFixed(1)+'%;background:'+x.cor+';border-radius:4px"></div></div>'
+                +'<div style="width:64px;font-size:12px;font-weight:800;font-family:\'JetBrains Mono\',monospace;color:'+(pct>=0?x.cor:"#EF6461")+';text-align:right;flex-shrink:0">'+(pct>=0?"+":"")+pct.toFixed(2)+'%</div>'
+                +'</div>';
+            });
+            /* Sharpe + Volatilidade se disponíveis */
+            if(!isNaN(_pRef.sharpe)||!isNaN(_pRef.vol)){
+              body+='<div style="display:flex;gap:24px;margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06)">';
+              if(!isNaN(_pRef.sharpe))body+='<div><div style="font-size:9px;color:#8B94A7;font-weight:700;text-transform:uppercase;letter-spacing:.8px">Sharpe</div><div style="font-size:15px;font-weight:800;color:#D4A328;font-family:\'JetBrains Mono\',monospace">'+(_pRef.sharpe||0).toFixed(2)+'</div></div>';
+              if(!isNaN(_pRef.vol))body+='<div><div style="font-size:9px;color:#8B94A7;font-weight:700;text-transform:uppercase;letter-spacing:.8px">Volatilidade</div><div style="font-size:15px;font-weight:800;color:#38BDF8;font-family:\'JetBrains Mono\',monospace">'+(_pRef.vol*100).toFixed(2)+'%</div></div>';
+              body+='</div>';
+            }
+            body+='</div>';
+          }
+        }
+      }
       } 
     }else if(isDarkReport && isFin){
       
@@ -12744,6 +12948,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
                   {corrMsg && <span style={{fontSize:9,fontWeight:600,color:corrMsg.indexOf("✅")>=0?T.green:T.orange}}>{corrMsg}</span>}
                   <input ref={corrFileRef} type="file" accept=".csv,.txt,.tsv,.xlsx,.xls,.pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf,text/csv,text/plain,*/*" onChange={function(e){if(e.target.files[0])importCorretora(e.target.files[0]);e.target.value=""}} style={{display:"none"}}/>
                   <Bt v="secondary" onClick={function(){corrFileRef.current&&corrFileRef.current.click()}} style={{fontSize:9,padding:"4px 8px"}}>📥 Gorila</Bt>
+                  <input ref={perf12mRef} type="file" accept=".xlsx,.xls" onChange={function(e){if(e.target.files[0])importPerf12m(e.target.files[0]);e.target.value=""}} style={{display:"none"}}/>
+                  <Bt v="secondary" onClick={function(){perf12mRef.current&&perf12mRef.current.click()}} title="Importa SOMENTE performance/benchmarks (12m, 24m, Início). Não altera ativos nem patrimônio do mês." style={{fontSize:9,padding:"4px 8px",color:T.cyan,border:"1px solid rgba(56,189,248,0.3)"}}>📊 12M</Bt>
                   {c.isCasal && <React.Fragment>
                     <input ref={gorilaConjRef} type="file" accept=".xlsx,.xls" onChange={function(e){if(e.target.files[0])importarGorilaConjuge(e.target.files[0]);e.target.value="";}} style={{display:"none"}}/>
                     <Bt v="secondary" onClick={function(){gorilaConjRef.current&&gorilaConjRef.current.click()}} style={{fontSize:9,padding:"4px 8px",color:T.purple,border:"1px solid rgba(167,139,250,0.3)"}}>👤 Cônjuge</Bt>
@@ -17593,6 +17799,22 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
               {c.sv&&c.sv.includes("patrimonio")&&(
                 <>
                   <div style={{fontSize:10,color:T.t3,fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>📊 Performance da Carteira</div>
+                  {/* Importar Performance 12M — separado do import mensal */}
+                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,padding:"12px 16px",background:"rgba(56,189,248,0.04)",borderRadius:10,border:"1px solid rgba(56,189,248,0.15)"}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:11,fontWeight:700,color:T.cyan,marginBottom:3}}>📊 Performance Histórica (12 meses)</div>
+                      <div style={{fontSize:10,color:T.t3}}>
+                        {c._gorila12mPerf
+                          ? "✅ Importado: "+new Date(c._gorila12mPerf.dataIni||Date.now()).toLocaleDateString("pt-BR")+" → "+new Date(c._gorila12mPerf.dataFim||Date.now()).toLocaleDateString("pt-BR")+" ("+((c._gorila12mPerf.periods||[]).length)+" períodos)"
+                          : "Importe o relatório Gorila de 12 meses para adicionar comparativo no final do relatório mensal."}
+                      </div>
+                    </div>
+                    <input ref={perf12mRef} type="file" accept=".xlsx,.xls" onChange={function(e){if(e.target.files[0])importPerf12m(e.target.files[0]);e.target.value=""}} style={{display:"none"}}/>
+                    <Bt v="secondary" onClick={function(){perf12mRef.current&&perf12mRef.current.click()}} style={{fontSize:10,padding:"8px 14px",color:T.cyan,border:"1px solid rgba(56,189,248,0.3)",flexShrink:0}}>
+                      {c._gorila12mPerf?"🔄 Reimportar 12M":"📥 Importar 12M"}
+                    </Bt>
+                    {corrMsg&&corrMsg.indexOf("12M")>=0&&<span style={{fontSize:10,color:corrMsg.indexOf("✅")>=0?T.green:T.orange,flexShrink:0}}>{corrMsg}</span>}
+                  </div>
                   {/* Campo para override manual do câmbio USD/BRL */}
                   <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,padding:"10px 14px",background:T.w3,borderRadius:8,border:"1px solid "+T.bdrL}}>
                     <span style={{fontSize:11,color:T.t2,fontWeight:600}}>💱 Câmbio fechamento (USD/BRL):</span>
@@ -27084,23 +27306,49 @@ function App({authUser}){
   const notsReais=React.useMemo(function(){return gerarNotificacoesReais(d)},[d.cl]);
   const nL=notsReais.filter(function(n){return !n.lido && n.tipo!=="placeholder"}).length;
 
-  /* ===== PUSH NOTIFICATIONS NATIVAS ===== */
+  /* ===== PUSH NOTIFICATIONS NATIVAS =====
+     Usa navigator.serviceWorker.ready para showNotification — compatível com Android PWA.
+     new Notification() não funciona em muitos Androids sem passar pelo SW. */
   const[pushPerm,sPushPerm]=useState(typeof Notification!=="undefined"?Notification.permission:"default");
+  const[showPushModal,sShowPushModal]=useState(false);
+
+  /* Mostra modal de permissão na 1ª visita se ainda não respondeu */
+  React.useEffect(function(){
+    if(typeof Notification==="undefined")return;
+    if(Notification.permission==="default"){
+      /* Aguarda 4s para o app carregar antes de pedir */
+      var t=setTimeout(function(){sShowPushModal(true);},4000);
+      return function(){clearTimeout(t);};
+    }
+  },[]);
+
+  /* Helper: mostra notificação via SW (Android-friendly) ou fallback Notification() */
+  var _showPushNotif=function(title,body,tag){
+    if(typeof Notification==="undefined"||Notification.permission!=="granted")return;
+    var icon="/icon-192.png";
+    if("serviceWorker" in navigator){
+      navigator.serviceWorker.ready.then(function(sw){
+        sw.showNotification(title,{body:body,icon:icon,badge:icon,tag:tag||"courinvest",vibrate:[200,100,200]});
+      }).catch(function(){
+        try{new Notification(title,{body:body,icon:icon});}catch(e){}
+      });
+    }else{
+      try{new Notification(title,{body:body,icon:icon});}catch(e){}
+    }
+  };
 
   const pedirPermissaoPush=function(){
     if(typeof Notification==="undefined")return;
     Notification.requestPermission().then(function(p){
       sPushPerm(p);
+      sShowPushModal(false);
       if(p==="granted"){
-        new Notification("🔔 Courinvest Hub",{
-          body:"Notificações ativadas! Você receberá alertas de vencimentos, rentabilidade e aniversários.",
-          icon:"/courinvest-hub/icon-192.png"
-        });
+        _showPushNotif("🔔 Courinvest Hub","Notificações ativadas! Você receberá alertas de vencimentos e reajustes.","setup");
       }
     });
   };
 
-  /* Dispara push para alertas urgentes não lidos (roda 1x ao abrir o app) */
+  /* Dispara push para alertas urgentes não lidos (roda 1x por dia ao abrir o app) */
   React.useEffect(function(){
     if(pushPerm!=="granted")return;
     var urgentes=notsReais.filter(function(n){
@@ -27108,18 +27356,11 @@ function App({authUser}){
     });
     if(!urgentes.length)return;
     var chaveHoje="push_enviado_"+new Date().toISOString().slice(0,10);
-    if(sessionStorage.getItem(chaveHoje))return; /* só 1x por dia */
+    if(sessionStorage.getItem(chaveHoje))return;
     sessionStorage.setItem(chaveHoje,"1");
     urgentes.slice(0,3).forEach(function(n,i){
       setTimeout(function(){
-        try{
-          new Notification("⚡ "+n.cliNome||"Alerta",{
-            body:n.msg,
-            icon:"/courinvest-hub/icon-192.png",
-            badge:"/courinvest-hub/icon-192.png",
-            tag:"courinvest-"+n.id
-          });
-        }catch(e){}
+        _showPushNotif("⚡ "+(n.cliNome||"Alerta"),n.msg,"courinvest-"+(n.id||i));
       },i*1500);
     });
   },[notsReais,pushPerm]);
@@ -27142,7 +27383,6 @@ function App({authUser}){
 
       {}
       {isMobile && (
-        <div style={{padding:"10px 16px",borderBottom:"1px solid "+T.bdr,background:T.bg2,display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,zIndex:50}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <button onClick={function(){sShowMenu(!showMenu)}} style={{background:"none",border:"none",color:T.gold,fontSize:22,cursor:"pointer",padding:4}}>☰</button>
             <Logo sz={28} full={false}/>
@@ -27160,6 +27400,25 @@ function App({authUser}){
       )}
 
       {}
+      {/* === MODAL DE PERMISSÃO DE PUSH (aparece automaticamente na 1ª vez) === */}
+      {showPushModal && (
+        <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"flex-end",justifyContent:"center",padding:16}}>
+          <div style={{background:T.bg2,borderRadius:20,padding:24,maxWidth:400,width:"100%",border:"1px solid "+T.bdr,boxShadow:"0 -8px 40px rgba(0,0,0,0.5)"}}>
+            <div style={{fontSize:32,textAlign:"center",marginBottom:12}}>🔔</div>
+            <div style={{fontSize:17,fontWeight:800,color:T.gold,textAlign:"center",marginBottom:8}}>Ativar Notificações</div>
+            <div style={{fontSize:13,color:T.t2,textAlign:"center",lineHeight:1.6,marginBottom:20}}>
+              Receba alertas no celular sobre <strong style={{color:T.t1}}>reajustes de fee</strong>, <strong style={{color:T.t1}}>vencimentos</strong> e <strong style={{color:T.t1}}>carteiras desatualizadas</strong> — mesmo com o app em segundo plano.
+            </div>
+            <button onClick={pedirPermissaoPush} style={{width:"100%",padding:"14px",borderRadius:14,border:"none",background:T.gold,color:"#1a1505",fontSize:15,fontWeight:800,cursor:"pointer",marginBottom:10}}>
+              ✅ Ativar notificações
+            </button>
+            <button onClick={function(){sShowPushModal(false);}} style={{width:"100%",padding:"10px",borderRadius:14,border:"none",background:"transparent",color:T.t3,fontSize:13,cursor:"pointer"}}>
+              Agora não
+            </button>
+          </div>
+        </div>
+      )}
+
       {isMobile && showMenu && (
         <div style={{position:"fixed",inset:0,zIndex:200,display:"flex"}} onClick={function(){sShowMenu(false)}}>
           <div onClick={function(e){e.stopPropagation()}} style={{width:260,background:T.bg2,borderRight:"1px solid "+T.bdr,display:"flex",flexDirection:"column",height:"100%",boxShadow:"4px 0 30px rgba(0,0,0,0.5)"}}>
@@ -27507,7 +27766,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '308';
+  var SW_VERSION = '320';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
