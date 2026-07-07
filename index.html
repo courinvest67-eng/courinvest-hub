@@ -25443,6 +25443,24 @@ function PropostasView({data,dispatch}){
           <Cd style={{padding:24}} hov={false}>
             <div style={{fontSize:14,fontWeight:700,color:T.gold,marginBottom:16}}>4. Portfólio Sugerido e Precificação</div>
 
+            {/* Checkbox: cliente acima de R$200k prefere Consultoria Pontual */}
+            {form.valorPatrimonio>200000 && (
+              <div style={{marginBottom:16,padding:"10px 14px",background:"rgba(45,212,160,0.05)",border:"1px solid rgba(45,212,160,0.25)",borderRadius:10}}>
+                <label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer"}}>
+                  <input type="checkbox" checked={!!form._forcarConsultoria} onChange={function(e){
+                    var fc=e.target.checked;
+                    sForm(function(p){return{...p,_forcarConsultoria:fc,servico:fc?"consultoria":"patrimonio",_servicoAutoSugerido:false}});
+                  }} style={{marginTop:3,accentColor:"#2DD4A0",width:16,height:16,flexShrink:0}}/>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:T.cyan}}>🎯 Cliente prefere Consultoria Pontual (mesmo com patrimônio acima de R$ 200k)</div>
+                    <div style={{fontSize:10,color:T.t3,marginTop:2,lineHeight:1.5}}>
+                      Cobra <strong style={{color:T.t1}}>1% do patrimônio total</strong> = <strong style={{color:T.green}}>{fm(form.valorPatrimonio*0.01)}</strong> — pagamento único.
+                    </div>
+                  </div>
+                </label>
+              </div>
+            )}
+
             {form.servico==="patrimonio"?(
               <div style={{marginBottom:16}}>
                 <div style={{fontSize:11,fontWeight:700,color:T.gold,marginBottom:10,letterSpacing:.5}}>💎 TABELA DE TAXA REGRESSIVA</div>
@@ -27891,7 +27909,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '323';
+  var SW_VERSION = '324';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
