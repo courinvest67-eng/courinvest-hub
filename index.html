@@ -4640,7 +4640,7 @@ function CL({data:d,onSel:os,dispatch:dp}){
             var ws=XLSX.utils.aoa_to_sheet(rows);
             ws["!cols"]=[{wch:28},{wch:22},{wch:14},{wch:16},{wch:14},{wch:12},{wch:32},{wch:16},{wch:14},{wch:10},{wch:12}];
             var wb=XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb,"Clientes",ws);
+            XLSX.utils.book_append_sheet(wb,ws,"Clientes");
             var wbout=XLSX.write(wb,{bookType:"xlsx",type:"binary"});
             var buf=new ArrayBuffer(wbout.length);
             var view=new Uint8Array(buf);
@@ -27986,7 +27986,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '335';
+  var SW_VERSION = '336';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
