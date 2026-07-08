@@ -4627,28 +4627,51 @@ function CL({data:d,onSel:os,dispatch:dp}){
         <Bt v="secondary" onClick={function(){
           try{
             var lista=d&&d.cl?d.cl:[];
-            var esc=function(v){var s=v===null||v===undefined?"":String(v);return '"'+s.replace(/"/g,'""')+'"';};
-            var linhas=["Nome,Servico,Perfil,Patrimonio,Fee Mensal,Email,Telefone"];
+            /* Gera XLSX via XLSX.write + Blob (evita XLSX.writeFile que tem bug) */
+            var headers=["Nome","Serviço","Perfil de Risco","Patrimônio (R$)","Fee Mensal (R$)","Taxa Gestão (%/mês)","E-mail","Telefone","Cidade","Base IPCA","Aniversário"];
+            var data=[headers];
             for(var xi=0;xi<lista.length;xi++){
               var xc=lista[xi];if(!xc)continue;
+              var xnome=xc.nome?String(xc.nome):"";
               var xsv="";
-              if(Array.isArray(xc.sv))xsv=xc.sv.join("|");
+              if(Array.isArray(xc.sv))xsv=xc.sv.map(function(s){return s==="patrimonio"?"Gestão de Patrimônio":s==="planejamento"?"Gestão Financeira":s==="milhas"?"Couri Mile$":String(s)}).join(", ");
               else if(xc.sv)xsv=String(xc.sv);
-              linhas.push([
-                esc(xc.nome),esc(xsv),esc(xc.risco),
-                esc(xc.patGorila||xc.pat||0),esc(xc.feeFixo||0),
-                esc(xc.email),esc(xc.tel)
-              ].join(","));
+              var xperfil=xc.risco?String(xc.risco):"";
+              var xpat=0;try{var _p=parseFloat(xc.patGorila||xc.pat||0);xpat=isNaN(_p)?0:Math.round(_p*100)/100;}catch(e2){}
+              var xfee=0;try{var _f=parseFloat(xc.feeFixo||0);xfee=isNaN(_f)?0:Math.round(_f*100)/100;}catch(e2){}
+              var xtx=0;try{var _t=parseFloat(xc.txGestao||0);xtx=isNaN(_t)?0:_t;}catch(e2){}
+              var xemail=xc.email?String(xc.email):"";
+              var xtel=xc.tel?String(xc.tel):"";
+              var xcidade=xc.cidade?String(xc.cidade):"";
+              var xipca=xc.baseIpca?String(xc.baseIpca):"";
+              var xaniv=xc.aniversario?String(xc.aniversario):"";
+              data.push([xnome,xsv,xperfil,xpat,xfee,xtx,xemail,xtel,xcidade,xipca,xaniv]);
             }
-            var csv="\uFEFF"+linhas.join("\n");
-            var blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+            var ws=XLSX.utils.aoa_to_sheet(data);
+            /* Largura das colunas */
+            ws["!cols"]=[{wch:28},{wch:22},{wch:14},{wch:16},{wch:14},{wch:14},{wch:32},{wch:16},{wch:14},{wch:10},{wch:12}];
+            /* Estilo do cabeçalho */
+            var range=XLSX.utils.decode_range(ws["!ref"]);
+            for(var C=range.s.c;C<=range.e.c;C++){
+              var cellAddr=XLSX.utils.encode_cell({r:0,c:C});
+              if(!ws[cellAddr])continue;
+              ws[cellAddr].s={font:{bold:true},fill:{fgColor:{rgb:"1A2842"}},font:{color:{rgb:"D4A328"},bold:true}};
+            }
+            var wb=XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb,"Clientes",ws);
+            /* Usa XLSX.write + Blob ao invés de writeFile para evitar bug */
+            var wbout=XLSX.write(wb,{bookType:"xlsx",type:"binary"});
+            var buf=new ArrayBuffer(wbout.length);
+            var view=new Uint8Array(buf);
+            for(var i=0;i<wbout.length;i++)view[i]=wbout.charCodeAt(i)&0xFF;
+            var blob=new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
             var url=URL.createObjectURL(blob);
             var a=document.createElement("a");
-            a.href=url;a.download="clientes_"+new Date().toISOString().slice(0,10)+".csv";
+            a.href=url;a.download="clientes_"+new Date().toISOString().slice(0,10)+".xlsx";
             document.body.appendChild(a);a.click();
-            setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},1000);
+            setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},2000);
           }catch(xerr){alert("Erro: "+(xerr&&xerr.message?xerr.message:String(xerr)));}
-        }} style={{fontSize:11,padding:"10px 14px"}}>📊 Exportar CSV</Bt>
+        }} style={{fontSize:11,padding:"10px 14px"}}>📊 Exportar Excel</Bt>
 
         <input ref={bulkRef} type="file" accept=".xlsx,.xls,.csv,.pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf,text/csv,text/plain,*/*" multiple onChange={function(e){if(e.target.files.length>0)importGorilaBulk(e.target.files);e.target.value=""}} style={{display:"none"}}/>
         {/* Input de PASTA — webkitdirectory + filtro de extensões em runtime já que o atributo não filtra */}
@@ -27983,7 +28006,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '333';
+  var SW_VERSION = '334';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
