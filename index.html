@@ -3030,6 +3030,12 @@ function Dash({data:d,onSel:os,goTo}){
                     <div style={{fontSize:10,color:T.gold,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",marginBottom:5}}>💎 Gestão de Patrimônio</div>
                     <div style={{fontSize:24,fontWeight:900,color:T.gold,fontFamily:"'JetBrains Mono',monospace"}}>{fm(mrrPat)}</div>
                     <div style={{fontSize:9,color:T.t3,marginTop:3}}>{clPat.length} cliente{clPat.length!==1?"s":""} · taxa média {(taxaMediaGestao*100||0).toFixed(3)}%/mês</div>
+                    {clPat.length>0 && mrrPat>0 && (
+                      <div style={{marginTop:6,display:"inline-flex",alignItems:"center",gap:5,padding:"3px 8px",background:"rgba(212,163,40,0.08)",borderRadius:6,border:"1px solid rgba(212,163,40,0.2)"}}>
+                        <span style={{fontSize:9,color:T.t3,fontWeight:600}}>TICKET MÉDIO</span>
+                        <span style={{fontSize:11,fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono',monospace"}}>{fm(mrrPat/clPat.length)}</span>
+                      </div>
+                    )}
                   </div>
                   <div style={{fontSize:28,opacity:.4}}>💎</div>
                 </div>
@@ -7035,7 +7041,34 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
         (function(){var txt=(ganhoPeriodo>=0?"+":"")+fmRel(ganhoPeriodo);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Ganho '+labelPeriodo+'</div><div class="kpi-value '+(ganhoPeriodo>=0?"green":"red")+'" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">variação estimada</div></div>';})();
         body+='<div class="kpi"><div class="kpi-label">vs CDI</div><div class="kpi-value '+(vsC>=0?"green":"red")+'">'+(vsC>=0?"+":"")+vsC.toFixed(2)+'pp</div><div class="kpi-sub">'+(vsC>=0?"acima do":"abaixo do")+' benchmark</div></div>';
         body+='</div>';
-      }else{
+
+        /* ===== PATRIMÔNIO CONSOLIDADO DO CASAL ===== */
+        if((c.tipoCli==="casal"||c.tipoCli==="familia") && c.conjuge){
+          var _patTit=c.patGorila||c.pat||0;
+          var _patConj=(c.conjuge.patGorila||0);
+          if(_patConj===0&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
+            _patConj=c.conjuge._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
+          }
+          if(_patTit>0&&_patConj>0){
+            var _patTotal=_patTit+_patConj;
+            var _nomeConj=(c.conjuge.nome||c.conjuge.nomeConjuge||"Cônjuge");
+            body+='<div style="margin:16px 0;padding:16px;background:#f8f6f0;border-radius:12px;border:1px solid #E8E0C8">';
+            body+='<div style="font-size:11px;font-weight:700;color:#D4A328;letter-spacing:1px;margin-bottom:10px">👫 PATRIMÔNIO CONSOLIDADO DO CASAL</div>';
+            body+='<table style="width:100%;border-collapse:collapse">';
+            body+='<tr><td style="padding:7px 10px;font-size:12px;color:#555">'+(tipo==="casal"?"Titular":"")+'</td><td style="padding:7px 10px;font-size:12px;font-weight:700;color:#1A1A2E">'+c.nome+'</td><td style="padding:7px 10px;text-align:right;font-size:14px;font-weight:800;color:#D4A328;font-family:Outfit,monospace">'+fmF(_patTit)+'</td></tr>';
+            body+='<tr><td style="padding:7px 10px;font-size:12px;color:#555">Cônjuge</td><td style="padding:7px 10px;font-size:12px;font-weight:700;color:#1A1A2E">'+_nomeConj+'</td><td style="padding:7px 10px;text-align:right;font-size:14px;font-weight:800;color:#D4A328;font-family:Outfit,monospace">'+fmF(_patConj)+'</td></tr>';
+            body+='<tr style="border-top:2px solid #D4A328"><td colspan="2" style="padding:10px 10px;font-size:13px;font-weight:800;color:#1A1A2E">Total do Casal</td><td style="padding:10px 10px;text-align:right;font-size:18px;font-weight:900;color:#D4A328;font-family:Outfit,monospace">'+fmF(_patTotal)+'</td></tr>';
+            body+='</table>';
+            var _pctTit=(_patTotal>0?(_patTit/_patTotal*100):0);
+            var _pctConj=(_patTotal>0?(_patConj/_patTotal*100):0);
+            body+='<div style="margin-top:10px;height:8px;background:#E8E0C8;border-radius:4px;overflow:hidden;display:flex">';
+            body+='<div style="width:'+_pctTit.toFixed(1)+'%;background:#D4A328;border-radius:4px 0 0 4px"></div>';
+            body+='<div style="width:'+_pctConj.toFixed(1)+'%;background:#F5C94B;border-radius:0 4px 4px 0"></div>';
+            body+='</div>';
+            body+='<div style="display:flex;justify-content:space-between;font-size:9px;color:#888;margin-top:4px"><span>'+c.nome.split(" ")[0]+': '+_pctTit.toFixed(1)+'%</span><span>'+_nomeConj.split(" ")[0]+': '+_pctConj.toFixed(1)+'%</span></div>';
+            body+='</div>';
+          }
+        }
         
         body+='<div class="kpi-grid">';
         (function(){var txt=fmF(tCV);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value gold" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">posição atual</div></div>';})();
@@ -10851,7 +10884,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
     })();
     var patReal=(function(){
     var pt=c.patGorila||c.pat||0;
-    if(!c.isCasal)return pt;
+    var ehCasal=(c.tipoCli==="casal"||c.tipoCli==="familia")&&c.conjuge;
+    if(!ehCasal)return pt;
     var pc=(c.conjuge&&(c.conjuge.patGorila||0))||0;
     if(pc===0&&c.conjuge&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
       pc=c.conjuge._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
@@ -24104,7 +24138,10 @@ function PropostasView({data,dispatch}){
       perfilRisco:"Moderado",
       portfolioSugerido:[],
       observacoes:"",
-      validadeDias:30
+      validadeDias:30,
+      /* Defaults para comparativo de payback */
+      rentAtual:10.0,    /* CDI ~10-14% — usuário ajusta conforme carteira atual */
+      melhoriaPP:2.0,    /* melhoria esperada de 2pp — valor conservador */
     };
     sForm(p);
     sEditingId(p.id);
@@ -25026,6 +25063,14 @@ function PropostasView({data,dispatch}){
                 var c=clientes.find(function(x){return x.id===e.target.value});
                 if(c){
                   var patC=c.patGorila||c.pat||0;
+                  /* Tenta pegar rentabilidade atual do Gorila (12m) para pré-preencher payback */
+                  var rentAtualC=10.0;
+                  if(c._gorilaRent&&c._gorilaRent.periods){
+                    var p12=c._gorilaRent.periods.find(function(p){return String(p.p||"").toLowerCase().indexOf("12m")>=0;});
+                    if(p12&&typeof p12.rent==="number"&&p12.rent>0)rentAtualC=+(p12.rent*100).toFixed(1);
+                    else{var pMesC=c._gorilaRent.periods.find(function(p){return String(p.p||"").toLowerCase().indexOf("último")>=0||String(p.p||"").toLowerCase().indexOf("mes")>=0;});
+                    if(pMesC&&typeof pMesC.cdi==="number"&&pMesC.cdi>0)rentAtualC=+(pMesC.cdi*100*12).toFixed(1);}
+                  }
                   upF("clienteId",c.id);
                   upF("clienteNome",c.nome);
                   upF("clienteEmail",c.email||"");
@@ -25034,6 +25079,7 @@ function PropostasView({data,dispatch}){
                   upF("taxaMensal",patC>0?txGestaoRegressiva(patC):0.15);
                   upF("feeFixo",c.feeFixo||0);
                   upF("perfilRisco",c.risco||"Moderado");
+                  upF("rentAtual",rentAtualC);
                   /* auto-sugere serviço baseado no patrimônio */
                   if(patC>0)upF("servico",servicoSugeridoCI(patC));
                 }else{
@@ -27909,7 +27955,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '324';
+  var SW_VERSION = '327';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
