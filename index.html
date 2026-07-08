@@ -4629,17 +4629,19 @@ function CL({data:d,onSel:os,dispatch:dp}){
           try{
             var rows=[["Nome","Serviço","Perfil","Patrimônio (R$)","Fee Mensal (R$)","Taxa Gestão (%)","Rentab. Mês (%)","Atualização Gorila","E-mail","Telefone","Cidade","Reajuste IPCA","Aniversário"]];
             fl.forEach(function(c){
-              var svArr=Array.isArray(c.sv)?c.sv:(c.sv?[c.sv]:[]);
-              var fee=feeBaseDoCliente(c).fee||feeMensalBRL(c)||c.feeFixo||0;
-              var rent=c._gorilaRent&&c._gorilaRent.periods?(function(){var p=c._gorilaRent.periods.find(function(p){var s=String(p.p||"").toLowerCase();return s.indexOf("último")>=0||s.indexOf("mes")>=0;});return p&&typeof p.rent==="number"?(p.rent*100).toFixed(2):"";})():"";
-              var atualizacao=c._ativosTs?new Date(c._ativosTs).toLocaleDateString("pt-BR"):"";
+              var svArr=Array.isArray(c.sv)?c.sv:typeof c.sv==="string"&&c.sv?[c.sv]:[];
+              var fee=+(feeBaseDoCliente(c).fee||feeMensalBRL(c)||c.feeFixo||0)||0;
+              var pat=+(c.patGorila||c.pat||0)||0;
+              var rent="";
+              try{if(c._gorilaRent&&Array.isArray(c._gorilaRent.periods)){var rp=c._gorilaRent.periods.find(function(p){var s=String(p&&p.p||"").toLowerCase();return s.indexOf("ltimo")>=0||s.indexOf("mes")>=0;});if(rp&&typeof rp.rent==="number")rent=(rp.rent*100).toFixed(2);}}catch(ex){}
+              var atualizacao="";try{if(c._ativosTs)atualizacao=new Date(c._ativosTs).toLocaleDateString("pt-BR");}catch(ex){}
               rows.push([
-                c.nome||"",
-                svArr.map(function(s){return SL[s]||s}).join(", "),
+                String(c.nome||""),
+                svArr.map(function(s){return SL[String(s)]||String(s)}).join(", "),
                 c.risco||"",
-                (c.patGorila||c.pat||0).toFixed(2).replace(".",","),
+                pat.toFixed(2).replace(".",","),
                 fee.toFixed(2).replace(".",","),
-                (c.txGestao||0).toString(),
+                String(+(c.txGestao||0)||0),
                 rent,
                 atualizacao,
                 c.email||"",
@@ -27987,7 +27989,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '329';
+  var SW_VERSION = '330';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
