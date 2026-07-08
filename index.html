@@ -4627,47 +4627,27 @@ function CL({data:d,onSel:os,dispatch:dp}){
         <Bt v="secondary" onClick={function(){
           try{
             var lista=d&&d.cl?d.cl:[];
-            /* Gera XLSX via XLSX.write + Blob (evita XLSX.writeFile que tem bug) */
-            var headers=["Nome","Serviço","Perfil de Risco","Patrimônio (R$)","Fee Mensal (R$)","Taxa Gestão (%/mês)","E-mail","Telefone","Cidade","Base IPCA","Aniversário"];
-            var data=[headers];
+            var S=function(v){try{return v===null||v===undefined?"":String(v);}catch(e){return "";}};
+            var N=function(v){try{var n=parseFloat(String(v||0));return isNaN(n)?"0":String(Math.round(n*100)/100);}catch(e){return "0";}};
+            var rows=[["Nome","Servico","Perfil","Patrimonio R$","Fee Mensal R$","Taxa Gestao %","Email","Telefone","Cidade","Base IPCA","Aniversario"]];
             for(var xi=0;xi<lista.length;xi++){
               var xc=lista[xi];if(!xc)continue;
-              var xnome=xc.nome?String(xc.nome):"";
               var xsv="";
-              if(Array.isArray(xc.sv))xsv=xc.sv.map(function(s){return s==="patrimonio"?"Gestão de Patrimônio":s==="planejamento"?"Gestão Financeira":s==="milhas"?"Couri Mile$":String(s)}).join(", ");
-              else if(xc.sv)xsv=String(xc.sv);
-              var xperfil=xc.risco?String(xc.risco):"";
-              var xpat=0;try{var _p=parseFloat(xc.patGorila||xc.pat||0);xpat=isNaN(_p)?0:Math.round(_p*100)/100;}catch(e2){}
-              var xfee=0;try{var _f=parseFloat(xc.feeFixo||0);xfee=isNaN(_f)?0:Math.round(_f*100)/100;}catch(e2){}
-              var xtx=0;try{var _t=parseFloat(xc.txGestao||0);xtx=isNaN(_t)?0:_t;}catch(e2){}
-              var xemail=xc.email?String(xc.email):"";
-              var xtel=xc.tel?String(xc.tel):"";
-              var xcidade=xc.cidade?String(xc.cidade):"";
-              var xipca=xc.baseIpca?String(xc.baseIpca):"";
-              var xaniv=xc.aniversario?String(xc.aniversario):"";
-              data.push([xnome,xsv,xperfil,xpat,xfee,xtx,xemail,xtel,xcidade,xipca,xaniv]);
+              if(Array.isArray(xc.sv)){var sp=[];for(var si=0;si<xc.sv.length;si++){var ss=xc.sv[si];sp.push(ss==="patrimonio"?"Gestao Patrimonio":ss==="planejamento"?"Gestao Financeira":ss==="milhas"?"Couri Miles":S(ss));};xsv=sp.join("|");}
+              else xsv=S(xc.sv);
+              rows.push([S(xc.nome),xsv,S(xc.risco),N(xc.patGorila||xc.pat),N(xc.feeFixo),N(xc.txGestao),S(xc.email),S(xc.tel),S(xc.cidade),S(xc.baseIpca),S(xc.aniversario)]);
             }
-            var ws=XLSX.utils.aoa_to_sheet(data);
-            /* Largura das colunas */
-            ws["!cols"]=[{wch:28},{wch:22},{wch:14},{wch:16},{wch:14},{wch:14},{wch:32},{wch:16},{wch:14},{wch:10},{wch:12}];
-            /* Estilo do cabeçalho */
-            var range=XLSX.utils.decode_range(ws["!ref"]);
-            for(var C=range.s.c;C<=range.e.c;C++){
-              var cellAddr=XLSX.utils.encode_cell({r:0,c:C});
-              if(!ws[cellAddr])continue;
-              ws[cellAddr].s={font:{bold:true},fill:{fgColor:{rgb:"1A2842"}},font:{color:{rgb:"D4A328"},bold:true}};
-            }
+            var ws=XLSX.utils.aoa_to_sheet(rows);
+            ws["!cols"]=[{wch:28},{wch:22},{wch:14},{wch:16},{wch:14},{wch:12},{wch:32},{wch:16},{wch:14},{wch:10},{wch:12}];
             var wb=XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb,"Clientes",ws);
-            /* Usa XLSX.write + Blob ao invés de writeFile para evitar bug */
             var wbout=XLSX.write(wb,{bookType:"xlsx",type:"binary"});
             var buf=new ArrayBuffer(wbout.length);
             var view=new Uint8Array(buf);
             for(var i=0;i<wbout.length;i++)view[i]=wbout.charCodeAt(i)&0xFF;
             var blob=new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
             var url=URL.createObjectURL(blob);
-            var a=document.createElement("a");
-            a.href=url;a.download="clientes_"+new Date().toISOString().slice(0,10)+".xlsx";
+            var a=document.createElement("a");a.href=url;a.download="clientes_"+new Date().toISOString().slice(0,10)+".xlsx";
             document.body.appendChild(a);a.click();
             setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},2000);
           }catch(xerr){alert("Erro: "+(xerr&&xerr.message?xerr.message:String(xerr)));}
@@ -28006,7 +27986,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '334';
+  var SW_VERSION = '335';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
