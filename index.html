@@ -4624,6 +4624,37 @@ function CL({data:d,onSel:os,dispatch:dp}){
         <Bt onClick={()=>sShowAdd(true)} style={{fontSize:12,padding:"10px 18px"}}>＋ Novo</Bt>
         <input ref={gorilaRef} type="file" accept=".xlsx,.xls,.csv,.pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf,text/csv,text/plain,*/*" onChange={function(e){if(e.target.files[0])importGorilaCliente(e.target.files[0]);e.target.value=""}} style={{display:"none"}}/>
         <Bt v="secondary" onClick={function(){gorilaRef.current&&gorilaRef.current.click()}} style={{fontSize:11,padding:"10px 14px"}}>📥 Importar Gorila</Bt>
+        <Bt v="secondary" onClick={function(){
+          /* Exportar lista de clientes para Excel */
+          try{
+            var rows=[["Nome","Serviço","Perfil","Patrimônio (R$)","Fee Mensal (R$)","Taxa Gestão (%)","Rentab. Mês (%)","Atualização Gorila","E-mail","Telefone","Cidade","Reajuste IPCA","Aniversário"]];
+            fl.forEach(function(c){
+              var fee=feeBaseDoCliente(c).fee||feeMensalBRL(c)||c.feeFixo||0;
+              var rent=c._gorilaRent&&c._gorilaRent.periods?(function(){var p=c._gorilaRent.periods.find(function(p){var s=String(p.p||"").toLowerCase();return s.indexOf("último")>=0||s.indexOf("mes")>=0;});return p&&typeof p.rent==="number"?(p.rent*100).toFixed(2):"";})():"";
+              var atualizacao=c._ativosTs?new Date(c._ativosTs).toLocaleDateString("pt-BR"):"";
+              rows.push([
+                c.nome||"",
+                (c.sv||[]).map(function(s){return SL[s]||s}).join(", "),
+                c.risco||"",
+                (c.patGorila||c.pat||0).toFixed(2).replace(".",","),
+                fee.toFixed(2).replace(".",","),
+                (c.txGestao||0).toString(),
+                rent,
+                atualizacao,
+                c.email||"",
+                c.tel||"",
+                c.cidade||"",
+                c.baseIpca||"",
+                c.aniversario||""
+              ]);
+            });
+            var ws=XLSX.utils.aoa_to_sheet(rows);
+            ws["!cols"]=[{wch:30},{wch:25},{wch:12},{wch:18},{wch:15},{wch:14},{wch:14},{wch:18},{wch:30},{wch:16},{wch:15},{wch:12},{wch:12}];
+            var wb=XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb,"Clientes",ws);
+            XLSX.writeFile(wb,"courinvest_clientes_"+new Date().toISOString().slice(0,10)+".xlsx");
+          }catch(e){alert("Erro ao exportar: "+e.message);}
+        }} style={{fontSize:11,padding:"10px 14px"}}>📊 Exportar Excel</Bt>
 
         <input ref={bulkRef} type="file" accept=".xlsx,.xls,.csv,.pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf,text/csv,text/plain,*/*" multiple onChange={function(e){if(e.target.files.length>0)importGorilaBulk(e.target.files);e.target.value=""}} style={{display:"none"}}/>
         {/* Input de PASTA — webkitdirectory + filtro de extensões em runtime já que o atributo não filtra */}
@@ -27955,7 +27986,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '327';
+  var SW_VERSION = '328';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
