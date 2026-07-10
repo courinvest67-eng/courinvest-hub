@@ -12587,7 +12587,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
 
           {}
           {isFin && ativos.length>0 && (function(){
-            var objLabels={emergencia:"🛡 Reserva de Emergência",aposentadoria:"🏖 Aposentadoria",casa:"🏠 Casa Própria",viagem:"✈️ Viagem",carro:"🚗 Veículo",educacao:"🎓 Educação",filhos:"👶 Filhos",casamento:"💍 Casamento",negocio:"💼 Negócio Próprio",patrimonio:"💰 Formação Patrimônio",curto_prazo:"⚡ Curto Prazo",longo_prazo:"📈 Longo Prazo",outros:"📌 Outros"};
+            var objLabels={emergencia:"🛡 Reserva de Emergência",aposentadoria:"🏖 Aposentadoria",casa:"🏠 Casa Própria",viagem:"✈️ Viagem",carro:"🚗 Veículo",educacao:"🎓 Educação",filhos:"👶 Filhos",casamento:"💍 Casamento",negocio:"💼 Negócio Próprio",patrimonio:"💰 Formação Patrimônio",curto_prazo:"⚡ Curto Prazo",longo_prazo:"📈 Longo Prazo",renda_passiva:"💸 Renda Passiva",outros:"📌 Outros"};
             var objIcons={emergencia:"🛡",aposentadoria:"🏖",casa:"🏠",viagem:"✈️",carro:"🚗",educacao:"🎓",filhos:"👶",casamento:"💍",negocio:"💼",patrimonio:"💰",curto_prazo:"⚡",longo_prazo:"📈",outros:"📌"};
             var objColors={emergencia:T.green,aposentadoria:T.cyan,casa:T.gold,viagem:T.purple,carro:T.orange,educacao:T.cyan,filhos:T.purple,casamento:T.gold,negocio:T.red,patrimonio:T.gold,curto_prazo:T.orange,longo_prazo:T.cyan,outros:T.t2};
             var byObj={};var semObj=0;
@@ -13369,6 +13369,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
                                 <option value="patrimonio">💰 Formação Patrimônio</option>
                                 <option value="curto_prazo">⚡ Curto Prazo</option>
                                 <option value="longo_prazo">📈 Longo Prazo</option>
+                                <option value="renda_passiva">💸 Renda Passiva</option>
                                 <option value="outros">📌 Outros</option>
                               </select>
                               {a.obj && <input type="text" placeholder="Ex: Maldivas" value={a.objNome||""} onChange={function(e){upAt(a.tk,"objNome",e.target.value)}} style={{padding:"3px 4px",background:"rgba(255,255,255,0.02)",border:"1px solid rgba(167,139,250,0.15)",borderRadius:4,color:T.purple,fontSize:9,fontWeight:600,outline:"none",width:"100%",marginTop:3,fontStyle:"italic"}}/>}
@@ -14827,6 +14828,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
               {ic:"✈️",nome:"Viagem",cor:"#38BDF8",desc:"Viagem dos sonhos, lua de mel, etc."},
               {ic:"🏠",nome:"Compra de Imóvel",cor:"#D4A328",desc:"Entrada ou compra à vista"},
               {ic:"🚗",nome:"Compra de Veículo",cor:"#F59E0B",desc:"Carro novo, moto, etc."},
+              {ic:"💸",nome:"Renda Passiva",cor:"#2DD4A0",desc:"Meta de renda mensal com investimentos"},
               {ic:"🎓",nome:"Educação",cor:"#A78BFA",desc:"Faculdade dos filhos, MBA, intercâmbio"},
               {ic:"💍",nome:"Casamento",cor:"#F472B6",desc:"Cerimônia, festa, aliança"},
               {ic:"👶",nome:"Filhos",cor:"#FBBF24",desc:"Reserva para nascimento e primeiros anos"},
@@ -15152,6 +15154,51 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
                             <input type="color" value={obj.cor||"#D4A328"} onChange={function(e){setField("cor",e.target.value)}} style={{width:"100%",height:36,padding:0,borderRadius:8,background:T.w3,border:"1px solid "+T.bdrL,cursor:"pointer"}}/>
                           </div>
                         </div>
+
+                        {}
+                        {/* === CAMPOS ESPECÍFICOS: RENDA PASSIVA === */}
+                        {(obj.nome==="Renda Passiva"||obj.tipo==="renda_passiva") && (
+                          <Cd style={{padding:14,border:"1px solid rgba(45,212,160,0.2)"}} hov={false}>
+                            <div style={{fontSize:11,fontWeight:800,color:T.green,marginBottom:12}}>💸 Renda Passiva — Configuração</div>
+                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                              <div>
+                                <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:.5,marginBottom:4}}>RENDA MENSAL DESEJADA (R$)</div>
+                                <input type="number" value={obj.rendaMensalAlvo||""} onChange={function(e){setField("rendaMensalAlvo",+e.target.value)}} placeholder="Ex: 10000" style={{width:"100%",padding:"8px 10px",borderRadius:8,background:T.w3,border:"1px solid rgba(45,212,160,0.3)",color:T.green,fontSize:14,fontWeight:700,outline:"none",fontFamily:"'JetBrains Mono'"}}/>
+                              </div>
+                              <div>
+                                <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:.5,marginBottom:4}}>TAXA RETORNO MENSAL ESTIMADA (%)</div>
+                                <input type="number" step="0.01" value={obj.taxaRetornoMes||0.5} onChange={function(e){setField("taxaRetornoMes",+e.target.value)}} placeholder="0.5" style={{width:"100%",padding:"8px 10px",borderRadius:8,background:T.w3,border:"1px solid rgba(45,212,160,0.3)",color:T.green,fontSize:14,fontWeight:700,outline:"none",fontFamily:"'JetBrains Mono'"}}/>
+                              </div>
+                            </div>
+                            {obj.rendaMensalAlvo>0 && (function(){
+                              var txMes=(obj.taxaRetornoMes||0.5)/100;
+                              var patNecessario=txMes>0?obj.rendaMensalAlvo/txMes:0;
+                              var patAtual=(function(){if(obj.modo==="ativos"&&(obj.ativosVinculados||[]).length>0){return enr.filter(function(a){return(obj.ativosVinculados||[]).indexOf(a.tk)>=0}).reduce(function(s,a){return s+(a.vA||0)},0);}return obj.acumuladoManual||0;})();
+                              var rendaAtual=patAtual*txMes;
+                              var pct=patNecessario>0?(patAtual/patNecessario*100):0;
+                              /* Atualiza automaticamente o alvo */
+                              if(Math.abs((obj.alvo||0)-patNecessario)>100)setTimeout(function(){setField("alvo",Math.round(patNecessario));},0);
+                              return (
+                                <div style={{padding:"10px 12px",background:"rgba(45,212,160,0.05)",borderRadius:8,border:"1px solid rgba(45,212,160,0.15)"}}>
+                                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                                    <div>
+                                      <div style={{fontSize:8,color:T.t3,fontWeight:600}}>PATRIMÔNIO NECESSÁRIO</div>
+                                      <div style={{fontSize:13,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(patNecessario)}</div>
+                                    </div>
+                                    <div>
+                                      <div style={{fontSize:8,color:T.t3,fontWeight:600}}>RENDA ATUAL ESTIMADA</div>
+                                      <div style={{fontSize:13,fontWeight:800,color:rendaAtual>=obj.rendaMensalAlvo?T.green:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(rendaAtual)}<span style={{fontSize:9,color:T.t3}}>/mês</span></div>
+                                    </div>
+                                    <div>
+                                      <div style={{fontSize:8,color:T.t3,fontWeight:600}}>PROGRESSO</div>
+                                      <div style={{fontSize:13,fontWeight:800,color:pct>=100?T.green:T.gold,fontFamily:"'JetBrains Mono'"}}>{Math.min(pct,100).toFixed(1)}%</div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </Cd>
+                        )}
 
                         {}
                         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
@@ -28043,7 +28090,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '339';
+  var SW_VERSION = '340';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
