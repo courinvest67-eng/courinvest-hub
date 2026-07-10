@@ -7092,7 +7092,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
             if(typeof c.conjuge._gorilaRent.resultado==="number")_ganhoConj=c.conjuge._gorilaRent.resultado;
             else _ganhoConj=_patConj*(_rentConj/100);
           }
-          var _cdiMes=typeof c._gorilaRent?.cdiMes==="number"?c._gorilaRent.cdiMes*100:((cdiAnual/100+1)**(1/12)-1)*100;
+          var _cdiMes=(c._gorilaRent&&typeof c._gorilaRent.cdiMes==="number")?c._gorilaRent.cdiMes*100:cdiPeriodo;
           var _vsCdiConj=_rentConj-_cdiMes;
           /* Consolidado */
           var _patTotal=tCV+_patConj;
@@ -28134,7 +28134,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '342';
+  var SW_VERSION = '343';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
