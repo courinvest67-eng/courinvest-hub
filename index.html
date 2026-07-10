@@ -7063,12 +7063,56 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
           ganhoPeriodo=patBaseGanho*(rentPeriodo/100);
         }
         var labelPeriodo=tipo==="mensal"?"do mês":(tipo==="anual"?"em 12 meses":"do trimestre");
-        body+='<div class="kpi-grid">';
-        (function(){var txt=fmF(tCV);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value gold" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">posição atual</div></div>';})();
-        body+='<div class="kpi"><div class="kpi-label">Rentabilidade</div><div class="kpi-value '+(rentPeriodo>=0?"green":"red")+'">'+(rentPeriodo>=0?"+":"")+rentPeriodo.toFixed(2)+'%</div><div class="kpi-sub">'+rentLabel+'</div></div>';
-        (function(){var txt=(ganhoPeriodo>=0?"+":"")+fmRel(ganhoPeriodo);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Ganho '+labelPeriodo+'</div><div class="kpi-value '+(ganhoPeriodo>=0?"green":"red")+'" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">variação estimada</div></div>';})();
-        body+='<div class="kpi"><div class="kpi-label">vs CDI</div><div class="kpi-value '+(vsC>=0?"green":"red")+'">'+(vsC>=0?"+":"")+vsC.toFixed(2)+'pp</div><div class="kpi-sub">'+(vsC>=0?"acima do":"abaixo do")+' benchmark</div></div>';
-        body+='</div>';
+
+        /* Helper para bloco de KPIs de uma carteira */
+        var _kpiBlock=function(titulo,pat,rent,ganho,vsCdi,label){
+          var txt=fmF(pat);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;
+          var b='';
+          if(titulo)b+='<div style="font-size:10px;font-weight:800;color:#D4A328;letter-spacing:.8px;margin:10px 0 6px;text-transform:uppercase;">'+titulo+'</div>';
+          b+='<div class="kpi-grid">';
+          b+='<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value gold" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">posição atual</div></div>';
+          b+='<div class="kpi"><div class="kpi-label">Rentabilidade</div><div class="kpi-value '+(rent>=0?"green":"red")+'">'+(rent>=0?"+":"")+rent.toFixed(2)+'%</div><div class="kpi-sub">'+label+'</div></div>';
+          var gtxt=(ganho>=0?"+":"")+fmF(ganho);var gsz=gtxt.length>=16?12:gtxt.length>=14?13:gtxt.length>=12?14:gtxt.length>=10?15:17;
+          b+='<div class="kpi"><div class="kpi-label">Ganho '+labelPeriodo+'</div><div class="kpi-value '+(ganho>=0?"green":"red")+'" style="font-size:'+gsz+'px">'+gtxt+'</div><div class="kpi-sub">variação estimada</div></div>';
+          b+='<div class="kpi"><div class="kpi-label">vs CDI</div><div class="kpi-value '+(vsCdi>=0?"green":"red")+'">'+(vsCdi>=0?"+":"")+vsCdi.toFixed(2)+'pp</div><div class="kpi-sub">'+(vsCdi>=0?"acima do":"abaixo do")+' benchmark</div></div>';
+          b+='</div>';
+          return b;
+        };
+
+        var _ehCasalRel=(c.tipoCli==="casal"||c.tipoCli==="familia")&&c.conjuge;
+        if(_ehCasalRel){
+          /* Dados do cônjuge */
+          var _patConj=c.conjuge.patGorila||0;
+          if(_patConj===0&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
+            _patConj=c.conjuge._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
+          }
+          var _rentConj=0,_ganhoConj=0;
+          if(c.conjuge._gorilaRent){
+            if(typeof c.conjuge._gorilaRent.rentMes==="number")_rentConj=c.conjuge._gorilaRent.rentMes*100;
+            if(typeof c.conjuge._gorilaRent.resultado==="number")_ganhoConj=c.conjuge._gorilaRent.resultado;
+            else _ganhoConj=_patConj*(_rentConj/100);
+          }
+          var _cdiMes=typeof c._gorilaRent?.cdiMes==="number"?c._gorilaRent.cdiMes*100:((cdiAnual/100+1)**(1/12)-1)*100;
+          var _vsCdiConj=_rentConj-_cdiMes;
+          /* Consolidado */
+          var _patTotal=tCV+_patConj;
+          var _ganhoTotal=ganhoPeriodo+_ganhoConj;
+          var _rentTotal=_patTotal>0?(_ganhoTotal/_patTotal*100):((rentPeriodo+_rentConj)/2);
+          var _vsCdiTotal=_rentTotal-_cdiMes;
+          var _nomeConj=c.conjuge.nome||c.conjuge.nomeConjuge||"Cônjuge";
+          body+=_kpiBlock("👤 "+c.nome.split(" ")[0],tCV,rentPeriodo,ganhoPeriodo,vsC,rentLabel);
+          body+='<hr style="border:none;border-top:1px solid #E8E0C8;margin:14px 0;"/>';
+          body+=_kpiBlock("👤 "+_nomeConj.split(" ")[0],_patConj,_rentConj,_ganhoConj,_vsCdiConj,rentLabel);
+          body+='<hr style="border:none;border-top:2px solid #D4A328;margin:14px 0;"/>';
+          body+=_kpiBlock("👫 Consolidado do Casal",_patTotal,_rentTotal,_ganhoTotal,_vsCdiTotal,rentLabel);
+        }else{
+          body+='<div class="kpi-grid">';
+          (function(){var txt=fmF(tCV);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value gold" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">posição atual</div></div>';})();
+          body+='<div class="kpi"><div class="kpi-label">Rentabilidade</div><div class="kpi-value '+(rentPeriodo>=0?"green":"red")+'">'+(rentPeriodo>=0?"+":"")+rentPeriodo.toFixed(2)+'%</div><div class="kpi-sub">'+rentLabel+'</div></div>';
+          (function(){var txt=(ganhoPeriodo>=0?"+":"")+fmRel(ganhoPeriodo);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Ganho '+labelPeriodo+'</div><div class="kpi-value '+(ganhoPeriodo>=0?"green":"red")+'" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">variação estimada</div></div>';})();
+          body+='<div class="kpi"><div class="kpi-label">vs CDI</div><div class="kpi-value '+(vsC>=0?"green":"red")+'">'+(vsC>=0?"+":"")+vsC.toFixed(2)+'pp</div><div class="kpi-sub">'+(vsC>=0?"acima do":"abaixo do")+' benchmark</div></div>';
+          body+='</div>';
+        }
 
         /* ===== PATRIMÔNIO CONSOLIDADO DO CASAL ===== */
         if((c.tipoCli==="casal"||c.tipoCli==="familia") && c.conjuge){
@@ -28090,7 +28134,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '340';
+  var SW_VERSION = '342';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
