@@ -18582,7 +18582,14 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
                   <div style={{fontSize:13,fontWeight:800,color:T.gold}}>Gestão de Casal</div>
                   <div style={{fontSize:10,color:T.t3,marginTop:2}}>Ative para gerenciar carteira do cônjuge separadamente</div>
                 </div>
-                <div onClick={function(){dp({t:"UC",p:{id:c.id,isCasal:!(c.tipoCli==="casal"||c.tipoCli==="familia"||!!c.conjuge)}})}}
+                <div onClick={function(){
+                    var ehCasal=(c.tipoCli==="casal"||c.tipoCli==="familia"||!!c.conjuge);
+                    if(ehCasal){
+                      dp({t:"UC",p:{id:c.id,tipoCli:"individual",conjuge:null}});
+                    }else{
+                      dp({t:"UC",p:{id:c.id,tipoCli:"casal"}});
+                    }
+                  }}
                   style={{width:40,height:22,borderRadius:11,background:(c.tipoCli==="casal"||c.tipoCli==="familia"||!!c.conjuge)?T.gold:"rgba(255,255,255,0.1)",cursor:"pointer",position:"relative",transition:"all .2s",border:"1px solid "+((c.tipoCli==="casal"||c.tipoCli==="familia"||!!c.conjuge)?T.gold:T.bdrL),flexShrink:0}}>
                   <div style={{position:"absolute",top:2,left:(c.tipoCli==="casal"||c.tipoCli==="familia"||!!c.conjuge)?20:2,width:16,height:16,borderRadius:8,background:(c.tipoCli==="casal"||c.tipoCli==="familia"||!!c.conjuge)?"#0A1628":"#6B7489",transition:"all .2s"}}/>
                 </div>
@@ -28036,7 +28043,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '338';
+  var SW_VERSION = '339';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
