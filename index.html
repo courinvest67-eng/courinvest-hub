@@ -1760,6 +1760,9 @@ function Dash({data:d,onSel:os,goTo}){
                 var enviando=relEnviando===c.id;
                 var temWa=!!(c.waGrupo||c.tel);
                 var pat=c.patGorila||c.pat||0;
+                var svArr=Array.isArray(c.sv)?c.sv:(c.sv?[c.sv]:[]);
+                var isGP=svArr.includes("patrimonio");
+                var isGF=svArr.includes("planejamento");
                 return (
                   <div key={c.id} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",background:enviado?"rgba(45,212,160,0.06)":aprovado?"rgba(212,163,40,0.06)":T.w3,borderRadius:10,border:"1px solid "+(enviado?T.green+"44":aprovado?T.gold+"44":T.bdrL),transition:"all 0.2s"}}>
                     {/* Checkbox */}
@@ -1767,18 +1770,18 @@ function Dash({data:d,onSel:os,goTo}){
                       {enviado?"✓":aprovado?"✓":""}
                     </div>
                     {/* Avatar */}
-                    <div style={{width:32,height:32,borderRadius:8,background:T.goldD,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,color:T.gold,flexShrink:0}}>
+                    <div style={{width:32,height:32,borderRadius:8,background:isGP?T.goldD:"rgba(56,189,248,0.15)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,color:isGP?T.gold:T.cyan,flexShrink:0}}>
                       {c.nome.split(" ").slice(0,2).map(function(w){return w[0]}).join("")}
                     </div>
                     {/* Info */}
                     <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:12,fontWeight:700,color:T.t1,display:"flex",alignItems:"center",gap:6}}>
+                      <div style={{fontSize:12,fontWeight:700,color:T.t1,display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}>
                         {c.nome}
-                        {c.sv&&c.sv.includes("patrimonio")&&<span style={{fontSize:8,background:"rgba(212,163,40,0.15)",color:T.gold,padding:"1px 5px",borderRadius:3,fontWeight:700}}>GP</span>}
-                        {c.sv&&c.sv.includes("planejamento")&&<span style={{fontSize:8,background:"rgba(56,189,248,0.15)",color:T.cyan,padding:"1px 5px",borderRadius:3,fontWeight:700}}>GF</span>}
+                        {isGP&&<span style={{fontSize:8,background:"rgba(212,163,40,0.18)",color:T.gold,padding:"2px 6px",borderRadius:4,fontWeight:800}}>💎 GP</span>}
+                        {isGF&&<span style={{fontSize:8,background:"rgba(56,189,248,0.18)",color:T.cyan,padding:"2px 6px",borderRadius:4,fontWeight:800}}>📊 GF</span>}
                       </div>
                       <div style={{fontSize:10,color:T.t3,marginTop:1}}>
-                        {(pat/1e6).toFixed(2).replace(".",",")}M · {c.risco||"Moderado"}
+                        {pat>0?(pat/1e6).toFixed(2).replace(".",",")+("M"):isGF?"Gestão Financeira":""} · {c.risco||"Moderado"}
                         {!temWa&&<span style={{color:T.orange,marginLeft:6}}>⚠️ sem WhatsApp</span>}
                       </div>
                     </div>
@@ -1789,18 +1792,17 @@ function Dash({data:d,onSel:os,goTo}){
                       {!enviado&&aprovado&&!enviando&&<div style={{fontSize:10,color:T.gold,fontWeight:700}}>✓ aprovado</div>}
                       {!enviado&&!aprovado&&<div style={{fontSize:10,color:T.t3}}>pendente</div>}
                     </div>
-                    {/* Ver relatório direto */}
+                    {/* PDF com tipo correto baseado no serviço */}
                     <button onClick={function(){
-                      /* Abre o cliente e navega para a aba Relatório com preview automático */
                       sRelModal(false);
                       os(c);
-                      /* Sinaliza para abrir o relatório automaticamente */
                       setTimeout(function(){
-                        var ev=new CustomEvent("courinvest:abrirRelatorio",{detail:{clienteId:c.id}});
+                        var tipoRel=isGF&&!isGP?"planejamento":"mensal";
+                        var ev=new CustomEvent("courinvest:abrirRelatorio",{detail:{clienteId:c.id,abrirPdf:true,tipoRelatorio:tipoRel}});
                         window.dispatchEvent(ev);
                       },400);
-                    }} style={{padding:"4px 10px",background:"rgba(212,163,40,0.08)",border:"1px solid "+T.gold+"44",borderRadius:6,color:T.gold,fontSize:10,cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
-                      📄 Ver
+                    }} style={{padding:"4px 10px",background:isGP?"rgba(212,163,40,0.08)":"rgba(56,189,248,0.08)",border:"1px solid "+(isGP?T.gold:T.cyan)+"44",borderRadius:6,color:isGP?T.gold:T.cyan,fontSize:10,cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
+                      {isGP?"📈 PDF GP":"📋 PDF GF"}
                     </button>
                   </div>
                 );
@@ -5103,13 +5105,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
   const[editNome,setEditNome]=useState(false);
   const[nomeTemp,setNomeTemp]=useState("");
   const[autoRelatorio,sAutoRelatorio]=useState(false);
+  const[autoPrint,sAutoPrint]=useState(false);
   /* Listener: abre relatório automaticamente quando vem do modal de aprovação */
   React.useEffect(function(){
     var cId=c&&c.id;
     var handler=function(ev){
       if(ev.detail&&ev.detail.clienteId===cId){
         sTab("relatorio");
-        sAutoRelatorio(true);
+        sAutoRelatorio(ev.detail.tipoRelatorio||"mensal");
+        if(ev.detail.abrirPdf)sAutoPrint(true);
       }
     };
     window.addEventListener("courinvest:abrirRelatorio",handler);
@@ -7089,7 +7093,11 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
 
         var _ehCasalRel=(c.tipoCli==="casal"||c.tipoCli==="familia")&&c.conjuge;
         if(_ehCasalRel){
-          /* Dados do cônjuge */
+          /* Patrimônio individual do titular (sem cônjuge) */
+          var _patTit=c.patGorila||c.pat||0;
+          if(_patTit===0&&c._ativosImport&&c._ativosImport.length>0){
+            _patTit=c._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
+          }
           var _patConj=c.conjuge.patGorila||0;
           if(_patConj===0&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
             _patConj=c.conjuge._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
@@ -7102,13 +7110,13 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
           }
           var _cdiMes=(c._gorilaRent&&typeof c._gorilaRent.cdiMes==="number")?c._gorilaRent.cdiMes*100:cdiPeriodo;
           var _vsCdiConj=_rentConj-_cdiMes;
-          /* Consolidado */
-          var _patTotal=tCV+_patConj;
+          /* Consolidado: usa patrimônios individuais, não tCV (que pode estar consolidado) */
+          var _patTotal=_patTit+_patConj;
           var _ganhoTotal=ganhoPeriodo+_ganhoConj;
-          var _rentTotal=_patTotal>0?(_ganhoTotal/_patTotal*100):((rentPeriodo+_rentConj)/2);
+          var _rentTotal=_patTotal>0?(_ganhoTotal/_patTotal*100):(rentPeriodo+_rentConj)/2;
           var _vsCdiTotal=_rentTotal-_cdiMes;
           var _nomeConj=c.conjuge.nome||c.conjuge.nomeConjuge||"Cônjuge";
-          body+=_kpiBlock("👤 "+c.nome.split(" ")[0],tCV,rentPeriodo,ganhoPeriodo,vsC,rentLabel);
+          body+=_kpiBlock("👤 "+c.nome.split(" ")[0],_patTit,rentPeriodo,ganhoPeriodo,vsC,rentLabel);
           body+='<hr style="border:none;border-top:1px solid #E8E0C8;margin:14px 0;"/>';
           body+=_kpiBlock("👤 "+_nomeConj.split(" ")[0],_patConj,_rentConj,_ganhoConj,_vsCdiConj,rentLabel);
           body+='<hr style="border:none;border-top:2px solid #D4A328;margin:14px 0;"/>';
@@ -17584,10 +17592,24 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
         <div>
           {/* Auto-gera relatório quando vem do modal de aprovação */}
           {autoRelatorio && !reportHtml && (function(){
+            var tipoRel=typeof autoRelatorio==="string"&&autoRelatorio!=="true"?autoRelatorio:"mensal";
             sAutoRelatorio(false);
             try{
-              var html=gerarRelatorio("mensal",d);
-              if(html)sReportHtml(html);
+              var html=gerarRelatorio(tipoRel,d);
+              if(html){
+                if(autoPrint){
+                  sAutoPrint(false);
+                  var w=window.open("","_blank","width=900,height=700");
+                  if(w){
+                    w.document.write(html);
+                    w.document.close();
+                    w.focus();
+                    setTimeout(function(){try{w.print();}catch(e){}},800);
+                  }
+                }else{
+                  sReportHtml(html);
+                }
+              }
             }catch(e){console.error("Auto relatório:",e);}
             return null;
           })()}
@@ -28142,7 +28164,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '344';
+  var SW_VERSION = '346';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
