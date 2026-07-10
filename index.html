@@ -463,6 +463,14 @@ const feeBaseDoCliente=function(c){
   if(patTotal===0&&c._ativosImport&&c._ativosImport.length>0){
     patTotal=c._ativosImport.reduce(function(s,at){return s+(+at.posR||+at.qtd*+at.pa||0)},0);
   }
+  /* FIX CASAL: soma patrimônio do cônjuge na base de cálculo do fee */
+  if((c.tipoCli==="casal"||c.tipoCli==="familia")&&c.conjuge){
+    var patConj=c.conjuge.patGorila||0;
+    if(patConj===0&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
+      patConj=c.conjuge._ativosImport.reduce(function(s,at){return s+(+at.posR||+at.qtd*+at.pa||0)},0);
+    }
+    patTotal+=patConj;
+  }
   var part=(c&&c.particularidades&&c.particularidades.fee)||{};
   var exclReserva=part.excluiReservaEmerg?valorAtivosReserva(c):0;
   var exclHolding=part.excluiHolding?valorAtivosHolding(c):0;
@@ -28134,7 +28142,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '343';
+  var SW_VERSION = '344';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
