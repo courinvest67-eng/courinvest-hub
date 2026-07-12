@@ -9310,6 +9310,44 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
         body+='</div>';
       }
 
+      /* ── Seção: Comparativo com o mês anterior (por categoria) ──
+         Inspirado no formato "Evolução por Categoria" dos relatórios de orçamento:
+         mostra quais categorias mais subiram/caíram em relação ao mês anterior. */
+      var gfKeyAnt=gfKeys.length>1?gfKeys[gfKeys.length-2]:null;
+      var gfMesAnt=gfKeyAnt?gfMeses[gfKeyAnt]:null;
+      var gfCatVar=[];
+      if(gfMesAnt){
+        var gfCatsAnt={};
+        (gfMesAnt.despesas||[]).forEach(function(d){var cat=d.categoria||d.cat||"Outros";gfCatsAnt[cat]=(gfCatsAnt[cat]||0)+(d.valor||0);});
+        var gfCatsTodas={};
+        Object.keys(gfCats).forEach(function(k){gfCatsTodas[k]=true;});
+        Object.keys(gfCatsAnt).forEach(function(k){gfCatsTodas[k]=true;});
+        Object.keys(gfCatsTodas).forEach(function(cat){
+          var atual=gfCats[cat]||0,ant=gfCatsAnt[cat]||0,diff=atual-ant;
+          if(Math.abs(diff)<50)return; /* ignora variações irrelevantes */
+          gfCatVar.push({cat:cat,atual:atual,ant:ant,diff:diff,pct:ant>0?(diff/ant*100):null});
+        });
+        gfCatVar.sort(function(a,b){return Math.abs(b.diff)-Math.abs(a.diff)});
+      }
+      if(gfCatVar.length>0){
+        var gfMesAntLabel=MN[(+gfKeyAnt.split("-")[1])-1];
+        body+=secTitle("🔄","Comparado a "+gfMesAntLabel);
+        body+='<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">';
+        gfCatVar.slice(0,5).forEach(function(v){
+          var subiu=v.diff>0;
+          var cor=subiu?"#EF6461":"#2DD4A0";
+          var seta=subiu?"▲":"▼";
+          var pctTxt=v.pct!==null?(subiu?"+":"")+v.pct.toFixed(0)+"%":"novo gasto";
+          body+='<div style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:8px">'
+            +'<div style="font-size:10.5px;color:#C5CDD8;font-weight:600">'+v.cat+'</div>'
+            +'<div style="display:flex;align-items:center;gap:8px">'
+            +'<span style="font-size:9px;color:#8B94A7">'+fmF(v.ant)+' → '+fmF(v.atual)+'</span>'
+            +'<span style="font-size:10px;font-weight:800;color:'+cor+'">'+seta+' '+pctTxt+'</span>'
+            +'</div></div>';
+        });
+        body+='</div>';
+      }
+
       /* ── Seção: Metas Financeiras ── */
       if(gfMetas.length>0){
         body+=secTitle("🎯","Metas Financeiras");
@@ -9336,14 +9374,24 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       }
 
       /* ── Recomendações automáticas ── */
+      var gfNome=String(c.nome||"").split(" ")[0];
       var gfRecs=[];
-      if(gfPoup<10)gfRecs.push({cor:"#EF6461",ic:"⚠️",txt:"Taxa de poupança abaixo de 10%. O ideal é poupar ao menos 20% da receita mensal para construção de patrimônio."});
-      else if(gfPoup>=20)gfRecs.push({cor:"#2DD4A0",ic:"✅",txt:"Excelente taxa de poupança de "+gfPoup.toFixed(1)+"%. Continue mantendo a disciplina!"});
-      if(gfSaldo<0)gfRecs.push({cor:"#EF6461",ic:"🚨",txt:"Saldo negativo de "+fmF(Math.abs(gfSaldo))+" no mês. Revise as despesas para retornar ao equilíbrio."});
+      if(gfPoup<10)gfRecs.push({cor:"#EF6461",ic:"⚠️",txt:"A taxa de poupança ficou em "+gfPoup.toFixed(1)+"% neste mês, abaixo da faixa recomendada de 20%. Vale olhar com calma onde dá pra ajustar sem abrir mão do essencial."});
+      else if(gfPoup>=20)gfRecs.push({cor:"#2DD4A0",ic:"✅",txt:gfNome+", taxa de poupança de "+gfPoup.toFixed(1)+"% neste mês — disciplina em alto nível! Mantendo esse ritmo, o patrimônio cresce bem mais rápido."});
+      else gfRecs.push({cor:"#D4A328",ic:"⚡",txt:"Taxa de poupança moderada, em "+gfPoup.toFixed(1)+"%. Ainda dá pra evoluir até a faixa dos 20% recomendados."});
+      if(gfSaldo<0)gfRecs.push({cor:"#EF6461",ic:"🚨",txt:"O mês fechou no vermelho, com saldo negativo de "+fmF(Math.abs(gfSaldo))+". Vale entender se foi um gasto pontual ou se é hora de rever o orçamento."});
       if(gfHist.length>=3){
         var ultTres=gfHist.slice(-3);
         var tendDespesa=(ultTres[2].desp-ultTres[0].desp)/Math.max(1,ultTres[0].desp)*100;
-        if(tendDespesa>15)gfRecs.push({cor:"#D4A328",ic:"📈",txt:"Despesas crescendo "+tendDespesa.toFixed(0)+"% nos últimos 3 meses. Atenção para manter o controle."});
+        if(tendDespesa>15)gfRecs.push({cor:"#D4A328",ic:"📈",txt:"As despesas vêm subindo "+tendDespesa.toFixed(0)+"% nos últimos 3 meses. Vale ficar de olho pra não perder o ritmo positivo."});
+        var gfMelhorMes=gfHist.reduce(function(a,b){return b.saldo>a.saldo?b:a});
+        if(gfMelhorMes.k===gfHist[gfHist.length-1].k&&gfMelhorMes.saldo>0)gfRecs.push({cor:"#2DD4A0",ic:"🏆",txt:gfNome+", esse foi o melhor saldo dos últimos "+gfHist.length+" meses — parabéns pelo resultado!"});
+      }
+      if(gfCatVar.length>0){
+        var gfMaiorAlta=gfCatVar.filter(function(v){return v.diff>0}).sort(function(a,b){return b.diff-a.diff})[0];
+        var gfMaiorQueda=gfCatVar.filter(function(v){return v.diff<0}).sort(function(a,b){return a.diff-b.diff})[0];
+        if(gfMaiorAlta&&gfMaiorAlta.diff>=200)gfRecs.push({cor:"#F6A623",ic:"📈",txt:"Gasto com "+gfMaiorAlta.cat+" subiu "+fmF(gfMaiorAlta.diff)+" em relação ao mês anterior"+(gfMaiorAlta.pct!==null?" (+"+gfMaiorAlta.pct.toFixed(0)+"%)":"")+". Vale entender se foi algo pontual."});
+        if(gfMaiorQueda&&gfMaiorQueda.diff<=-200)gfRecs.push({cor:"#2DD4A0",ic:"✅",txt:"Boa! "+gfMaiorQueda.cat+" caiu "+fmF(Math.abs(gfMaiorQueda.diff))+" frente ao mês anterior — disciplina em ação."});
       }
       if(gfRecs.length>0){
         body+='<div style="margin-top:8px">';
