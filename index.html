@@ -1645,6 +1645,35 @@ function Dash({data:d,onSel:os,goTo}){
               );})}
             </div>
 
+            {/* Busca + Filtro GP/GF */}
+            {(function(){
+              if(!window._relFiltro)window._relFiltro={busca:"",tipo:"todos"};
+              return null;
+            })()}
+            <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+              <input
+                type="text"
+                placeholder="🔍 Buscar cliente..."
+                defaultValue=""
+                onChange={function(e){window._relBusca=e.target.value.toLowerCase();var el=document.getElementById("rel-lista");if(el){var rows=el.querySelectorAll("[data-rel-nome]");rows.forEach(function(r){var nome=r.getAttribute("data-rel-nome").toLowerCase();var tipo=r.getAttribute("data-rel-tipo")||"";var filtroTipo=window._relTipo||"todos";var matchBusca=!window._relBusca||nome.indexOf(window._relBusca)>=0;var matchTipo=filtroTipo==="todos"||(filtroTipo==="gp"&&tipo.indexOf("patrimonio")>=0)||(filtroTipo==="gf"&&tipo.indexOf("planejamento")>=0);r.style.display=(matchBusca&&matchTipo)?"flex":"none";});}}}
+                style={{flex:1,minWidth:160,padding:"8px 12px",borderRadius:8,background:T.w3,border:"1px solid "+T.bdrL,color:T.t1,fontSize:12,outline:"none"}}
+              />
+              {["todos","gp","gf"].map(function(tp){
+                var lbl=tp==="todos"?"Todos":tp==="gp"?"💎 GP":"📊 GF";
+                return (
+                  <button key={tp} onClick={function(){
+                    window._relTipo=tp;
+                    var input=document.querySelector("[placeholder='🔍 Buscar cliente...']");
+                    var busca=input?input.value.toLowerCase():"";
+                    var el=document.getElementById("rel-lista");
+                    if(el){var rows=el.querySelectorAll("[data-rel-nome]");rows.forEach(function(r){var nome=r.getAttribute("data-rel-nome").toLowerCase();var tipo=r.getAttribute("data-rel-tipo")||"";var matchBusca=!busca||nome.indexOf(busca)>=0;var matchTipo=tp==="todos"||(tp==="gp"&&tipo.indexOf("patrimonio")>=0)||(tp==="gf"&&tipo.indexOf("planejamento")>=0);r.style.display=(matchBusca&&matchTipo)?"flex":"none";});}
+                  }} style={{padding:"7px 12px",borderRadius:8,border:"1px solid "+T.bdrL,background:"transparent",color:T.t2,fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                    {lbl}
+                  </button>
+                );
+              })}
+            </div>
+
             {/* Botões de ação em lote */}
             <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
               <button onClick={function(){
@@ -1753,8 +1782,10 @@ function Dash({data:d,onSel:os,goTo}){
             </div>
 
             {/* Lista de clientes */}
-            <div style={{maxHeight:420,overflowY:"auto",display:"flex",flexDirection:"column",gap:6}}>
+            <div id="rel-lista" style={{maxHeight:420,overflowY:"auto",display:"flex",flexDirection:"column",gap:6}}>
               {clRelatorio.map(function(c){
+                var svArr=Array.isArray(c.sv)?c.sv:(c.sv?[c.sv]:[]);
+                var svStr=svArr.join(",");
                 var aprovado=!!relAprovados[c.id+"-"+mesRefKey];
                 var enviado=!!relEnviados[c.id+"-"+mesRefKey];
                 var enviando=relEnviando===c.id;
@@ -1764,7 +1795,7 @@ function Dash({data:d,onSel:os,goTo}){
                 var isGP=svArr.includes("patrimonio");
                 var isGF=svArr.includes("planejamento");
                 return (
-                  <div key={c.id} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",background:enviado?"rgba(45,212,160,0.06)":aprovado?"rgba(212,163,40,0.06)":T.w3,borderRadius:10,border:"1px solid "+(enviado?T.green+"44":aprovado?T.gold+"44":T.bdrL),transition:"all 0.2s"}}>
+                  <div key={c.id} data-rel-nome={c.nome} data-rel-tipo={svStr} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",background:enviado?"rgba(45,212,160,0.06)":aprovado?"rgba(212,163,40,0.06)":T.w3,borderRadius:10,border:"1px solid "+(enviado?T.green+"44":aprovado?T.gold+"44":T.bdrL),transition:"all 0.2s"}}>
                     {/* Checkbox */}
                     <div onClick={function(){if(!enviado)sRelAprovados(function(prev){var n=Object.assign({},prev);n[c.id+"-"+mesRefKey]=!prev[c.id+"-"+mesRefKey];return n;})}} style={{width:20,height:20,borderRadius:5,border:"1.5px solid "+(enviado?T.green:aprovado?T.gold:T.bdrL),background:enviado?"rgba(45,212,160,0.2)":aprovado?T.goldD:"transparent",display:"flex",alignItems:"center",justifyContent:"center",cursor:enviado?"default":"pointer",flexShrink:0,fontSize:12}}>
                       {enviado?"✓":aprovado?"✓":""}
@@ -6633,7 +6664,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
        DARK:  mensal, anual, irpf, aporte            (layout institucional padrão novo)
        LIGHT: irpf_light, aporte_light, planejamento (fundo branco pra impressão/uso rápido)
        Mantive "trimestral"/"completo" como dark por compatibilidade se chamados programaticamente */
-    var isDarkReport=(tipo==="mensal"||tipo==="anual"||tipo==="trimestral"||tipo==="completo"||tipo==="irpf"||tipo==="aporte");
+    var isDarkReport=(tipo==="mensal"||tipo==="anual"||tipo==="trimestral"||tipo==="completo"||tipo==="irpf"||tipo==="aporte"||tipo==="planejamento");
 
     var cssDark='<style>@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&family=JetBrains+Mono:wght@500;700&display=swap");'
       +'@page{size:A4;margin:0}'
@@ -9135,12 +9166,193 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
 
 
     if(tipo==="planejamento"){
-      if(isFin){
-        body+='<h2>Planejamento Financeiro</h2>';
-        body+='<div class="kpi-grid"><div class="kpi"><div class="kpi-label">Receitas</div><div class="kpi-value green">'+fmF(tRec)+'</div></div><div class="kpi"><div class="kpi-label">Despesas</div><div class="kpi-value red">'+fmF(tDesp)+'</div></div><div class="kpi"><div class="kpi-label">Saldo</div><div class="kpi-value '+(saldo>=0?"green":"red")+'">'+(saldo>=0?"+":"")+fmF(saldo)+'</div></div><div class="kpi"><div class="kpi-label">Taxa Poupança</div><div class="kpi-value">'+txPoup.toFixed(0)+'%</div></div></div>';
-        body+='<h2>Metas Financeiras</h2><table><tr><th>Meta</th><th>Alvo</th><th>Atual</th><th>Progresso</th><th>Aporte/mês</th></tr>';
-        metas.forEach(function(m){var pct=m.alvo>0?(m.atual/m.alvo*100):0;var prazoDate=new Date(m.prazo+"-01");var mesesRest=Math.max(1,Math.ceil((prazoDate-new Date())/(30*864e5)));var aporteMes=Math.max(0,(m.alvo-m.atual)/mesesRest);body+='<tr><td><strong>'+m.ic+" "+m.nome+'</strong></td><td>'+fmF(m.alvo)+'</td><td>'+fmF(m.atual)+'</td><td><span class="badge badge-'+(pct>=100?"green":pct>=50?"gold":"red")+'">'+pct.toFixed(0)+'%</span></td><td>'+fmF(aporteMes)+'</td></tr>'});
-        body+='</table>';
+      /* ===== RELATÓRIO MENSAL DE GESTÃO FINANCEIRA — mesmo formato dark do GP ===== */
+      var gfMeses=c.orcamento&&c.orcamento.mensais?c.orcamento.mensais:{};
+      var gfKeys=Object.keys(gfMeses).sort();
+      var gfUlt=gfKeys.slice(-12); /* últimos 12 meses */
+      var gfAtual=gfKeys.length>0?gfMeses[gfKeys[gfKeys.length-1]]:{};
+
+      /* Calcula KPIs do mês atual */
+      var gfRec=(gfAtual.receitas||[]).reduce(function(s,r){return s+(r.valor||0)},0);
+      var gfDesp=(gfAtual.despesas||[]).reduce(function(s,d){return s+(d.valor||0)},0);
+      var gfInv=(gfAtual.investimentos||[]).reduce(function(s,i){return s+(i.valor||0)},0);
+      var gfSaldo=gfRec-gfDesp;
+      var gfPoup=gfRec>0?((gfInv/gfRec)*100):0;
+
+      /* Evolução dos últimos meses */
+      var gfHist=gfUlt.map(function(k){
+        var snap=gfMeses[k];
+        var rec=(snap.receitas||[]).reduce(function(s,r){return s+(r.valor||0)},0);
+        var desp=(snap.despesas||[]).reduce(function(s,d){return s+(d.valor||0)},0);
+        var inv=(snap.investimentos||[]).reduce(function(s,i){return s+(i.valor||0)},0);
+        var partes=k.split("-");
+        var label=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"][+(partes[1]||1)-1]+"/"+(partes[0]||"").slice(-2);
+        return{k:k,label:label,rec:rec,desp:desp,inv:inv,saldo:rec-desp,poup:rec>0?(inv/rec*100):0};
+      });
+
+      /* Despesas por categoria do mês atual */
+      var gfCats={};
+      (gfAtual.despesas||[]).forEach(function(d){var cat=d.categoria||d.cat||"Outros";gfCats[cat]=(gfCats[cat]||0)+(d.valor||0);});
+      var gfCatList=Object.entries(gfCats).sort(function(a,b){return b[1]-a[1]});
+
+      /* Metas financeiras */
+      var gfMetas=(c.objetivos||[]).filter(function(m){return m.alvo>0;});
+
+      /* Cor por performance */
+      var gfCor=function(v){return v>=0?"#2DD4A0":"#EF6461";};
+
+      /* ── Seção: Resumo do mês ── */
+      body+=secTitle("📊","Resumo Financeiro — "+MN[mesAtualIdx]+"/"+anoAtual);
+      body+='<div class="kpi-grid">';
+      body+='<div class="kpi"><div class="kpi-label">Receita Total</div><div class="kpi-value green">'+fmF(gfRec)+'</div><div class="kpi-sub">no mês</div></div>';
+      body+='<div class="kpi"><div class="kpi-label">Despesas</div><div class="kpi-value red">'+fmF(gfDesp)+'</div><div class="kpi-sub">no mês</div></div>';
+      body+='<div class="kpi"><div class="kpi-label">Saldo</div><div class="kpi-value '+(gfSaldo>=0?"green":"red")+'">'+(gfSaldo>=0?"+":"")+fmF(gfSaldo)+'</div><div class="kpi-sub">receita − despesas</div></div>';
+      body+='<div class="kpi"><div class="kpi-label">Taxa de Poupança</div><div class="kpi-value '+(gfPoup>=20?"green":gfPoup>=10?"gold":"red")+'">'+gfPoup.toFixed(1)+'%</div><div class="kpi-sub">'+(gfPoup>=20?"✅ saudável":gfPoup>=10?"⚡ moderada":"⚠️ abaixo do ideal")+'</div></div>';
+      body+='</div>';
+
+      if(gfInv>0){
+        body+='<div style="margin-top:12px;padding:12px 16px;background:rgba(45,212,160,0.07);border:1px solid rgba(45,212,160,0.2);border-radius:10px;display:flex;justify-content:space-between;align-items:center">';
+        body+='<div><div style="font-size:10px;font-weight:700;color:#2DD4A0;text-transform:uppercase;letter-spacing:.8px">💰 Investido no mês</div><div style="font-size:22px;font-weight:800;color:#2DD4A0;font-family:JetBrains Mono,monospace;margin-top:2px">'+fmF(gfInv)+'</div></div>';
+        body+='<div style="text-align:right"><div style="font-size:10px;color:#8B94A7">'+gfPoup.toFixed(1)+'% da receita</div><div style="font-size:11px;color:#2DD4A0;margin-top:2px">→ patrimônio construído</div></div>';
+        body+='</div>';
+      }
+
+      /* ── Seção: Evolução dos últimos meses ── */
+      if(gfHist.length>1){
+        body+="<!-- PAGE_BREAK -->";
+        body+=secTitle("📈","Evolução dos Últimos "+gfHist.length+" Meses");
+
+        /* Tabela de evolução */
+        body+='<div style="border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,0.06);margin-bottom:16px">';
+        body+='<table style="width:100%;border-collapse:collapse;font-size:10px">';
+        body+='<thead><tr style="background:rgba(212,163,40,0.08)">'
+          +'<th style="padding:9px 12px;text-align:left;color:#D4A328;font-weight:700;font-size:9px;letter-spacing:.8px">MÊS</th>'
+          +'<th style="padding:9px 10px;text-align:right;color:#2DD4A0;font-weight:700;font-size:9px">RECEITA</th>'
+          +'<th style="padding:9px 10px;text-align:right;color:#EF6461;font-weight:700;font-size:9px">DESPESA</th>'
+          +'<th style="padding:9px 10px;text-align:right;color:#D4A328;font-weight:700;font-size:9px">INVESTIDO</th>'
+          +'<th style="padding:9px 10px;text-align:right;color:#60a5fa;font-weight:700;font-size:9px">SALDO</th>'
+          +'<th style="padding:9px 10px;text-align:right;color:#A78BFA;font-weight:700;font-size:9px">POUPANÇA</th>'
+          +'</tr></thead><tbody>';
+        var gfRecMedia=gfHist.reduce(function(s,h){return s+h.rec},0)/(gfHist.length||1);
+        var gfDespMedia=gfHist.reduce(function(s,h){return s+h.desp},0)/(gfHist.length||1);
+        gfHist.forEach(function(h,i){
+          var isUlt=i===gfHist.length-1;
+          var bg=isUlt?"background:rgba(212,163,40,0.06)":"background:"+(i%2===0?"transparent":"rgba(255,255,255,0.015)");
+          body+='<tr style="border-top:1px solid rgba(255,255,255,0.04);'+bg+(isUlt?";border-top:1px solid rgba(212,163,40,0.2);border-bottom:1px solid rgba(212,163,40,0.2)":"")+';">'
+            +'<td style="padding:8px 12px;font-weight:'+(isUlt?800:600)+';color:'+(isUlt?"#D4A328":"#C5CDD8")+'">'+h.label+(isUlt?" ◀":"")+'</td>'
+            +'<td style="padding:8px 10px;text-align:right;color:#2DD4A0;font-weight:700;font-family:JetBrains Mono,monospace">'+fmF(h.rec)+'</td>'
+            +'<td style="padding:8px 10px;text-align:right;color:#EF6461;font-family:JetBrains Mono,monospace">'+fmF(h.desp)+'</td>'
+            +'<td style="padding:8px 10px;text-align:right;color:#D4A328;font-weight:700;font-family:JetBrains Mono,monospace">'+(h.inv>0?fmF(h.inv):"—")+'</td>'
+            +'<td style="padding:8px 10px;text-align:right;color:'+(h.saldo>=0?"#2DD4A0":"#EF6461")+';font-weight:700;font-family:JetBrains Mono,monospace">'+(h.saldo>=0?"+":"")+fmF(h.saldo)+'</td>'
+            +'<td style="padding:8px 10px;text-align:right;color:'+(h.poup>=20?"#2DD4A0":h.poup>=10?"#D4A328":"#EF6461")+';font-weight:700">'+h.poup.toFixed(1)+'%</td>'
+            +'</tr>';
+        });
+        /* Linha de média */
+        var gfInvMedia=gfHist.reduce(function(s,h){return s+h.inv},0)/(gfHist.length||1);
+        var gfSaldoMedia=gfHist.reduce(function(s,h){return s+h.saldo},0)/(gfHist.length||1);
+        var gfPoupMedia=gfHist.reduce(function(s,h){return s+h.poup},0)/(gfHist.length||1);
+        body+='<tr style="border-top:2px solid rgba(212,163,40,0.3);background:rgba(212,163,40,0.04)">'
+          +'<td style="padding:9px 12px;font-weight:800;color:#D4A328;font-size:9px">MÉDIA '+gfHist.length+'M</td>'
+          +'<td style="padding:9px 10px;text-align:right;font-weight:800;color:#2DD4A0;font-size:9px;font-family:JetBrains Mono,monospace">'+fmF(gfRecMedia)+'</td>'
+          +'<td style="padding:9px 10px;text-align:right;font-weight:800;color:#EF6461;font-size:9px;font-family:JetBrains Mono,monospace">'+fmF(gfDespMedia)+'</td>'
+          +'<td style="padding:9px 10px;text-align:right;font-weight:800;color:#D4A328;font-size:9px;font-family:JetBrains Mono,monospace">'+fmF(gfInvMedia)+'</td>'
+          +'<td style="padding:9px 10px;text-align:right;font-weight:800;font-size:9px;color:'+(gfSaldoMedia>=0?"#2DD4A0":"#EF6461")+';font-family:JetBrains Mono,monospace">'+(gfSaldoMedia>=0?"+":"")+fmF(gfSaldoMedia)+'</td>'
+          +'<td style="padding:9px 10px;text-align:right;font-weight:800;font-size:9px;color:'+(gfPoupMedia>=20?"#2DD4A0":gfPoupMedia>=10?"#D4A328":"#EF6461")+'">'+gfPoupMedia.toFixed(1)+'%</td>'
+          +'</tr>';
+        body+='</tbody></table></div>';
+
+        /* Gráfico de barras visual — receita vs despesa vs investimento */
+        var gfMaxVal=Math.max.apply(null,gfHist.map(function(h){return Math.max(h.rec,h.desp)}));
+        if(gfMaxVal>0){
+          body+='<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:16px 18px;margin-bottom:16px">';
+          body+='<div style="font-size:10px;font-weight:700;color:#8B94A7;text-transform:uppercase;letter-spacing:.8px;margin-bottom:12px">Receita vs Despesa</div>';
+          body+='<div style="display:flex;flex-direction:column;gap:6px">';
+          gfHist.forEach(function(h){
+            var wRec=(h.rec/gfMaxVal*100).toFixed(1);
+            var wDesp=(h.desp/gfMaxVal*100).toFixed(1);
+            body+='<div style="display:flex;align-items:center;gap:8px">'
+              +'<div style="width:40px;font-size:8px;color:#8B94A7;text-align:right;flex-shrink:0">'+h.label+'</div>'
+              +'<div style="flex:1">'
+              +'<div style="display:flex;gap:2px;height:10px;border-radius:4px;overflow:hidden;background:rgba(255,255,255,0.04)">'
+              +'<div style="width:'+wRec+'%;background:#2DD4A0;border-radius:4px 0 0 4px"></div>'
+              +'</div>'
+              +'<div style="display:flex;gap:2px;height:6px;border-radius:4px;overflow:hidden;background:rgba(255,255,255,0.02);margin-top:2px">'
+              +'<div style="width:'+wDesp+'%;background:#EF6461;border-radius:4px 0 0 4px"></div>'
+              +'</div>'
+              +'</div>'
+              +'<div style="width:70px;font-size:8px;color:#8B94A7;text-align:right;flex-shrink:0">'+(h.saldo>=0?"<span style=\"color:#2DD4A0\">+"+fmF(h.saldo).replace("R$ ","")+"</span>":"<span style=\"color:#EF6461\">"+fmF(h.saldo).replace("R$ ","")+"</span>")+'</div>'
+              +'</div>';
+          });
+          body+='</div>';
+          body+='<div style="display:flex;gap:16px;margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.05)">';
+          body+='<div style="display:flex;align-items:center;gap:5px"><div style="width:10px;height:10px;background:#2DD4A0;border-radius:2px"></div><span style="font-size:9px;color:#8B94A7">Receita</span></div>';
+          body+='<div style="display:flex;align-items:center;gap:5px"><div style="width:10px;height:6px;background:#EF6461;border-radius:2px"></div><span style="font-size:9px;color:#8B94A7">Despesa</span></div>';
+          body+='</div></div>';
+        }
+      }
+
+      /* ── Seção: Despesas por categoria ── */
+      if(gfCatList.length>0){
+        body+=secTitle("💸","Despesas por Categoria");
+        var gfDespTotal=gfCatList.reduce(function(s,e){return s+e[1]},0);
+        body+='<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">';
+        gfCatList.forEach(function(e){
+          var pct=gfDespTotal>0?(e[1]/gfDespTotal*100):0;
+          body+='<div style="display:flex;align-items:center;gap:10px">'
+            +'<div style="width:120px;font-size:10px;color:#C5CDD8;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+e[0]+'</div>'
+            +'<div style="flex:1;height:12px;background:rgba(255,255,255,0.04);border-radius:4px;overflow:hidden">'
+            +'<div style="height:100%;width:'+pct.toFixed(1)+'%;background:rgba(239,100,97,0.6);border-radius:4px"></div>'
+            +'</div>'
+            +'<div style="width:70px;text-align:right;font-size:10px;font-weight:700;color:#EF6461;font-family:JetBrains Mono,monospace;flex-shrink:0">'+fmF(e[1])+'</div>'
+            +'<div style="width:35px;text-align:right;font-size:9px;color:#8B94A7;flex-shrink:0">'+pct.toFixed(0)+'%</div>'
+            +'</div>';
+        });
+        body+='</div>';
+      }
+
+      /* ── Seção: Metas Financeiras ── */
+      if(gfMetas.length>0){
+        body+=secTitle("🎯","Metas Financeiras");
+        gfMetas.forEach(function(m){
+          var pct=m.alvo>0?(m.atual/m.alvo*100):0;
+          var prazoDate=m.prazo?new Date(m.prazo+"-01"):null;
+          var mesesRest=prazoDate?Math.max(1,Math.ceil((prazoDate-new Date())/(30*864e5))):24;
+          var aporteMes=Math.max(0,((m.alvo||0)-(m.atual||0))/mesesRest);
+          var corPct=pct>=100?"#2DD4A0":pct>=50?"#D4A328":"#EF6461";
+          body+='<div style="margin-bottom:14px;padding:14px 16px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px">';
+          body+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+          body+='<div style="font-size:12px;font-weight:700;color:#E2E8F0">'+(m.ic||"🎯")+" "+m.nome+'</div>';
+          body+='<div style="font-size:13px;font-weight:800;color:'+corPct+'">'+Math.min(pct,100).toFixed(0)+'%</div>';
+          body+='</div>';
+          body+='<div style="height:8px;background:rgba(255,255,255,0.06);border-radius:4px;overflow:hidden;margin-bottom:8px">'
+            +'<div style="height:100%;width:'+Math.min(pct,100).toFixed(1)+'%;background:'+corPct+';border-radius:4px"></div>'
+            +'</div>';
+          body+='<div style="display:flex;justify-content:space-between;font-size:9px;color:#8B94A7">';
+          body+='<span>Atual: <strong style="color:#E2E8F0">'+fmF(m.atual||0)+'</strong></span>';
+          body+='<span>Meta: <strong style="color:#D4A328">'+fmF(m.alvo||0)+'</strong></span>';
+          if(prazoDate)body+='<span>Prazo: <strong style="color:#E2E8F0">'+m.prazo.replace("-","/")+' — aporte sugerido: '+fmF(aporteMes)+'/mês</strong></span>';
+          body+='</div></div>';
+        });
+      }
+
+      /* ── Recomendações automáticas ── */
+      var gfRecs=[];
+      if(gfPoup<10)gfRecs.push({cor:"#EF6461",ic:"⚠️",txt:"Taxa de poupança abaixo de 10%. O ideal é poupar ao menos 20% da receita mensal para construção de patrimônio."});
+      else if(gfPoup>=20)gfRecs.push({cor:"#2DD4A0",ic:"✅",txt:"Excelente taxa de poupança de "+gfPoup.toFixed(1)+"%. Continue mantendo a disciplina!"});
+      if(gfSaldo<0)gfRecs.push({cor:"#EF6461",ic:"🚨",txt:"Saldo negativo de "+fmF(Math.abs(gfSaldo))+" no mês. Revise as despesas para retornar ao equilíbrio."});
+      if(gfHist.length>=3){
+        var ultTres=gfHist.slice(-3);
+        var tendDespesa=(ultTres[2].desp-ultTres[0].desp)/Math.max(1,ultTres[0].desp)*100;
+        if(tendDespesa>15)gfRecs.push({cor:"#D4A328",ic:"📈",txt:"Despesas crescendo "+tendDespesa.toFixed(0)+"% nos últimos 3 meses. Atenção para manter o controle."});
+      }
+      if(gfRecs.length>0){
+        body+='<div style="margin-top:8px">';
+        body+=secTitle("💡","Análise e Recomendações");
+        gfRecs.forEach(function(r){
+          body+='<div style="margin-bottom:10px;padding:12px 14px;background:'+r.cor+'0d;border:1px solid '+r.cor+'33;border-radius:10px;font-size:11px;color:#C5CDD8;line-height:1.6">'
+            +'<span style="font-size:14px;margin-right:8px">'+r.ic+'</span>'+r.txt+'</div>';
+        });
+        body+='</div>';
       }
     }
 
@@ -9156,8 +9368,51 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
 
     var bgDecor=isDarkReport?'<div class="bg-pattern"></div>':'';
 
-    /* === Capa Courinvest para relatórios de Patrimônio (mensal/anual/trimestral/completo) === */
-    var capaPat='';
+    /* === Capa GF (Gestão Financeira) — mesmo formato escuro do GP === */
+    var capaGF='';
+    if(isDarkReport && isFin && tipo==="planejamento"){
+      var MN_GF=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+      var _dcGF=new Date();_dcGF.setDate(1);_dcGF.setMonth(_dcGF.getMonth()-1);
+      var mesGFIdx=_dcGF.getMonth();var anoGF=_dcGF.getFullYear();
+      var logoGF='<div style="display:flex;align-items:center;gap:14px">'
+        +'<svg width="48" height="48" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
+        +'<defs><linearGradient id="lgGF" x1="0" y1="0" x2="100" y2="100"><stop offset="0%" stop-color="#60D8C0"/><stop offset="100%" stop-color="#38BDF8"/></linearGradient></defs>'
+        +'<circle cx="50" cy="50" r="46" stroke="url(#lgGF)" stroke-width="0.5" opacity=".15" fill="none"/>'
+        +'<path d="M50 6 C18 6,6 26,6 50 C6 74,18 94,50 94" stroke="url(#lgGF)" stroke-width="5" stroke-linecap="round" fill="none"/>'
+        +'<path d="M50 18 C28 18,18 32,18 50 C18 68,28 82,50 82" stroke="url(#lgGF)" stroke-width="4" stroke-linecap="round" fill="none" opacity=".7"/>'
+        +'<circle cx="58" cy="50" r="4" fill="url(#lgGF)"/></svg>'
+        +'<div><div style="font-size:18px;font-weight:800;color:#fff;letter-spacing:1.5px;line-height:1">COURINVEST</div>'
+        +'<div style="font-size:8.5px;font-weight:600;color:#B8C4D6;letter-spacing:3px;margin-top:3px">CONSULTORIA EM INVESTIMENTOS</div>'
+        +'</div></div>';
+      var svgGF='<svg width="420" height="420" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:-60px;right:-100px;opacity:0.35;pointer-events:none;z-index:1">'
+        +'<g stroke="#38BDF8" fill="none"><path d="M200,60 L340,200 L200,340 L60,200 Z" stroke-width="1" opacity=".3"/>'
+        +'<path d="M200,100 L300,200 L200,300 L100,200 Z" stroke-width="1.5" opacity=".4"/>'
+        +'<path d="M200,140 L260,200 L200,260 L140,200 Z" stroke-width="2" opacity=".55"/>'
+        +'<circle cx="200" cy="200" r="20" stroke-width="3" opacity=".5"/></g></svg>';
+      var gfMesActual=c.orcamento&&c.orcamento.mensais?Object.keys(c.orcamento.mensais).sort():[];
+      var gfAteual=gfMesActual.length>0?c.orcamento.mensais[gfMesActual[gfMesActual.length-1]]:{};
+      var gfRecCapa=(gfAteual.receitas||[]).reduce(function(s,r){return s+(r.valor||0)},0);
+      capaGF='<div class="cv-cover" style="position:relative;overflow:hidden;page-break-after:always;min-height:100vh">'
+        +'<div class="cv-cover-pattern"></div>'+svgGF
+        +'<div class="cv-cover-content">'
+        +'<div class="cv-cover-top">'+logoGF+'</div>'
+        +'<div class="cv-cover-mid">'
+        +'<div style="font-size:11px;font-weight:700;color:#38BDF8;letter-spacing:5px;text-transform:uppercase;margin-bottom:14px">📊 Gestão Financeira · Relatório Mensal</div>'
+        +'<div class="cv-cover-title">Controle e<br><span class="cv-cover-title-gold" style="color:#38BDF8;font-style:italic">Planejamento</span><br>Financeiro.</div>'
+        +'<p class="cv-cover-sub">Acompanhamento das receitas, despesas, poupança e metas financeiras. Evolução mensal com análise e recomendações personalizadas.</p>'
+        +'</div>'
+        +'<div class="cv-cover-bottom">'
+        +'<div class="cv-cover-cliente">'
+        +'<div class="cv-cover-cli-label">CLIENTE</div>'
+        +'<div class="cv-cover-cli-name">'+c.nome+'</div>'
+        +'<div class="cv-cover-cli-meta">Período de referência: <strong>'+MN_GF[mesGFIdx]+"/"+anoGF+'</strong></div>'
+        +(c.risco?'<div class="cv-cover-cli-meta">Perfil: <strong>'+c.risco+'</strong></div>':'')
+        +'</div>'
+        +'<div class="cv-cover-data"><div class="cv-cover-data-year">'+anoGF+'</div>'
+        +'<div style="font-size:11px;color:#9CADC9;margin-top:4px">'+MN_GF[mesGFIdx]+'</div>'
+        +(gfRecCapa>0?'<div style="font-size:11px;color:#38BDF8;margin-top:6px;font-weight:700">Receita: '+fmF(gfRecCapa)+'</div>':'')
+        +'</div></div></div></div>';
+    }
     if(isDarkReport && isPat && (tipo==="mensal"||tipo==="anual"||tipo==="trimestral"||tipo==="completo")){
       var MN_CAPA=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
       var _dcapa=new Date();_dcapa.setDate(1);_dcapa.setMonth(_dcapa.getMonth()-1);
@@ -9260,7 +9515,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       
       return true;
     })();
-    var capaFinal=_capaSecAtiva?capaPat:'';
+    var capaFinal=tipo==="planejamento"?capaGF:(_capaSecAtiva?capaPat:'');
 
     /* === FASE 3: PÁGINA DE SUMÁRIO === 
        Aparece entre capa e conteúdo. Lista as seções ativas com numeração e ícone.
@@ -28164,7 +28419,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '346';
+  var SW_VERSION = '349';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
