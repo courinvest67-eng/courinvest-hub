@@ -11541,6 +11541,19 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       +'</section>':"";
 
     /* ====== Encerramento ====== */
+    var primeiroNome=String(c.nome||"").split(" ")[0];
+    var saldoAtualFmt=fmt(an.kpis.saldoAtual);
+    var txPoupFmt=an.kpis.txPoupAtual.toFixed(0);
+    var qualificador=an.kpis.saldoAtual>0
+      ?(an.kpis.txPoupAtual>=20?"um resultado sólido — no ritmo certo para construir patrimônio":"um mês positivo, com espaço para evoluir ainda mais a poupança")
+      :"um mês mais apertado — vamos olhar juntos os ajustes para o próximo";
+    var melhorMesHist=an.historico.slice(0,6).reduce(function(best,h){
+      var sl=(h.tRec||0)-(h.tDesp||0);
+      var slBest=(best.tRec||0)-(best.tDesp||0);
+      return sl>slBest?h:best;
+    },an.historico[0]||{mes:an.mesRef,tRec:0,tDesp:0});
+    var ehMelhorMes=an.historico.length>=3 && melhorMesHist.mes===an.mesRef && an.kpis.saldoAtual>0;
+
     var fechamento='<section class="page page-dark cover-end">'
       +'<div class="bg-pattern" style="position:absolute;bottom:-100px;left:-100px;opacity:0.5">'+patternSvg(450,0.18)+'</div>'
       +'<div class="end-content">'
@@ -11548,7 +11561,11 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       +'<div>'
       +eyebrow("OBRIGADO PELA CONFIANÇA")
       +'<h2 class="end-title">Construindo seu<br/><span class="cover-title-gold">patrimônio juntos.</span></h2>'
-      +'<p class="end-text">Este relatório foi gerado pela equipe Courinvest a partir dos dados financeiros que você compartilhou. Para dúvidas, ajustes ou agendamento da próxima reunião de acompanhamento, entre em contato com seu consultor.</p>'
+      +'<p class="end-text">'+primeiroNome+', '+mesNome+' fechou com saldo de '+saldoAtualFmt+' e taxa de poupança de '+txPoupFmt+'% — '+qualificador+(ehMelhorMes?" — aliás, o melhor resultado dos últimos meses! 🏆":"")+'. Este relatório resume os dados que você compartilhou com a Courinvest neste período. Para dúvidas, ajustes ou para agendar a próxima reunião de acompanhamento, fale com seu consultor.</p>'
+      +'<div class="end-meta">'
+      +'<div><div class="end-meta-l">SALDO DO MÊS</div><div class="end-meta-v" style="color:'+(an.kpis.saldoAtual>=0?"#34D399":"#F87171")+'">'+saldoAtualFmt+'</div></div>'
+      +'<div><div class="end-meta-l">TAXA DE POUPANÇA</div><div class="end-meta-v">'+txPoupFmt+'%</div></div>'
+      +'</div>'
       +'<div class="end-divider"></div>'
       +'</div>'
       +'<div class="end-footer">© '+hoje.getFullYear()+' Courinvest Consultoria em Investimentos · courinvest.com.br</div>'
@@ -28467,7 +28484,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '349';
+  var SW_VERSION = '351';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
