@@ -11257,6 +11257,76 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       +'<div class="page-footer">Página 2 · Categorias e Maiores Despesas</div>'
       +'</section>';
 
+    /* ====== PÁGINA NOVA: Orçado vs. Realizado ======
+       Usa o campo "orc" (orçamento por lançamento) já preenchido nas telas de Receitas/Despesas/
+       Investimentos, mas que até agora nunca aparecia no relatório mensal. Só entra a categoria
+       que teve orçamento definido pelo menos uma vez no mês — sem isso, não dá pra comparar. */
+    var orcPorMacro={};
+    (an.snapAtual.despesas||[]).forEach(function(d){
+      var k=d.macro||"outros";
+      if(k==="investimentos")return;
+      orcPorMacro[k]=(orcPorMacro[k]||0)+(d.orc||0);
+    });
+    var orcList=Object.keys(an.atualPorMacro).map(function(k){
+      var realizado=an.atualPorMacro[k].tot;
+      var orcado=orcPorMacro[k]||0;
+      var m=MACRO_CATS[k]||{l:k,ic:"📦",cor:"#8B9DC3"};
+      return{k:k,label:m.l,ic:m.ic,cor:m.cor,realizado:realizado,orcado:orcado,pct:orcado>0?(realizado/orcado*100):null};
+    }).filter(function(o){return o.orcado>0}).sort(function(a,b){return(b.pct||0)-(a.pct||0)});
+
+    var secOrc=orcList.length>0?'<section class="page page-light">'
+      +'<div class="bg-pattern" style="position:absolute;top:-60px;right:-90px;opacity:0.04">'+patternSvg(380,0.4)+'</div>'
+      +'<div class="page-header">'+logoSvg(160,false)+'<div class="page-meta">'+esc(c.nome)+' · '+mesNome+'</div></div>'
+      +eyebrow("ORÇADO VS. REALIZADO")
+      +'<h2 class="page-title">O quanto o mês <span class="gold-highlight">saiu do planejado</span>.</h2>'
+      +'<p class="page-lead">Comparação entre o valor orçado e o efetivamente gasto em cada categoria, com base no planejamento definido com seu consultor.</p>'
+      +'<table class="cv-table">'
+      +'<thead><tr><th>CATEGORIA</th><th class="ta-right">ORÇADO</th><th class="ta-right">REALIZADO</th><th class="ta-right">% DO ORÇADO</th><th>STATUS</th></tr></thead><tbody>'
+      +orcList.map(function(o){
+        var statusCor=o.pct===null?"#5a5a6e":(o.pct<=100?"#0F9D58":o.pct<=130?"#E8810C":"#D93025");
+        var statusTxt=o.pct===null?"—":(o.pct<=100?"✅ Dentro do orçado":o.pct<=130?"⚠️ Levemente acima":"🚨 Muito acima do orçado");
+        return '<tr><td><span class="macro-pill" style="background:'+o.cor+'1f;color:'+o.cor+'">'+o.ic+' '+o.label+'</span></td>'
+          +'<td class="ta-right mono">'+fmtCol(o.orcado)+'</td>'
+          +'<td class="ta-right mono bold" style="color:'+o.cor+'">'+fmtCol(o.realizado)+'</td>'
+          +'<td class="ta-right mono bold" style="color:'+statusCor+'">'+(o.pct!==null?o.pct.toFixed(0)+"%":"—")+'</td>'
+          +'<td style="color:'+statusCor+';font-weight:700;font-size:10px">'+statusTxt+'</td></tr>';
+      }).join("")
+      +'</tbody></table>'
+      +'<div class="page-footer">Página · Orçado vs. Realizado</div>'
+      +'</section>':"";
+
+    /* ====== PÁGINA NOVA: Destaque do Mês ======
+       Só aparece quando o mês realmente tem uma conquista pra mostrar: foi o melhor saldo dos
+       últimos 6 meses, ou faz parte de uma sequência de pelo menos 3 meses seguidos de melhora. */
+    var saldoDoMes=function(h){return(h.tRec||0)-(h.tDesp||0)};
+    var streakMeses=0;
+    for(var _si=0;_si<an.historico.length-1;_si++){
+      if(saldoDoMes(an.historico[_si])>saldoDoMes(an.historico[_si+1]))streakMeses++;
+      else break;
+    }
+    var ultimos6=an.historico.slice(0,6);
+    var melhorHistMes=ultimos6.reduce(function(best,h){return saldoDoMes(h)>saldoDoMes(best)?h:best},ultimos6[0]||{mes:an.mesRef});
+    var ehMelhorMesPeriodo=melhorHistMes.mes===an.mesRef;
+    var mostraDestaque=an.kpis.saldoAtual>0&&(ehMelhorMesPeriodo||streakMeses>=2);
+
+    var varDespAbs=an.snapAnterior?(an.snapAtual.tDespPuro-an.snapAnterior.tDespPuro):null;
+    var varDespTxt=varDespAbs!==null?((varDespAbs<=0?"−":"+")+fmt(Math.abs(varDespAbs))+" · "+(mesAntNome||"mês ant.")+" → "+mesNome):"—";
+    var varRecTxt=an.kpis.varRec!==null?((an.kpis.varRec>=0?"+":"")+an.kpis.varRec.toFixed(1)+"% vs "+(mesAntNome||"mês ant.")):"";
+
+    var secDestaque=mostraDestaque?'<section class="page page-light">'
+      +'<div class="bg-pattern" style="position:absolute;top:-60px;right:-90px;opacity:0.04">'+patternSvg(380,0.4)+'</div>'
+      +'<div class="page-header">'+logoSvg(160,false)+'<div class="page-meta">'+esc(c.nome)+' · '+mesNome+'</div></div>'
+      +eyebrow((mesNome.split("/")[0]||"").toUpperCase()+" EM DESTAQUE")
+      +'<h2 class="page-title">A conquista <span class="gold-highlight">do mês</span>.</h2>'
+      +'<p class="page-lead">'+mesNome+' registrou '+(ehMelhorMesPeriodo?"o melhor saldo dos últimos meses":"mais um mês de evolução")+': '+fmt(an.kpis.saldoAtual)+(streakMeses>=2?" — "+(streakMeses+1)+"º mês seguido de melhora!":"")+'</p>'
+      +'<div class="kpi-row" style="margin-top:10px">'
+      +'<div class="kpi-card"><div class="kpi-label">RECEITA DO MÊS</div><div class="kpi-value" style="color:#0F9D58">'+fmt(an.snapAtual.tRec)+'</div>'+(varRecTxt?'<div class="kpi-sub" style="color:#0F9D58">'+varRecTxt+'</div>':'')+'</div>'
+      +'<div class="kpi-card"><div class="kpi-label">DESPESAS</div><div class="kpi-value" style="font-size:16px">'+varDespTxt+'</div></div>'
+      +'<div class="kpi-card"><div class="kpi-label">SALDO DO MÊS</div><div class="kpi-value" style="color:#D4A328">'+fmt(an.kpis.saldoAtual)+'</div><div class="kpi-sub" style="color:#D4A328">'+(ehMelhorMesPeriodo?"Melhor saldo do período":"Em sequência de melhora")+'</div></div>'
+      +'</div>'
+      +'<div class="page-footer">Página · Destaque do Mês</div>'
+      +'</section>':"";
+
     /* ====== PATRIMÔNIO + APORTES + OBJETIVOS — 3 páginas integradas ====== */
     var totInvAtual=an.snapAtual.tInv||0;
     var totInvAnt=an.snapAnterior?(an.snapAnterior.tInv||0):0;
@@ -11729,6 +11799,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
         if(sec.capa!==false) partes+=capa;
         if(sec.orcamento!==false || sec.resumoExec!==false) partes+=sec1; 
         if(sec.despesas!==false) partes+=sec2;
+        if(sec.despesas!==false) partes+=secOrc;
+        if(sec.despesas!==false) partes+=secDestaque;
         if(sec.carteira!==false || sec.rentabilidade!==false) partes+=secPat; 
         if(sec.metas!==false) partes+=secAportes;
         if(sec.objetivos!==false) partes+=secObjs;
@@ -28484,7 +28556,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '351';
+  var SW_VERSION = '352';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
