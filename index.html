@@ -22518,6 +22518,7 @@ function NewsView({data,dispatch}){
   var s9=useState({}),macroData=s9[0],sMacroData=s9[1];
   var s10=useState(false),macroLoad=s10[0],sMacroLoad=s10[1];
   var s11=useState(false),iaLoad=s11[0],sIaLoad=s11[1];
+  var s12=useState(false),testSending=s12[0],sTestSending=s12[1];
 
   /* === NOTÍCIAS AO VIVO via RSS === */
   var nState=useState({mercado:[],rendaFixa:[],fii:[],internacional:[]});var newsLive=nState[0];var sNewsLive=nState[1];
@@ -23259,6 +23260,71 @@ function NewsView({data,dispatch}){
             }} style={{padding:"6px 10px",borderRadius:8,border:"1px solid "+(data.config&&data.config.emailjs?"rgba(45,212,160,0.4)":T.bdrL),background:data.config&&data.config.emailjs?"rgba(45,212,160,0.08)":T.w3,color:data.config&&data.config.emailjs?T.green:T.t3,fontSize:10,fontWeight:600,cursor:"pointer"}}>
               📧 {data.config&&data.config.emailjs?"E-mail ativo":"Configurar E-mail"}
             </button>
+            {data.config&&data.config.emailjs&&data.config.emailjs.publicKey&&data.config.emailjs.serviceId&&data.config.emailjs.templateId && (
+              <button disabled={testSending} onClick={function(){
+                var cfg=data.config.emailjs;
+                var testEmail=prompt("Enviar e-mail de teste para qual endereço?\n\nUse seu e-mail pessoal para conferir o template antes de enviar aos clientes.","courinvest.67@gmail.com");
+                if(!testEmail||!testEmail.trim())return;
+                testEmail=testEmail.trim();
+                sTestSending(true);
+                try{
+                  if(window.emailjs)window.emailjs.init({publicKey:cfg.publicKey,limitRate:false});
+                  else{alert("⚠️ SDK do EmailJS não carregou. Recarregue a página e tente novamente.");sTestSending(false);return;}
+                }catch(e){alert("Erro ao iniciar EmailJS: "+e.message);sTestSending(false);return;}
+
+                var hojeT=new Date();
+                var MN_T=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+                var mesRefT=MN_T[hojeT.getMonth()]+"/"+hojeT.getFullYear();
+                var reportHtmlT='<!DOCTYPE html><html><head><meta charset="UTF-8">'
+                  +'<style>body{font-family:Arial,sans-serif;background:#f5f5f5;margin:0;padding:20px}'
+                  +'.card{background:#fff;border-radius:12px;padding:24px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,.08)}'
+                  +'.header{background:#0A1628;color:#fff;border-radius:12px;padding:28px;margin-bottom:16px;text-align:center}'
+                  +'.header h1{font-size:22px;margin:0 0 6px;color:#D4A328}'
+                  +'.header p{margin:0;color:#8B94A7;font-size:13px}'
+                  +'.kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:16px 0}'
+                  +'.kpi{background:#f8f9fa;border-radius:8px;padding:14px;text-align:center;border-left:3px solid #D4A328}'
+                  +'.kpi-label{font-size:11px;color:#666;font-weight:600;text-transform:uppercase;letter-spacing:.5px}'
+                  +'.kpi-value{font-size:20px;font-weight:700;color:#0A1628;margin-top:4px}'
+                  +'.kpi-value.green{color:#2DD4A0}'
+                  +'.footer{text-align:center;color:#999;font-size:11px;margin-top:20px}'
+                  +'</style></head><body>'
+                  +'<div class="header"><h1>COURINVEST</h1><p>🧪 E-mail de teste · '+mesRefT+'</p></div>'
+                  +'<div class="card"><p style="font-size:15px;color:#333">Olá <strong>Teste</strong>,</p>'
+                  +'<p style="color:#555;line-height:1.7">Este é um e-mail de teste para validar o template e a integração do EmailJS antes do envio real aos clientes.</p>'
+                  +'<div class="kpis">'
+                  +'<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value">R$ 1.250.000,00</div></div>'
+                  +'<div class="kpi"><div class="kpi-label">Rentabilidade do mês</div><div class="kpi-value green">+1,85%</div></div>'
+                  +'</div>'
+                  +'<p style="color:#555;font-size:13px">Se você recebeu este e-mail corretamente, com a formatação preservada, a configuração está funcionando.</p>'
+                  +'</div>'
+                  +'<div class="footer">Courinvest Consultoria em Investimentos · '+(cfg.remetente||"contato@courinvest.com.br")+'<br>Mensagem de teste — não enviada a nenhum cliente.</div>'
+                  +'</body></html>';
+
+                var templateParams={
+                  to_email:testEmail,
+                  to_name:"Teste",
+                  mes_ref:mesRefT,
+                  patrimonio:"R$ 1.250.000,00",
+                  rentabilidade:"+1,85%",
+                  tipo_servico:"🧪 TESTE — Gestão de Patrimônio",
+                  report_html:reportHtmlT,
+                  from_name:cfg.nomeRemetente||"Courinvest",
+                  reply_to:cfg.remetente||"",
+                };
+
+                window.emailjs.send(cfg.serviceId,cfg.templateId,templateParams)
+                  .then(function(){
+                    sTestSending(false);
+                    alert("✅ E-mail de teste enviado para "+testEmail+"!\n\nVerifique a caixa de entrada (e o spam) em alguns instantes.");
+                  })
+                  .catch(function(e){
+                    sTestSending(false);
+                    alert("❌ Erro ao enviar e-mail de teste:\n\n"+(e&&e.text||e&&e.message||JSON.stringify(e)));
+                  });
+              }} style={{padding:"6px 10px",borderRadius:8,border:"1px solid rgba(56,189,248,0.4)",background:testSending?"rgba(56,189,248,0.05)":"rgba(56,189,248,0.1)",color:T.cyan,fontSize:10,fontWeight:600,cursor:testSending?"not-allowed":"pointer",opacity:testSending?0.6:1}}>
+                {testSending?"⏳ Enviando...":"🧪 Enviar teste"}
+              </button>
+            )}
           </div>
           <div style={{height:18}}/>
 
