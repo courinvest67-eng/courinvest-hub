@@ -1715,6 +1715,26 @@ function Dash({data:d,onSel:os,goTo}){
       <Mo open={relModal} onClose={function(){sRelModal(false)}} title={"📬 Relatórios de "+mesRefNome} wide={true}>
           <div style={{maxWidth:700,width:"100%"}}>
 
+            {/* Config de e-mail acessível direto do modal */}
+            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
+              <button onClick={function(){
+                var cfg=d.config&&d.config.emailjs||{};
+                var pubKey=prompt("📧 CONFIGURAR E-MAIL AUTOMÁTICO\n\nPublic Key do EmailJS\n(emailjs.com → Account → API Keys):",cfg.publicKey||"");
+                if(pubKey===null)return;
+                if(!pubKey.trim()){dp({t:"CONFIG_SET",p:{key:"emailjs",value:null}});alert("❌ E-mail desativado.");return;}
+                var svcId=prompt("Service ID:\n(emailjs.com → Email Services)",cfg.serviceId||"service_zgq8elm");
+                if(!svcId)return;
+                var tplId=prompt("Template ID:\n(emailjs.com → Email Templates)",cfg.templateId||"template_847kwwg");
+                if(!tplId)return;
+                var nomeRem=prompt("Nome do remetente:",cfg.nomeRemetente||"Courinvest");
+                var emailRem=prompt("E-mail reply-to:",cfg.remetente||"courinvest.67@gmail.com");
+                dp({t:"CONFIG_SET",p:{key:"emailjs",value:{publicKey:pubKey.trim(),serviceId:svcId.trim(),templateId:tplId.trim(),nomeRemetente:(nomeRem||"Courinvest").trim(),remetente:(emailRem||"").trim()}}});
+                alert("✅ E-mail configurado! Relatórios serão enviados automaticamente por e-mail.");
+              }} style={{padding:"5px 12px",borderRadius:7,border:"1px solid "+(d.config&&d.config.emailjs?"rgba(45,212,160,0.4)":T.bdrL),background:d.config&&d.config.emailjs?"rgba(45,212,160,0.08)":"transparent",color:d.config&&d.config.emailjs?T.green:T.t3,fontSize:10,fontWeight:700,cursor:"pointer"}}>
+                📧 {d.config&&d.config.emailjs?"✅ E-mail ativo":"Configurar E-mail"}
+              </button>
+            </div>
+
             {/* Resumo */}
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:16}}>
               {[
@@ -28772,7 +28792,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '353';
+  var SW_VERSION = '354';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
