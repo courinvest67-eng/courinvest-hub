@@ -89,6 +89,8 @@ table{border-spacing:0}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.4/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<!-- EmailJS SDK para envio automático de relatórios por e-mail -->
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script>if(typeof pdfjsLib!=="undefined")pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";</script>
 
 <!-- Firebase SDK (compat for Babel standalone) -->
@@ -1443,6 +1445,84 @@ function Dash({data:d,onSel:os,goTo}){
   const[relAprovados,sRelAprovados]=useState({});
   const[relEnviados,sRelEnviados]=useState({});
   const[relEnviando,sRelEnviando]=useState(null);
+  const[emailStatus,sEmailStatus]=useState({}); /* {clienteId: "enviando"|"ok"|"erro"} */
+
+  /* ===== ENVIO DE RELATÓRIO POR E-MAIL (EmailJS) =====
+     Requer config em d.config.emailjs: { publicKey, serviceId, templateId }
+     Template deve ter vars: to_email, to_name, mes_ref, patrimonio, rentabilidade, ganho, obs */
+  var sendReportEmail=function(c,tipoRel,mesRefNomeParam){
+    return new Promise(function(resolve,reject){
+      var cfg=d.config&&d.config.emailjs;
+      if(!cfg||!cfg.publicKey||!cfg.serviceId||!cfg.templateId){
+        reject(new Error("EmailJS não configurado. Acesse Configurações → E-mail para configurar."));return;
+      }
+      if(!c.email){reject(new Error("Cliente sem e-mail cadastrado."));return;}
+      try{
+        if(window.emailjs)window.emailjs.init({publicKey:cfg.publicKey,limitRate:false});
+        else{reject(new Error("SDK EmailJS não carregou."));return;}
+      }catch(e){reject(e);return;}
+
+      /* Gera o relatório HTML para enviar como corpo do e-mail */
+      var reportHtml="";
+      try{
+        /* Usa a função gerarRelatorio do CD component via evento */
+        var pat=c.patGorila||c.pat||0;
+        var rent=c._gorilaRent&&c._gorilaRent.periods?(function(){
+          var p=c._gorilaRent.periods.find(function(x){var s=String(x.p||"").toLowerCase();return s.indexOf("ltimo")>=0||s.indexOf("mes")>=0;});
+          return p&&typeof p.rent==="number"?(p.rent*100).toFixed(2)+"%":"—";
+        })():"—";
+        var fee=feeBaseDoCliente(c).fee||0;
+        var fmV=function(v){return "R$ "+parseFloat(v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});};
+        var MN_EMAIL=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+        var hoje=new Date();var mesE=hoje.getMonth();var anoE=hoje.getFullYear();
+
+        reportHtml='<!DOCTYPE html><html><head><meta charset="UTF-8">'
+          +'<style>body{font-family:Arial,sans-serif;background:#f5f5f5;margin:0;padding:20px}'
+          +'.card{background:#fff;border-radius:12px;padding:24px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,.08)}'
+          +'.header{background:#0A1628;color:#fff;border-radius:12px;padding:28px;margin-bottom:16px;text-align:center}'
+          +'.header h1{font-size:22px;margin:0 0 6px;color:#D4A328}'
+          +'.header p{margin:0;color:#8B94A7;font-size:13px}'
+          +'.kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:16px 0}'
+          +'.kpi{background:#f8f9fa;border-radius:8px;padding:14px;text-align:center;border-left:3px solid #D4A328}'
+          +'.kpi-label{font-size:11px;color:#666;font-weight:600;text-transform:uppercase;letter-spacing:.5px}'
+          +'.kpi-value{font-size:20px;font-weight:700;color:#0A1628;margin-top:4px}'
+          +'.kpi-value.green{color:#2DD4A0}.kpi-value.red{color:#EF6461}'
+          +'.footer{text-align:center;color:#999;font-size:11px;margin-top:20px}'
+          +'</style></head><body>'
+          +'<div class="header"><h1>COURINVEST</h1><p>Relatório Mensal · '+MN_EMAIL[mesE]+'/'+anoE+'</p></div>'
+          +'<div class="card"><p style="font-size:15px;color:#333">Olá <strong>'+c.nome+'</strong>,</p>'
+          +'<p style="color:#555;line-height:1.7">Segue abaixo o resumo do seu relatório mensal de '+(tipoRel==="planejamento"?"planejamento financeiro":"gestão de patrimônio")+' referente a <strong>'+MN_EMAIL[mesE]+'/'+anoE+'</strong>.</p>'
+          +'<div class="kpis">'
+          +(pat>0?'<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value">'+fmV(pat)+'</div></div>':'')
+          +(rent!=="—"?'<div class="kpi"><div class="kpi-label">Rentabilidade do mês</div><div class="kpi-value green">'+rent+'</div></div>':'')
+          +(fee>0?'<div class="kpi"><div class="kpi-label">Fee de gestão</div><div class="kpi-value">'+fmV(fee)+'</div></div>':'')
+          +'</div>'
+          +'<p style="color:#555;font-size:13px">Para visualizar o relatório completo com todos os detalhes, gráficos e análises, entre em contato conosco ou acesse o relatório em PDF que será enviado em anexo.</p>'
+          +'</div>'
+          +'<div class="card" style="background:#f0fdf4;border-left:4px solid #2DD4A0">'
+          +'<p style="margin:0;font-size:13px;color:#333">💬 <strong>Precisa de alguma informação ou tem dúvidas?</strong><br>Responda este e-mail ou entre em contato diretamente.</p>'
+          +'</div>'
+          +'<div class="footer">Courinvest Consultoria em Investimentos · '+(cfg.remetente||"contato@courinvest.com.br")+'<br>Esta mensagem é confidencial e destinada ao destinatário indicado.</div>'
+          +'</body></html>';
+      }catch(e){console.warn("Erro ao gerar HTML do e-mail:",e);}
+
+      var templateParams={
+        to_email:c.email,
+        to_name:c.nome.split(" ")[0],
+        mes_ref:MN_EMAIL?.[mesE]+"/"+anoE,
+        patrimonio:pat>0?fmV(pat):"—",
+        rentabilidade:rent,
+        tipo_servico:tipoRel==="planejamento"?"Gestão Financeira":"Gestão de Patrimônio",
+        report_html:reportHtml,
+        from_name:cfg.nomeRemetente||"Courinvest",
+        reply_to:cfg.remetente||"",
+      };
+
+      window.emailjs.send(cfg.serviceId,cfg.templateId,templateParams)
+        .then(function(){resolve();})
+        .catch(function(e){reject(new Error("EmailJS: "+(e&&e.text||e&&e.message||JSON.stringify(e))));});
+    });
+  };
   /* === RESPONSIVE: detecção reativa de mobile pro Dashboard === */
   const[isMob,sIsMob]=useState(typeof window!=="undefined"&&window.innerWidth<768);
   const[isXS,sIsXS]=useState(typeof window!=="undefined"&&window.innerWidth<420);
@@ -1747,7 +1827,22 @@ function Dash({data:d,onSel:os,goTo}){
                     }
                   }catch(e){console.warn("Rel PDF:",e);}
 
-                  /* 2. Abre WhatsApp com mensagem pronta (2s depois para não bloquear popup) */
+                  /* 2. Envia e-mail automático se EmailJS configurado */
+                  var tipoRelEmail=(Array.isArray(cl.sv)?cl.sv:(cl.sv?[cl.sv]:[])).includes("planejamento")&&!(Array.isArray(cl.sv)?cl.sv:(cl.sv?[cl.sv]:[])).includes("patrimonio")?"planejamento":"mensal";
+                  if(d.config&&d.config.emailjs&&d.config.emailjs.publicKey&&cl.email){
+                    sEmailStatus(function(p){var n=Object.assign({},p);n[cl.id]="enviando";return n;});
+                    sendReportEmail(cl,tipoRelEmail,mesRefNome)
+                      .then(function(){
+                        sEmailStatus(function(p){var n=Object.assign({},p);n[cl.id]="ok";return n;});
+                        console.log("[E-mail] Enviado para",cl.nome,cl.email);
+                      })
+                      .catch(function(e){
+                        sEmailStatus(function(p){var n=Object.assign({},p);n[cl.id]="erro:"+e.message;return n;});
+                        console.warn("[E-mail] Erro",cl.nome,":",e.message);
+                      });
+                  }
+
+                  /* 3. Abre WhatsApp com mensagem pronta (2s depois para não bloquear popup) */
                   setTimeout(function(){
                     var waGrupo=(cl.waGrupo||"").trim();
                     var nome1=cl.nome.split(" ")[0];
@@ -1776,10 +1871,16 @@ function Dash({data:d,onSel:os,goTo}){
               </button>
             </div>
 
-            {/* Aviso sobre PDF */}
-            <div style={{padding:"10px 14px",background:"rgba(56,189,248,0.06)",border:"1px solid rgba(56,189,248,0.2)",borderRadius:8,fontSize:10,color:T.cyan,lineHeight:1.6,marginBottom:8}}>
-              💡 <strong>Como funciona o envio:</strong> O WhatsApp abre com a mensagem já digitada. Para enviar o PDF do relatório, salve-o como PDF pelo navegador (Ctrl+P → Salvar como PDF) e anexe no WhatsApp antes de enviar.
-            </div>
+            {/* Info sobre e-mail automático */}
+            {d.config&&d.config.emailjs&&d.config.emailjs.publicKey?(
+              <div style={{padding:"10px 14px",background:"rgba(45,212,160,0.06)",border:"1px solid rgba(45,212,160,0.2)",borderRadius:8,fontSize:10,color:T.green,lineHeight:1.6,marginBottom:8}}>
+                ✅ <strong>E-mail automático ativado.</strong> Ao aprovar e clicar em Enviar, os relatórios são enviados automaticamente por e-mail para cada cliente cadastrado.
+              </div>
+            ):(
+              <div style={{padding:"10px 14px",background:"rgba(212,163,40,0.06)",border:"1px solid rgba(212,163,40,0.2)",borderRadius:8,fontSize:10,color:T.gold,lineHeight:1.6,marginBottom:8}}>
+                📧 <strong>Ative o envio automático por e-mail:</strong> Acesse <strong>Configurações → E-mail (EmailJS)</strong> para configurar. Após configurado, relatórios são enviados automaticamente por e-mail + WhatsApp ao mesmo tempo.
+              </div>
+            )}
 
             {/* Lista de clientes */}
             <div id="rel-lista" style={{maxHeight:420,overflowY:"auto",display:"flex",flexDirection:"column",gap:6}}>
@@ -1823,6 +1924,12 @@ function Dash({data:d,onSel:os,goTo}){
                       {!enviado&&aprovado&&!enviando&&<div style={{fontSize:10,color:T.gold,fontWeight:700}}>✓ aprovado</div>}
                       {!enviado&&!aprovado&&<div style={{fontSize:10,color:T.t3}}>pendente</div>}
                     </div>
+                    {/* Status do e-mail */}
+                    {emailStatus[c.id]&&(
+                      <div style={{fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:5,background:emailStatus[c.id]==="ok"?"rgba(45,212,160,0.15)":emailStatus[c.id]==="enviando"?"rgba(56,189,248,0.15)":"rgba(239,100,97,0.15)",color:emailStatus[c.id]==="ok"?T.green:emailStatus[c.id]==="enviando"?T.cyan:T.red,whiteSpace:"nowrap"}}>
+                        {emailStatus[c.id]==="ok"?"📧✅":emailStatus[c.id]==="enviando"?"📧⏳":"📧❌"}
+                      </div>
+                    )}
                     {/* PDF com tipo correto baseado no serviço */}
                     <button onClick={function(){
                       sRelModal(false);
@@ -1847,7 +1954,7 @@ function Dash({data:d,onSel:os,goTo}){
           </div>
         </Mo>
 
-      <div style={{display:"flex",gap:5,marginBottom:18,flexWrap:"wrap"}}>{[{id:"geral",l:"Visão Geral"},{id:"receita",l:"💰 Receita"},{id:"negocio",l:"Métricas do Negócio"},{id:"clientes",l:"Base de Clientes"},{id:"oport",l:"🎯 Oportunidades"},{id:"agenda",l:"📅 Agenda"}].map(t=><button key={t.id} onClick={()=>sDt(t.id)} style={{padding:"8px 16px",borderRadius:12,fontSize:11,fontWeight:600,cursor:"pointer",border:dt===t.id?"1.5px solid "+T.gold:"1px solid "+T.bdrL,background:dt===t.id?T.goldD:"transparent",color:dt===t.id?T.gold:T.t3}}>{t.l}</button>)}</div>
+      <div style={{display:"flex",gap:5,marginBottom:18,flexWrap:"wrap"}}>{[{id:"geral",l:"Visão Geral"},{id:"receita",l:"💰 Receita"},{id:"negocio",l:"Métricas do Negócio"},{id:"clientes",l:"Base de Clientes"},{id:"oport",l:"🎯 Oportunidades"},{id:"retencao",l:"🛡 Retenção IA"},{id:"agenda",l:"📅 Agenda"}].map(t=><button key={t.id} onClick={()=>sDt(t.id)} style={{padding:"8px 16px",borderRadius:12,fontSize:11,fontWeight:600,cursor:"pointer",border:dt===t.id?"1.5px solid "+(t.id==="retencao"?T.cyan:T.gold):"1px solid "+T.bdrL,background:dt===t.id?(t.id==="retencao"?"rgba(56,189,248,0.1)":T.goldD):"transparent",color:dt===t.id?(t.id==="retencao"?T.cyan:T.gold):T.t3}}>{t.l}</button>)}</div>
 
       {dt==="geral" && (
         <div>
@@ -3137,6 +3244,229 @@ function Dash({data:d,onSel:os,goTo}){
                 </div>
               </Cd>
             </div>
+          </div>
+        );
+      })()}
+
+      })()}
+
+      {/* ===== 🛡 AGENTE DE RETENÇÃO IA ===== */}
+      {dt==="retencao" && (function(){
+        /* Config do agente */
+        var cfgRet=d.config&&d.config.retencao||{};
+        var nomeSocio1=cfgRet.nomeSocio1||"Igor";
+        var nomeSocio2=cfgRet.nomeSocio2||"";
+        var assinatura=nomeSocio2?nomeSocio1+" e "+nomeSocio2:nomeSocio1;
+
+        /* ── Cálculo de Score de Retenção (0-100) ── */
+        var hoje=new Date();
+        var scoreCliente=function(c){
+          var score=100;
+          var motivos=[];
+          var alertas=[];
+
+          /* 1. Última interação */
+          var itsC=(d.it||[]).filter(function(i){return i.cliId===c.id;}).sort(function(a,b){return new Date(b.dt)-new Date(a.dt);});
+          var diasSemContato=itsC.length>0?Math.round((hoje-new Date(itsC[0].dt))/864e5):999;
+          if(diasSemContato>90){score-=35;motivos.push("sem contato há "+diasSemContato+" dias");alertas.push("🚨 "+diasSemContato+"d sem contato");}
+          else if(diasSemContato>60){score-=25;motivos.push(diasSemContato+" dias sem contato");alertas.push("⚠️ "+diasSemContato+"d sem contato");}
+          else if(diasSemContato>30){score-=10;motivos.push(diasSemContato+" dias sem contato");}
+
+          /* 2. Carteira atualizada */
+          var diasSemGorila=c._ativosTs?Math.round((hoje-new Date(c._ativosTs))/864e5):999;
+          if(diasSemGorila>60){score-=20;alertas.push("📊 Gorila "+diasSemGorila+"d desatualizado");}
+          else if(diasSemGorila>30){score-=8;}
+
+          /* 3. Rentabilidade negativa recente */
+          var rentMes=null;
+          if(c._gorilaRent&&c._gorilaRent.periods){
+            var pm=c._gorilaRent.periods.find(function(p){var s=String(p.p||"").toLowerCase();return s.indexOf("ltimo")>=0||s.indexOf("mes")>=0;});
+            if(pm&&typeof pm.rent==="number")rentMes=pm.rent*100;
+          }
+          if(rentMes!==null&&rentMes<-3){score-=15;alertas.push("📉 Rent. "+rentMes.toFixed(1)+"% no mês");}
+          else if(rentMes!==null&&rentMes<0){score-=5;}
+
+          /* 4. Sem objetivos definidos */
+          if(!c.objetivos||c.objetivos.length===0){score-=5;motivos.push("sem objetivos cadastrados");}
+
+          /* 5. Fee alto em relação ao patrimônio */
+          var pat=c.patGorila||c.pat||0;
+          var fee=feeBaseDoCliente(c).fee||0;
+          var txEf=pat>0?(fee/pat*100):0;
+          if(txEf>0.5&&pat<200000){score-=5;}
+
+          /* Urgência da ação */
+          var urgencia=score<=35?"critico":score<=60?"atencao":"saudavel";
+          var corUrg=urgencia==="critico"?T.red:urgencia==="atencao"?T.orange:T.green;
+
+          return{
+            cli:c,score:Math.max(0,score),urgencia:urgencia,cor:corUrg,
+            diasSemContato:diasSemContato,diasSemGorila:diasSemGorila,
+            rentMes:rentMes,motivos:motivos,alertas:alertas,
+            ultimaInt:itsC.length>0?itsC[0]:null,pat:pat,fee:fee,
+            qtdInteracoes:itsC.length,
+          };
+        };
+
+        var clientes=d.cl.filter(function(c){return Array.isArray(c.sv)?c.sv.includes("patrimonio")||c.sv.includes("planejamento"):false;});
+        var scores=clientes.map(scoreCliente).sort(function(a,b){return a.score-b.score;});
+        var criticos=scores.filter(function(s){return s.urgencia==="critico";});
+        var atencao=scores.filter(function(s){return s.urgencia==="atencao";});
+        var saudaveis=scores.filter(function(s){return s.urgencia==="saudavel";});
+
+        /* Estado local para mensagens geradas pela IA */
+        var [msgGeradas,sMsgGeradas]=React.useState({});
+        var [gerando,sGerando]=React.useState({});
+        var [cfgModal,sCfgModal]=React.useState(false);
+
+        /* Gera mensagem personalizada via Claude */
+        var gerarMensagem=function(s){
+          if(gerando[s.cli.id])return;
+          sGerando(function(p){var n=Object.assign({},p);n[s.cli.id]=true;return n;});
+          var c=s.cli;
+          var svArr=Array.isArray(c.sv)?c.sv:(c.sv?[c.sv]:[]);
+          var tipoSrv=svArr.includes("patrimonio")?"Gestão de Patrimônio":"Gestão Financeira";
+          var nome1=c.nome.split(" ")[0];
+          var contextoPat=s.pat>0?"com patrimônio investido de R$ "+s.pat.toLocaleString("pt-BR",{maximumFractionDigits:0}):"";
+          var contextoRent=s.rentMes!==null?"A carteira rendeu "+(s.rentMes>=0?"+":"")+s.rentMes.toFixed(2)+"% no último mês. ":"";
+          var contextoObs=s.diasSemContato<999?"O último contato foi há "+s.diasSemContato+" dias. ":"Este é o primeiro contato. ";
+          var objetivosStr=(c.objetivos||[]).length>0?"Os objetivos financeiros incluem: "+c.objetivos.map(function(o){return o.nome;}).join(", ")+". ":"";
+          var perfilStr=c.risco?"Perfil "+c.risco+". ":"";
+          var prompt="Você é "+assinatura+", sócio(a) da Courinvest Consultoria em Investimentos. Escreva uma mensagem de WhatsApp pessoal e calorosa para o cliente "+c.nome+" ("+tipoSrv+") "+contextoPat+". "+contextoRent+contextoObs+objetivosStr+perfilStr+"O tom deve ser completamente humano, como se você estivesse escrevendo pessoalmente do seu celular. Use o primeiro nome ("+nome1+"). Seja genuíno e interessado no bem-estar financeiro dele(a), não comercial. Máximo 3 parágrafos curtos. Assine como "+assinatura+". Escreva em português brasileiro. Não use emojis em excesso — apenas 1-2 no máximo para ser natural.";
+
+          fetch("https://api.anthropic.com/v1/messages",{
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({
+              model:"claude-sonnet-4-6",max_tokens:400,
+              system:"Você é um consultor financeiro humano, caloroso e genuíno. Suas mensagens parecem escritas à mão, não por IA. Nunca mencione que é IA.",
+              messages:[{role:"user",content:prompt}]
+            })
+          }).then(function(r){return r.json();})
+          .then(function(data){
+            var txt=data.content&&data.content[0]&&data.content[0].text;
+            if(txt){
+              sMsgGeradas(function(p){var n=Object.assign({},p);n[c.id]=txt;return n;});
+            }
+          }).catch(function(e){console.warn("Agente retenção:",e);})
+          .finally(function(){sGerando(function(p){var n=Object.assign({},p);n[c.id]=false;return n;});});
+        };
+
+        var gerarTodos=function(lista){lista.forEach(function(s,i){setTimeout(function(){gerarMensagem(s);},i*1200);});};
+
+        return (
+          <div>
+            {/* Header do agente */}
+            <div style={{marginBottom:20}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
+                <div>
+                  <div style={{fontSize:18,fontWeight:800,color:T.cyan,marginBottom:4}}>🛡 Agente de Retenção</div>
+                  <div style={{fontSize:12,color:T.t3,maxWidth:480}}>IA que monitora o engajamento de cada cliente e gera mensagens personalizadas no seu tom, como se fossem escritas por você. Foco em retenção e relacionamento genuíno.</div>
+                </div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  <button onClick={function(){sCfgModal(true);}} style={{padding:"7px 14px",borderRadius:9,border:"1px solid "+T.bdrL,background:"transparent",color:T.t3,fontSize:11,fontWeight:700,cursor:"pointer"}}>⚙️ Configurar Agente</button>
+                  {(criticos.length>0||atencao.length>0)&&<button onClick={function(){gerarTodos(criticos.concat(atencao));}} style={{padding:"7px 14px",borderRadius:9,border:"1px solid "+T.cyan+"55",background:"rgba(56,189,248,0.08)",color:T.cyan,fontSize:11,fontWeight:700,cursor:"pointer"}}>🤖 Gerar mensagens para todos em risco</button>}
+                </div>
+              </div>
+
+              {/* Modal de configuração do agente */}
+              {cfgModal&&<Mo open={true} onClose={function(){sCfgModal(false);}} title="⚙️ Configurar Agente de Retenção">
+                <div style={{maxWidth:420,display:"flex",flexDirection:"column",gap:14}}>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:T.t2,marginBottom:6}}>Nome do Sócio 1 (como assina as mensagens)</div>
+                    <input defaultValue={nomeSocio1} onBlur={function(e){dp({t:"CONFIG_SET",p:{key:"retencao",value:Object.assign({},cfgRet,{nomeSocio1:e.target.value.trim()})}});}} style={{width:"100%",padding:"10px 12px",borderRadius:9,background:T.w3,border:"1px solid "+T.bdrL,color:T.t1,fontSize:13,outline:"none"}} placeholder="Ex: Igor"/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:T.t2,marginBottom:6}}>Nome do Sócio 2 (opcional — aparece como "Igor e [Nome]")</div>
+                    <input defaultValue={nomeSocio2} onBlur={function(e){dp({t:"CONFIG_SET",p:{key:"retencao",value:Object.assign({},cfgRet,{nomeSocio2:e.target.value.trim()})}});}} style={{width:"100%",padding:"10px 12px",borderRadius:9,background:T.w3,border:"1px solid "+T.bdrL,color:T.t1,fontSize:13,outline:"none"}} placeholder="Ex: Ana (deixe vazio se for só um)"/>
+                  </div>
+                  <div style={{padding:"10px 12px",background:"rgba(56,189,248,0.06)",border:"1px solid rgba(56,189,248,0.2)",borderRadius:9,fontSize:11,color:T.cyan,lineHeight:1.6}}>
+                    💡 As mensagens são geradas no seu tom pessoal, como se você estivesse escrevendo do celular. O cliente não percebe que foi gerado por IA.
+                  </div>
+                  <Bt onClick={function(){sCfgModal(false);}}>Salvar e fechar</Bt>
+                </div>
+              </Mo>}
+
+              {/* KPIs de risco */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginTop:16}}>
+                {[
+                  {l:"🚨 Risco crítico",v:criticos.length,c:T.red,d:"score ≤ 35 · ação imediata"},
+                  {l:"⚠️ Atenção",v:atencao.length,c:T.orange,d:"score 36-60 · contato proativo"},
+                  {l:"✅ Saudáveis",v:saudaveis.length,c:T.green,d:"score > 60 · manter ritmo"},
+                ].map(function(k,i){return (
+                  <Cd key={i} style={{padding:"14px 16px"}} hov={false}>
+                    <div style={{fontSize:11,color:T.t3,marginBottom:4}}>{k.l}</div>
+                    <div style={{fontSize:28,fontWeight:900,color:k.c,fontFamily:"'JetBrains Mono'"}}>{k.v}</div>
+                    <div style={{fontSize:9,color:T.t3,marginTop:2}}>{k.d}</div>
+                  </Cd>
+                );})}
+              </div>
+            </div>
+
+            {/* Lista de clientes por risco */}
+            {[
+              {titulo:"🚨 Ação Imediata — Risco Crítico",lista:criticos,cor:T.red,bg:"rgba(239,100,97,0.05)"},
+              {titulo:"⚠️ Contato Proativo — Atenção",lista:atencao,cor:T.orange,bg:"rgba(249,115,22,0.05)"},
+              {titulo:"✅ Engajados — Manter Ritmo",lista:saudaveis,cor:T.green,bg:"rgba(45,212,160,0.04)"},
+            ].map(function(grupo,gi){
+              if(grupo.lista.length===0)return null;
+              return (
+                <div key={gi} style={{marginBottom:24}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                    <div style={{fontSize:13,fontWeight:800,color:grupo.cor}}>{grupo.titulo}</div>
+                    {gi<2&&grupo.lista.length>0&&<button onClick={function(){gerarTodos(grupo.lista);}} style={{padding:"5px 12px",borderRadius:8,border:"1px solid "+grupo.cor+"44",background:grupo.cor+"11",color:grupo.cor,fontSize:10,fontWeight:700,cursor:"pointer"}}>🤖 Gerar mensagens para este grupo</button>}
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                    {grupo.lista.map(function(s){
+                      var msg=msgGeradas[s.cli.id];
+                      var carregando=gerando[s.cli.id];
+                      var nome1=s.cli.nome.split(" ")[0];
+                      var tel=(s.cli.tel||"").replace(/\D/g,"");
+                      return (
+                        <Cd key={s.cli.id} style={{padding:"14px 16px",border:"1px solid "+grupo.cor+"22",background:grupo.bg}} hov={false}>
+                          <div style={{display:"flex",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+                            {/* Avatar + info */}
+                            <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:200}}>
+                              <Av name={s.cli.nome} sz={38}/>
+                              <div>
+                                <div style={{fontSize:13,fontWeight:800,color:T.t1,marginBottom:2}}>{s.cli.nome}</div>
+                                <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                                  {s.alertas.map(function(a,i){return <span key={i} style={{fontSize:9,color:grupo.cor,background:grupo.cor+"15",padding:"1px 6px",borderRadius:4,fontWeight:700}}>{a}</span>;})}
+                                  {s.motivos.length>0&&!s.alertas.length&&<span style={{fontSize:9,color:T.t3}}>{s.motivos[0]}</span>}
+                                </div>
+                              </div>
+                            </div>
+                            {/* Score */}
+                            <div style={{textAlign:"center",flexShrink:0}}>
+                              <div style={{width:44,height:44,borderRadius:"50%",border:"2px solid "+grupo.cor,display:"flex",alignItems:"center",justifyContent:"center",background:grupo.cor+"10"}}>
+                                <span style={{fontSize:13,fontWeight:800,color:grupo.cor}}>{s.score}</span>
+                              </div>
+                              <div style={{fontSize:8,color:T.t3,marginTop:2}}>score</div>
+                            </div>
+                            {/* Botões */}
+                            <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap",alignItems:"center"}}>
+                              {!msg&&!carregando&&<button onClick={function(){gerarMensagem(s);}} style={{padding:"6px 12px",borderRadius:8,border:"1px solid "+T.cyan+"44",background:"rgba(56,189,248,0.08)",color:T.cyan,fontSize:10,fontWeight:700,cursor:"pointer"}}>🤖 Gerar mensagem</button>}
+                              {carregando&&<span style={{fontSize:10,color:T.cyan}}>✨ escrevendo...</span>}
+                              {msg&&tel&&<button onClick={function(){window.open("https://wa.me/55"+tel+"?text="+encodeURIComponent(msg),"_blank");}} style={{padding:"6px 12px",borderRadius:8,border:"1px solid rgba(37,211,102,0.4)",background:"rgba(37,211,102,0.08)",color:"#25D366",fontSize:10,fontWeight:700,cursor:"pointer"}}>📱 Enviar WA</button>}
+                              {msg&&<button onClick={function(){navigator.clipboard&&navigator.clipboard.writeText(msg).then(function(){alert("Mensagem copiada!");});}} style={{padding:"6px 12px",borderRadius:8,border:"1px solid "+T.bdrL,background:"transparent",color:T.t3,fontSize:10,fontWeight:700,cursor:"pointer"}}>📋 Copiar</button>}
+                              {msg&&<button onClick={function(){sMsgGeradas(function(p){var n=Object.assign({},p);delete n[s.cli.id];return n;});}} style={{padding:"6px 10px",borderRadius:8,border:"1px solid "+T.bdrL,background:"transparent",color:T.t3,fontSize:10,cursor:"pointer"}}>🔄</button>}
+                            </div>
+                          </div>
+                          {/* Mensagem gerada */}
+                          {msg&&(
+                            <div style={{marginTop:12,padding:"12px 14px",background:"rgba(56,189,248,0.04)",border:"1px solid rgba(56,189,248,0.15)",borderRadius:10}}>
+                              <div style={{fontSize:9,color:T.cyan,fontWeight:700,letterSpacing:.5,marginBottom:8}}>✉️ MENSAGEM GERADA — revise antes de enviar</div>
+                              <textarea defaultValue={msg} onChange={function(e){sMsgGeradas(function(p){var n=Object.assign({},p);n[s.cli.id]=e.target.value;return n;});}} style={{width:"100%",minHeight:100,padding:"8px 10px",borderRadius:7,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",color:T.t1,fontSize:12,lineHeight:1.6,resize:"vertical",outline:"none",fontFamily:"inherit"}}/>
+                              <div style={{fontSize:9,color:T.t3,marginTop:4}}>💡 Edite se quiser personalizar ainda mais antes de enviar.</div>
+                            </div>
+                          )}
+                        </Cd>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         );
       })()}
@@ -7161,6 +7491,34 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
           body+='</div>';
         }
 
+        /* ===== PATRIMÔNIO CONSOLIDADO DO CASAL ===== */
+        if((c.tipoCli==="casal"||c.tipoCli==="familia") && c.conjuge){
+          var _patTit=c.patGorila||c.pat||0;
+          var _patConj=(c.conjuge.patGorila||0);
+          if(_patConj===0&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
+            _patConj=c.conjuge._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
+          }
+          if(_patTit>0&&_patConj>0){
+            var _patTotal=_patTit+_patConj;
+            var _nomeConj=(c.conjuge.nome||c.conjuge.nomeConjuge||"Cônjuge");
+            body+='<div style="margin:16px 0;padding:16px;background:#f8f6f0;border-radius:12px;border:1px solid #E8E0C8">';
+            body+='<div style="font-size:11px;font-weight:700;color:#D4A328;letter-spacing:1px;margin-bottom:10px">👫 PATRIMÔNIO CONSOLIDADO DO CASAL</div>';
+            body+='<table style="width:100%;border-collapse:collapse">';
+            body+='<tr><td style="padding:7px 10px;font-size:12px;color:#555">'+(tipo==="casal"?"Titular":"")+'</td><td style="padding:7px 10px;font-size:12px;font-weight:700;color:#1A1A2E">'+c.nome+'</td><td style="padding:7px 10px;text-align:right;font-size:14px;font-weight:800;color:#D4A328;font-family:Outfit,monospace">'+fmF(_patTit)+'</td></tr>';
+            body+='<tr><td style="padding:7px 10px;font-size:12px;color:#555">Cônjuge</td><td style="padding:7px 10px;font-size:12px;font-weight:700;color:#1A1A2E">'+_nomeConj+'</td><td style="padding:7px 10px;text-align:right;font-size:14px;font-weight:800;color:#D4A328;font-family:Outfit,monospace">'+fmF(_patConj)+'</td></tr>';
+            body+='<tr style="border-top:2px solid #D4A328"><td colspan="2" style="padding:10px 10px;font-size:13px;font-weight:800;color:#1A1A2E">Total do Casal</td><td style="padding:10px 10px;text-align:right;font-size:18px;font-weight:900;color:#D4A328;font-family:Outfit,monospace">'+fmF(_patTotal)+'</td></tr>';
+            body+='</table>';
+            var _pctTit=(_patTotal>0?(_patTit/_patTotal*100):0);
+            var _pctConj=(_patTotal>0?(_patConj/_patTotal*100):0);
+            body+='<div style="margin-top:10px;height:8px;background:#E8E0C8;border-radius:4px;overflow:hidden;display:flex">';
+            body+='<div style="width:'+_pctTit.toFixed(1)+'%;background:#D4A328;border-radius:4px 0 0 4px"></div>';
+            body+='<div style="width:'+_pctConj.toFixed(1)+'%;background:#F5C94B;border-radius:0 4px 4px 0"></div>';
+            body+='</div>';
+            body+='<div style="display:flex;justify-content:space-between;font-size:9px;color:#888;margin-top:4px"><span>'+c.nome.split(" ")[0]+': '+_pctTit.toFixed(1)+'%</span><span>'+_nomeConj.split(" ")[0]+': '+_pctConj.toFixed(1)+'%</span></div>';
+            body+='</div>';
+          }
+        }
+        
         body+='<div class="kpi-grid">';
         (function(){var txt=fmF(tCV);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value gold" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">posição atual</div></div>';})();
         body+='<div class="kpi"><div class="kpi-label">Investido</div><div class="kpi-value">'+fmF(tCT)+'</div><div class="kpi-sub">custo total</div></div>';
@@ -9282,44 +9640,6 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
         body+='</div>';
       }
 
-      /* ── Seção: Comparativo com o mês anterior (por categoria) ──
-         Inspirado no formato "Evolução por Categoria" dos relatórios de orçamento:
-         mostra quais categorias mais subiram/caíram em relação ao mês anterior. */
-      var gfKeyAnt=gfKeys.length>1?gfKeys[gfKeys.length-2]:null;
-      var gfMesAnt=gfKeyAnt?gfMeses[gfKeyAnt]:null;
-      var gfCatVar=[];
-      if(gfMesAnt){
-        var gfCatsAnt={};
-        (gfMesAnt.despesas||[]).forEach(function(d){var cat=d.categoria||d.cat||"Outros";gfCatsAnt[cat]=(gfCatsAnt[cat]||0)+(d.valor||0);});
-        var gfCatsTodas={};
-        Object.keys(gfCats).forEach(function(k){gfCatsTodas[k]=true;});
-        Object.keys(gfCatsAnt).forEach(function(k){gfCatsTodas[k]=true;});
-        Object.keys(gfCatsTodas).forEach(function(cat){
-          var atual=gfCats[cat]||0,ant=gfCatsAnt[cat]||0,diff=atual-ant;
-          if(Math.abs(diff)<50)return; /* ignora variações irrelevantes */
-          gfCatVar.push({cat:cat,atual:atual,ant:ant,diff:diff,pct:ant>0?(diff/ant*100):null});
-        });
-        gfCatVar.sort(function(a,b){return Math.abs(b.diff)-Math.abs(a.diff)});
-      }
-      if(gfCatVar.length>0){
-        var gfMesAntLabel=MN[(+gfKeyAnt.split("-")[1])-1];
-        body+=secTitle("🔄","Comparado a "+gfMesAntLabel);
-        body+='<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">';
-        gfCatVar.slice(0,5).forEach(function(v){
-          var subiu=v.diff>0;
-          var cor=subiu?"#EF6461":"#2DD4A0";
-          var seta=subiu?"▲":"▼";
-          var pctTxt=v.pct!==null?(subiu?"+":"")+v.pct.toFixed(0)+"%":"novo gasto";
-          body+='<div style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:8px">'
-            +'<div style="font-size:10.5px;color:#C5CDD8;font-weight:600">'+v.cat+'</div>'
-            +'<div style="display:flex;align-items:center;gap:8px">'
-            +'<span style="font-size:9px;color:#8B94A7">'+fmF(v.ant)+' → '+fmF(v.atual)+'</span>'
-            +'<span style="font-size:10px;font-weight:800;color:'+cor+'">'+seta+' '+pctTxt+'</span>'
-            +'</div></div>';
-        });
-        body+='</div>';
-      }
-
       /* ── Seção: Metas Financeiras ── */
       if(gfMetas.length>0){
         body+=secTitle("🎯","Metas Financeiras");
@@ -9346,24 +9666,14 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       }
 
       /* ── Recomendações automáticas ── */
-      var gfNome=String(c.nome||"").split(" ")[0];
       var gfRecs=[];
-      if(gfPoup<10)gfRecs.push({cor:"#EF6461",ic:"⚠️",txt:"A taxa de poupança ficou em "+gfPoup.toFixed(1)+"% neste mês, abaixo da faixa recomendada de 20%. Vale olhar com calma onde dá pra ajustar sem abrir mão do essencial."});
-      else if(gfPoup>=20)gfRecs.push({cor:"#2DD4A0",ic:"✅",txt:gfNome+", taxa de poupança de "+gfPoup.toFixed(1)+"% neste mês — disciplina em alto nível! Mantendo esse ritmo, o patrimônio cresce bem mais rápido."});
-      else gfRecs.push({cor:"#D4A328",ic:"⚡",txt:"Taxa de poupança moderada, em "+gfPoup.toFixed(1)+"%. Ainda dá pra evoluir até a faixa dos 20% recomendados."});
-      if(gfSaldo<0)gfRecs.push({cor:"#EF6461",ic:"🚨",txt:"O mês fechou no vermelho, com saldo negativo de "+fmF(Math.abs(gfSaldo))+". Vale entender se foi um gasto pontual ou se é hora de rever o orçamento."});
+      if(gfPoup<10)gfRecs.push({cor:"#EF6461",ic:"⚠️",txt:"Taxa de poupança abaixo de 10%. O ideal é poupar ao menos 20% da receita mensal para construção de patrimônio."});
+      else if(gfPoup>=20)gfRecs.push({cor:"#2DD4A0",ic:"✅",txt:"Excelente taxa de poupança de "+gfPoup.toFixed(1)+"%. Continue mantendo a disciplina!"});
+      if(gfSaldo<0)gfRecs.push({cor:"#EF6461",ic:"🚨",txt:"Saldo negativo de "+fmF(Math.abs(gfSaldo))+" no mês. Revise as despesas para retornar ao equilíbrio."});
       if(gfHist.length>=3){
         var ultTres=gfHist.slice(-3);
         var tendDespesa=(ultTres[2].desp-ultTres[0].desp)/Math.max(1,ultTres[0].desp)*100;
-        if(tendDespesa>15)gfRecs.push({cor:"#D4A328",ic:"📈",txt:"As despesas vêm subindo "+tendDespesa.toFixed(0)+"% nos últimos 3 meses. Vale ficar de olho pra não perder o ritmo positivo."});
-        var gfMelhorMes=gfHist.reduce(function(a,b){return b.saldo>a.saldo?b:a});
-        if(gfMelhorMes.k===gfHist[gfHist.length-1].k&&gfMelhorMes.saldo>0)gfRecs.push({cor:"#2DD4A0",ic:"🏆",txt:gfNome+", esse foi o melhor saldo dos últimos "+gfHist.length+" meses — parabéns pelo resultado!"});
-      }
-      if(gfCatVar.length>0){
-        var gfMaiorAlta=gfCatVar.filter(function(v){return v.diff>0}).sort(function(a,b){return b.diff-a.diff})[0];
-        var gfMaiorQueda=gfCatVar.filter(function(v){return v.diff<0}).sort(function(a,b){return a.diff-b.diff})[0];
-        if(gfMaiorAlta&&gfMaiorAlta.diff>=200)gfRecs.push({cor:"#F6A623",ic:"📈",txt:"Gasto com "+gfMaiorAlta.cat+" subiu "+fmF(gfMaiorAlta.diff)+" em relação ao mês anterior"+(gfMaiorAlta.pct!==null?" (+"+gfMaiorAlta.pct.toFixed(0)+"%)":"")+". Vale entender se foi algo pontual."});
-        if(gfMaiorQueda&&gfMaiorQueda.diff<=-200)gfRecs.push({cor:"#2DD4A0",ic:"✅",txt:"Boa! "+gfMaiorQueda.cat+" caiu "+fmF(Math.abs(gfMaiorQueda.diff))+" frente ao mês anterior — disciplina em ação."});
+        if(tendDespesa>15)gfRecs.push({cor:"#D4A328",ic:"📈",txt:"Despesas crescendo "+tendDespesa.toFixed(0)+"% nos últimos 3 meses. Atenção para manter o controle."});
       }
       if(gfRecs.length>0){
         body+='<div style="margin-top:8px">';
@@ -11113,7 +11423,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       +eyebrow(ehMultiplo?("RELATÓRIO MENSAL · "+tipoLabel.toUpperCase()):"RELATÓRIO MENSAL")
       +'<h1 class="cover-title">Diagnóstico<br/>financeiro do<br/><span class="cover-title-gold">mês de '+(MN[+partes[1]-1]||"").toLowerCase()+'.</span></h1>'
       +'<p class="cover-sub">'+(ehMultiplo
-        ?"Análise consolidada do orçamento "+(tipoCli==="casal"?"do casal":"da família")+". Receitas, despesas, investimentos e objetivos vistos como uma unidade financeira única."
+        ?"Visão integrada das finanças "+(tipoCli==="casal"?"do casal":"da família")+". Receitas, despesas, investimentos e metas analisados em conjunto — porque o crescimento financeiro começa com planejamento compartilhado."
         :"Acompanhamento mensal personalizado. Análise inteligente do seu orçamento, evolução, alertas e recomendações estratégicas para construção de patrimônio.")+'</p>'
       +'</div>'
       +'<div class="cover-bottom">'
@@ -11228,76 +11538,6 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       +'</tbody></table></div>'
       +'<div class="page-footer">Página 2 · Categorias e Maiores Despesas</div>'
       +'</section>';
-
-    /* ====== PÁGINA NOVA: Orçado vs. Realizado ======
-       Usa o campo "orc" (orçamento por lançamento) já preenchido nas telas de Receitas/Despesas/
-       Investimentos, mas que até agora nunca aparecia no relatório mensal. Só entra a categoria
-       que teve orçamento definido pelo menos uma vez no mês — sem isso, não dá pra comparar. */
-    var orcPorMacro={};
-    (an.snapAtual.despesas||[]).forEach(function(d){
-      var k=d.macro||"outros";
-      if(k==="investimentos")return;
-      orcPorMacro[k]=(orcPorMacro[k]||0)+(d.orc||0);
-    });
-    var orcList=Object.keys(an.atualPorMacro).map(function(k){
-      var realizado=an.atualPorMacro[k].tot;
-      var orcado=orcPorMacro[k]||0;
-      var m=MACRO_CATS[k]||{l:k,ic:"📦",cor:"#8B9DC3"};
-      return{k:k,label:m.l,ic:m.ic,cor:m.cor,realizado:realizado,orcado:orcado,pct:orcado>0?(realizado/orcado*100):null};
-    }).filter(function(o){return o.orcado>0}).sort(function(a,b){return(b.pct||0)-(a.pct||0)});
-
-    var secOrc=orcList.length>0?'<section class="page page-light">'
-      +'<div class="bg-pattern" style="position:absolute;top:-60px;right:-90px;opacity:0.04">'+patternSvg(380,0.4)+'</div>'
-      +'<div class="page-header">'+logoSvg(160,false)+'<div class="page-meta">'+esc(c.nome)+' · '+mesNome+'</div></div>'
-      +eyebrow("ORÇADO VS. REALIZADO")
-      +'<h2 class="page-title">O quanto o mês <span class="gold-highlight">saiu do planejado</span>.</h2>'
-      +'<p class="page-lead">Comparação entre o valor orçado e o efetivamente gasto em cada categoria, com base no planejamento definido com seu consultor.</p>'
-      +'<table class="cv-table">'
-      +'<thead><tr><th>CATEGORIA</th><th class="ta-right">ORÇADO</th><th class="ta-right">REALIZADO</th><th class="ta-right">% DO ORÇADO</th><th>STATUS</th></tr></thead><tbody>'
-      +orcList.map(function(o){
-        var statusCor=o.pct===null?"#5a5a6e":(o.pct<=100?"#0F9D58":o.pct<=130?"#E8810C":"#D93025");
-        var statusTxt=o.pct===null?"—":(o.pct<=100?"✅ Dentro do orçado":o.pct<=130?"⚠️ Levemente acima":"🚨 Muito acima do orçado");
-        return '<tr><td><span class="macro-pill" style="background:'+o.cor+'1f;color:'+o.cor+'">'+o.ic+' '+o.label+'</span></td>'
-          +'<td class="ta-right mono">'+fmtCol(o.orcado)+'</td>'
-          +'<td class="ta-right mono bold" style="color:'+o.cor+'">'+fmtCol(o.realizado)+'</td>'
-          +'<td class="ta-right mono bold" style="color:'+statusCor+'">'+(o.pct!==null?o.pct.toFixed(0)+"%":"—")+'</td>'
-          +'<td style="color:'+statusCor+';font-weight:700;font-size:10px">'+statusTxt+'</td></tr>';
-      }).join("")
-      +'</tbody></table>'
-      +'<div class="page-footer">Página · Orçado vs. Realizado</div>'
-      +'</section>':"";
-
-    /* ====== PÁGINA NOVA: Destaque do Mês ======
-       Só aparece quando o mês realmente tem uma conquista pra mostrar: foi o melhor saldo dos
-       últimos 6 meses, ou faz parte de uma sequência de pelo menos 3 meses seguidos de melhora. */
-    var saldoDoMes=function(h){return(h.tRec||0)-(h.tDesp||0)};
-    var streakMeses=0;
-    for(var _si=0;_si<an.historico.length-1;_si++){
-      if(saldoDoMes(an.historico[_si])>saldoDoMes(an.historico[_si+1]))streakMeses++;
-      else break;
-    }
-    var ultimos6=an.historico.slice(0,6);
-    var melhorHistMes=ultimos6.reduce(function(best,h){return saldoDoMes(h)>saldoDoMes(best)?h:best},ultimos6[0]||{mes:an.mesRef});
-    var ehMelhorMesPeriodo=melhorHistMes.mes===an.mesRef;
-    var mostraDestaque=an.kpis.saldoAtual>0&&(ehMelhorMesPeriodo||streakMeses>=2);
-
-    var varDespAbs=an.snapAnterior?(an.snapAtual.tDespPuro-an.snapAnterior.tDespPuro):null;
-    var varDespTxt=varDespAbs!==null?((varDespAbs<=0?"−":"+")+fmt(Math.abs(varDespAbs))+" · "+(mesAntNome||"mês ant.")+" → "+mesNome):"—";
-    var varRecTxt=an.kpis.varRec!==null?((an.kpis.varRec>=0?"+":"")+an.kpis.varRec.toFixed(1)+"% vs "+(mesAntNome||"mês ant.")):"";
-
-    var secDestaque=mostraDestaque?'<section class="page page-light">'
-      +'<div class="bg-pattern" style="position:absolute;top:-60px;right:-90px;opacity:0.04">'+patternSvg(380,0.4)+'</div>'
-      +'<div class="page-header">'+logoSvg(160,false)+'<div class="page-meta">'+esc(c.nome)+' · '+mesNome+'</div></div>'
-      +eyebrow((mesNome.split("/")[0]||"").toUpperCase()+" EM DESTAQUE")
-      +'<h2 class="page-title">A conquista <span class="gold-highlight">do mês</span>.</h2>'
-      +'<p class="page-lead">'+mesNome+' registrou '+(ehMelhorMesPeriodo?"o melhor saldo dos últimos meses":"mais um mês de evolução")+': '+fmt(an.kpis.saldoAtual)+(streakMeses>=2?" — "+(streakMeses+1)+"º mês seguido de melhora!":"")+'</p>'
-      +'<div class="kpi-row" style="margin-top:10px">'
-      +'<div class="kpi-card"><div class="kpi-label">RECEITA DO MÊS</div><div class="kpi-value" style="color:#0F9D58">'+fmt(an.snapAtual.tRec)+'</div>'+(varRecTxt?'<div class="kpi-sub" style="color:#0F9D58">'+varRecTxt+'</div>':'')+'</div>'
-      +'<div class="kpi-card"><div class="kpi-label">DESPESAS</div><div class="kpi-value" style="font-size:16px">'+varDespTxt+'</div></div>'
-      +'<div class="kpi-card"><div class="kpi-label">SALDO DO MÊS</div><div class="kpi-value" style="color:#D4A328">'+fmt(an.kpis.saldoAtual)+'</div><div class="kpi-sub" style="color:#D4A328">'+(ehMelhorMesPeriodo?"Melhor saldo do período":"Em sequência de melhora")+'</div></div>'
-      +'</div>'
-      +'<div class="page-footer">Página · Destaque do Mês</div>'
-      +'</section>':"";
 
     /* ====== PATRIMÔNIO + APORTES + OBJETIVOS — 3 páginas integradas ====== */
     var totInvAtual=an.snapAtual.tInv||0;
@@ -11583,19 +11823,6 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       +'</section>':"";
 
     /* ====== Encerramento ====== */
-    var primeiroNome=String(c.nome||"").split(" ")[0];
-    var saldoAtualFmt=fmt(an.kpis.saldoAtual);
-    var txPoupFmt=an.kpis.txPoupAtual.toFixed(0);
-    var qualificador=an.kpis.saldoAtual>0
-      ?(an.kpis.txPoupAtual>=20?"um resultado sólido — no ritmo certo para construir patrimônio":"um mês positivo, com espaço para evoluir ainda mais a poupança")
-      :"um mês mais apertado — vamos olhar juntos os ajustes para o próximo";
-    var melhorMesHist=an.historico.slice(0,6).reduce(function(best,h){
-      var sl=(h.tRec||0)-(h.tDesp||0);
-      var slBest=(best.tRec||0)-(best.tDesp||0);
-      return sl>slBest?h:best;
-    },an.historico[0]||{mes:an.mesRef,tRec:0,tDesp:0});
-    var ehMelhorMes=an.historico.length>=3 && melhorMesHist.mes===an.mesRef && an.kpis.saldoAtual>0;
-
     var fechamento='<section class="page page-dark cover-end">'
       +'<div class="bg-pattern" style="position:absolute;bottom:-100px;left:-100px;opacity:0.5">'+patternSvg(450,0.18)+'</div>'
       +'<div class="end-content">'
@@ -11603,11 +11830,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       +'<div>'
       +eyebrow("OBRIGADO PELA CONFIANÇA")
       +'<h2 class="end-title">Construindo seu<br/><span class="cover-title-gold">patrimônio juntos.</span></h2>'
-      +'<p class="end-text">'+primeiroNome+', '+mesNome+' fechou com saldo de '+saldoAtualFmt+' e taxa de poupança de '+txPoupFmt+'% — '+qualificador+(ehMelhorMes?" — aliás, o melhor resultado dos últimos meses! 🏆":"")+'. Este relatório resume os dados que você compartilhou com a Courinvest neste período. Para dúvidas, ajustes ou para agendar a próxima reunião de acompanhamento, fale com seu consultor.</p>'
-      +'<div class="end-meta">'
-      +'<div><div class="end-meta-l">SALDO DO MÊS</div><div class="end-meta-v" style="color:'+(an.kpis.saldoAtual>=0?"#34D399":"#F87171")+'">'+saldoAtualFmt+'</div></div>'
-      +'<div><div class="end-meta-l">TAXA DE POUPANÇA</div><div class="end-meta-v">'+txPoupFmt+'%</div></div>'
-      +'</div>'
+      +'<p class="end-text">Este relatório foi gerado pela equipe Courinvest a partir dos dados financeiros que você compartilhou. Para dúvidas, ajustes ou agendamento da próxima reunião de acompanhamento, entre em contato com seu consultor.</p>'
       +'<div class="end-divider"></div>'
       +'</div>'
       +'<div class="end-footer">© '+hoje.getFullYear()+' Courinvest Consultoria em Investimentos · courinvest.com.br</div>'
@@ -11771,8 +11994,6 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
         if(sec.capa!==false) partes+=capa;
         if(sec.orcamento!==false || sec.resumoExec!==false) partes+=sec1; 
         if(sec.despesas!==false) partes+=sec2;
-        if(sec.despesas!==false) partes+=secOrc;
-        if(sec.despesas!==false) partes+=secDestaque;
         if(sec.carteira!==false || sec.rentabilidade!==false) partes+=secPat; 
         if(sec.metas!==false) partes+=secAportes;
         if(sec.objetivos!==false) partes+=secObjs;
@@ -22995,6 +23216,22 @@ function NewsView({data,dispatch}){
                 }
               }} style={{padding:"6px 10px",borderRadius:8,border:"1px solid "+T.bdrL,background:T.w3,color:T.t3,fontSize:10,fontWeight:600,cursor:"pointer"}}>⚙️ {(data&&data.config&&data.config.anthropicKey)?"IA configurada":"Configurar IA"}</button>
             )}
+            <button onClick={function(){
+              var cfg=d.config&&d.config.emailjs||{};
+              var pubKey=prompt("EmailJS — Chave Pública (Public Key):\n\nObtido em emailjs.com → Account → API Keys\n\nDeixe vazio para desativar.",cfg.publicKey||"");
+              if(pubKey===null)return;
+              if(!pubKey.trim()){dispatch({t:"CONFIG_SET",p:{key:"emailjs",value:null}});alert("❌ E-mail automático desativado.");return;}
+              var svcId=prompt("EmailJS — Service ID:\n\nExemplo: service_abc123\n\nEncontrado em emailjs.com → Email Services",cfg.serviceId||"");
+              if(!svcId)return;
+              var tplId=prompt("EmailJS — Template ID:\n\nExemplo: template_xyz789\n\nEncontrado em emailjs.com → Email Templates",cfg.templateId||"");
+              if(!tplId)return;
+              var nomeRem=prompt("Nome do remetente (como aparece no e-mail):",cfg.nomeRemetente||"Courinvest");
+              var emailRem=prompt("E-mail de resposta (reply-to):",cfg.remetente||"");
+              dispatch({t:"CONFIG_SET",p:{key:"emailjs",value:{publicKey:pubKey.trim(),serviceId:svcId.trim(),templateId:tplId.trim(),nomeRemetente:(nomeRem||"Courinvest").trim(),remetente:(emailRem||"").trim()}}});
+              alert("✅ E-mail automático configurado! Ao enviar relatórios, eles serão enviados por e-mail automaticamente.");
+            }} style={{padding:"6px 10px",borderRadius:8,border:"1px solid "+(d.config&&d.config.emailjs?"rgba(45,212,160,0.4)":T.bdrL),background:d.config&&d.config.emailjs?"rgba(45,212,160,0.08)":T.w3,color:d.config&&d.config.emailjs?T.green:T.t3,fontSize:10,fontWeight:600,cursor:"pointer"}}>
+              📧 {d.config&&d.config.emailjs?"E-mail ativo":"Configurar E-mail"}
+            </button>
           </div>
           <div style={{height:18}}/>
 
@@ -28528,7 +28765,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '353';
+  var SW_VERSION = '352';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
