@@ -1437,6 +1437,10 @@ const inpS={padding:"11px 14px",background:"rgba(255,255,255,0.025)",border:"1px
 
 function Dash({data:d,onSel:os,goTo}){
   const[dt,sDt]=useState("geral");
+  /* Agente de Retenção — estados no topo do componente (regra dos hooks React) */
+  const[retMsgGeradas,sRetMsgGeradas]=useState({});
+  const[retGerando,sRetGerando]=useState({});
+  const[retCfgModal,sRetCfgModal]=useState(false);
   const[subTab,sSubTab]=useState("patrimonio"); 
   const[showAum,sShowAum]=useState(false);
   const[showCarteiras,sShowCarteiras]=useState(false); 
@@ -3314,10 +3318,13 @@ function Dash({data:d,onSel:os,goTo}){
         var atencao=scores.filter(function(s){return s.urgencia==="atencao";});
         var saudaveis=scores.filter(function(s){return s.urgencia==="saudavel";});
 
-        /* Estado local para mensagens geradas pela IA */
-        var [msgGeradas,sMsgGeradas]=React.useState({});
-        var [gerando,sGerando]=React.useState({});
-        var [cfgModal,sCfgModal]=React.useState(false);
+        /* Estado local para mensagens geradas pela IA — usa estados do topo do componente */
+        var msgGeradas=retMsgGeradas;
+        var sMsgGeradas=sRetMsgGeradas;
+        var gerando=retGerando;
+        var sGerando=sRetGerando;
+        var cfgModal=retCfgModal;
+        var sCfgModal=sRetCfgModal;
 
         /* Gera mensagem personalizada via Claude */
         var gerarMensagem=function(s){
@@ -28765,7 +28772,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '352';
+  var SW_VERSION = '353';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
