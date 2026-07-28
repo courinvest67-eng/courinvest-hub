@@ -23244,7 +23244,7 @@ function NewsView({data,dispatch}){
               }} style={{padding:"6px 10px",borderRadius:8,border:"1px solid "+T.bdrL,background:T.w3,color:T.t3,fontSize:10,fontWeight:600,cursor:"pointer"}}>⚙️ {(data&&data.config&&data.config.anthropicKey)?"IA configurada":"Configurar IA"}</button>
             )}
             <button onClick={function(){
-              var cfg=d.config&&d.config.emailjs||{};
+              var cfg=data.config&&data.config.emailjs||{};
               var pubKey=prompt("EmailJS — Chave Pública (Public Key):\n\nObtido em emailjs.com → Account → API Keys\n\nDeixe vazio para desativar.",cfg.publicKey||"");
               if(pubKey===null)return;
               if(!pubKey.trim()){dispatch({t:"CONFIG_SET",p:{key:"emailjs",value:null}});alert("❌ E-mail automático desativado.");return;}
@@ -23256,8 +23256,8 @@ function NewsView({data,dispatch}){
               var emailRem=prompt("E-mail de resposta (reply-to):",cfg.remetente||"");
               dispatch({t:"CONFIG_SET",p:{key:"emailjs",value:{publicKey:pubKey.trim(),serviceId:svcId.trim(),templateId:tplId.trim(),nomeRemetente:(nomeRem||"Courinvest").trim(),remetente:(emailRem||"").trim()}}});
               alert("✅ E-mail automático configurado! Ao enviar relatórios, eles serão enviados por e-mail automaticamente.");
-            }} style={{padding:"6px 10px",borderRadius:8,border:"1px solid "+(d.config&&d.config.emailjs?"rgba(45,212,160,0.4)":T.bdrL),background:d.config&&d.config.emailjs?"rgba(45,212,160,0.08)":T.w3,color:d.config&&d.config.emailjs?T.green:T.t3,fontSize:10,fontWeight:600,cursor:"pointer"}}>
-              📧 {d.config&&d.config.emailjs?"E-mail ativo":"Configurar E-mail"}
+            }} style={{padding:"6px 10px",borderRadius:8,border:"1px solid "+(data.config&&data.config.emailjs?"rgba(45,212,160,0.4)":T.bdrL),background:data.config&&data.config.emailjs?"rgba(45,212,160,0.08)":T.w3,color:data.config&&data.config.emailjs?T.green:T.t3,fontSize:10,fontWeight:600,cursor:"pointer"}}>
+              📧 {data.config&&data.config.emailjs?"E-mail ativo":"Configurar E-mail"}
             </button>
           </div>
           <div style={{height:18}}/>
