@@ -294,19 +294,31 @@ const feeMensalBRL=function(c){
    Resolve(null) — nunca rejeita — se qualquer etapa falhar (lib não carregada, Storage
    indisponível, erro de permissão, etc.) OU demorar mais que 25s (timeout de segurança),
    pra NUNCA travar o envio do e-mail (nem a UI, presa em "Enviando...") por causa do PDF.
-   Nota: o container usa posição normal no fluxo (só invisível via opacity), não
-   position:fixed/absolute fora da tela — testado que essa combinação faz o html2canvas
-   medir a altura do conteúdo como 0 e gerar um PDF em branco. */
+   Nota: o container fica em opacidade normal (100%) dentro de um wrapper de tamanho zero
+   (width:0;height:0;overflow:hidden), fixado fora da área visível. Duas armadilhas já
+   encontradas e evitadas aqui: (1) position:fixed/absolute com o CONTEÚDO offset pra fora
+   da tela faz o html2canvas medir altura 0 e gerar PDF em branco; (2) opacity baixa
+   (ex.: 0.01) no container com o conteúdo é capturada pelo html2canvas no render, gerando
+   um PDF "lavado"/quase invisível — por isso é o WRAPPER que fica de tamanho zero, não o
+   conteúdo que fica com opacidade baixa. */
 const _gerarPdfLinkCourinvestInner=function(pathStorage,htmlContent){
   return new Promise(function(resolve){
-    var container=null;
+    var wrapper=null;
     try{
       if(typeof window.html2pdf==="undefined"){console.warn("[PDF] html2pdf.js não carregou.");resolve(null);return;}
       if(!window._fbStorage){console.warn("[PDF] Firebase Storage indisponível (verifique se o Storage está habilitado no projeto Firebase).");resolve(null);return;}
-      container=document.createElement("div");
-      container.style.cssText="width:800px;background:#fff;opacity:0.01;pointer-events:none;";
+      var container=document.createElement("div");
+      container.style.cssText="width:800px;background:#fff;";
       container.innerHTML=htmlContent;
-      document.body.appendChild(container);
+      /* Esconde do usuário SEM mexer em opacity/visibility do conteúdo — o html2canvas captura o
+         estilo computado, e opacity:quase-zero deixa o PDF "lavado"/em branco (já vimos isso
+         acontecer). Em vez disso, o container fica com opacidade normal (100%) dentro de um
+         wrapper de tamanho zero com overflow:hidden, fixado fora da área visível — testado que
+         isso preserva o contraste/cores corretamente. */
+      wrapper=document.createElement("div");
+      wrapper.style.cssText="position:fixed;top:0;left:0;width:0;height:0;overflow:hidden;";
+      wrapper.appendChild(container);
+      document.body.appendChild(wrapper);
       html2pdf().set({
         margin:0,
         filename:"relatorio.pdf",
@@ -314,7 +326,7 @@ const _gerarPdfLinkCourinvestInner=function(pathStorage,htmlContent){
         html2canvas:{scale:2,useCORS:true,backgroundColor:"#ffffff"},
         jsPDF:{unit:"pt",format:"a4",orientation:"portrait"}
       }).from(container).toPdf().output("blob").then(function(blob){
-        try{if(container&&container.parentNode)document.body.removeChild(container)}catch(_e){}
+        try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
         var ref=window._fbStorage.ref().child(pathStorage);
         return ref.put(blob,{contentType:"application/pdf"});
       }).then(function(snap){
@@ -323,12 +335,12 @@ const _gerarPdfLinkCourinvestInner=function(pathStorage,htmlContent){
         resolve(url);
       }).catch(function(e){
         console.warn("[PDF] Falha ao gerar/subir PDF:",e);
-        try{if(container&&container.parentNode)document.body.removeChild(container)}catch(_e){}
+        try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
         resolve(null);
       });
     }catch(e){
       console.warn("[PDF] Erro inesperado ao gerar PDF:",e);
-      try{if(container&&container.parentNode)document.body.removeChild(container)}catch(_e){}
+      try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
       resolve(null);
     }
   });
