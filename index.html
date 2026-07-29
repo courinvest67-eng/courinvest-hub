@@ -2184,9 +2184,15 @@ function Dash({data:d,onSel:os,goTo}){
                     }
                   }catch(e){console.warn("Rel PDF:",e);}
 
-                  /* 2. Envia e-mail automático se EmailJS configurado */
+                  /* 2. Canal PRIORITÁRIO: e-mail. Se o cliente tem e-mail cadastrado e o EmailJS
+                     está configurado, envia por e-mail e NÃO abre o WhatsApp também — evita
+                     contato duplicado. WhatsApp só entra como fallback pra quem não tem e-mail
+                     cadastrado (ou se o EmailJS não estiver configurado). */
                   var tipoRelEmail=(Array.isArray(cl.sv)?cl.sv:(cl.sv?[cl.sv]:[])).includes("planejamento")&&!(Array.isArray(cl.sv)?cl.sv:(cl.sv?[cl.sv]:[])).includes("patrimonio")?"planejamento":"mensal";
-                  if(d.config&&d.config.emailjs&&d.config.emailjs.publicKey&&cl.email){
+                  var emailConfigurado=!!(d.config&&d.config.emailjs&&d.config.emailjs.publicKey);
+                  var enviaPorEmail=emailConfigurado&&!!cl.email;
+
+                  if(enviaPorEmail){
                     sEmailStatus(function(p){var n=Object.assign({},p);n[cl.id]="enviando";return n;});
                     sendReportEmail(cl,tipoRelEmail,mesRefNome)
                       .then(function(){
@@ -2199,8 +2205,12 @@ function Dash({data:d,onSel:os,goTo}){
                       });
                   }
 
-                  /* 3. Abre WhatsApp com mensagem pronta (2s depois para não bloquear popup) */
+                  /* 3. WhatsApp: só dispara se NÃO enviamos por e-mail (fallback) */
                   setTimeout(function(){
+                    if(enviaPorEmail){
+                      setTimeout(enviarProximo,300);
+                      return;
+                    }
                     var waGrupo=(cl.waGrupo||"").trim();
                     var nome1=cl.nome.split(" ")[0];
                     var msg=encodeURIComponent(
@@ -2217,25 +2227,25 @@ function Dash({data:d,onSel:os,goTo}){
                     }else{
                       var tel=(cl.tel||"").replace(/\D/g,"");
                       if(tel)window.open("https://wa.me/55"+tel+"?text="+msg,"_blank");
-                      else console.warn("Sem WhatsApp:",cl.nome);
+                      else console.warn("Sem WhatsApp nem e-mail cadastrado:",cl.nome);
                     }
                     setTimeout(enviarProximo,2000);
                   },500);
                 };
                 enviarProximo();
-              }} style={{padding:"7px 18px",background:relEnviando?"rgba(37,211,102,0.1)":"#25D366",color:relEnviando?"#25D366":"#fff",border:"1px solid #25D366",borderRadius:8,fontSize:11,fontWeight:800,cursor:"pointer"}}>
-                {relEnviando?"⏳ Enviando...":"📱 Enviar aprovados via WhatsApp"}
+              }} style={{padding:"7px 18px",background:relEnviando?"rgba(212,163,40,0.12)":"linear-gradient(135deg,#D4A328,#E8C158)",color:relEnviando?T.gold:"#0A1628",border:"1px solid "+T.gold,borderRadius:8,fontSize:11,fontWeight:800,cursor:"pointer"}}>
+                {relEnviando?"⏳ Enviando...":"📧 Enviar aprovados por e-mail"}
               </button>
             </div>
 
             {/* Info sobre e-mail automático */}
             {d.config&&d.config.emailjs&&d.config.emailjs.publicKey?(
               <div style={{padding:"10px 14px",background:"rgba(45,212,160,0.06)",border:"1px solid rgba(45,212,160,0.2)",borderRadius:8,fontSize:10,color:T.green,lineHeight:1.6,marginBottom:8}}>
-                ✅ <strong>E-mail automático ativado.</strong> Ao aprovar e clicar em Enviar, os relatórios são enviados automaticamente por e-mail para cada cliente cadastrado.
+                ✅ <strong>E-mail automático ativado (canal prioritário).</strong> Ao aprovar e clicar em Enviar, quem tem e-mail cadastrado recebe o relatório por e-mail. O WhatsApp só é aberto automaticamente para quem <strong>não</strong> tem e-mail cadastrado.
               </div>
             ):(
               <div style={{padding:"10px 14px",background:"rgba(212,163,40,0.06)",border:"1px solid rgba(212,163,40,0.2)",borderRadius:8,fontSize:10,color:T.gold,lineHeight:1.6,marginBottom:8}}>
-                📧 <strong>Ative o envio automático por e-mail:</strong> Acesse <strong>Configurações → E-mail (EmailJS)</strong> para configurar. Após configurado, relatórios são enviados automaticamente por e-mail + WhatsApp ao mesmo tempo.
+                📧 <strong>Ative o envio automático por e-mail:</strong> Acesse <strong>Configurações → E-mail (EmailJS)</strong> para configurar. Depois de configurado, o e-mail passa a ser o canal prioritário — o WhatsApp só é usado automaticamente para quem não tem e-mail cadastrado.
               </div>
             )}
 
