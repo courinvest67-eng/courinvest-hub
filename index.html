@@ -430,6 +430,92 @@ const gerarRelatorioHtmlHeadless=function(cliente,dadosApp,tipoRelatorio){
   });
 };
 
+/* === MONTA O HTML DO CORPO DO E-MAIL DE RELATÓRIO (não é o PDF — é o e-mail em si) ===
+   Layout único reaproveitado pelo envio automático real (sendReportEmail, no Dash) e pelo botão
+   de teste (NewsView), pra garantir que os dois fiquem sempre visualmente idênticos.
+   Segue a identidade visual da Courinvest (navy #0A1628 + dourado #D4A328) — a mesma paleta do
+   relatório completo em PDF, só que num layout mais simples e compacto, adequado a e-mail.
+   KPIs em <table> (não CSS grid/flex) pra ficar compatível com clientes de e-mail mais antigos
+   (ex: Outlook desktop), que não renderizam grid/flex corretamente. */
+const montarEmailRelatorioHtml=function(opts){
+  var o=opts||{};
+  var nome=o.nome||"";
+  var mesRefStr=o.mesRefStr||"";
+  var tituloTopo=o.tituloTopo||"Relatório Mensal";
+  var introTxt=o.introTxt||"";
+  var destaque=o.destaque||null; /* {icon,label,value} — o número principal, em destaque */
+  var badges=o.badges||[]; /* [{icon,label,value,cls}] — pílulas menores abaixo do destaque (ex: rentabilidade) */
+  var remetente=o.remetente||"contato@courinvest.com.br";
+  var notaExtra=o.notaExtra||"";
+  var supportHtml=o.supportHtml||'💬 <b>Alguma dúvida sobre este relatório?</b><br>Responda este e-mail — teremos prazer em ajudar.';
+
+  var destaqueHtml=destaque?(
+    '<div class="hero-stat">'
+    +'<div class="hero-stat-label">'+(destaque.icon?destaque.icon+' ':'')+destaque.label+'</div>'
+    +'<div class="hero-stat-value">'+destaque.value+'</div>'
+    +'</div>'
+  ):'';
+
+  var badgesHtml=badges.length?(
+    '<div class="badges-row">'
+    +badges.map(function(b){
+      return '<span class="badge '+(b.cls||"neutral")+'">'+(b.icon?b.icon+' ':'')+b.value+(b.label?' <span style="opacity:.75;font-weight:600">'+b.label+'</span>':'')+'</span>';
+    }).join('')
+    +'</div>'
+  ):'';
+
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+    +'<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+    +'<style>'
+    +'body{margin:0;padding:0;background:#EEF1F6}'
+    +'.pdfwrap{font-family:Arial,Helvetica,sans-serif;background:#EEF1F6;margin:0;padding:32px 16px}'
+    +'.container{max-width:600px;margin:0 auto}'
+    +'.hero{background:radial-gradient(ellipse 70% 65% at 88% 12%,rgba(212,163,40,0.22) 0%,transparent 55%),linear-gradient(135deg,#0A1628 0%,#142B52 100%);border-radius:16px 16px 0 0;padding:38px 32px;text-align:center}'
+    +'.brand{font-size:22px;font-weight:800;letter-spacing:2px;color:#D4A328;margin:0}'
+    +'.brand-sub{font-size:9px;letter-spacing:3px;color:#8B94A7;text-transform:uppercase;margin:4px 0 18px}'
+    +'.hero-divider{width:40px;height:2px;background:#D4A328;margin:0 auto 16px;border-radius:2px}'
+    +'.hero h1{font-size:19px;color:#fff;margin:0 0 5px;font-weight:700}'
+    +'.hero p{font-size:12px;color:#B9C2D4;margin:0}'
+    +'.body-card{background:#fff;padding:32px;border-radius:0 0 16px 16px;box-shadow:0 4px 24px rgba(10,22,40,.06)}'
+    +'.greeting{font-size:15px;color:#1A1A2E;margin:0 0 8px}'
+    +'.intro{font-size:13px;color:#5B6472;line-height:1.7;margin:0 0 22px}'
+    +'.hero-stat{text-align:center;margin:0 0 14px;padding:24px 16px;background:linear-gradient(180deg,#FBF8EF 0%,#F5F6F9 100%);border-radius:14px;border:1px solid #EFE3BD}'
+    +'.hero-stat-label{font-size:10px;color:#9A8555;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px}'
+    +'.hero-stat-value{font-size:32px;font-weight:800;color:#0A1628;letter-spacing:-.5px;line-height:1.15}'
+    +'.badges-row{text-align:center;margin:0 0 26px}'
+    +'.badge{display:inline-block;padding:7px 16px;border-radius:20px;font-size:12px;font-weight:800;margin:4px}'
+    +'.badge.green{background:#E7F8F1;color:#1FAE7E}'
+    +'.badge.red{background:#FCEBEA;color:#D9534F}'
+    +'.badge.neutral{background:#EEF1F6;color:#5B6472}'
+    +'.cta-wrap{text-align:center;margin:4px 0 24px}'
+    +'.cta-btn{display:inline-block;background:linear-gradient(135deg,#D4A328,#E8C158);color:#0A1628;text-decoration:none;font-weight:800;font-size:13px;padding:14px 34px;border-radius:10px;letter-spacing:.3px}'
+    +'.cta-fallback{font-size:12px;color:#999}'
+    +'.support-card{background:#F0FBF6;border:1px solid #D7F0E3;border-radius:10px;padding:16px 18px;font-size:12px;color:#33473E;line-height:1.6}'
+    +'.support-card b{color:#0F7A50}'
+    +'.nota-extra{margin-top:16px;font-size:11px;color:#8A93A3;text-align:center}'
+    +'.footer{text-align:center;padding:24px 12px 4px;font-size:10px;color:#98A1B0;line-height:1.7}'
+    +'.footer .fmark{color:#D4A328;font-weight:800;letter-spacing:1px;font-size:11px;display:block;margin-bottom:4px}'
+    +'</style></head><body><div class="pdfwrap"><div class="container">'
+    +'<div class="hero">'
+      +'<div class="brand">COURINVEST</div>'
+      +'<div class="brand-sub">Consultoria em Investimentos</div>'
+      +'<div class="hero-divider"></div>'
+      +'<h1>'+tituloTopo+'</h1>'
+      +'<p>Período de referência: '+mesRefStr+'</p>'
+    +'</div>'
+    +'<div class="body-card">'
+      +'<p class="greeting">Olá, <strong>'+nome+'</strong>.</p>'
+      +'<p class="intro">'+introTxt+'</p>'
+      +destaqueHtml
+      +badgesHtml
+      +'<div class="cta-wrap">%%PDF_BUTTON%%</div>'
+      +'<div class="support-card">'+supportHtml+'</div>'
+      +(notaExtra?('<div class="nota-extra">'+notaExtra+'</div>'):'')
+    +'</div>'
+    +'<div class="footer"><span class="fmark">COURINVEST</span>Consultoria em Investimentos · '+remetente+'<br>Esta mensagem é confidencial e destinada exclusivamente ao destinatário indicado.</div>'
+    +'</div></div></body></html>';
+};
+
 /* === PARTICULARIDADES DO CLIENTE ===
    Cada cliente pode ter regras especiais que afetam o cálculo de fee.
    c.particularidades = {
@@ -1625,51 +1711,49 @@ function Dash({data:d,onSel:os,goTo}){
         var p=c._gorilaRent.periods.find(function(x){var s=String(x.p||"").toLowerCase();return s.indexOf("ltimo")>=0||s.indexOf("mes")>=0;});
         return p&&typeof p.rent==="number"?(p.rent*100).toFixed(2)+"%":"—";
       })():"—";
-      var fee=isPlan?feeMensalBRL(c):(feeBaseDoCliente(c).fee||0);
       var fmV=function(v){return "R$ "+parseFloat(v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});};
       var MN_EMAIL=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
       var hoje=new Date();var mesE=hoje.getMonth();var anoE=hoje.getFullYear();
-      var mesRefStr=MN_EMAIL[mesE]+"/"+anoE;
+      /* Sem "/" no texto exibido: o EmailJS escapa "/" como "&#x2F;" em campos de texto puro
+         (ex: o Assunto do e-mail), e "Julho&#x2F;2026" aparecia literalmente pro cliente.
+         "Julho de 2026" evita esse problema na raiz, em qualquer campo do template. */
+      var mesRefStr=MN_EMAIL[mesE]+" de "+anoE;
+      /* Formato AAAA-MM só pro nome do arquivo/caminho no Storage — não depende do texto exibido */
+      var mesRefArquivo=anoE+"-"+String(mesE+1).padStart(2,"0");
 
-      /* KPIs variam por tipo de serviço: GF não tem patrimônio/rentabilidade acompanhados aqui */
-      var kpisHtml=isPlan
-        ?(fee>0?'<div class="kpi"><div class="kpi-label">Fee mensal</div><div class="kpi-value">'+fmV(fee)+'</div></div>':'')
-          +'<div class="kpi"><div class="kpi-label">Serviço</div><div class="kpi-value" style="font-size:14px">Gestão Financeira</div></div>'
-        :(pat>0?'<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value">'+fmV(pat)+'</div></div>':'')
-          +(rent!=="—"?'<div class="kpi"><div class="kpi-label">Rentabilidade do mês</div><div class="kpi-value green">'+rent+'</div></div>':'')
-          +(fee>0?'<div class="kpi"><div class="kpi-label">Fee de gestão</div><div class="kpi-value">'+fmV(fee)+'</div></div>':'');
+      /* Informação de fee/taxa de gestão NÃO aparece no e-mail (pedido explícito) — fica só no
+         relatório em PDF completo, quando aplicável. Aqui só o "destaque" (número principal) e,
+         quando existir, um badge de rentabilidade do mês (com seta e cor conforme o sinal). */
+      var rentNum=null;
+      if(rent!=="—"){var _rn=parseFloat(String(rent).replace(",",".").replace("%",""));if(!isNaN(_rn))rentNum=_rn;}
+      var rentBadge=(rentNum!=null)?[{
+        icon:rentNum>=0?"▲":"▼",
+        value:(rentNum>=0?"+":"")+rent,
+        label:"no mês",
+        cls:rentNum>=0?"green":"red"
+      }]:[];
+
+      var destaque=isPlan
+        ?{icon:"📊",label:"Serviço Ativo",value:"Gestão Financeira"}
+        :(pat>0?{icon:"💰",label:"Patrimônio Atual",value:fmV(pat)}:{icon:"💎",label:"Serviço Ativo",value:"Gestão de Patrimônio"});
+      var badges=isPlan?[]:rentBadge;
+
       var introTxt=isPlan
-        ?"Seu planejamento financeiro segue em acompanhamento. Segue abaixo o resumo referente a"
-        :"Segue abaixo o resumo do seu relatório mensal de gestão de patrimônio referente a";
+        ?"Seu planejamento financeiro segue em acompanhamento. Segue abaixo o resumo referente a <strong>"+mesRefStr+"</strong>."
+        :"Segue abaixo o resumo do seu relatório mensal de gestão de patrimônio referente a <strong>"+mesRefStr+"</strong>.";
 
-      /* Gera o relatório HTML para enviar como corpo do e-mail (com placeholder pro botão de PDF) */
+      /* Gera o HTML do corpo do e-mail (com placeholder pro botão de PDF) */
       var reportHtml="";
       try{
-        reportHtml='<!DOCTYPE html><html><head><meta charset="UTF-8">'
-          +'<style>.pdfwrap{font-family:Arial,sans-serif;background:#f5f5f5;margin:0;padding:20px}'
-          +'.card{background:#fff;border-radius:12px;padding:24px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,.08)}'
-          +'.header{background:#0A1628;color:#fff;border-radius:12px;padding:28px;margin-bottom:16px;text-align:center}'
-          +'.header h1{font-size:22px;margin:0 0 6px;color:#D4A328}'
-          +'.header p{margin:0;color:#8B94A7;font-size:13px}'
-          +'.kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:16px 0}'
-          +'.kpi{background:#f8f9fa;border-radius:8px;padding:14px;text-align:center;border-left:3px solid #D4A328}'
-          +'.kpi-label{font-size:11px;color:#666;font-weight:600;text-transform:uppercase;letter-spacing:.5px}'
-          +'.kpi-value{font-size:20px;font-weight:700;color:#0A1628;margin-top:4px}'
-          +'.kpi-value.green{color:#2DD4A0}.kpi-value.red{color:#EF6461}'
-          +'.pdfbtn{display:inline-block;background:#D4A328;color:#0A1628;text-decoration:none;font-weight:700;padding:12px 28px;border-radius:8px;font-size:14px}'
-          +'.footer{text-align:center;color:#999;font-size:11px;margin-top:20px}'
-          +'</style></head><body><div class="pdfwrap">'
-          +'<div class="header"><h1>COURINVEST</h1><p>Relatório Mensal · '+mesRefStr+'</p></div>'
-          +'<div class="card"><p style="font-size:15px;color:#333">Olá <strong>'+c.nome+'</strong>,</p>'
-          +'<p style="color:#555;line-height:1.7">'+introTxt+' <strong>'+mesRefStr+'</strong>.</p>'
-          +'<div class="kpis">'+kpisHtml+'</div>'
-          +'<div style="text-align:center;margin:20px 0 6px">%%PDF_BUTTON%%</div>'
-          +'</div>'
-          +'<div class="card" style="background:#f0fdf4;border-left:4px solid #2DD4A0">'
-          +'<p style="margin:0;font-size:13px;color:#333">💬 <strong>Precisa de alguma informação ou tem dúvidas?</strong><br>Responda este e-mail ou entre em contato diretamente.</p>'
-          +'</div>'
-          +'<div class="footer">Courinvest Consultoria em Investimentos · '+(cfg.remetente||"contato@courinvest.com.br")+'<br>Esta mensagem é confidencial e destinada ao destinatário indicado.</div>'
-          +'</div></body></html>';
+        reportHtml=montarEmailRelatorioHtml({
+          nome:c.nome,
+          mesRefStr:mesRefStr,
+          tituloTopo:isPlan?"Acompanhamento Financeiro":"Relatório Mensal",
+          introTxt:introTxt,
+          destaque:destaque,
+          badges:badges,
+          remetente:cfg.remetente||"contato@courinvest.com.br"
+        });
       }catch(e){console.warn("Erro ao gerar HTML do e-mail:",e);}
 
       /* Gera o PDF e sobe pro Storage. Tenta primeiro o RELATÓRIO COMPLETO real (a mesma ficha
@@ -1677,15 +1761,15 @@ function Dash({data:d,onSel:os,goTo}){
          de administração — que a aba "Relatório" do cliente gera), montando uma instância oculta
          da ficha só pra isso (gerarRelatorioHtmlHeadless). Se isso falhar ou demorar demais, cai
          pro resumo curto (o card com os KPIs) como PDF — nunca bloqueia o envio do e-mail. */
-      var pathStorage="relatorios/"+c.id+"/"+mesRefStr.replace("/","-")+"_"+(isPlan?"gf":"gp")+".pdf";
+      var pathStorage="relatorios/"+c.id+"/"+mesRefArquivo+"_"+(isPlan?"gf":"gp")+".pdf";
       var tipoRelatorioCompleto=isPlan?"planejamento":"mensal";
       gerarRelatorioHtmlHeadless(c,d,tipoRelatorioCompleto).then(function(htmlCompleto){
         var htmlParaPdf=htmlCompleto||reportHtml.replace("%%PDF_BUTTON%%","");
         return gerarPdfLinkCourinvest(pathStorage,htmlParaPdf);
       }).then(function(pdfUrl){
         var botaoHtml=pdfUrl
-          ?'<a class="pdfbtn" href="'+pdfUrl+'" target="_blank" rel="noopener">📄 Baixar relatório em PDF</a>'
-          :'<span style="font-size:12px;color:#999">Entre em contato para receber o relatório completo em PDF.</span>';
+          ?'<a class="cta-btn" href="'+pdfUrl+'" target="_blank" rel="noopener">📄 Baixar Relatório Completo em PDF</a>'
+          :'<span class="cta-fallback">Entre em contato para receber o relatório completo em PDF.</span>';
         var reportHtmlFinal=reportHtml.replace("%%PDF_BUTTON%%",botaoHtml);
 
         var templateParams={
@@ -23467,38 +23551,22 @@ function NewsView({data,dispatch}){
 
                 var hojeT=new Date();
                 var MN_T=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
-                var mesRefT=MN_T[hojeT.getMonth()]+"/"+hojeT.getFullYear();
-                var reportHtmlT='<!DOCTYPE html><html><head><meta charset="UTF-8">'
-                  +'<style>.pdfwrap{font-family:Arial,sans-serif;background:#f5f5f5;margin:0;padding:20px}'
-                  +'.card{background:#fff;border-radius:12px;padding:24px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,.08)}'
-                  +'.header{background:#0A1628;color:#fff;border-radius:12px;padding:28px;margin-bottom:16px;text-align:center}'
-                  +'.header h1{font-size:22px;margin:0 0 6px;color:#D4A328}'
-                  +'.header p{margin:0;color:#8B94A7;font-size:13px}'
-                  +'.kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:16px 0}'
-                  +'.kpi{background:#f8f9fa;border-radius:8px;padding:14px;text-align:center;border-left:3px solid #D4A328}'
-                  +'.kpi-label{font-size:11px;color:#666;font-weight:600;text-transform:uppercase;letter-spacing:.5px}'
-                  +'.kpi-value{font-size:20px;font-weight:700;color:#0A1628;margin-top:4px}'
-                  +'.kpi-value.green{color:#2DD4A0}'
-                  +'.pdfbtn{display:inline-block;background:#D4A328;color:#0A1628;text-decoration:none;font-weight:700;padding:12px 28px;border-radius:8px;font-size:14px}'
-                  +'.footer{text-align:center;color:#999;font-size:11px;margin-top:20px}'
-                  +'</style></head><body><div class="pdfwrap">'
-                  +'<div class="header"><h1>COURINVEST</h1><p>🧪 E-mail de teste · '+mesRefT+'</p></div>'
-                  +'<div class="card"><p style="font-size:15px;color:#333">Olá <strong>Teste</strong>,</p>'
-                  +'<p style="color:#555;line-height:1.7">Este é um e-mail de teste para validar o template, a integração do EmailJS e a geração do PDF antes do envio real aos clientes.</p>'
-                  +'<div class="kpis">'
-                  +'<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value">R$ 1.250.000,00</div></div>'
-                  +'<div class="kpi"><div class="kpi-label">Rentabilidade do mês</div><div class="kpi-value green">+1,85%</div></div>'
-                  +'</div>'
-                  +'<div style="text-align:center;margin:20px 0 6px">%%PDF_BUTTON%%</div>'
-                  +'<p style="color:#555;font-size:13px">Se você recebeu este e-mail corretamente, com a formatação preservada e o botão de PDF funcionando, a configuração está 100% pronta.</p>'
-                  +'</div>'
-                  +'<div class="footer">Courinvest Consultoria em Investimentos · '+(cfg.remetente||"contato@courinvest.com.br")+'<br>Mensagem de teste — não enviada a nenhum cliente.</div>'
-                  +'</div></body></html>';
+                var mesRefT=MN_T[hojeT.getMonth()]+" de "+hojeT.getFullYear();
+                var reportHtmlT=montarEmailRelatorioHtml({
+                  nome:"Teste",
+                  mesRefStr:mesRefT,
+                  tituloTopo:"🧪 E-mail de Teste",
+                  introTxt:"Este é um e-mail de teste para validar o template, a integração do EmailJS e a geração do PDF antes do envio real aos clientes.",
+                  destaque:{icon:"💰",label:"Patrimônio Atual",value:"R$ 1.250.000,00"},
+                  badges:[{icon:"▲",value:"+1,85%",label:"no mês",cls:"green"}],
+                  remetente:cfg.remetente||"contato@courinvest.com.br",
+                  notaExtra:"Se você recebeu este e-mail corretamente, com a formatação preservada e o botão de PDF funcionando, a configuração está 100% pronta."
+                });
 
                 gerarPdfLinkCourinvest("relatorios/_teste/teste_"+Date.now()+".pdf",reportHtmlT.replace("%%PDF_BUTTON%%","")).then(function(pdfUrl){
                   var botaoHtml=pdfUrl
-                    ?'<a class="pdfbtn" href="'+pdfUrl+'" target="_blank" rel="noopener">📄 Baixar relatório em PDF</a>'
-                    :'<span style="font-size:12px;color:#c00">⚠️ PDF não foi gerado/enviado ao Storage (veja o alerta após o envio).</span>';
+                    ?'<a class="cta-btn" href="'+pdfUrl+'" target="_blank" rel="noopener">📄 Baixar Relatório Completo em PDF</a>'
+                    :'<span class="cta-fallback" style="color:#c00">⚠️ PDF não foi gerado/enviado ao Storage (veja o alerta após o envio).</span>';
                   var reportHtmlFinal=reportHtmlT.replace("%%PDF_BUTTON%%",botaoHtml);
 
                   var templateParams={
