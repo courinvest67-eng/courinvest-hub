@@ -363,6 +363,73 @@ const gerarPdfLinkCourinvest=function(pathStorage,htmlContent){
   });
 };
 
+/* === GERA O RELATÓRIO MENSAL COMPLETO (a mesma ficha detalhada multi-página da aba "Relatório"
+   dentro do cadastro do cliente) EM SEGUNDO PLANO, SEM abrir a ficha na tela ===
+   Usado no envio automático de e-mail: em vez de um resumo curto, o PDF anexado passa a ser o
+   relatório oficial completo (capa, resumo executivo, rentabilidade vs benchmarks, alocação,
+   proventos, movimentações, taxa de administração etc. — a função gerarRelatorio já existente).
+
+   Como funciona: gerarRelatorio() é uma closure que só existe dentro do componente CD (a ficha
+   do cliente) — ela depende de várias contas feitas no corpo do CD (ativos enriquecidos, totais,
+   proventos...). Não dá pra chamar ela "de fora". Então montamos uma instância REAL do CD, só que
+   invisível (dentro de um wrapper de tamanho zero, igual ao truque do PDF), já nascendo direto na
+   aba "relatorio" (via headlessTipoRelatorio) — e ela mesma nos devolve o HTML pronto via o
+   callback onReportReady, exatamente como já acontece na abertura automática vinda do modal de
+   aprovação (courinvest:abrirRelatorio). Depois de receber (ou depois de 40s, o que vier primeiro),
+   desmonta tudo e nunca deixa nada visível na tela do usuário.
+
+   dispatch é propositalmente um no-op: o CD tem efeitos que re-salvam dados (ex: ativos importados,
+   metas) automaticamente ao montar — inofensivos pro conteúdo, mas que gravariam no Firestore e
+   disparariam um re-render geral do app se usássemos o dispatch de verdade. Como só precisamos do
+   HTML do relatório (que depende só de props/estado local, não do dispatch), um no-op é seguro e
+   evita qualquer efeito colateral indesejado dessa instância oculta.
+
+   Resolve(null) — nunca rejeita — se qualquer etapa falhar ou demorar demais, pra quem chamou
+   sempre poder cair de volta pro resumo curto sem travar o envio do e-mail. */
+const gerarRelatorioHtmlHeadless=function(cliente,dadosApp,tipoRelatorio){
+  return new Promise(function(resolve){
+    var settled=false;
+    var root=null,container=null;
+    var finish=function(v){
+      if(settled)return;
+      settled=true;
+      try{if(root)root.unmount();}catch(_e){}
+      try{if(container&&container.parentNode)document.body.removeChild(container);}catch(_e){}
+      resolve(v);
+    };
+    var timeoutId=setTimeout(function(){
+      console.warn("[Relatório] Timeout de 40s ao gerar o relatório completo em segundo plano — usando o resumo como PDF.");
+      finish(null);
+    },40000);
+    try{
+      if(typeof CD==="undefined"||typeof ReactDOM==="undefined"||typeof React==="undefined"){
+        clearTimeout(timeoutId);finish(null);return;
+      }
+      container=document.createElement("div");
+      container.style.cssText="position:fixed;top:0;left:0;width:0;height:0;overflow:hidden;";
+      document.body.appendChild(container);
+      root=ReactDOM.createRoot(container);
+      root.render(
+        React.createElement(CD,{
+          client:cliente,
+          data:dadosApp,
+          dispatch:function(){},
+          onBack:function(){},
+          headlessTipoRelatorio:tipoRelatorio,
+          onReportReady:function(html){
+            clearTimeout(timeoutId);
+            finish(html||null);
+          }
+        })
+      );
+    }catch(e){
+      console.warn("[Relatório] Erro ao montar ficha oculta para gerar o relatório completo:",e);
+      clearTimeout(timeoutId);
+      finish(null);
+    }
+  });
+};
+
 /* === PARTICULARIDADES DO CLIENTE ===
    Cada cliente pode ter regras especiais que afetam o cálculo de fee.
    c.particularidades = {
@@ -1605,9 +1672,17 @@ function Dash({data:d,onSel:os,goTo}){
           +'</div></body></html>';
       }catch(e){console.warn("Erro ao gerar HTML do e-mail:",e);}
 
-      /* Gera o PDF do resumo e sobe pro Storage; se falhar, segue sem o botão (não bloqueia o envio) */
+      /* Gera o PDF e sobe pro Storage. Tenta primeiro o RELATÓRIO COMPLETO real (a mesma ficha
+         detalhada — capa, resumo executivo, benchmarks, alocação, proventos, movimentações, taxa
+         de administração — que a aba "Relatório" do cliente gera), montando uma instância oculta
+         da ficha só pra isso (gerarRelatorioHtmlHeadless). Se isso falhar ou demorar demais, cai
+         pro resumo curto (o card com os KPIs) como PDF — nunca bloqueia o envio do e-mail. */
       var pathStorage="relatorios/"+c.id+"/"+mesRefStr.replace("/","-")+"_"+(isPlan?"gf":"gp")+".pdf";
-      gerarPdfLinkCourinvest(pathStorage,reportHtml.replace("%%PDF_BUTTON%%","")).then(function(pdfUrl){
+      var tipoRelatorioCompleto=isPlan?"planejamento":"mensal";
+      gerarRelatorioHtmlHeadless(c,d,tipoRelatorioCompleto).then(function(htmlCompleto){
+        var htmlParaPdf=htmlCompleto||reportHtml.replace("%%PDF_BUTTON%%","");
+        return gerarPdfLinkCourinvest(pathStorage,htmlParaPdf);
+      }).then(function(pdfUrl){
         var botaoHtml=pdfUrl
           ?'<a class="pdfbtn" href="'+pdfUrl+'" target="_blank" rel="noopener">📄 Baixar relatório em PDF</a>'
           :'<span style="font-size:12px;color:#999">Entre em contato para receber o relatório completo em PDF.</span>';
@@ -5579,10 +5654,14 @@ function TaxaGestaoInput({txGestao,clienteId,dispatch:dp}){
   />;
 }
 
-function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
+function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onReportReady,headlessTipoRelatorio}){
   /* Salva d globalmente para acesso em closures como gerarRelatorio */
   window._courinvestData=d;
-  const[tab,sTab]=useState("geral");
+  /* === MODO HEADLESS (sem UI, usado pra gerar o relatório completo em segundo plano) ===
+     Quando headlessTipoRelatorio vem preenchido, essa instância do CD nasce direto na aba
+     "relatorio" com autoRelatorio já setado — dispensa esperar o listener de evento
+     (courinvest:abrirRelatorio) e evita qualquer corrida de timing no primeiro render. */
+  const[tab,sTab]=useState(function(){return headlessTipoRelatorio?"relatorio":"geral"});
   /* === FIRE: único estado objeto para evitar problemas de inicialização === */
   const[fireParams,sFireParams]=useState({
     idadeAlvo:60,rendaMensal:15000,aporteMensal:5000,
@@ -5596,7 +5675,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
   const[escopoRelatorio,setEscopoRelatorio]=useState("titular");
   const[editNome,setEditNome]=useState(false);
   const[nomeTemp,setNomeTemp]=useState("");
-  const[autoRelatorio,sAutoRelatorio]=useState(false);
+  const[autoRelatorio,sAutoRelatorio]=useState(function(){return headlessTipoRelatorio||false});
   const[autoPrint,sAutoPrint]=useState(false);
   /* Listener: abre relatório automaticamente quando vem do modal de aprovação */
   React.useEffect(function(){
@@ -18313,7 +18392,12 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
             try{
               var html=gerarRelatorio(tipoRel,d);
               if(html){
-                if(autoPrint){
+                /* Modo headless (envio automático de e-mail): devolve o HTML pra quem montou
+                   essa instância oculta do CD e não mexe em UI (print/tela) — a instância é
+                   descartada logo em seguida por quem chamou. */
+                if(onReportReady){
+                  try{onReportReady(html,tipoRel);}catch(_e){}
+                }else if(autoPrint){
                   sAutoPrint(false);
                   var w=window.open("","_blank","width=900,height=700");
                   if(w){
@@ -18325,8 +18409,13 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
                 }else{
                   sReportHtml(html);
                 }
+              }else if(onReportReady){
+                try{onReportReady(null,tipoRel);}catch(_e){}
               }
-            }catch(e){console.error("Auto relatório:",e);}
+            }catch(e){
+              console.error("Auto relatório:",e);
+              if(onReportReady){try{onReportReady(null,tipoRel);}catch(_e){}}
+            }
             return null;
           })()}
           {irpfMode ? (
