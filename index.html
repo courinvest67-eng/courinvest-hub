@@ -430,6 +430,62 @@ const gerarRelatorioHtmlHeadless=function(cliente,dadosApp,tipoRelatorio){
   });
 };
 
+/* === BUSCA O OVERVIEW DE MERCADO MAIS RECENTE (o mesmo texto/dados usados no "Resumo do Mercado
+   Financeiro" do relatório completo em PDF, mantido pelo usuário na aba "Overview IA") ===
+   Mesma lógica de busca do gerarRelatorio (mês anterior → mês atual → qualquer chave disponível
+   com texto), só que reutilizável fora do componente CD. */
+const obterOverviewMercadoRecente=function(dadosApp){
+  if(!dadosApp||!dadosApp.overviewMercado)return null;
+  var hoje=new Date();
+  var refAnt=new Date();refAnt.setDate(1);refAnt.setMonth(refAnt.getMonth()-1);
+  var chaveAnt=refAnt.getFullYear()+"-"+String(refAnt.getMonth()+1).padStart(2,"0");
+  var chaveAtual=hoje.getFullYear()+"-"+String(hoje.getMonth()+1).padStart(2,"0");
+  var ov=dadosApp.overviewMercado[chaveAnt]||dadosApp.overviewMercado[chaveAtual]||null;
+  if(!ov){
+    var chaves=Object.keys(dadosApp.overviewMercado).sort().reverse();
+    for(var i=0;i<chaves.length;i++){
+      if(dadosApp.overviewMercado[chaves[i]]&&dadosApp.overviewMercado[chaves[i]].texto){ov=dadosApp.overviewMercado[chaves[i]];break;}
+    }
+  }
+  return ov;
+};
+
+/* === EXTRAI UM COMENTÁRIO CURTO + INDICADORES (Selic, IPCA, Dólar) DO OVERVIEW DE MERCADO ===
+   pra usar no e-mail (versão compacta do "Resumo do Mercado Financeiro" do PDF completo).
+   Pega só o primeiro parágrafo de prosa (pula cabeçalhos em CAIXA ALTA) e trunca pra caber bem
+   no e-mail. Os indicadores vêm do MESMO dado estruturado (dados.selic/ipca/dolar) salvo junto
+   com o texto na aba "Overview IA" — não faz nenhuma chamada de API nova. */
+const montarResumoMercadoEmail=function(ov){
+  if(!ov)return null;
+  var fmtN=function(v,d){return v==null?null:Number(v).toFixed(d==null?2:d).replace(".",",");};
+  var comentario=null;
+  if(ov.texto){
+    /* Cada bloco de parágrafo pode vir como "TÍTULO EM CAIXA ALTA\nRestante do texto..." (título
+       e corpo na mesma "linha em branco a linha em branco" — é assim que o gerarRelatorio também
+       lê). Se a primeira linha for um título, usa o resto do bloco; senão usa o bloco inteiro. */
+    var paragrafos=String(ov.texto).split(/\n\s*\n/).map(function(p){return p.trim();}).filter(function(p){return p.length>0;});
+    var candidato=null;
+    for(var i=0;i<paragrafos.length;i++){
+      var linhas=paragrafos[i].split("\n");
+      var primeiraLinha=linhas[0];
+      var ehCabecalho=/^[A-ZÁÉÍÓÚÂÊÔÃÕÇ\s&]+$/.test(primeiraLinha)&&primeiraLinha.length<=40&&primeiraLinha.length>=3;
+      var corpo=(ehCabecalho?linhas.slice(1).join(" "):paragrafos[i]).trim();
+      if(corpo){candidato=corpo;break;}
+    }
+    if(candidato){
+      var limpo=candidato.replace(/\*\*(.+?)\*\*/g,"$1").replace(/\n/g," ").trim();
+      comentario=limpo.length>230?(limpo.slice(0,227).trim()+"..."):limpo;
+    }
+  }
+  var indicadores=[];
+  var dd=ov.dados||{};
+  if(dd.selic!=null)indicadores.push({label:"Selic",value:fmtN(dd.selic)+"% a.a."});
+  if(dd.ipca!=null)indicadores.push({label:"IPCA (12m)",value:fmtN(dd.ipca)+"%"});
+  if(dd.dolar&&dd.dolar.bid!=null)indicadores.push({label:"Dólar",value:"R$ "+fmtN(dd.dolar.bid,2)});
+  if(!comentario&&!indicadores.length)return null;
+  return{comentario:comentario,indicadores:indicadores};
+};
+
 /* === MONTA O HTML DO CORPO DO E-MAIL DE RELATÓRIO (não é o PDF — é o e-mail em si) ===
    Layout único reaproveitado pelo envio automático real (sendReportEmail, no Dash) e pelo botão
    de teste (NewsView), pra garantir que os dois fiquem sempre visualmente idênticos.
@@ -445,6 +501,7 @@ const montarEmailRelatorioHtml=function(opts){
   var introTxt=o.introTxt||"";
   var destaque=o.destaque||null; /* {icon,label,value} — o número principal, em destaque */
   var badges=o.badges||[]; /* [{icon,label,value,cls}] — pílulas menores abaixo do destaque (ex: rentabilidade) */
+  var mercado=o.mercado||null; /* {comentario,indicadores:[{label,value}]} — panorama do mês (Selic, IPCA...) */
   var remetente=o.remetente||"contato@courinvest.com.br";
   var notaExtra=o.notaExtra||"";
   var supportHtml=o.supportHtml||'💬 <b>Alguma dúvida sobre este relatório?</b><br>Responda este e-mail — teremos prazer em ajudar.';
@@ -461,6 +518,20 @@ const montarEmailRelatorioHtml=function(opts){
     +badges.map(function(b){
       return '<span class="badge '+(b.cls||"neutral")+'">'+(b.icon?b.icon+' ':'')+b.value+(b.label?' <span style="opacity:.75;font-weight:600">'+b.label+'</span>':'')+'</span>';
     }).join('')
+    +'</div>'
+  ):'';
+
+  var mercadoHtml=(mercado&&(mercado.comentario||(mercado.indicadores&&mercado.indicadores.length)))?(
+    '<div class="market-card">'
+    +'<div class="mkt-label">📰 Panorama do Mês</div>'
+    +(mercado.comentario?('<p class="mkt-comment">'+mercado.comentario+'</p>'):'')
+    +((mercado.indicadores&&mercado.indicadores.length)?(
+      '<div class="mkt-indicators">'
+      +mercado.indicadores.map(function(ind){
+        return '<span class="mkt-chip">'+ind.label+': <b>'+ind.value+'</b></span>';
+      }).join('')
+      +'</div>'
+    ):'')
     +'</div>'
   ):'';
 
@@ -487,6 +558,11 @@ const montarEmailRelatorioHtml=function(opts){
     +'.badge.green{background:#E7F8F1;color:#1FAE7E}'
     +'.badge.red{background:#FCEBEA;color:#D9534F}'
     +'.badge.neutral{background:#EEF1F6;color:#5B6472}'
+    +'.market-card{background:#F7F8FA;border-left:3px solid #0A1628;border-radius:10px;padding:18px 20px;margin:0 0 24px}'
+    +'.mkt-label{font-size:9px;color:#8A93A3;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px}'
+    +'.mkt-comment{font-size:12px;color:#3C4450;line-height:1.65;margin:0 0 12px;font-style:italic}'
+    +'.mkt-chip{display:inline-block;background:#fff;border:1px solid #E4E7ED;border-radius:8px;padding:6px 12px;margin:0 6px 6px 0;font-size:11px;color:#5B6472}'
+    +'.mkt-chip b{color:#0A1628}'
     +'.cta-wrap{text-align:center;margin:4px 0 24px}'
     +'.cta-btn{display:inline-block;background:linear-gradient(135deg,#D4A328,#E8C158);color:#0A1628;text-decoration:none;font-weight:800;font-size:13px;padding:14px 34px;border-radius:10px;letter-spacing:.3px}'
     +'.cta-fallback{font-size:12px;color:#999}'
@@ -508,6 +584,7 @@ const montarEmailRelatorioHtml=function(opts){
       +'<p class="intro">'+introTxt+'</p>'
       +destaqueHtml
       +badgesHtml
+      +mercadoHtml
       +'<div class="cta-wrap">%%PDF_BUTTON%%</div>'
       +'<div class="support-card">'+supportHtml+'</div>'
       +(notaExtra?('<div class="nota-extra">'+notaExtra+'</div>'):'')
@@ -1722,21 +1799,14 @@ function Dash({data:d,onSel:os,goTo}){
       var mesRefArquivo=anoE+"-"+String(mesE+1).padStart(2,"0");
 
       /* Informação de fee/taxa de gestão NÃO aparece no e-mail (pedido explícito) — fica só no
-         relatório em PDF completo, quando aplicável. Aqui só o "destaque" (número principal) e,
-         quando existir, um badge de rentabilidade do mês (com seta e cor conforme o sinal). */
-      var rentNum=null;
-      if(rent!=="—"){var _rn=parseFloat(String(rent).replace(",",".").replace("%",""));if(!isNaN(_rn))rentNum=_rn;}
-      var rentBadge=(rentNum!=null)?[{
-        icon:rentNum>=0?"▲":"▼",
-        value:(rentNum>=0?"+":"")+rent,
-        label:"no mês",
-        cls:rentNum>=0?"green":"red"
-      }]:[];
-
+         relatório em PDF completo, quando aplicável. Rentabilidade do mês também não aparece mais
+         aqui (pedido explícito) — só o "destaque" (patrimônio) e, pra GP, um panorama do mês
+         (comentário + Selic/IPCA), reaproveitando o mesmo overview de mercado mantido na aba
+         "Overview IA" e usado no relatório completo em PDF — não faz nenhuma chamada de API nova. */
       var destaque=isPlan
         ?{icon:"📊",label:"Serviço Ativo",value:"Gestão Financeira"}
         :(pat>0?{icon:"💰",label:"Patrimônio Atual",value:fmV(pat)}:{icon:"💎",label:"Serviço Ativo",value:"Gestão de Patrimônio"});
-      var badges=isPlan?[]:rentBadge;
+      var mercado=isPlan?null:montarResumoMercadoEmail(obterOverviewMercadoRecente(d));
 
       var introTxt=isPlan
         ?"Seu planejamento financeiro segue em acompanhamento. Segue abaixo o resumo referente a <strong>"+mesRefStr+"</strong>."
@@ -1751,7 +1821,7 @@ function Dash({data:d,onSel:os,goTo}){
           tituloTopo:isPlan?"Acompanhamento Financeiro":"Relatório Mensal",
           introTxt:introTxt,
           destaque:destaque,
-          badges:badges,
+          mercado:mercado,
           remetente:cfg.remetente||"contato@courinvest.com.br"
         });
       }catch(e){console.warn("Erro ao gerar HTML do e-mail:",e);}
@@ -23558,7 +23628,7 @@ function NewsView({data,dispatch}){
                   tituloTopo:"🧪 E-mail de Teste",
                   introTxt:"Este é um e-mail de teste para validar o template, a integração do EmailJS e a geração do PDF antes do envio real aos clientes.",
                   destaque:{icon:"💰",label:"Patrimônio Atual",value:"R$ 1.250.000,00"},
-                  badges:[{icon:"▲",value:"+1,85%",label:"no mês",cls:"green"}],
+                  mercado:montarResumoMercadoEmail(obterOverviewMercadoRecente(data)),
                   remetente:cfg.remetente||"contato@courinvest.com.br",
                   notaExtra:"Se você recebeu este e-mail corretamente, com a formatação preservada e o botão de PDF funcionando, a configuração está 100% pronta."
                 });
