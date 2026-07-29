@@ -92,11 +92,14 @@ table{border-spacing:0}
 <!-- EmailJS SDK para envio automático de relatórios por e-mail -->
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script>if(typeof pdfjsLib!=="undefined")pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";</script>
+<!-- html2pdf.js: gera o PDF do relatório-resumo no navegador (envio automático por e-mail) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
 <!-- Firebase SDK (compat for Babel standalone) -->
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
 <script>
   /* Firebase bootstrap — defensive, tolera falha de carregamento */
   (function(){
@@ -117,6 +120,7 @@ table{border-spacing:0}
       firebase.initializeApp(firebaseConfig);
       window._fbAuth = firebase.auth();
       window._fbDB = firebase.firestore();
+      try { window._fbStorage = firebase.storage(); } catch(e) { console.warn("[Firebase] Storage indisponível:", e); }
       try {
         window._fbDB.enablePersistence({synchronizeTabs:true}).catch(function(err){
           console.warn("Firestore persistence not available:", err.code);
@@ -276,9 +280,54 @@ const metodoCobranca=function(c){
    Pra cliente BR fee é em R$ (sem conversão). Pra exterior, converte EUR/USD/etc → BRL. */
 const feeMensalBRL=function(c){
   if(!c)return 0;
-  var moeda=c.feeMoeda||moedaCli(c).code; 
+  var moeda=c.feeMoeda||moedaCli(c).code;
   var fee=c.feeFixo||0;
   return toBRL(fee,moeda);
+};
+
+/* === GERA PDF (via html2pdf.js) A PARTIR DE UM HTML E FAZ UPLOAD PRO FIREBASE STORAGE ===
+   Usado no envio automático de e-mail de relatórios: converte o resumo (ou qualquer HTML
+   autocontido) em PDF de verdade e devolve o link de download público.
+   Por quê link e não anexo: o plano Free do EmailJS não suporta anexos de e-mail — só
+   planos pagos (Personal $9/mês+), com limite de 500KB. Link via Storage funciona em
+   qualquer plano e não tem esse limite de tamanho.
+   Resolve(null) — nunca rejeita — se qualquer etapa falhar (lib não carregada, Storage
+   indisponível, erro de permissão, etc.), pra nunca travar o envio do e-mail por causa do PDF. */
+const gerarPdfLinkCourinvest=function(pathStorage,htmlContent){
+  return new Promise(function(resolve){
+    var container=null;
+    try{
+      if(typeof window.html2pdf==="undefined"){console.warn("[PDF] html2pdf.js não carregou.");resolve(null);return;}
+      if(!window._fbStorage){console.warn("[PDF] Firebase Storage indisponível (verifique se o Storage está habilitado no projeto Firebase).");resolve(null);return;}
+      container=document.createElement("div");
+      container.style.cssText="position:fixed;left:-9999px;top:0;width:800px;background:#fff;";
+      container.innerHTML=htmlContent;
+      document.body.appendChild(container);
+      html2pdf().set({
+        margin:0,
+        filename:"relatorio.pdf",
+        image:{type:"jpeg",quality:0.95},
+        html2canvas:{scale:2,useCORS:true,backgroundColor:"#ffffff"},
+        jsPDF:{unit:"pt",format:"a4",orientation:"portrait"}
+      }).from(container).toPdf().output("blob").then(function(blob){
+        try{if(container&&container.parentNode)document.body.removeChild(container)}catch(_e){}
+        var ref=window._fbStorage.ref().child(pathStorage);
+        return ref.put(blob,{contentType:"application/pdf"});
+      }).then(function(snap){
+        return snap.ref.getDownloadURL();
+      }).then(function(url){
+        resolve(url);
+      }).catch(function(e){
+        console.warn("[PDF] Falha ao gerar/subir PDF:",e);
+        try{if(container&&container.parentNode)document.body.removeChild(container)}catch(_e){}
+        resolve(null);
+      });
+    }catch(e){
+      console.warn("[PDF] Erro inesperado ao gerar PDF:",e);
+      try{if(container&&container.parentNode)document.body.removeChild(container)}catch(_e){}
+      resolve(null);
+    }
+  });
 };
 
 /* === PARTICULARIDADES DO CLIENTE ===
@@ -1453,7 +1502,11 @@ function Dash({data:d,onSel:os,goTo}){
 
   /* ===== ENVIO DE RELATÓRIO POR E-MAIL (EmailJS) =====
      Requer config em d.config.emailjs: { publicKey, serviceId, templateId }
-     Template deve ter vars: to_email, to_name, mes_ref, patrimonio, rentabilidade, ganho, obs */
+     Template deve ter vars: to_email, to_name, mes_ref, patrimonio, rentabilidade, ganho, obs
+     O e-mail traz um resumo (GP: patrimônio/rentabilidade/fee · GF: fee mensal) + um botão
+     "Baixar relatório em PDF" com link do Firebase Storage (não é anexo — o plano Free do
+     EmailJS não suporta anexo; ver gerarPdfLinkCourinvest). Se a geração/upload do PDF falhar
+     por qualquer motivo, o e-mail ainda é enviado, só sem o botão — nunca trava o envio. */
   var sendReportEmail=function(c,tipoRel,mesRefNomeParam){
     return new Promise(function(resolve,reject){
       var cfg=d.config&&d.config.emailjs;
@@ -1466,20 +1519,32 @@ function Dash({data:d,onSel:os,goTo}){
         else{reject(new Error("SDK EmailJS não carregou."));return;}
       }catch(e){reject(e);return;}
 
-      /* Gera o relatório HTML para enviar como corpo do e-mail */
+      var isPlan=tipoRel==="planejamento";
+      var pat=c.patGorila||c.pat||0;
+      var rent=c._gorilaRent&&c._gorilaRent.periods?(function(){
+        var p=c._gorilaRent.periods.find(function(x){var s=String(x.p||"").toLowerCase();return s.indexOf("ltimo")>=0||s.indexOf("mes")>=0;});
+        return p&&typeof p.rent==="number"?(p.rent*100).toFixed(2)+"%":"—";
+      })():"—";
+      var fee=isPlan?feeMensalBRL(c):(feeBaseDoCliente(c).fee||0);
+      var fmV=function(v){return "R$ "+parseFloat(v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});};
+      var MN_EMAIL=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+      var hoje=new Date();var mesE=hoje.getMonth();var anoE=hoje.getFullYear();
+      var mesRefStr=MN_EMAIL[mesE]+"/"+anoE;
+
+      /* KPIs variam por tipo de serviço: GF não tem patrimônio/rentabilidade acompanhados aqui */
+      var kpisHtml=isPlan
+        ?(fee>0?'<div class="kpi"><div class="kpi-label">Fee mensal</div><div class="kpi-value">'+fmV(fee)+'</div></div>':'')
+          +'<div class="kpi"><div class="kpi-label">Serviço</div><div class="kpi-value" style="font-size:14px">Gestão Financeira</div></div>'
+        :(pat>0?'<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value">'+fmV(pat)+'</div></div>':'')
+          +(rent!=="—"?'<div class="kpi"><div class="kpi-label">Rentabilidade do mês</div><div class="kpi-value green">'+rent+'</div></div>':'')
+          +(fee>0?'<div class="kpi"><div class="kpi-label">Fee de gestão</div><div class="kpi-value">'+fmV(fee)+'</div></div>':'');
+      var introTxt=isPlan
+        ?"Seu planejamento financeiro segue em acompanhamento. Segue abaixo o resumo referente a"
+        :"Segue abaixo o resumo do seu relatório mensal de gestão de patrimônio referente a";
+
+      /* Gera o relatório HTML para enviar como corpo do e-mail (com placeholder pro botão de PDF) */
       var reportHtml="";
       try{
-        /* Usa a função gerarRelatorio do CD component via evento */
-        var pat=c.patGorila||c.pat||0;
-        var rent=c._gorilaRent&&c._gorilaRent.periods?(function(){
-          var p=c._gorilaRent.periods.find(function(x){var s=String(x.p||"").toLowerCase();return s.indexOf("ltimo")>=0||s.indexOf("mes")>=0;});
-          return p&&typeof p.rent==="number"?(p.rent*100).toFixed(2)+"%":"—";
-        })():"—";
-        var fee=feeBaseDoCliente(c).fee||0;
-        var fmV=function(v){return "R$ "+parseFloat(v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});};
-        var MN_EMAIL=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
-        var hoje=new Date();var mesE=hoje.getMonth();var anoE=hoje.getFullYear();
-
         reportHtml='<!DOCTYPE html><html><head><meta charset="UTF-8">'
           +'<style>body{font-family:Arial,sans-serif;background:#f5f5f5;margin:0;padding:20px}'
           +'.card{background:#fff;border-radius:12px;padding:24px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,.08)}'
@@ -1491,17 +1556,14 @@ function Dash({data:d,onSel:os,goTo}){
           +'.kpi-label{font-size:11px;color:#666;font-weight:600;text-transform:uppercase;letter-spacing:.5px}'
           +'.kpi-value{font-size:20px;font-weight:700;color:#0A1628;margin-top:4px}'
           +'.kpi-value.green{color:#2DD4A0}.kpi-value.red{color:#EF6461}'
+          +'.pdfbtn{display:inline-block;background:#D4A328;color:#0A1628;text-decoration:none;font-weight:700;padding:12px 28px;border-radius:8px;font-size:14px}'
           +'.footer{text-align:center;color:#999;font-size:11px;margin-top:20px}'
           +'</style></head><body>'
-          +'<div class="header"><h1>COURINVEST</h1><p>Relatório Mensal · '+MN_EMAIL[mesE]+'/'+anoE+'</p></div>'
+          +'<div class="header"><h1>COURINVEST</h1><p>Relatório Mensal · '+mesRefStr+'</p></div>'
           +'<div class="card"><p style="font-size:15px;color:#333">Olá <strong>'+c.nome+'</strong>,</p>'
-          +'<p style="color:#555;line-height:1.7">Segue abaixo o resumo do seu relatório mensal de '+(tipoRel==="planejamento"?"planejamento financeiro":"gestão de patrimônio")+' referente a <strong>'+MN_EMAIL[mesE]+'/'+anoE+'</strong>.</p>'
-          +'<div class="kpis">'
-          +(pat>0?'<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value">'+fmV(pat)+'</div></div>':'')
-          +(rent!=="—"?'<div class="kpi"><div class="kpi-label">Rentabilidade do mês</div><div class="kpi-value green">'+rent+'</div></div>':'')
-          +(fee>0?'<div class="kpi"><div class="kpi-label">Fee de gestão</div><div class="kpi-value">'+fmV(fee)+'</div></div>':'')
-          +'</div>'
-          +'<p style="color:#555;font-size:13px">Para visualizar o relatório completo com todos os detalhes, gráficos e análises, entre em contato conosco ou acesse o relatório em PDF que será enviado em anexo.</p>'
+          +'<p style="color:#555;line-height:1.7">'+introTxt+' <strong>'+mesRefStr+'</strong>.</p>'
+          +'<div class="kpis">'+kpisHtml+'</div>'
+          +'<div style="text-align:center;margin:20px 0 6px">%%PDF_BUTTON%%</div>'
           +'</div>'
           +'<div class="card" style="background:#f0fdf4;border-left:4px solid #2DD4A0">'
           +'<p style="margin:0;font-size:13px;color:#333">💬 <strong>Precisa de alguma informação ou tem dúvidas?</strong><br>Responda este e-mail ou entre em contato diretamente.</p>'
@@ -1510,19 +1572,28 @@ function Dash({data:d,onSel:os,goTo}){
           +'</body></html>';
       }catch(e){console.warn("Erro ao gerar HTML do e-mail:",e);}
 
-      var templateParams={
-        to_email:c.email,
-        to_name:c.nome.split(" ")[0],
-        mes_ref:MN_EMAIL?.[mesE]+"/"+anoE,
-        patrimonio:pat>0?fmV(pat):"—",
-        rentabilidade:rent,
-        tipo_servico:tipoRel==="planejamento"?"Gestão Financeira":"Gestão de Patrimônio",
-        report_html:reportHtml,
-        from_name:cfg.nomeRemetente||"Courinvest",
-        reply_to:cfg.remetente||"",
-      };
+      /* Gera o PDF do resumo e sobe pro Storage; se falhar, segue sem o botão (não bloqueia o envio) */
+      var pathStorage="relatorios/"+c.id+"/"+mesRefStr.replace("/","-")+"_"+(isPlan?"gf":"gp")+".pdf";
+      gerarPdfLinkCourinvest(pathStorage,reportHtml.replace("%%PDF_BUTTON%%","")).then(function(pdfUrl){
+        var botaoHtml=pdfUrl
+          ?'<a class="pdfbtn" href="'+pdfUrl+'" target="_blank" rel="noopener">📄 Baixar relatório em PDF</a>'
+          :'<span style="font-size:12px;color:#999">Entre em contato para receber o relatório completo em PDF.</span>';
+        var reportHtmlFinal=reportHtml.replace("%%PDF_BUTTON%%",botaoHtml);
 
-      window.emailjs.send(cfg.serviceId,cfg.templateId,templateParams)
+        var templateParams={
+          to_email:c.email,
+          to_name:c.nome.split(" ")[0],
+          mes_ref:mesRefStr,
+          patrimonio:pat>0?fmV(pat):"—",
+          rentabilidade:rent,
+          tipo_servico:isPlan?"Gestão Financeira":"Gestão de Patrimônio",
+          report_html:reportHtmlFinal,
+          from_name:cfg.nomeRemetente||"Courinvest",
+          reply_to:cfg.remetente||"",
+        };
+
+        return window.emailjs.send(cfg.serviceId,cfg.templateId,templateParams);
+      })
         .then(function(){resolve();})
         .catch(function(e){reject(new Error("EmailJS: "+(e&&e.text||e&&e.message||JSON.stringify(e))));});
     });
@@ -23286,41 +23357,52 @@ function NewsView({data,dispatch}){
                   +'.kpi-label{font-size:11px;color:#666;font-weight:600;text-transform:uppercase;letter-spacing:.5px}'
                   +'.kpi-value{font-size:20px;font-weight:700;color:#0A1628;margin-top:4px}'
                   +'.kpi-value.green{color:#2DD4A0}'
+                  +'.pdfbtn{display:inline-block;background:#D4A328;color:#0A1628;text-decoration:none;font-weight:700;padding:12px 28px;border-radius:8px;font-size:14px}'
                   +'.footer{text-align:center;color:#999;font-size:11px;margin-top:20px}'
                   +'</style></head><body>'
                   +'<div class="header"><h1>COURINVEST</h1><p>🧪 E-mail de teste · '+mesRefT+'</p></div>'
                   +'<div class="card"><p style="font-size:15px;color:#333">Olá <strong>Teste</strong>,</p>'
-                  +'<p style="color:#555;line-height:1.7">Este é um e-mail de teste para validar o template e a integração do EmailJS antes do envio real aos clientes.</p>'
+                  +'<p style="color:#555;line-height:1.7">Este é um e-mail de teste para validar o template, a integração do EmailJS e a geração do PDF antes do envio real aos clientes.</p>'
                   +'<div class="kpis">'
                   +'<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value">R$ 1.250.000,00</div></div>'
                   +'<div class="kpi"><div class="kpi-label">Rentabilidade do mês</div><div class="kpi-value green">+1,85%</div></div>'
                   +'</div>'
-                  +'<p style="color:#555;font-size:13px">Se você recebeu este e-mail corretamente, com a formatação preservada, a configuração está funcionando.</p>'
+                  +'<div style="text-align:center;margin:20px 0 6px">%%PDF_BUTTON%%</div>'
+                  +'<p style="color:#555;font-size:13px">Se você recebeu este e-mail corretamente, com a formatação preservada e o botão de PDF funcionando, a configuração está 100% pronta.</p>'
                   +'</div>'
                   +'<div class="footer">Courinvest Consultoria em Investimentos · '+(cfg.remetente||"contato@courinvest.com.br")+'<br>Mensagem de teste — não enviada a nenhum cliente.</div>'
                   +'</body></html>';
 
-                var templateParams={
-                  to_email:testEmail,
-                  to_name:"Teste",
-                  mes_ref:mesRefT,
-                  patrimonio:"R$ 1.250.000,00",
-                  rentabilidade:"+1,85%",
-                  tipo_servico:"🧪 TESTE — Gestão de Patrimônio",
-                  report_html:reportHtmlT,
-                  from_name:cfg.nomeRemetente||"Courinvest",
-                  reply_to:cfg.remetente||"",
-                };
+                gerarPdfLinkCourinvest("relatorios/_teste/teste_"+Date.now()+".pdf",reportHtmlT.replace("%%PDF_BUTTON%%","")).then(function(pdfUrl){
+                  var botaoHtml=pdfUrl
+                    ?'<a class="pdfbtn" href="'+pdfUrl+'" target="_blank" rel="noopener">📄 Baixar relatório em PDF</a>'
+                    :'<span style="font-size:12px;color:#c00">⚠️ PDF não foi gerado/enviado ao Storage (veja o alerta após o envio).</span>';
+                  var reportHtmlFinal=reportHtmlT.replace("%%PDF_BUTTON%%",botaoHtml);
 
-                window.emailjs.send(cfg.serviceId,cfg.templateId,templateParams)
-                  .then(function(){
+                  var templateParams={
+                    to_email:testEmail,
+                    to_name:"Teste",
+                    mes_ref:mesRefT,
+                    patrimonio:"R$ 1.250.000,00",
+                    rentabilidade:"+1,85%",
+                    tipo_servico:"🧪 TESTE — Gestão de Patrimônio",
+                    report_html:reportHtmlFinal,
+                    from_name:cfg.nomeRemetente||"Courinvest",
+                    reply_to:cfg.remetente||"",
+                  };
+
+                  window.emailjs.send(cfg.serviceId,cfg.templateId,templateParams).then(function(){
                     sTestSending(false);
-                    alert("✅ E-mail de teste enviado para "+testEmail+"!\n\nVerifique a caixa de entrada (e o spam) em alguns instantes.");
-                  })
-                  .catch(function(e){
+                    if(pdfUrl){
+                      alert("✅ E-mail de teste enviado para "+testEmail+", com o PDF gerado e o link de download incluído!\n\nVerifique a caixa de entrada (e o spam) em alguns instantes.");
+                    }else{
+                      alert("⚠️ E-mail de teste enviado para "+testEmail+", mas o PDF NÃO foi gerado/enviado ao Storage.\n\nCausas comuns: Storage não habilitado no projeto Firebase, ou regras do Storage bloqueando o upload. Veja o console do navegador (F12) para o erro exato.");
+                    }
+                  }).catch(function(e){
                     sTestSending(false);
                     alert("❌ Erro ao enviar e-mail de teste:\n\n"+(e&&e.text||e&&e.message||JSON.stringify(e)));
                   });
+                });
               }} style={{padding:"6px 10px",borderRadius:8,border:"1px solid rgba(56,189,248,0.4)",background:testSending?"rgba(56,189,248,0.05)":"rgba(56,189,248,0.1)",color:T.cyan,fontSize:10,fontWeight:600,cursor:testSending?"not-allowed":"pointer",opacity:testSending?0.6:1}}>
                 {testSending?"⏳ Enviando...":"🧪 Enviar teste"}
               </button>
