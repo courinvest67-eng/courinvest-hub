@@ -7351,7 +7351,45 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
     return html;
   };
 
-  var gerarRelatorio=function(tipo, _dadosGlobais, _usdRateOverride){
+  /* === RENTABILIDADE REAL DOS ATIVOS DOLARIZADOS ===
+     Busca, pra cada ticker do cliente em dólar (stock_us/etf_int/reit — ex: VOO, AAPL), a
+     variação de fechamento do mês via brapi.dev (mesma API/endpoint já usada nesta tela pro
+     Ibovespa e S&P 500 no Overview de Mercado: /api/quote/{TICKER}?range=1mo&interval=1d,
+     lendo o array historicalDataPrice e comparando o primeiro fechamento do período com o
+     último). Retorna um mapa {TICKER: variação%} pra alimentar gerarRelatorio como a fonte
+     mais fiel de "Rentabilidade em USD" — em vez de estimar via proxy cambial. */
+  var buscarRentAtivosUSD=function(){
+    var TIPOS_EXT_USD_BUSCA={stock_us:1,etf_int:1,reit:1};
+    var tkSet={};
+    (c._ativosImport||[]).forEach(function(a){if(TIPOS_EXT_USD_BUSCA[a.tp]&&a.tk)tkSet[a.tk]=true;});
+    var tks=Object.keys(tkSet);
+    if(tks.length===0)return Promise.resolve(null);
+    return fetch("https://brapi.dev/api/quote/"+tks.join(",")+"?range=1mo&interval=1d")
+      .then(function(r){return r.json()})
+      .then(function(d){
+        if(!d||!d.results)return null;
+        var map={};
+        d.results.forEach(function(r){
+          var hist=r.historicalDataPrice||[];
+          if(hist.length>=2){
+            var prim=hist[0].close,ult=hist[hist.length-1].close;
+            if(prim>0)map[r.symbol]=((ult/prim-1)*100);
+          }
+        });
+        return Object.keys(map).length>0?map:null;
+      }).catch(function(){return null;});
+  };
+  /* Wrapper: busca a rentabilidade real dos ativos USD antes de gerar o relatório mensal —
+     usado pelos 3 botões/fluxos de geração (câmbio já fixado, câmbio buscado, fallback) pra
+     não duplicar essa lógica em cada um. */
+  var gerarRelMensal=function(taxaCambio){
+    buscarRentAtivosUSD().then(function(mapaRentUSD){
+      try{sReportHtml(gerarRelatorio("mensal",d,taxaCambio,mapaRentUSD))}
+      catch(e){alert("Erro ao gerar relatório:\n"+e.message)}
+    });
+  };
+
+  var gerarRelatorio=function(tipo, _dadosGlobais, _usdRateOverride, _usdAtivosRentMap){
     var d=_dadosGlobais; /* dados do estado React passado como parâmetro */
     var normI=function(n){if(!n)return"Sem instituição";if(n.match(/xp\b|xp investimentos/i))return"Rico";if(n.match(/rico/i))return"Rico";if(n.match(/sproutfi|passfolio|PASSFOLIO|passfólio/i))return"Vest";if(n.match(/j\.?\s*safra/i))return"Safra";return n;};
     /* Garante acesso ao estado global d — usa window._courinvestData como fallback */
@@ -8361,23 +8399,42 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         if(ativosUSD.length===0&&ativosEUR.length===0)return;
         var totalCart=enr.reduce(function(s,a){return s+(a.vA||0);},0);
         /* === Rentabilidade USD ===
+           PRIORIDADE 0: fechamento real de cada ativo no mês (buscado via brapi.dev, ex: VOO,
+           AAPL — mesmo dado usado pra Ibovespa/S&P500 no Overview). Vem de um pré-fetch feito
+           antes de chamar gerarRelatorio (ver buscarRentAtivosUSD/gerarRelMensal na aba
+           Relatório) — é o dado mais fiel à pergunta "quanto rendeu CADA ativo dolarizado".
            PRIORIDADE 1: extrato PDF Vest importado (mais preciso, vem direto do broker americano)
            PRIORIDADE 2: Gorila (período mensal, coluna "ext")
            PRIORIDADE 3: Calculado a partir dos ativos individuais (getRentAtivoPer) */
         var rentUSDpct=null,rentUSDvalor=null,fonteRentUSD="";
         var somaRsUSD_brl=null; /* ganho em BRL dos ativos USD — usado pra converter p/ USD depois */
-        if(c._vestRent && typeof c._vestRent.rentPct==="number"){
-          rentUSDpct=c._vestRent.rentPct*100;
-          rentUSDvalor=c._vestRent.rentUSD;
-          fonteRentUSD="Vest";
-        } else if(temGorila&&c._gorilaRent&&c._gorilaRent.periods){
-          var pUSD=findRentMesAtual(c._gorilaRent.periods);
-          if(pUSD&&pUSD.ext!=null){
-            rentUSDpct=parseFloat(pUSD.ext)*100;
-            fonteRentUSD="Gorila";
-            /* Gorila não dá ganho R$ direto por moeda — estima pelo pct sobre o patrimônio ext */
-            var totalUSD_brl_est=ativosUSD.reduce(function(s,a){return s+(a.vA||0);},0);
-            if(totalUSD_brl_est>0) somaRsUSD_brl=totalUSD_brl_est*(rentUSDpct/100)/(1+rentUSDpct/100);
+        if(_usdAtivosRentMap){
+          var somaPondRealUSD=0,somaValRealUSD=0,tksSemDado=[];
+          ativosUSD.forEach(function(a){
+            var rp=_usdAtivosRentMap[a.tk];
+            if(typeof rp==="number"&&a.vA>0){somaPondRealUSD+=a.vA*rp;somaValRealUSD+=a.vA;}
+            else if(a.vA>0)tksSemDado.push(a.tk);
+          });
+          if(somaValRealUSD>0){
+            rentUSDpct=somaPondRealUSD/somaValRealUSD;
+            fonteRentUSD="fechamento do mês por ativo"+(tksSemDado.length>0?" · "+tksSemDado.length+" ativo(s) sem cotação, fora da conta":"");
+            somaRsUSD_brl=(rentUSDpct/100)*somaValRealUSD;
+          }
+        }
+        if(rentUSDpct===null){
+          if(c._vestRent && typeof c._vestRent.rentPct==="number"){
+            rentUSDpct=c._vestRent.rentPct*100;
+            rentUSDvalor=c._vestRent.rentUSD;
+            fonteRentUSD="Vest";
+          } else if(temGorila&&c._gorilaRent&&c._gorilaRent.periods){
+            var pUSD=findRentMesAtual(c._gorilaRent.periods);
+            if(pUSD&&pUSD.ext!=null){
+              rentUSDpct=parseFloat(pUSD.ext)*100;
+              fonteRentUSD="Gorila";
+              /* Gorila não dá ganho R$ direto por moeda — estima pelo pct sobre o patrimônio ext */
+              var totalUSD_brl_est=ativosUSD.reduce(function(s,a){return s+(a.vA||0);},0);
+              if(totalUSD_brl_est>0) somaRsUSD_brl=totalUSD_brl_est*(rentUSDpct/100)/(1+rentUSDpct/100);
+            }
           }
         }
         /* PRIORIDADE 3: calcular a partir dos ativos individuais USD quando não há fonte direta */
@@ -8412,12 +8469,16 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
               fonteRentUSD="Gorila (estimado)";
               /* Valor em USD: ganho BRL / taxa fim de mês */
               somaRsUSD_brl=somaRsUSD;
-            }else{
-              /* Sem dado cambial — reporta BRL e avisa que inclui câmbio */
-              rentUSDpct=retBRL_bruto*100;
-              somaRsUSD_brl=somaRsUSD;
-              fonteRentUSD="Gorila (estimado, inclui câmbio)";
             }
+            /* Se NÃO achamos um jeito de isolar o efeito cambial (nenhuma posição em dólar/caixa
+               pra usar como proxy), rentUSDpct FICA null — ou seja, a seção "Rentabilidade em
+               USD" simplesmente não aparece (ver `if(rentUSDpct!==null)` no render abaixo).
+               Antes, esse "else" reaproveitava o retorno em BRL (retBRL_bruto) como se fosse o
+               retorno em USD — mostrando o MESMO número duas vezes, com o rótulo "em USD" e "em
+               BRL" lado a lado (o que é exatamente o cálculo em BRL, incluindo câmbio, e não a
+               performance real dos ativos em dólar). Isso confundia porque as duas coisas são
+               conceitos diferentes por definição — só a seção "Rentabilidade em BRL" (calculada
+               separadamente logo abaixo, de forma correta) continua aparecendo nesse caso. */
           }
         }
         var labelC='color:#374151';
@@ -8537,6 +8598,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           }
           body+='<div><div style="'+labelS+'">Benchmark</div><div style="font-size:13px;font-weight:700;color:#2563EB">S&amp;P 500 · Nasdaq</div></div>';
           body+='</div>';
+          if(rentUSDpct===null&&rentUSD_brl_pct!==null){
+            body+='<div style="margin-top:10px;font-size:9px;color:#9CA3AF;font-style:italic">ℹ️ Não foi possível isolar o efeito cambial pra mostrar a rentabilidade em USD separadamente (nenhuma posição em dólar/caixa disponível como referência de câmbio no período). O valor acima em BRL já inclui a variação cambial.</div>';
+          }
           body+='<div style="margin-top:10px;font-size:9px;color:#9CA3AF;font-style:italic">Ativos: '+ativosUSD.map(function(a){return a.tk||(a.nm||"").split(" ")[0];}).slice(0,10).join(", ")+(ativosUSD.length>10?"...":"")+'</div>';
           body+='</div>';
         }
@@ -19139,7 +19203,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                     <Cd onClick={function(){
                       /* Se câmbio já foi informado manualmente, usa direto sem buscar API */
                       if(usdRelatorio&&usdRelatorio>1&&usdRelatorio<20){
-                        try{sReportHtml(gerarRelatorio("mensal",d,usdRelatorio))}catch(e){alert("Erro ao gerar relatório:\n"+e.message)}
+                        gerarRelMensal(usdRelatorio);
                         return;
                       }
                       /* Busca câmbio do último dia útil do mês do RELATÓRIO. */
@@ -19168,7 +19232,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                         if(idx>=tentativas.length){
                           var taxaFallback=usdRateGlobal||5.70;
                           sUsdRelatorio(taxaFallback);
-                          try{sReportHtml(gerarRelatorio("mensal",d,taxaFallback))}catch(e){alert("Erro ao gerar relatório:\n"+e.message)}
+                          gerarRelMensal(taxaFallback);
                           return;
                         }
                         var dataFmt=tentativas[idx++];
@@ -19187,7 +19251,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                               if(melhor&&melhor.bid){
                                 var taxaFechamento=parseFloat(melhor.bid);
                                 sUsdRelatorio(taxaFechamento);
-                                try{sReportHtml(gerarRelatorio("mensal",d,taxaFechamento))}catch(e){alert("Erro ao gerar relatório:\n"+e.message+"\n\nLinha: "+e.stack.split("\n")[1])}
+                                gerarRelMensal(taxaFechamento);
                                 return;
                               }
                             }
