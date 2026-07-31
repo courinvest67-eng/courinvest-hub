@@ -7901,7 +7901,14 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           var _somaPondRentConjPre=0,_somaValComRentConjPre=0;
           c.conjuge._ativosImport.forEach(function(a){
             var v=+a.posR||(+a.qtd*+a.pa)||0;
-            var rp=(a._gRentPct&&typeof a._gRentPct.periodo==="number")?a._gRentPct.periodo*100:null;
+            /* _gRentPct.periodo DEVERIA vir como fração (0.0116=1,16%, formato gravado pelo
+               import corrigido), mas dados importados ANTES dessa correção ainda estão salvos
+               no Firestore em pontos percentuais (1.16). Mesma detecção por magnitude usada em
+               getRentAtivoPer: |valor|>1 é sempre pontos percentuais (nenhuma carteira real
+               rende >100%/-100% num mês), então não multiplica de novo — evita o "116%" voltar
+               pra quem importou o extrato do cônjuge antes desta correção. */
+            var _pRaw=(a._gRentPct&&typeof a._gRentPct.periodo==="number")?a._gRentPct.periodo:null;
+            var rp=_pRaw===null?null:(Math.abs(_pRaw)>1?_pRaw:_pRaw*100);
             if(rp!==null&&v>0){_somaPondRentConjPre+=v*rp;_somaValComRentConjPre+=v;}
           });
           if(_somaValComRentConjPre>0){
