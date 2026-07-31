@@ -7840,28 +7840,27 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       if(secAtiva("resumoExec")){
       body+=secTitle('📊','Resumo Executivo');
 
+      /* A partir do momento que o cliente tem cônjuge cadastrado, a carteira é tratada como
+         do casal — a saudação e a rentabilidade em destaque (lead paragraph + narrativa)
+         passam a se referir ao "casal" e ao número CONSOLIDADO, em vez do nome/rentabilidade
+         individual do titular. */
+      var _ehCasalRel=(c.tipoCli==="casal"||c.tipoCli==="familia")&&c.conjuge;
+      var _saudacao=_ehCasalRel?"casal":c.nome.split(" ")[0];
+      var _rentParaNarrativa=rentPeriodo,_vsCdiParaNarrativa=vsC;
+
       /* === FASE 4: LEAD PARAGRAPH antes dos KPIs === */
       var leadResumo='';
-      if(tipo==="mensal"||tipo==="trimestral"||tipo==="anual"){
-        if(rentPeriodo>=0){
-          leadResumo='Sua carteira encerrou o período com <span class="cv-lead-strong">rentabilidade de +'+rentPeriodo.toFixed(2)+'%</span>'+(vsC>=0?', superando o CDI':'')+' e mantendo o ritmo consistente de crescimento esperado para o seu perfil '+c.risco+'.';
-        }else{
-          leadResumo='Sua carteira apresentou <span class="cv-lead-strong">variação de '+rentPeriodo.toFixed(2)+'%</span> no período, refletindo movimentos do mercado que serão analisados em detalhe nas próximas seções.';
-        }
-      }else{
-        leadResumo='Visão consolidada da carteira <span class="cv-lead-strong">'+c.nome.split(" ")[0]+'</span>, com posição atual, custo de aquisição e ganho acumulado desde o início.';
-      }
-      body+='<p class="cv-lead">'+leadResumo+'</p>';
 
       if(tipo==="mensal"||tipo==="trimestral"||tipo==="anual"){
-        
+
         var fmRel=function(v){return fmF(v);};
-        /* Ganho do período: usa Resultado Período EXATO do Gorila quando importado (mais preciso),
-           senão estima como pat × rent% (aprox). Antes: tCV × rent% multiplicava o pat FINAL,
-           gerando valor R$ ligeiramente inflado vs o "Resultado Período" exato exportado pelo Gorila. */
+        /* Ganho do período: usa Resultado Período EXATO do extrato importado quando disponível
+           (mais preciso), senão estima como pat × rent% (aprox). Antes: tCV × rent% multiplicava
+           o pat FINAL, gerando valor R$ ligeiramente inflado vs o "Resultado Período" exato
+           exportado no extrato. */
         var ganhoPeriodo;
         if(tipo==="mensal" && c._gorilaRent && typeof c._gorilaRent.resultado==="number" && c._gorilaRent.resultado!==0){
-          /* Usa o valor exato do Gorila (já considera valorização + rendimentos − aportes/resgates) */
+          /* Usa o valor exato do extrato importado (já considera valorização + rendimentos − aportes/resgates) */
           ganhoPeriodo=c._gorilaRent.resultado;
         }else{
           /* Fallback: estima usando patrimônio. Usa pat inicial se conhecido (mais correto matematicamente). */
@@ -7901,7 +7900,6 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           return b;
         };
 
-        var _ehCasalRel=(c.tipoCli==="casal"||c.tipoCli==="familia")&&c.conjuge;
         if(_ehCasalRel){
           /* Patrimônio individual do titular (sem cônjuge) */
           var _patTit=c.patGorila||c.pat||0;
@@ -7980,6 +7978,20 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           var _rentTotal=_baseRentTotal>0?(_ganhoTotal/_baseRentTotal*100):rentPeriodo;
           var _vsCdiTotal=_rentTotal-_cdiMes;
           var _nomeConj=c.conjuge.nome||c.conjuge.nomeConjuge||"Cônjuge";
+          /* Lead paragraph + narrativa do casal usam o CONSOLIDADO, não a rentabilidade
+             individual do titular. */
+          _rentParaNarrativa=_rentTotal;
+          _vsCdiParaNarrativa=_vsCdiTotal;
+        }
+
+        if(_rentParaNarrativa>=0){
+          leadResumo='Sua carteira encerrou o período com <span class="cv-lead-strong">rentabilidade de +'+_rentParaNarrativa.toFixed(2)+'%</span>'+(_vsCdiParaNarrativa>=0?', superando o CDI':'')+' e mantendo o ritmo consistente de crescimento esperado para o seu perfil '+c.risco+'.';
+        }else{
+          leadResumo='Sua carteira apresentou <span class="cv-lead-strong">variação de '+_rentParaNarrativa.toFixed(2)+'%</span> no período, refletindo movimentos do mercado que serão analisados em detalhe nas próximas seções.';
+        }
+        body+='<p class="cv-lead">'+leadResumo+'</p>';
+
+        if(_ehCasalRel){
           body+=_kpiBlock("👤 "+c.nome.split(" ")[0],_patTit,rentPeriodo,ganhoPeriodo,vsC,rentLabel);
           body+='<hr style="border:none;border-top:1px solid #E8E0C8;margin:14px 0;"/>';
           body+=_kpiBlock("👤 "+_nomeConj.split(" ")[0],_patConj,_rentConj,_ganhoConj,_vsCdiConj,rentLabel,{semDado:!_temDadoConj,nota:_notaConj});
@@ -8012,16 +8024,19 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           body+='<div class="kpi"><div class="kpi-label">Rentabilidade</div><div class="kpi-value '+(ganhoV>=0?"green":"red")+'">'+(ganhoV>=0?"+":"")+rentPct+'%</div><div class="kpi-sub">desde o início</div></div>';
           body+='</div>';
         }
+      }else{
+        leadResumo='Visão consolidada da carteira '+(_ehCasalRel?'do <span class="cv-lead-strong">casal</span>':'<span class="cv-lead-strong">'+c.nome.split(" ")[0]+'</span>')+', com posição atual, custo de aquisição e ganho acumulado desde o início.';
+        body+='<p class="cv-lead">'+leadResumo+'</p>';
       }
 
       /* ===== NARRATIVA ===== */
       var narrativa='<div class="narrative">';
-      narrativa+='Olá <strong>'+c.nome.split(" ")[0]+'</strong>, segue a síntese da sua carteira em <strong>'+periodoLabel+'</strong>. ';
-      narrativa+='A carteira '+(rentPeriodo>=0?'rendeu <span class="highlight-green">+'+rentPeriodo.toFixed(2)+'%</span>':'variou <span class="highlight-red">'+rentPeriodo.toFixed(2)+'%</span>')+' '+rentLabel+', ';
-      if(vsC>=0){
-        narrativa+='<span class="highlight-green">superando o CDI em '+vsC.toFixed(2)+' pontos percentuais</span> — resultado consistente com o perfil <strong>'+c.risco+'</strong>. ';
+      narrativa+='Olá <strong>'+_saudacao+'</strong>, segue a síntese da sua carteira em <strong>'+periodoLabel+'</strong>. ';
+      narrativa+='A carteira '+(_rentParaNarrativa>=0?'rendeu <span class="highlight-green">+'+_rentParaNarrativa.toFixed(2)+'%</span>':'variou <span class="highlight-red">'+_rentParaNarrativa.toFixed(2)+'%</span>')+' '+rentLabel+', ';
+      if(_vsCdiParaNarrativa>=0){
+        narrativa+='<span class="highlight-green">superando o CDI em '+_vsCdiParaNarrativa.toFixed(2)+' pontos percentuais</span> — resultado consistente com o perfil <strong>'+c.risco+'</strong>. ';
       }else{
-        narrativa+='ficando <span class="highlight-red">'+Math.abs(vsC).toFixed(2)+'pp abaixo do CDI</span> no período. ';
+        narrativa+='ficando <span class="highlight-red">'+Math.abs(_vsCdiParaNarrativa).toFixed(2)+'pp abaixo do CDI</span> no período. ';
       }
       var totalClasses=(function(){var bt={};enr.forEach(function(a){var t=tipoAtivoLabel(a);bt[t]=true});return Object.keys(bt).length})();
       narrativa+='A composição é de <strong>'+enr.length+' ativos</strong> em '+totalClasses+' classes distintas.';
@@ -8198,7 +8213,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         /* Legenda explicativa */
         body+='<div style="display:flex;gap:18px;flex-wrap:wrap;font-size:9px;color:#9CA3AF;margin-bottom:14px;padding:8px 12px;background:#F8FAFC;border-radius:6px;border-left:2px solid #E5E7EB">';
         body+='<div><strong style="color:#6B7489">Ganho Líquido:</strong> patrimônio atual − custo de aquisição + proventos recebidos.</div>';
-        if(ganhoTWR!==null) body+='<div><strong style="color:#6B7489">Rentabilidade TWR:</strong> performance ajustada por tempo (Time-Weighted Return) calculada pelo Gorila.</div>';
+        if(ganhoTWR!==null) body+='<div><strong style="color:#6B7489">Rentabilidade TWR:</strong> performance ajustada por tempo (Time-Weighted Return).</div>';
         body+='</div>';
         body+='<svg width="100%" viewBox="0 0 '+W+' '+H+'" style="overflow:visible">';
         /* Grid horizontal */
@@ -8430,7 +8445,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
             var pUSD=findRentMesAtual(c._gorilaRent.periods);
             if(pUSD&&pUSD.ext!=null){
               rentUSDpct=parseFloat(pUSD.ext)*100;
-              fonteRentUSD="Gorila";
+              fonteRentUSD="extrato importado";
               /* Gorila não dá ganho R$ direto por moeda — estima pelo pct sobre o patrimônio ext */
               var totalUSD_brl_est=ativosUSD.reduce(function(s,a){return s+(a.vA||0);},0);
               if(totalUSD_brl_est>0) somaRsUSD_brl=totalUSD_brl_est*(rentUSDpct/100)/(1+rentUSDpct/100);
@@ -8466,7 +8481,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
             var retBRL_bruto=somaRsUSD/somaPosIniUSD;
             if(fxChangeMes!==null&&Math.abs(fxChangeMes)>0.0001){
               rentUSDpct=((1+retBRL_bruto)/(1+fxChangeMes)-1)*100;
-              fonteRentUSD="Gorila (estimado)";
+              fonteRentUSD="extrato importado (estimado)";
               /* Valor em USD: ganho BRL / taxa fim de mês */
               somaRsUSD_brl=somaRsUSD;
             }
@@ -8591,7 +8606,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           /* Rentabilidade em BRL (inclui variação cambial) */
           if(rentUSD_brl_pct!==null){
             var corBRL=rentUSD_brl_pct>=0?'#0F9D58':'#D93025';
-            body+='<div><div style="'+labelS+'">Rentabilidade em BRL <span style="color:#9CA3AF;font-weight:400;text-transform:none;letter-spacing:0">· Gorila (incl. câmbio)</span></div>';
+            body+='<div><div style="'+labelS+'">Rentabilidade em BRL <span style="color:#9CA3AF;font-weight:400;text-transform:none;letter-spacing:0">· inclui câmbio</span></div>';
             body+='<div style="font-size:17px;font-weight:800;color:'+corBRL+'">'+(rentUSD_brl_pct>=0?'+':'')+rentUSD_brl_pct.toFixed(2)+'%';
             body+=' <span style="font-size:12px;font-weight:700;color:'+corBRL+';opacity:.85">('+(rentUSD_brl_rs>=0?'+R$ ':'-R$ ')+Math.abs(rentUSD_brl_rs).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+')</span>';
             body+='</div></div>';
@@ -8696,7 +8711,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
               +'<div class="attrib-bar-wrap"><div class="attrib-bar" style="width:'+Math.min(100,Math.abs(pct))+'%;background:linear-gradient(90deg,'+barColor+','+barColor+'AA)"></div></div>'
               +'<div class="attrib-value" style="color:'+barColor+'">'+(pct>=0?"+":"")+pct.toFixed(2)+'%</div></div>';
           });
-          body+='<div class="nota-inline" style="margin-top:14px">⚠️ Dados históricos acumulados do relatório Gorila (não do mês).</div>';
+          body+='<div class="nota-inline" style="margin-top:14px">⚠️ Dados históricos acumulados do extrato importado (não do mês).</div>';
         }
       })();
       } 
@@ -9300,7 +9315,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         }else{
           narrMov='Movimentação neutra no período — aportes e retiradas se equilibraram.';
         }
-        body+='<div class="nota-inline" style="margin-top:4px">'+narrMov+(temMovGorila?' Valores extraídos diretamente do relatório Gorila.':' Valores baseados em movimentações cadastradas manualmente.')+'</div>';
+        body+='<div class="nota-inline" style="margin-top:4px">'+narrMov+(temMovGorila?' Valores extraídos diretamente do extrato importado.':' Valores baseados em movimentações cadastradas manualmente.')+'</div>';
         
         if(movManuaisDoMes.length>0){
           body+='<div style="margin-top:14px">';
@@ -9691,7 +9706,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           var _fmtD=function(d){if(!d)return"";return String(d.getDate()).padStart(2,"0")+"/"+(d.getMonth()+1).toString().padStart(2,"0")+"/"+d.getFullYear();};
           body+="<!-- PAGE_BREAK -->";
           body+=secTitle("📊","Performance Histórica da Carteira");
-          body+='<p class="cv-lead">Rentabilidade acumulada extraída do relatório Gorila'
+          body+='<p class="cv-lead">Rentabilidade acumulada extraída do extrato importado'
             +(_dataIni2&&_dataFim2?' (<span class="cv-lead-strong">'+_fmtD(_dataIni2)+' → '+_fmtD(_dataFim2)+'</span>)':"")
             +'. Comparativo com benchmarks CDI, Ibovespa e IPCA.</p>';
           /* Tabela de períodos */
