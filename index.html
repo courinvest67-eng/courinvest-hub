@@ -7843,17 +7843,89 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         }
       }
 
-      /* ===== KPIs — ajustados ao período ===== */
-      if(secAtiva("resumoExec")){
-      body+=secTitle('📊','Resumo Executivo');
-
       /* A partir do momento que o cliente tem cônjuge cadastrado, a carteira é tratada como
-         do casal — a saudação e a rentabilidade em destaque (lead paragraph + narrativa)
-         passam a se referir ao "casal" e ao número CONSOLIDADO, em vez do nome/rentabilidade
-         individual do titular. */
+         do casal — a saudação e a rentabilidade em destaque (lead paragraph, narrativa, e
+         TODAS as seções depois do Resumo Executivo: Benchmarks, Atribuição, Instituição,
+         Composição Detalhada) passam a se referir ao "casal" e ao número CONSOLIDADO, em vez
+         do nome/rentabilidade individual do titular. Declarado AQUI (fora do
+         secAtiva("resumoExec")) porque essas seções seguintes usam essas variáveis mesmo se
+         o Resumo Executivo estiver desativado nas configurações do relatório. */
       var _ehCasalRel=(c.tipoCli==="casal"||c.tipoCli==="familia")&&c.conjuge;
       var _saudacao=_ehCasalRel?"casal":c.nome.split(" ")[0];
       var _rentParaNarrativa=rentPeriodo,_vsCdiParaNarrativa=vsC;
+      if(_ehCasalRel){
+        /* Patrimônio individual do titular (sem cônjuge) */
+        var _patTit=c.patGorila||c.pat||0;
+        if(_patTit===0&&c._ativosImport&&c._ativosImport.length>0){
+          _patTit=c._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
+        }
+        var _patConj=c.conjuge.patGorila||0;
+        if(_patConj===0&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
+          _patConj=c.conjuge._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
+        }
+        var _rentConj=0,_ganhoConj=0,_temDadoConj=false,_notaConj='';
+        var _ganhoPeriodoPreCalc;
+        if(tipo==="mensal" && c._gorilaRent && typeof c._gorilaRent.resultado==="number" && c._gorilaRent.resultado!==0){
+          _ganhoPeriodoPreCalc=c._gorilaRent.resultado;
+        }else{
+          var _patBaseGanhoPreCalc=tCV;
+          if(c._gorilaRent && typeof c._gorilaRent.captacao==="number" && c._gorilaRent.captacao!==0){
+            _patBaseGanhoPreCalc=tCV-c._gorilaRent.captacao;
+          }
+          _ganhoPeriodoPreCalc=_patBaseGanhoPreCalc*(rentPeriodo/100);
+        }
+        if(c.conjuge._gorilaRent&&c.conjuge._gorilaRent.periods&&c.conjuge._gorilaRent.periods.length>0){
+          var _findPConjPre=function(keys){
+            return c.conjuge._gorilaRent.periods.find(function(x){
+              var s=String(x.p||"").toLowerCase();
+              return keys.some(function(k){return s.indexOf(k)>=0});
+            });
+          };
+          var _alvoConjPre=null;
+          if(tipo==="mensal")_alvoConjPre=_findPConjPre(["último mês","ultimo mes","último mes","ultimo mês","mês atual","mes atual","1m"]);
+          else if(tipo==="anual")_alvoConjPre=_findPConjPre(["12 mês","12 meses","12m","no ano","ytd","ano"]);
+          else if(tipo==="trimestral")_alvoConjPre=_findPConjPre(["3 mês","3 meses","3m","trimestre"]);
+          else _alvoConjPre=_findPConjPre(["desde","início","inicio","total"])||_findPConjPre(["12"])||c.conjuge._gorilaRent.periods[c.conjuge._gorilaRent.periods.length-1];
+          if(_alvoConjPre&&typeof _alvoConjPre.rent==="number"){
+            _rentConj=_alvoConjPre.rent*100;
+            _ganhoConj=_patConj*(_rentConj/100);
+            _temDadoConj=true;
+          }
+        }
+        if(!_temDadoConj&&c.conjuge._gorilaRent){
+          if(typeof c.conjuge._gorilaRent.rentMes==="number"){_rentConj=c.conjuge._gorilaRent.rentMes*100;_temDadoConj=true;}
+          if(typeof c.conjuge._gorilaRent.resultado==="number")_ganhoConj=c.conjuge._gorilaRent.resultado;
+          else if(_temDadoConj)_ganhoConj=_patConj*(_rentConj/100);
+        }
+        if(!_temDadoConj&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
+          var _somaPondRentConjPre=0,_somaValComRentConjPre=0;
+          c.conjuge._ativosImport.forEach(function(a){
+            var v=+a.posR||(+a.qtd*+a.pa)||0;
+            var rp=(a._gRentPct&&typeof a._gRentPct.periodo==="number")?a._gRentPct.periodo*100:null;
+            if(rp!==null&&v>0){_somaPondRentConjPre+=v*rp;_somaValComRentConjPre+=v;}
+          });
+          if(_somaValComRentConjPre>0){
+            _rentConj=_somaPondRentConjPre/_somaValComRentConjPre;
+            _ganhoConj=_patConj*(_rentConj/100);
+            _temDadoConj=true;
+            _notaConj='* rentabilidade estimada a partir da rentabilidade por ativo do extrato importado';
+          }
+        }
+        var _cdiMes=(c._gorilaRent&&typeof c._gorilaRent.cdiMes==="number")?c._gorilaRent.cdiMes*100:cdiPeriodo;
+        var _vsCdiConj=_rentConj-_cdiMes;
+        var _patTotal=_patTit+_patConj;
+        var _baseRentTotal=_patTit+(_temDadoConj?_patConj:0);
+        var _ganhoTotal=_ganhoPeriodoPreCalc+(_temDadoConj?_ganhoConj:0);
+        var _rentTotal=_baseRentTotal>0?(_ganhoTotal/_baseRentTotal*100):rentPeriodo;
+        var _vsCdiTotal=_rentTotal-_cdiMes;
+        var _nomeConj=c.conjuge.nome||c.conjuge.nomeConjuge||"Cônjuge";
+        _rentParaNarrativa=_rentTotal;
+        _vsCdiParaNarrativa=_vsCdiTotal;
+      }
+
+      /* ===== KPIs — ajustados ao período ===== */
+      if(secAtiva("resumoExec")){
+      body+=secTitle('📊','Resumo Executivo');
 
       /* === FASE 4: LEAD PARAGRAPH antes dos KPIs === */
       var leadResumo='';
@@ -7907,90 +7979,10 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           return b;
         };
 
-        if(_ehCasalRel){
-          /* Patrimônio individual do titular (sem cônjuge) */
-          var _patTit=c.patGorila||c.pat||0;
-          if(_patTit===0&&c._ativosImport&&c._ativosImport.length>0){
-            _patTit=c._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
-          }
-          var _patConj=c.conjuge.patGorila||0;
-          if(_patConj===0&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
-            _patConj=c.conjuge._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
-          }
-          var _rentConj=0,_ganhoConj=0,_temDadoConj=false,_notaConj='';
-          if(c.conjuge._gorilaRent&&c.conjuge._gorilaRent.periods&&c.conjuge._gorilaRent.periods.length>0){
-            /* A importação do cônjuge (importarGorilaConjuge) salva os períodos no MESMO
-               formato do titular — c.conjuge._gorilaRent.periods = [{p:"Último Mês",rent:0.0057},...].
-               O código antigo procurava campos "rentMes"/"resultado" que essa importação nunca
-               escreve, então a rentabilidade do cônjuge sempre dava "sem dado" mesmo quando o
-               extrato tinha a informação. Busca o período certo pro tipo de relatório, igual já
-               é feito pro titular (findP) acima. */
-            var _findPConj=function(keys){
-              return c.conjuge._gorilaRent.periods.find(function(x){
-                var s=String(x.p||"").toLowerCase();
-                return keys.some(function(k){return s.indexOf(k)>=0});
-              });
-            };
-            var _alvoConj=null;
-            if(tipo==="mensal")_alvoConj=_findPConj(["último mês","ultimo mes","último mes","ultimo mês","mês atual","mes atual","1m"]);
-            else if(tipo==="anual")_alvoConj=_findPConj(["12 mês","12 meses","12m","no ano","ytd","ano"]);
-            else if(tipo==="trimestral")_alvoConj=_findPConj(["3 mês","3 meses","3m","trimestre"]);
-            else _alvoConj=_findPConj(["desde","início","inicio","total"])||_findPConj(["12"])||c.conjuge._gorilaRent.periods[c.conjuge._gorilaRent.periods.length-1];
-            if(_alvoConj&&typeof _alvoConj.rent==="number"){
-              _rentConj=_alvoConj.rent*100;
-              _ganhoConj=_patConj*(_rentConj/100);
-              _temDadoConj=true;
-            }
-          }
-          if(!_temDadoConj&&c.conjuge._gorilaRent){
-            /* Formato alternativo (campos "achatados"), caso algum import futuro venha assim */
-            if(typeof c.conjuge._gorilaRent.rentMes==="number"){_rentConj=c.conjuge._gorilaRent.rentMes*100;_temDadoConj=true;}
-            if(typeof c.conjuge._gorilaRent.resultado==="number")_ganhoConj=c.conjuge._gorilaRent.resultado;
-            else if(_temDadoConj)_ganhoConj=_patConj*(_rentConj/100);
-          }
-          if(!_temDadoConj&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
-            /* Fallback: nenhum período bateu acima (ex: extrato sem a linha "Último Mês"
-               pro tipo de relatório atual, ou sem nenhuma linha de rentabilidade agregada).
-               O próprio arquivo de posições traz, por ativo, a rentabilidade do período
-               (coluna do Gorila, salva em _gRentPct.periodo) — usamos a média ponderada pelo
-               valor de cada ativo, que é o dado real mais próximo disponível, em vez de
-               assumir 0% (o que faria parecer que o cônjuge não rendeu nada no período,
-               distorcendo o consolidado do casal pra baixo). */
-            var _somaPondRentConj=0,_somaValComRentConj=0;
-            c.conjuge._ativosImport.forEach(function(a){
-              var v=+a.posR||(+a.qtd*+a.pa)||0;
-              /* _gRentPct.periodo vem como FRAÇÃO (ex: 0.0116 = 1,16%) — mesmo formato bruto
-                 gravado no import (ver importarGorilaConjuge). _rentConj abaixo é usado como
-                 PONTO PERCENTUAL (ex: 1.16) no resto do relatório, então multiplica por 100 aqui. */
-              var rp=(a._gRentPct&&typeof a._gRentPct.periodo==="number")?a._gRentPct.periodo*100:null;
-              if(rp!==null&&v>0){_somaPondRentConj+=v*rp;_somaValComRentConj+=v;}
-            });
-            if(_somaValComRentConj>0){
-              _rentConj=_somaPondRentConj/_somaValComRentConj;
-              _ganhoConj=_patConj*(_rentConj/100);
-              _temDadoConj=true;
-              _notaConj='* rentabilidade estimada a partir da rentabilidade por ativo do extrato importado';
-            }
-          }
-          var _cdiMes=(c._gorilaRent&&typeof c._gorilaRent.cdiMes==="number")?c._gorilaRent.cdiMes*100:cdiPeriodo;
-          var _vsCdiConj=_rentConj-_cdiMes;
-          /* Consolidado: usa patrimônios individuais, não tCV (que pode estar consolidado).
-             Se não há NENHUM dado de rentabilidade do cônjuge, não tratamos a parte dela como
-             "rendeu 0%" (isso distorceria a média pra baixo) — a média ponderada considera só
-             a parte do casal com dado real; na prática, sem dado do cônjuge, o consolidado
-             reflete a rentabilidade do titular. */
-          var _patTotal=_patTit+_patConj;
-          var _baseRentTotal=_patTit+(_temDadoConj?_patConj:0);
-          var _ganhoTotal=ganhoPeriodo+(_temDadoConj?_ganhoConj:0);
-          var _rentTotal=_baseRentTotal>0?(_ganhoTotal/_baseRentTotal*100):rentPeriodo;
-          var _vsCdiTotal=_rentTotal-_cdiMes;
-          var _nomeConj=c.conjuge.nome||c.conjuge.nomeConjuge||"Cônjuge";
-          /* Lead paragraph + narrativa do casal usam o CONSOLIDADO, não a rentabilidade
-             individual do titular. */
-          _rentParaNarrativa=_rentTotal;
-          _vsCdiParaNarrativa=_vsCdiTotal;
-        }
-
+        /* _patTit/_patConj/_rentConj/_ganhoConj/_temDadoConj/_notaConj/_patTotal/_rentTotal/
+           _ganhoTotal/_vsCdiTotal/_nomeConj — e _rentParaNarrativa/_vsCdiParaNarrativa — já
+           foram calculados acima (antes do secAtiva("resumoExec")), pra ficarem disponíveis
+           pras seções seguintes mesmo se o Resumo Executivo estiver desativado. Só reusa aqui. */
         if(_rentParaNarrativa>=0){
           leadResumo='Sua carteira encerrou o período com <span class="cv-lead-strong">rentabilidade de +'+_rentParaNarrativa.toFixed(2)+'%</span>'+(_vsCdiParaNarrativa>=0?', superando o CDI':'')+' e mantendo o ritmo consistente de crescimento esperado para o seu perfil '+c.risco+'.';
         }else{
@@ -8332,9 +8324,12 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       
       var poupPeriodo=tipo==="mensal"?0.55:(tipo==="trimestral"?1.7:8.5);
       var ifixVal=(d&&d.config&&d.config.ifixMes!=null)?d.config.ifixMes:(tipo==="mensal"?0.80:2.4);
-      var maxBench=Math.max(Math.abs(rentPeriodo),Math.abs(cdiPeriodo),Math.abs(ibovPeriodo),Math.abs(ipcaPeriodo),Math.abs(ifixVal),Math.abs(poupPeriodo),0.01);
+      /* "Carteira" é do CASAL quando aplicável (_rentParaNarrativa/_vsCdiParaNarrativa,
+         definidos no Resumo Executivo), não só do titular — mesma correção aplicada em
+         todo o resto do relatório a partir daqui. */
+      var maxBench=Math.max(Math.abs(_rentParaNarrativa),Math.abs(cdiPeriodo),Math.abs(ibovPeriodo),Math.abs(ipcaPeriodo),Math.abs(ifixVal),Math.abs(poupPeriodo),0.01);
       var benchData=[
-        {l:"Carteira",v:rentPeriodo,c:"#D4A328",own:true},
+        {l:"Carteira",v:_rentParaNarrativa,c:"#D4A328",own:true},
         {l:"CDI",v:cdiPeriodo,c:"#38BDF8"},
         {l:"IBOVESPA",v:ibovPeriodo,c:"#2DD4A0"},
         {l:"IFIX",v:ifixVal,c:"#A78BFA"},
@@ -8351,10 +8346,10 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           +'<div class="bench-value" style="color:'+corB+'">'+(b.v>=0?"+":"")+b.v.toFixed(2)+'%</div></div>'
           +'<div style="font-size:8.5px;color:#6B7489;margin:-2px 0 8px 88px;font-style:italic">'+(BENCH_DESC[b.l]||"")+'</div>';
       });
-      if(vsC>=0){
-        body+='<div class="nota-inline">✅ <strong>Sua carteira superou o CDI</strong> em '+vsC.toFixed(2)+' pontos percentuais. Capital crescendo acima da taxa básica de mercado.</div>';
+      if(_vsCdiParaNarrativa>=0){
+        body+='<div class="nota-inline">✅ <strong>Sua carteira superou o CDI</strong> em '+_vsCdiParaNarrativa.toFixed(2)+' pontos percentuais. Capital crescendo acima da taxa básica de mercado.</div>';
       }else{
-        body+='<div class="nota-inline">⚠️ <strong>Sua carteira ficou '+Math.abs(vsC).toFixed(2)+'pp abaixo do CDI</strong> no período. Revisamos alocação e riscos conforme suas metas.</div>';
+        body+='<div class="nota-inline">⚠️ <strong>Sua carteira ficou '+Math.abs(_vsCdiParaNarrativa).toFixed(2)+'pp abaixo do CDI</strong> no período. Revisamos alocação e riscos conforme suas metas.</div>';
       }
 
       /* === FUNÇÃO HELPER: getRentAtivoPer ===
@@ -8675,11 +8670,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
             byClasse[cls].temRentReal=true;
           }
         });
-        if(totalV>0 && rentPeriodo!==null){
+        if(totalV>0 && _rentParaNarrativa!==null){
           body+='<!-- PAGE_BREAK -->';
           var classesOrdenadas=Object.keys(byClasse).sort(function(a,b){return byClasse[b].v-byClasse[a].v});
           body+=secTitle('🧩','Atribuição de Performance por Classe');
-          /* Decide se usa rent. real de cada classe (Gorila) ou aproximação peso × rentCarteira */
+          /* Decide se usa rent. real de cada classe (extrato importado) ou aproximação peso × rentCarteira.
+             byClasse já é consolidado (vem de enr, que mistura titular+cônjuge quando é casal), então
+             a comparação usa _rentParaNarrativa (a rentabilidade do CASAL) em vez de rentPeriodo (só do
+             titular) — senão a "diferença" reportada era artificial, comparando dado combinado com
+             rentabilidade individual. */
           var temDadosReais=classesOrdenadas.some(function(cls){return byClasse[cls].temRentReal});
           var maxContrib=0;
           var contributions=classesOrdenadas.map(function(cls){
@@ -8690,7 +8689,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
               contrib=totalV>0?(byClasse[cls].ganhoMes/totalV)*100:0;
             }else{
               /* Fallback: peso × rent. carteira (assume rent. uniforme entre classes) */
-              contrib=peso*rentPeriodo;
+              contrib=peso*_rentParaNarrativa;
             }
             if(Math.abs(contrib)>maxContrib)maxContrib=Math.abs(contrib);
             return {classe:cls,peso:peso,contrib:contrib};
@@ -8708,14 +8707,14 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           if(temDadosReais){
             /* Compara soma das contribuições com rent. carteira pra detectar discrepância (ex: ativos liquidados, eventos não-posicionais) */
             var somaContrib=contributions.reduce(function(s,it){return s+it.contrib},0);
-            var diff=rentPeriodo-somaContrib;
-            notaTexto='Contribuição real de cada classe — calculada como (ganho da classe ÷ patrimônio total). Usa rentabilidades exatas do Gorila por ativo.';
+            var diff=_rentParaNarrativa-somaContrib;
+            notaTexto='Contribuição real de cada classe — calculada como (ganho da classe ÷ patrimônio total). Usa rentabilidades exatas do extrato importado por ativo.';
             if(Math.abs(diff)>0.05){
               /* Diferença > 0,05pp: provavelmente proventos/eventos ou ativos liquidados no período */
-              notaTexto+=' A soma das contribuições ('+(somaContrib>=0?"+":"")+somaContrib.toFixed(2)+'%) difere da rent. da carteira ('+(rentPeriodo>=0?"+":"")+rentPeriodo.toFixed(2)+'%) em '+(diff>=0?"+":"")+diff.toFixed(2)+'pp por causa de eventos do período (proventos pagos, ativos liquidados, etc).';
+              notaTexto+=' A soma das contribuições ('+(somaContrib>=0?"+":"")+somaContrib.toFixed(2)+'%) difere da rent. da carteira ('+(_rentParaNarrativa>=0?"+":"")+_rentParaNarrativa.toFixed(2)+'%) em '+(diff>=0?"+":"")+diff.toFixed(2)+'pp por causa de eventos do período (proventos pagos, ativos liquidados, etc).';
             }
           }else{
-            notaTexto='Contribuição estimada de cada classe para a rentabilidade de '+(rentPeriodo>=0?"+":"")+rentPeriodo.toFixed(2)+'% '+rentLabel+'. Calculada pelo peso de cada classe na carteira atual.';
+            notaTexto='Contribuição estimada de cada classe para a rentabilidade de '+(_rentParaNarrativa>=0?"+":"")+_rentParaNarrativa.toFixed(2)+'% '+rentLabel+'. Calculada pelo peso de cada classe na carteira atual.';
           }
           body+='<div class="nota-inline" style="margin-top:14px">'+notaTexto+'</div>';
         } else if(temGorila && c._gorilaRent.atribuicao && c._gorilaRent.atribuicao.length>0){
@@ -9473,15 +9472,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         if(!byInst[inst])byInst[inst]={ativos:0,valor:0,ganhoMes:0};
         byInst[inst].ativos++;
         byInst[inst].valor+=a.vA;
-        /* Tenta pegar ganho do mês do Gorila */
+        /* Tenta pegar ganho do mês do extrato importado */
         var rentAt=getRentAtivoPer(a);
-        byInst[inst].ganhoMes+=rentAt.doPeriodo?rentAt.rs:(a.vA*(rentPeriodo||0)/100);
+        byInst[inst].ganhoMes+=rentAt.doPeriodo?rentAt.rs:(a.vA*(_rentParaNarrativa||0)/100);
       });
       var totalValor=enr.reduce(function(s,a){return s+a.vA;},0);
       var instList=Object.entries(byInst).map(function(e){
         var d=e[1];var pctCart=tCV>0?(d.valor/tCV*100):0;
-        /* Se instituição = carteira toda, usa rentPeriodo direto */
-        var rentPctPer=pctCart>=99.9&&rentPeriodo!==null?rentPeriodo:(d.valor>0?(d.ganhoMes/(d.valor-d.ganhoMes)*100):0);
+        /* Se instituição = carteira toda, usa a rentabilidade consolidada (do casal, se aplicável) */
+        var rentPctPer=pctCart>=99.9&&_rentParaNarrativa!==null?_rentParaNarrativa:(d.valor>0?(d.ganhoMes/(d.valor-d.ganhoMes)*100):0);
         return {nome:e[0],ativos:d.ativos,valor:d.valor,ganho:d.ganhoMes,rentPct:rentPctPer,pctCarteira:pctCart};
       }).sort(function(a,b){return b.valor-a.valor});
       if(secAtiva("instituicao") && instList.length>0){
@@ -9634,8 +9633,10 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         });
       });
       var totalGanhoPer=enr.reduce(function(s,a){return s+getRentAtivoPer(a).rs},0);
-      var totalRentPer=rentPeriodo!==null?rentPeriodo:(tCV>0?(totalGanhoPer/tCV*100):0);
-      var totalGanhoExib=rentPeriodo!==null?(tCV*rentPeriodo/100):totalGanhoPer;
+      /* Usa a rentabilidade consolidada (do casal, se aplicável) como fonte preferida —
+         enr/tCV aqui já somam titular+cônjuge, então a linha TOTAL precisa da mesma base. */
+      var totalRentPer=_rentParaNarrativa!==null?_rentParaNarrativa:(tCV>0?(totalGanhoPer/tCV*100):0);
+      var totalGanhoExib=_rentParaNarrativa!==null?(tCV*_rentParaNarrativa/100):totalGanhoPer;
       body+='<tr class="total-row"><td>TOTAL CARTEIRA</td>'
         +'<td style="text-align:right;font-family:\'JetBrains Mono\',monospace;color:#5a5a6e">'+fmF(tCV-totalGanhoExib)+'</td>'
         +'<td style="text-align:right;font-family:\'JetBrains Mono\',monospace;color:#D4A328">'+fmF(tCV)+'</td>'
@@ -9726,6 +9727,14 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           body+='<p class="cv-lead">Rentabilidade acumulada extraída do extrato importado'
             +(_dataIni2&&_dataFim2?' (<span class="cv-lead-strong">'+_fmtD(_dataIni2)+' → '+_fmtD(_dataFim2)+'</span>)':"")
             +'. Comparativo com benchmarks CDI, Ibovespa e IPCA.</p>';
+          /* Diferente do Resumo Executivo e da Rentabilidade vs Benchmarks (que já usam a
+             rentabilidade CONSOLIDADA do casal), esta tabela histórica multi-período vem de
+             c._gorila12mPerf, que só existe pro extrato do TITULAR — não há uma série histórica
+             equivalente importada do cônjuge pra consolidar mês a mês. Deixamos isso explícito
+             pro cliente em vez de apresentar como se fosse do casal. */
+          if(_ehCasalRel){
+            body+='<div class="nota-inline" style="margin-top:-8px;margin-bottom:10px">ℹ️ Esta tabela histórica reflete apenas a carteira de '+c.nome.split(" ")[0]+' — o extrato do cônjuge não traz uma série histórica por período para consolidar.</div>';
+          }
           /* Tabela de períodos */
           body+='<div style="border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,0.06);margin-bottom:20px">';
           body+='<table style="width:100%;border-collapse:collapse;font-size:10px">';
