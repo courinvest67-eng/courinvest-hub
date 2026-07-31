@@ -606,8 +606,24 @@ const montarEmailRelatorioHtml=function(opts){
    }
    Em cada ativo: ativo.reservaEmerg = true / ativo.holding = true */
 
+/* Se o cliente já tem um objetivo "Reserva de Emergência" (aba Carteira → Objetivos) com
+   ativos vinculados, usamos ELE como fonte única de verdade — evita ter que marcar os
+   mesmos ativos duas vezes (uma em Objetivos, outra em Particularidades). */
+const objetivoReservaEmerg=function(c){
+  if(!c||!c.objetivos)return null;
+  return c.objetivos.find(function(o){
+    return o.modo==="ativos" && (o.ativosVinculados||[]).length>0 &&
+      String(o.nome||"").toLowerCase().indexOf("reserva de emerg")>=0;
+  })||null;
+};
 const valorAtivosReserva=function(c){
   if(!c||!c._ativosImport)return 0;
+  var objRes=objetivoReservaEmerg(c);
+  if(objRes){
+    var tks=objRes.ativosVinculados||[];
+    return c._ativosImport.filter(function(a){return tks.indexOf(a.tk)>=0})
+      .reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
+  }
   return c._ativosImport.filter(function(a){return a.reservaEmerg===true})
     .reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
 };
@@ -19411,8 +19427,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         };
         
         var calc=feeBaseDoCliente(c);
-        
-        var ativosReserva=(c._ativosImport||[]).filter(function(a){return a.reservaEmerg===true});
+
+        var objReserva=objetivoReservaEmerg(c);
+        var ativosReserva=objReserva?(c._ativosImport||[]).filter(function(a){return (objReserva.ativosVinculados||[]).indexOf(a.tk)>=0}):(c._ativosImport||[]).filter(function(a){return a.reservaEmerg===true});
         var ativosHolding=(c._ativosImport||[]).filter(function(a){return a.holding===true});
         
         var toggleAtivo=function(idx,campo){
@@ -19585,8 +19602,29 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
               </div>
             </Cd>
 
-            {/* === LISTA DE ATIVOS MARCADOS === */}
-            {fee.excluiReservaEmerg && (
+            {/* === LISTA DE ATIVOS MARCADOS ===
+                Se já existe um objetivo "Reserva de Emergência" com ativos vinculados (aba
+                Carteira → Objetivos), usamos ele como fonte única — só mostra um resumo com
+                atalho pra editar lá, sem pedir pra marcar os mesmos ativos de novo aqui. */}
+            {fee.excluiReservaEmerg && objReserva && (
+              <Cd style={{padding:18,marginBottom:14,border:"1px solid rgba(45,212,160,0.2)"}} hov={false}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontSize:16}}>🛟</span>
+                  <div style={{flex:1}}>
+                    <h4 style={{margin:0,fontSize:13,fontWeight:800,color:T.t1}}>Ativos da Reserva de Emergência</h4>
+                    <div style={{fontSize:10,color:T.t3,marginTop:2}}>
+                      ✓ Já vinculado ao objetivo <strong style={{color:T.green}}>"{objReserva.nome}"</strong> em Carteira → Objetivos ({(objReserva.ativosVinculados||[]).length} ativo{(objReserva.ativosVinculados||[]).length>1?"s":""}) — não precisa marcar de novo aqui.
+                    </div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:9,color:T.t3,fontWeight:700}}>TOTAL</div>
+                    <div style={{fontSize:13,fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fmF(calc.exclReserva)}</div>
+                  </div>
+                </div>
+                <button onClick={function(){sTab("carteira");sCTab("obj")}} style={{marginTop:12,padding:"8px 14px",borderRadius:8,border:"1px solid "+T.gold+"55",background:"transparent",color:T.gold,fontSize:11,fontWeight:700,cursor:"pointer"}}>🎯 Editar em Carteira → Objetivos</button>
+              </Cd>
+            )}
+            {fee.excluiReservaEmerg && !objReserva && (
               <Cd style={{padding:18,marginBottom:14}} hov={false}>
                 <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
                   <span style={{fontSize:16}}>🛡️</span>
@@ -19622,7 +19660,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                     })}
                   </div>
                 )}
-                <div style={{fontSize:10,color:T.t3,marginTop:10,fontStyle:"italic"}}>💡 Dica: ativos típicos pra reserva são CDB liquidez D+0, Tesouro Selic, fundos DI</div>
+                <div style={{fontSize:10,color:T.t3,marginTop:10,fontStyle:"italic"}}>💡 Dica: crie um objetivo "Reserva de Emergência" em Carteira → Objetivos e vincule os ativos lá — assim você marca só uma vez e ele já vale aqui também.</div>
               </Cd>
             )}
 
