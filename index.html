@@ -7836,18 +7836,30 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         }
         var labelPeriodo=tipo==="mensal"?"do mês":(tipo==="anual"?"em 12 meses":"do trimestre");
 
-        /* Helper para bloco de KPIs de uma carteira */
-        var _kpiBlock=function(titulo,pat,rent,ganho,vsCdi,label){
+        /* Helper para bloco de KPIs de uma carteira.
+           opts.semDado=true → mostra "—" em Rentabilidade/Ganho/vs CDI em vez de 0,00%/R$0,00
+           (usado quando não há NENHUM dado de rentabilidade pro período, pra não parecer
+           que a carteira realmente rendeu zero). opts.nota = texto explicativo opcional. */
+        var _kpiBlock=function(titulo,pat,rent,ganho,vsCdi,label,opts){
+          opts=opts||{};
+          var semDado=!!opts.semDado;
           var txt=fmF(pat);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;
           var b='';
           if(titulo)b+='<div style="font-size:10px;font-weight:800;color:#D4A328;letter-spacing:.8px;margin:10px 0 6px;text-transform:uppercase;">'+titulo+'</div>';
           b+='<div class="kpi-grid">';
           b+='<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value gold" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">posição atual</div></div>';
-          b+='<div class="kpi"><div class="kpi-label">Rentabilidade</div><div class="kpi-value '+(rent>=0?"green":"red")+'">'+(rent>=0?"+":"")+rent.toFixed(2)+'%</div><div class="kpi-sub">'+label+'</div></div>';
-          var gtxt=(ganho>=0?"+":"")+fmF(ganho);var gsz=gtxt.length>=16?12:gtxt.length>=14?13:gtxt.length>=12?14:gtxt.length>=10?15:17;
-          b+='<div class="kpi"><div class="kpi-label">Ganho '+labelPeriodo+'</div><div class="kpi-value '+(ganho>=0?"green":"red")+'" style="font-size:'+gsz+'px">'+gtxt+'</div><div class="kpi-sub">variação estimada</div></div>';
-          b+='<div class="kpi"><div class="kpi-label">vs CDI</div><div class="kpi-value '+(vsCdi>=0?"green":"red")+'">'+(vsCdi>=0?"+":"")+vsCdi.toFixed(2)+'pp</div><div class="kpi-sub">'+(vsCdi>=0?"acima do":"abaixo do")+' benchmark</div></div>';
+          if(semDado){
+            b+='<div class="kpi"><div class="kpi-label">Rentabilidade</div><div class="kpi-value" style="color:#9AA0AE">—</div><div class="kpi-sub">sem dado no período</div></div>';
+            b+='<div class="kpi"><div class="kpi-label">Ganho '+labelPeriodo+'</div><div class="kpi-value" style="color:#9AA0AE">—</div><div class="kpi-sub">sem dado no período</div></div>';
+            b+='<div class="kpi"><div class="kpi-label">vs CDI</div><div class="kpi-value" style="color:#9AA0AE">—</div><div class="kpi-sub">sem dado no período</div></div>';
+          }else{
+            b+='<div class="kpi"><div class="kpi-label">Rentabilidade</div><div class="kpi-value '+(rent>=0?"green":"red")+'">'+(rent>=0?"+":"")+rent.toFixed(2)+'%</div><div class="kpi-sub">'+label+'</div></div>';
+            var gtxt=(ganho>=0?"+":"")+fmF(ganho);var gsz=gtxt.length>=16?12:gtxt.length>=14?13:gtxt.length>=12?14:gtxt.length>=10?15:17;
+            b+='<div class="kpi"><div class="kpi-label">Ganho '+labelPeriodo+'</div><div class="kpi-value '+(ganho>=0?"green":"red")+'" style="font-size:'+gsz+'px">'+gtxt+'</div><div class="kpi-sub">variação estimada</div></div>';
+            b+='<div class="kpi"><div class="kpi-label">vs CDI</div><div class="kpi-value '+(vsCdi>=0?"green":"red")+'">'+(vsCdi>=0?"+":"")+vsCdi.toFixed(2)+'pp</div><div class="kpi-sub">'+(vsCdi>=0?"acima do":"abaixo do")+' benchmark</div></div>';
+          }
           b+='</div>';
+          if(opts.nota)b+='<div style="font-size:9px;color:#9AA0AE;font-style:italic;margin-top:4px">'+opts.nota+'</div>';
           return b;
         };
 
@@ -7862,25 +7874,49 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           if(_patConj===0&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
             _patConj=c.conjuge._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
           }
-          var _rentConj=0,_ganhoConj=0;
+          var _rentConj=0,_ganhoConj=0,_temDadoConj=false,_notaConj='';
           if(c.conjuge._gorilaRent){
-            if(typeof c.conjuge._gorilaRent.rentMes==="number")_rentConj=c.conjuge._gorilaRent.rentMes*100;
+            if(typeof c.conjuge._gorilaRent.rentMes==="number"){_rentConj=c.conjuge._gorilaRent.rentMes*100;_temDadoConj=true;}
             if(typeof c.conjuge._gorilaRent.resultado==="number")_ganhoConj=c.conjuge._gorilaRent.resultado;
             else _ganhoConj=_patConj*(_rentConj/100);
+          }else if(c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
+            /* Fallback: o fluxo de importação do cônjuge não gera um "_gorilaRent" agregado
+               (esse campo nunca é preenchido). Mas o próprio arquivo de posições traz, por
+               ativo, a rentabilidade do período (coluna do Gorila, salva em _gRentPct.periodo)
+               — usamos a média ponderada pelo valor de cada ativo, que é o dado real mais
+               próximo disponível, em vez de assumir 0% (o que faria parecer que o cônjuge não
+               rendeu nada no período, distorcendo o consolidado do casal pra baixo). */
+            var _somaPondRentConj=0,_somaValComRentConj=0;
+            c.conjuge._ativosImport.forEach(function(a){
+              var v=+a.posR||(+a.qtd*+a.pa)||0;
+              var rp=(a._gRentPct&&typeof a._gRentPct.periodo==="number")?a._gRentPct.periodo*100:null;
+              if(rp!==null&&v>0){_somaPondRentConj+=v*rp;_somaValComRentConj+=v;}
+            });
+            if(_somaValComRentConj>0){
+              _rentConj=_somaPondRentConj/_somaValComRentConj;
+              _ganhoConj=_patConj*(_rentConj/100);
+              _temDadoConj=true;
+              _notaConj='* rentabilidade estimada a partir da rentabilidade por ativo do extrato importado';
+            }
           }
           var _cdiMes=(c._gorilaRent&&typeof c._gorilaRent.cdiMes==="number")?c._gorilaRent.cdiMes*100:cdiPeriodo;
           var _vsCdiConj=_rentConj-_cdiMes;
-          /* Consolidado: usa patrimônios individuais, não tCV (que pode estar consolidado) */
+          /* Consolidado: usa patrimônios individuais, não tCV (que pode estar consolidado).
+             Se não há NENHUM dado de rentabilidade do cônjuge, não tratamos a parte dela como
+             "rendeu 0%" (isso distorceria a média pra baixo) — a média ponderada considera só
+             a parte do casal com dado real; na prática, sem dado do cônjuge, o consolidado
+             reflete a rentabilidade do titular. */
           var _patTotal=_patTit+_patConj;
-          var _ganhoTotal=ganhoPeriodo+_ganhoConj;
-          var _rentTotal=_patTotal>0?(_ganhoTotal/_patTotal*100):(rentPeriodo+_rentConj)/2;
+          var _baseRentTotal=_patTit+(_temDadoConj?_patConj:0);
+          var _ganhoTotal=ganhoPeriodo+(_temDadoConj?_ganhoConj:0);
+          var _rentTotal=_baseRentTotal>0?(_ganhoTotal/_baseRentTotal*100):rentPeriodo;
           var _vsCdiTotal=_rentTotal-_cdiMes;
           var _nomeConj=c.conjuge.nome||c.conjuge.nomeConjuge||"Cônjuge";
           body+=_kpiBlock("👤 "+c.nome.split(" ")[0],_patTit,rentPeriodo,ganhoPeriodo,vsC,rentLabel);
           body+='<hr style="border:none;border-top:1px solid #E8E0C8;margin:14px 0;"/>';
-          body+=_kpiBlock("👤 "+_nomeConj.split(" ")[0],_patConj,_rentConj,_ganhoConj,_vsCdiConj,rentLabel);
+          body+=_kpiBlock("👤 "+_nomeConj.split(" ")[0],_patConj,_rentConj,_ganhoConj,_vsCdiConj,rentLabel,{semDado:!_temDadoConj,nota:_notaConj});
           body+='<hr style="border:none;border-top:2px solid #D4A328;margin:14px 0;"/>';
-          body+=_kpiBlock("👫 Consolidado do Casal",_patTotal,_rentTotal,_ganhoTotal,_vsCdiTotal,rentLabel);
+          body+=_kpiBlock("👫 Consolidado do Casal",_patTotal,_rentTotal,_ganhoTotal,_vsCdiTotal,rentLabel,{nota:_temDadoConj?'':'* considera apenas a rentabilidade do titular — sem dado de rentabilidade do cônjuge no período'});
         }else{
           body+='<div class="kpi-grid">';
           (function(){var txt=fmF(tCV);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value gold" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">posição atual</div></div>';})();
@@ -7918,12 +7954,18 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           }
         }
         
-        body+='<div class="kpi-grid">';
-        (function(){var txt=fmF(tCV);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value gold" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">posição atual</div></div>';})();
-        body+='<div class="kpi"><div class="kpi-label">Investido</div><div class="kpi-value">'+fmF(tCT)+'</div><div class="kpi-sub">custo total</div></div>';
-        body+='<div class="kpi"><div class="kpi-label">Ganho / Perda</div><div class="kpi-value '+(ganhoV>=0?"green":"red")+'">'+(ganhoV>=0?"+":"")+fmF(ganhoV)+'</div><div class="kpi-sub">acumulado</div></div>';
-        body+='<div class="kpi"><div class="kpi-label">Rentabilidade</div><div class="kpi-value '+(ganhoV>=0?"green":"red")+'">'+(ganhoV>=0?"+":"")+rentPct+'%</div><div class="kpi-sub">desde o início</div></div>';
-        body+='</div>';
+        /* Bloco "desde o início" (Patrimônio/Investido/Ganho/Rentabilidade) — omitido pra
+           clientes casal porque tCV/tCT/ganhoV/rentPct aqui refletem só o titular (dependem
+           do viewCasal ambiente), e duplicavam/confundiam com o Patrimônio Total do casal já
+           mostrado acima (painel "PATRIMÔNIO CONSOLIDADO DO CASAL" + os blocos de KPI). */
+        if(!_ehCasalRel){
+          body+='<div class="kpi-grid">';
+          (function(){var txt=fmF(tCV);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value gold" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">posição atual</div></div>';})();
+          body+='<div class="kpi"><div class="kpi-label">Investido</div><div class="kpi-value">'+fmF(tCT)+'</div><div class="kpi-sub">custo total</div></div>';
+          body+='<div class="kpi"><div class="kpi-label">Ganho / Perda</div><div class="kpi-value '+(ganhoV>=0?"green":"red")+'">'+(ganhoV>=0?"+":"")+fmF(ganhoV)+'</div><div class="kpi-sub">acumulado</div></div>';
+          body+='<div class="kpi"><div class="kpi-label">Rentabilidade</div><div class="kpi-value '+(ganhoV>=0?"green":"red")+'">'+(ganhoV>=0?"+":"")+rentPct+'%</div><div class="kpi-sub">desde o início</div></div>';
+          body+='</div>';
+        }
       }
 
       /* ===== NARRATIVA ===== */
