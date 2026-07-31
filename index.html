@@ -6550,7 +6550,14 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                 pa:preco2||pmReal, 
                 pm:pmReal, 
                 cT:cTotal,ganho:ganho2,gPct:gPct2,
-                _gRentPct:{periodo:(!isNaN(rentPer2)&&rentPer2!==0)?rentPer2:null},
+                /* periodo gravado como FRAÇÃO (ex: 0.0116 = 1,16%) — mesmo formato numérico
+                   bruto que o import do titular grava (valor da célula % do Excel do Gorila,
+                   sem multiplicar por 100). Antes gravava em pontos percentuais (1.16), o que
+                   fazia getRentAtivoPer() (usado na Rentabilidade por Moeda / Carteira Brasil
+                   pra carteiras casal/família) multiplicar por 100 de novo — um ativo do
+                   cônjuge com rentabilidade real de 1,16% virava 116% no relatório consolidado,
+                   distorcendo a rentabilidade da carteira toda quando havia ativo só dela. */
+                _gRentPct:{periodo:(!isNaN(rentPer2)&&rentPer2!==0)?rentPer2/100:null},
                 tp:tp2,inst:inst2,cat:cl,
                 venc:vencFmt||undefined
               });
@@ -7952,10 +7959,10 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
             var _somaPondRentConj=0,_somaValComRentConj=0;
             c.conjuge._ativosImport.forEach(function(a){
               var v=+a.posR||(+a.qtd*+a.pa)||0;
-              /* _gRentPct.periodo já vem em pontos percentuais (ex: 1.16 = 1,16%), gravado
-                 direto da coluna "Rentabilidade" do extrato — NÃO é fração (não multiplicar
-                 por 100 de novo, senão 1,16% vira 116%). */
-              var rp=(a._gRentPct&&typeof a._gRentPct.periodo==="number")?a._gRentPct.periodo:null;
+              /* _gRentPct.periodo vem como FRAÇÃO (ex: 0.0116 = 1,16%) — mesmo formato bruto
+                 gravado no import (ver importarGorilaConjuge). _rentConj abaixo é usado como
+                 PONTO PERCENTUAL (ex: 1.16) no resto do relatório, então multiplica por 100 aqui. */
+              var rp=(a._gRentPct&&typeof a._gRentPct.periodo==="number")?a._gRentPct.periodo*100:null;
               if(rp!==null&&v>0){_somaPondRentConj+=v*rp;_somaValComRentConj+=v;}
             });
             if(_somaValComRentConj>0){
@@ -8382,7 +8389,17 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
               return {pct:pctDerivado,rs:rsPeriodo,doPeriodo:true,fonte:"gorila_periodo_rs"};
             }
             if(pctPeriodo!==null){
-              return {pct:pctPeriodo*100,rs:a.vA*pctPeriodo/(1+pctPeriodo),doPeriodo:true,fonte:"gorila_periodo_pct"};
+              /* pctPeriodo deveria ser FRAÇÃO (ex: 0.0116 = 1,16%), mas dados importados antes
+                 da correção do import do cônjuge (importarGorilaConjuge) gravaram em PONTOS
+                 PERCENTUAIS (ex: 1.16). Um valor absoluto > 1 aqui é praticamente sempre esse
+                 caso — nenhuma carteira real rende >100%/-100% num único mês — então tratamos
+                 como já sendo % em vez de multiplicar por 100 de novo (o que gerava números
+                 como "116%" pra um ativo que na verdade rendeu 1,16%). Isso corrige tanto dados
+                 novos (fração) quanto antigos (pontos percentuais), sem precisar reimportar. */
+              var ehJaPct=Math.abs(pctPeriodo)>1;
+              var pctFrac=ehJaPct?pctPeriodo/100:pctPeriodo;
+              var pctFinal=ehJaPct?pctPeriodo:pctPeriodo*100;
+              return {pct:pctFinal,rs:a.vA*pctFrac/(1+pctFrac),doPeriodo:true,fonte:"gorila_periodo_pct"};
             }
             var vAno=pickKey(rp,["ano","Ano","ANO"]);
             if(vAno!==null){
