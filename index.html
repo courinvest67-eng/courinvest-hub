@@ -7916,7 +7916,10 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
             var _somaPondRentConj=0,_somaValComRentConj=0;
             c.conjuge._ativosImport.forEach(function(a){
               var v=+a.posR||(+a.qtd*+a.pa)||0;
-              var rp=(a._gRentPct&&typeof a._gRentPct.periodo==="number")?a._gRentPct.periodo*100:null;
+              /* _gRentPct.periodo já vem em pontos percentuais (ex: 1.16 = 1,16%), gravado
+                 direto da coluna "Rentabilidade" do extrato — NÃO é fração (não multiplicar
+                 por 100 de novo, senão 1,16% vira 116%). */
+              var rp=(a._gRentPct&&typeof a._gRentPct.periodo==="number")?a._gRentPct.periodo:null;
               if(rp!==null&&v>0){_somaPondRentConj+=v*rp;_somaValComRentConj+=v;}
             });
             if(_somaValComRentConj>0){
