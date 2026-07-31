@@ -28570,6 +28570,18 @@ function App({authUser}){
   const[syncError,sSyncError]=useState(""); /* guarda a mensagem de erro do Firestore para diagnóstico */
   const isInitialLoadRef=useRef(true);
   const skipNextSaveRef=useRef(false);
+  /* pendingLocalRef: true entre uma mudança local genuína (ex: vincular ativo a um objetivo,
+     importar extrato do cliente ou do cônjuge) e a confirmação de que ela foi salva no Firestore.
+     Protege contra dois cenários de perda de dado:
+     1) Fechar/recarregar o navegador antes do debounce de 800ms disparar — sem isso, a
+        comparação de "quem tem mais dados" no carregamento seguinte comparava só o TAMANHO
+        das listas, então uma edição dentro de um cliente já existente (que não muda o tamanho
+        da lista) podia ser silenciosamente descartada em favor do que já estava salvo.
+     2) Uma atualização em tempo real de outro dispositivo (onSnapshot, ex: sócio trabalhando
+        em paralelo) chegar enquanto ainda há uma mudança local não salva — sem essa proteção,
+        o REPLACE_ALL do listener sobrescrevia o estado local (perdendo a mudança) e ainda
+        cancelava o salvamento pendente (por causa do cleanup do useEffect[d]). */
+  const pendingLocalRef=useRef(false);
   const finRef=useRef(d.fin); /* Sempre aponta para o fin atual — evita closures stale no sync */
   useEffect(function(){finRef.current=d.fin;},[d.fin]);
   const ovRef=useRef(d.overviewMercado||{}); /* FIX: ref para overviewMercado — evita closure stale no merge */
@@ -28623,14 +28635,27 @@ function App({authUser}){
         if(data&&Array.isArray(data.cl)&&Array.isArray(data.it)){
           var localEntradas=((finRef.current&&finRef.current.entradas)||[]).length;
           var remoteEntradas=(data.fin&&data.fin.entradas&&data.fin.entradas.length)||0;
+          /* pendingFlagLocal: gravado no localStorage sempre que houve uma mudança local ainda
+             não confirmada como salva no Firestore (ver pendingLocalRef). Se a sessão anterior
+             foi fechada/recarregada antes do debounce de 800ms concluir, esse flag continua "1"
+             — nesse caso o local PRECISA ser tratado como mais atualizado, mesmo que o tamanho
+             das listas seja igual (ex: edição dentro de um cliente já existente, como vincular
+             um ativo a um objetivo ou importar o extrato do cônjuge). */
+          var pendingFlagLocal=false;
+          try{pendingFlagLocal=localStorage.getItem("courinvest_pending_v1")==="1"}catch(e){}
           var localTemMaisDados=
+            pendingFlagLocal ||
             (d.cl.length>data.cl.length) ||
             (d.it.length>data.it.length) ||
             ((d.lds||[]).length>(data.lds||[]).length) ||
             (localEntradas>remoteEntradas);
           if(localTemMaisDados){
-            console.log("[Sync] Local tem mais dados. Fazendo UPLOAD.");
-            _salvarFirestore(d.cl,{it:d.it,lds:d.lds||[],fin:finRef.current||{entradas:[],despesas:[]},overviewMercado:ovRef.current||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[]}).catch(function(e){console.warn("Upload migration failed:",e)});
+            console.log("[Sync] Local tem mais dados"+(pendingFlagLocal?" (havia mudança pendente de sessão anterior)":"")+". Fazendo UPLOAD.");
+            pendingLocalRef.current=true;
+            _salvarFirestore(d.cl,{it:d.it,lds:d.lds||[],fin:finRef.current||{entradas:[],despesas:[]},overviewMercado:ovRef.current||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[]}).then(function(){
+              pendingLocalRef.current=false;
+              try{localStorage.removeItem("courinvest_pending_v1")}catch(e){}
+            }).catch(function(e){console.warn("Upload migration failed:",e)});
             sSyncState("synced");
             isInitialLoadRef.current=false;
             return;
@@ -28665,6 +28690,11 @@ function App({authUser}){
       return;
     }
     
+    /* Marca que existe uma mudança local ainda não confirmada no Firestore — em memória (protege
+       o listener em tempo real, ver onSnapshot abaixo) e no localStorage (protege contra fechar
+       o navegador antes do debounce concluir — ver comparação no carregamento inicial acima). */
+    pendingLocalRef.current=true;
+    try{localStorage.setItem("courinvest_pending_v1","1")}catch(e){}
     var nEntradas=((finRef.current&&finRef.current.entradas)||[]).length;
     console.log("[Sync] Agendando save. Entradas fin:",nEntradas,"clientes:",d.cl.length);
     var timeoutId=setTimeout(function(){
@@ -28672,7 +28702,11 @@ function App({authUser}){
       var finToSave=finRef.current||{entradas:[],despesas:[]};
       console.log("[Sync] Salvando no Firestore. clientes:",d.cl.length);
       _salvarFirestore(d.cl,{it:d.it,lds:d.lds||[],fin:finToSave,overviewMercado:ovRef.current||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[]})
-      .then(function(){sSyncState("synced");sSyncError("");console.log("[Sync] ✅ Salvo com sucesso");}).catch(function(e){
+      .then(function(){
+        pendingLocalRef.current=false;
+        try{localStorage.removeItem("courinvest_pending_v1")}catch(e){}
+        sSyncState("synced");sSyncError("");console.log("[Sync] ✅ Salvo com sucesso");
+      }).catch(function(e){
         console.warn("Firestore save failed:",e);
         sSyncError((e&&(e.message||e.code))||"Erro ao gravar no Firestore");
         sSyncState("offline");
@@ -28711,8 +28745,18 @@ function App({authUser}){
     var docRef=window._fbDB.collection("workspaces").doc("main");
     var unsub=docRef.onSnapshot(function(snap){
       if(!snap.exists)return;
-      if(isInitialLoadRef.current)return; 
-      if(snap.metadata.hasPendingWrites)return; 
+      if(isInitialLoadRef.current)return;
+      if(snap.metadata.hasPendingWrites)return;
+      if(pendingLocalRef.current){
+        /* Há uma mudança local (ex: ativo vinculado a objetivo, extrato importado) ainda não
+           confirmada como salva. Aplicar a atualização remota agora sobrescreveria essa mudança
+           E cancelaria o salvamento pendente (o useEffect[d] de baixo cancela o timer anterior
+           a cada novo d). Ignora esta atualização — assim que o salvamento local terminar, o
+           próprio save já reflete o estado mais novo; a próxima atualização remota (se houver)
+           chega depois, sem risco de perder o que acabou de ser feito aqui. */
+        console.log("[Sync] Atualização remota ignorada — há mudança local ainda não salva.");
+        return;
+      }
       var data=snap.data();
       if(!data||!Array.isArray(data.cl)||!Array.isArray(data.it))return;
       
