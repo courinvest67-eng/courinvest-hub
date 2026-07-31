@@ -89,12 +89,17 @@ table{border-spacing:0}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.4/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<!-- EmailJS SDK para envio automático de relatórios por e-mail -->
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script>if(typeof pdfjsLib!=="undefined")pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";</script>
+<!-- html2pdf.js: gera o PDF do relatório-resumo no navegador (envio automático por e-mail) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
 <!-- Firebase SDK (compat for Babel standalone) -->
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
 <script>
   /* Firebase bootstrap — defensive, tolera falha de carregamento */
   (function(){
@@ -115,6 +120,7 @@ table{border-spacing:0}
       firebase.initializeApp(firebaseConfig);
       window._fbAuth = firebase.auth();
       window._fbDB = firebase.firestore();
+      try { window._fbStorage = firebase.storage(); } catch(e) { console.warn("[Firebase] Storage indisponível:", e); }
       try {
         window._fbDB.enablePersistence({synchronizeTabs:true}).catch(function(err){
           console.warn("Firestore persistence not available:", err.code);
@@ -274,9 +280,317 @@ const metodoCobranca=function(c){
    Pra cliente BR fee é em R$ (sem conversão). Pra exterior, converte EUR/USD/etc → BRL. */
 const feeMensalBRL=function(c){
   if(!c)return 0;
-  var moeda=c.feeMoeda||moedaCli(c).code; 
+  var moeda=c.feeMoeda||moedaCli(c).code;
   var fee=c.feeFixo||0;
   return toBRL(fee,moeda);
+};
+
+/* === GERA PDF (via html2pdf.js) A PARTIR DE UM HTML E FAZ UPLOAD PRO FIREBASE STORAGE ===
+   Usado no envio automático de e-mail de relatórios: converte o resumo (ou qualquer HTML
+   autocontido) em PDF de verdade e devolve o link de download público.
+   Por quê link e não anexo: o plano Free do EmailJS não suporta anexos de e-mail — só
+   planos pagos (Personal $9/mês+), com limite de 500KB. Link via Storage funciona em
+   qualquer plano e não tem esse limite de tamanho.
+   Resolve(null) — nunca rejeita — se qualquer etapa falhar (lib não carregada, Storage
+   indisponível, erro de permissão, etc.) OU demorar mais que 25s (timeout de segurança),
+   pra NUNCA travar o envio do e-mail (nem a UI, presa em "Enviando...") por causa do PDF.
+   Nota: o container fica em opacidade normal (100%) dentro de um wrapper de tamanho zero
+   (width:0;height:0;overflow:hidden), fixado fora da área visível. Duas armadilhas já
+   encontradas e evitadas aqui: (1) position:fixed/absolute com o CONTEÚDO offset pra fora
+   da tela faz o html2canvas medir altura 0 e gerar PDF em branco; (2) opacity baixa
+   (ex.: 0.01) no container com o conteúdo é capturada pelo html2canvas no render, gerando
+   um PDF "lavado"/quase invisível — por isso é o WRAPPER que fica de tamanho zero, não o
+   conteúdo que fica com opacidade baixa. */
+const _gerarPdfLinkCourinvestInner=function(pathStorage,htmlContent){
+  return new Promise(function(resolve){
+    var wrapper=null;
+    try{
+      if(typeof window.html2pdf==="undefined"){console.warn("[PDF] html2pdf.js não carregou.");resolve(null);return;}
+      if(!window._fbStorage){console.warn("[PDF] Firebase Storage indisponível (verifique se o Storage está habilitado no projeto Firebase).");resolve(null);return;}
+      var container=document.createElement("div");
+      container.style.cssText="width:800px;background:#fff;";
+      container.innerHTML=htmlContent;
+      /* Esconde do usuário SEM mexer em opacity/visibility do conteúdo — o html2canvas captura o
+         estilo computado, e opacity:quase-zero deixa o PDF "lavado"/em branco (já vimos isso
+         acontecer). Em vez disso, o container fica com opacidade normal (100%) dentro de um
+         wrapper de tamanho zero com overflow:hidden, fixado fora da área visível — testado que
+         isso preserva o contraste/cores corretamente. */
+      wrapper=document.createElement("div");
+      wrapper.style.cssText="position:fixed;top:0;left:0;width:0;height:0;overflow:hidden;";
+      wrapper.appendChild(container);
+      document.body.appendChild(wrapper);
+      html2pdf().set({
+        margin:0,
+        filename:"relatorio.pdf",
+        image:{type:"jpeg",quality:0.95},
+        html2canvas:{scale:2,useCORS:true,backgroundColor:"#ffffff"},
+        jsPDF:{unit:"pt",format:"a4",orientation:"portrait"}
+      }).from(container).toPdf().output("blob").then(function(blob){
+        try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
+        var ref=window._fbStorage.ref().child(pathStorage);
+        return ref.put(blob,{contentType:"application/pdf"});
+      }).then(function(snap){
+        return snap.ref.getDownloadURL();
+      }).then(function(url){
+        resolve(url);
+      }).catch(function(e){
+        console.warn("[PDF] Falha ao gerar/subir PDF:",e);
+        try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
+        resolve(null);
+      });
+    }catch(e){
+      console.warn("[PDF] Erro inesperado ao gerar PDF:",e);
+      try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
+      resolve(null);
+    }
+  });
+};
+const gerarPdfLinkCourinvest=function(pathStorage,htmlContent){
+  return new Promise(function(resolve){
+    var settled=false;
+    var finish=function(v){if(settled)return;settled=true;resolve(v);};
+    var timeoutId=setTimeout(function(){
+      console.warn("[PDF] Timeout de 25s atingido — seguindo sem o link do PDF.");
+      finish(null);
+    },25000);
+    _gerarPdfLinkCourinvestInner(pathStorage,htmlContent).then(function(url){
+      clearTimeout(timeoutId);
+      finish(url);
+    }).catch(function(){
+      clearTimeout(timeoutId);
+      finish(null);
+    });
+  });
+};
+
+/* === GERA O RELATÓRIO MENSAL COMPLETO (a mesma ficha detalhada multi-página da aba "Relatório"
+   dentro do cadastro do cliente) EM SEGUNDO PLANO, SEM abrir a ficha na tela ===
+   Usado no envio automático de e-mail: em vez de um resumo curto, o PDF anexado passa a ser o
+   relatório oficial completo (capa, resumo executivo, rentabilidade vs benchmarks, alocação,
+   proventos, movimentações, taxa de administração etc. — a função gerarRelatorio já existente).
+
+   Como funciona: gerarRelatorio() é uma closure que só existe dentro do componente CD (a ficha
+   do cliente) — ela depende de várias contas feitas no corpo do CD (ativos enriquecidos, totais,
+   proventos...). Não dá pra chamar ela "de fora". Então montamos uma instância REAL do CD, só que
+   invisível (dentro de um wrapper de tamanho zero, igual ao truque do PDF), já nascendo direto na
+   aba "relatorio" (via headlessTipoRelatorio) — e ela mesma nos devolve o HTML pronto via o
+   callback onReportReady, exatamente como já acontece na abertura automática vinda do modal de
+   aprovação (courinvest:abrirRelatorio). Depois de receber (ou depois de 40s, o que vier primeiro),
+   desmonta tudo e nunca deixa nada visível na tela do usuário.
+
+   dispatch é propositalmente um no-op: o CD tem efeitos que re-salvam dados (ex: ativos importados,
+   metas) automaticamente ao montar — inofensivos pro conteúdo, mas que gravariam no Firestore e
+   disparariam um re-render geral do app se usássemos o dispatch de verdade. Como só precisamos do
+   HTML do relatório (que depende só de props/estado local, não do dispatch), um no-op é seguro e
+   evita qualquer efeito colateral indesejado dessa instância oculta.
+
+   Resolve(null) — nunca rejeita — se qualquer etapa falhar ou demorar demais, pra quem chamou
+   sempre poder cair de volta pro resumo curto sem travar o envio do e-mail. */
+const gerarRelatorioHtmlHeadless=function(cliente,dadosApp,tipoRelatorio){
+  return new Promise(function(resolve){
+    var settled=false;
+    var root=null,container=null;
+    var finish=function(v){
+      if(settled)return;
+      settled=true;
+      try{if(root)root.unmount();}catch(_e){}
+      try{if(container&&container.parentNode)document.body.removeChild(container);}catch(_e){}
+      resolve(v);
+    };
+    var timeoutId=setTimeout(function(){
+      console.warn("[Relatório] Timeout de 40s ao gerar o relatório completo em segundo plano — usando o resumo como PDF.");
+      finish(null);
+    },40000);
+    try{
+      if(typeof CD==="undefined"||typeof ReactDOM==="undefined"||typeof React==="undefined"){
+        clearTimeout(timeoutId);finish(null);return;
+      }
+      container=document.createElement("div");
+      container.style.cssText="position:fixed;top:0;left:0;width:0;height:0;overflow:hidden;";
+      document.body.appendChild(container);
+      root=ReactDOM.createRoot(container);
+      root.render(
+        React.createElement(CD,{
+          client:cliente,
+          data:dadosApp,
+          dispatch:function(){},
+          onBack:function(){},
+          headlessTipoRelatorio:tipoRelatorio,
+          onReportReady:function(html){
+            clearTimeout(timeoutId);
+            finish(html||null);
+          }
+        })
+      );
+    }catch(e){
+      console.warn("[Relatório] Erro ao montar ficha oculta para gerar o relatório completo:",e);
+      clearTimeout(timeoutId);
+      finish(null);
+    }
+  });
+};
+
+/* === BUSCA O OVERVIEW DE MERCADO MAIS RECENTE (o mesmo texto/dados usados no "Resumo do Mercado
+   Financeiro" do relatório completo em PDF, mantido pelo usuário na aba "Overview IA") ===
+   Mesma lógica de busca do gerarRelatorio (mês anterior → mês atual → qualquer chave disponível
+   com texto), só que reutilizável fora do componente CD. */
+const obterOverviewMercadoRecente=function(dadosApp){
+  if(!dadosApp||!dadosApp.overviewMercado)return null;
+  var hoje=new Date();
+  var refAnt=new Date();refAnt.setDate(1);refAnt.setMonth(refAnt.getMonth()-1);
+  var chaveAnt=refAnt.getFullYear()+"-"+String(refAnt.getMonth()+1).padStart(2,"0");
+  var chaveAtual=hoje.getFullYear()+"-"+String(hoje.getMonth()+1).padStart(2,"0");
+  var ov=dadosApp.overviewMercado[chaveAnt]||dadosApp.overviewMercado[chaveAtual]||null;
+  if(!ov){
+    var chaves=Object.keys(dadosApp.overviewMercado).sort().reverse();
+    for(var i=0;i<chaves.length;i++){
+      if(dadosApp.overviewMercado[chaves[i]]&&dadosApp.overviewMercado[chaves[i]].texto){ov=dadosApp.overviewMercado[chaves[i]];break;}
+    }
+  }
+  return ov;
+};
+
+/* === EXTRAI UM COMENTÁRIO CURTO + INDICADORES (Selic, IPCA, Dólar) DO OVERVIEW DE MERCADO ===
+   pra usar no e-mail (versão compacta do "Resumo do Mercado Financeiro" do PDF completo).
+   Pega só o primeiro parágrafo de prosa (pula cabeçalhos em CAIXA ALTA) e trunca pra caber bem
+   no e-mail. Os indicadores vêm do MESMO dado estruturado (dados.selic/ipca/dolar) salvo junto
+   com o texto na aba "Overview IA" — não faz nenhuma chamada de API nova. */
+const montarResumoMercadoEmail=function(ov){
+  if(!ov)return null;
+  var fmtN=function(v,d){return v==null?null:Number(v).toFixed(d==null?2:d).replace(".",",");};
+  var comentario=null;
+  if(ov.texto){
+    /* Cada bloco de parágrafo pode vir como "TÍTULO EM CAIXA ALTA\nRestante do texto..." (título
+       e corpo na mesma "linha em branco a linha em branco" — é assim que o gerarRelatorio também
+       lê). Se a primeira linha for um título, usa o resto do bloco; senão usa o bloco inteiro. */
+    var paragrafos=String(ov.texto).split(/\n\s*\n/).map(function(p){return p.trim();}).filter(function(p){return p.length>0;});
+    var candidato=null;
+    for(var i=0;i<paragrafos.length;i++){
+      var linhas=paragrafos[i].split("\n");
+      var primeiraLinha=linhas[0];
+      var ehCabecalho=/^[A-ZÁÉÍÓÚÂÊÔÃÕÇ\s&]+$/.test(primeiraLinha)&&primeiraLinha.length<=40&&primeiraLinha.length>=3;
+      var corpo=(ehCabecalho?linhas.slice(1).join(" "):paragrafos[i]).trim();
+      if(corpo){candidato=corpo;break;}
+    }
+    if(candidato){
+      var limpo=candidato.replace(/\*\*(.+?)\*\*/g,"$1").replace(/\n/g," ").trim();
+      comentario=limpo.length>230?(limpo.slice(0,227).trim()+"..."):limpo;
+    }
+  }
+  var indicadores=[];
+  var dd=ov.dados||{};
+  if(dd.selic!=null)indicadores.push({label:"Selic",value:fmtN(dd.selic)+"% a.a."});
+  if(dd.ipca!=null)indicadores.push({label:"IPCA (12m)",value:fmtN(dd.ipca)+"%"});
+  if(dd.dolar&&dd.dolar.bid!=null)indicadores.push({label:"Dólar",value:"R$ "+fmtN(dd.dolar.bid,2)});
+  if(!comentario&&!indicadores.length)return null;
+  return{comentario:comentario,indicadores:indicadores};
+};
+
+/* === MONTA O HTML DO CORPO DO E-MAIL DE RELATÓRIO (não é o PDF — é o e-mail em si) ===
+   Layout único reaproveitado pelo envio automático real (sendReportEmail, no Dash) e pelo botão
+   de teste (NewsView), pra garantir que os dois fiquem sempre visualmente idênticos.
+   Segue a identidade visual da Courinvest (navy #0A1628 + dourado #D4A328) — a mesma paleta do
+   relatório completo em PDF, só que num layout mais simples e compacto, adequado a e-mail.
+   KPIs em <table> (não CSS grid/flex) pra ficar compatível com clientes de e-mail mais antigos
+   (ex: Outlook desktop), que não renderizam grid/flex corretamente. */
+const montarEmailRelatorioHtml=function(opts){
+  var o=opts||{};
+  var nome=o.nome||"";
+  var mesRefStr=o.mesRefStr||"";
+  var tituloTopo=o.tituloTopo||"Relatório Mensal";
+  var introTxt=o.introTxt||"";
+  var destaque=o.destaque||null; /* {icon,label,value} — o número principal, em destaque */
+  var badges=o.badges||[]; /* [{icon,label,value,cls}] — pílulas menores abaixo do destaque (ex: rentabilidade) */
+  var mercado=o.mercado||null; /* {comentario,indicadores:[{label,value}]} — panorama do mês (Selic, IPCA...) */
+  var remetente=o.remetente||"contato@courinvest.com.br";
+  var notaExtra=o.notaExtra||"";
+  var supportHtml=o.supportHtml||'💬 <b>Alguma dúvida sobre este relatório?</b><br>Responda este e-mail — teremos prazer em ajudar.';
+
+  var destaqueHtml=destaque?(
+    '<div class="hero-stat">'
+    +'<div class="hero-stat-label">'+(destaque.icon?destaque.icon+' ':'')+destaque.label+'</div>'
+    +'<div class="hero-stat-value">'+destaque.value+'</div>'
+    +'</div>'
+  ):'';
+
+  var badgesHtml=badges.length?(
+    '<div class="badges-row">'
+    +badges.map(function(b){
+      return '<span class="badge '+(b.cls||"neutral")+'">'+(b.icon?b.icon+' ':'')+b.value+(b.label?' <span style="opacity:.75;font-weight:600">'+b.label+'</span>':'')+'</span>';
+    }).join('')
+    +'</div>'
+  ):'';
+
+  var mercadoHtml=(mercado&&(mercado.comentario||(mercado.indicadores&&mercado.indicadores.length)))?(
+    '<div class="market-card">'
+    +'<div class="mkt-label">📰 Panorama do Mês</div>'
+    +(mercado.comentario?('<p class="mkt-comment">'+mercado.comentario+'</p>'):'')
+    +((mercado.indicadores&&mercado.indicadores.length)?(
+      '<div class="mkt-indicators">'
+      +mercado.indicadores.map(function(ind){
+        return '<span class="mkt-chip">'+ind.label+': <b>'+ind.value+'</b></span>';
+      }).join('')
+      +'</div>'
+    ):'')
+    +'</div>'
+  ):'';
+
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+    +'<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+    +'<style>'
+    +'body{margin:0;padding:0;background:#EEF1F6}'
+    +'.pdfwrap{font-family:Arial,Helvetica,sans-serif;background:#EEF1F6;margin:0;padding:32px 16px}'
+    +'.container{max-width:600px;margin:0 auto}'
+    +'.hero{background:radial-gradient(ellipse 70% 65% at 88% 12%,rgba(212,163,40,0.22) 0%,transparent 55%),linear-gradient(135deg,#0A1628 0%,#142B52 100%);border-radius:16px 16px 0 0;padding:38px 32px;text-align:center}'
+    +'.brand{font-size:22px;font-weight:800;letter-spacing:2px;color:#D4A328;margin:0}'
+    +'.brand-sub{font-size:9px;letter-spacing:3px;color:#8B94A7;text-transform:uppercase;margin:4px 0 18px}'
+    +'.hero-divider{width:40px;height:2px;background:#D4A328;margin:0 auto 16px;border-radius:2px}'
+    +'.hero h1{font-size:19px;color:#fff;margin:0 0 5px;font-weight:700}'
+    +'.hero p{font-size:12px;color:#B9C2D4;margin:0}'
+    +'.body-card{background:#fff;padding:32px;border-radius:0 0 16px 16px;box-shadow:0 4px 24px rgba(10,22,40,.06)}'
+    +'.greeting{font-size:15px;color:#1A1A2E;margin:0 0 8px}'
+    +'.intro{font-size:13px;color:#5B6472;line-height:1.7;margin:0 0 22px}'
+    +'.hero-stat{text-align:center;margin:0 0 14px;padding:24px 16px;background:linear-gradient(180deg,#FBF8EF 0%,#F5F6F9 100%);border-radius:14px;border:1px solid #EFE3BD}'
+    +'.hero-stat-label{font-size:10px;color:#9A8555;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px}'
+    +'.hero-stat-value{font-size:32px;font-weight:800;color:#0A1628;letter-spacing:-.5px;line-height:1.15}'
+    +'.badges-row{text-align:center;margin:0 0 26px}'
+    +'.badge{display:inline-block;padding:7px 16px;border-radius:20px;font-size:12px;font-weight:800;margin:4px}'
+    +'.badge.green{background:#E7F8F1;color:#1FAE7E}'
+    +'.badge.red{background:#FCEBEA;color:#D9534F}'
+    +'.badge.neutral{background:#EEF1F6;color:#5B6472}'
+    +'.market-card{background:#F7F8FA;border-left:3px solid #0A1628;border-radius:10px;padding:18px 20px;margin:0 0 24px}'
+    +'.mkt-label{font-size:9px;color:#8A93A3;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px}'
+    +'.mkt-comment{font-size:12px;color:#3C4450;line-height:1.65;margin:0 0 12px;font-style:italic}'
+    +'.mkt-chip{display:inline-block;background:#fff;border:1px solid #E4E7ED;border-radius:8px;padding:6px 12px;margin:0 6px 6px 0;font-size:11px;color:#5B6472}'
+    +'.mkt-chip b{color:#0A1628}'
+    +'.cta-wrap{text-align:center;margin:4px 0 24px}'
+    +'.cta-btn{display:inline-block;background:linear-gradient(135deg,#D4A328,#E8C158);color:#0A1628;text-decoration:none;font-weight:800;font-size:13px;padding:14px 34px;border-radius:10px;letter-spacing:.3px}'
+    +'.cta-fallback{font-size:12px;color:#999}'
+    +'.support-card{background:#F0FBF6;border:1px solid #D7F0E3;border-radius:10px;padding:16px 18px;font-size:12px;color:#33473E;line-height:1.6}'
+    +'.support-card b{color:#0F7A50}'
+    +'.nota-extra{margin-top:16px;font-size:11px;color:#8A93A3;text-align:center}'
+    +'.footer{text-align:center;padding:24px 12px 4px;font-size:10px;color:#98A1B0;line-height:1.7}'
+    +'.footer .fmark{color:#D4A328;font-weight:800;letter-spacing:1px;font-size:11px;display:block;margin-bottom:4px}'
+    +'</style></head><body><div class="pdfwrap"><div class="container">'
+    +'<div class="hero">'
+      +'<div class="brand">COURINVEST</div>'
+      +'<div class="brand-sub">Consultoria em Investimentos</div>'
+      +'<div class="hero-divider"></div>'
+      +'<h1>'+tituloTopo+'</h1>'
+      +'<p>Período de referência: '+mesRefStr+'</p>'
+    +'</div>'
+    +'<div class="body-card">'
+      +'<p class="greeting">Olá, <strong>'+nome+'</strong>.</p>'
+      +'<p class="intro">'+introTxt+'</p>'
+      +destaqueHtml
+      +badgesHtml
+      +mercadoHtml
+      +'<div class="cta-wrap">%%PDF_BUTTON%%</div>'
+      +'<div class="support-card">'+supportHtml+'</div>'
+      +(notaExtra?('<div class="nota-extra">'+notaExtra+'</div>'):'')
+    +'</div>'
+    +'<div class="footer"><span class="fmark">COURINVEST</span>Consultoria em Investimentos · '+remetente+'<br>Esta mensagem é confidencial e destinada exclusivamente ao destinatário indicado.</div>'
+    +'</div></div></body></html>';
 };
 
 /* === PARTICULARIDADES DO CLIENTE ===
@@ -462,6 +776,14 @@ const feeBaseDoCliente=function(c){
   var patTotal=c.patGorila||c.pat||0;
   if(patTotal===0&&c._ativosImport&&c._ativosImport.length>0){
     patTotal=c._ativosImport.reduce(function(s,at){return s+(+at.posR||+at.qtd*+at.pa||0)},0);
+  }
+  /* FIX CASAL: soma patrimônio do cônjuge na base de cálculo do fee */
+  if((c.tipoCli==="casal"||c.tipoCli==="familia")&&c.conjuge){
+    var patConj=c.conjuge.patGorila||0;
+    if(patConj===0&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
+      patConj=c.conjuge._ativosImport.reduce(function(s,at){return s+(+at.posR||+at.qtd*+at.pa||0)},0);
+    }
+    patTotal+=patConj;
   }
   var part=(c&&c.particularidades&&c.particularidades.fee)||{};
   var exclReserva=part.excluiReservaEmerg?valorAtivosReserva(c):0;
@@ -1427,6 +1749,12 @@ const inpS={padding:"11px 14px",background:"rgba(255,255,255,0.025)",border:"1px
 
 function Dash({data:d,onSel:os,goTo}){
   const[dt,sDt]=useState("geral");
+  /* Busca por nome — usada na aba "💰 Receita" pra filtrar as listas "Por cliente" (GP e GF) */
+  const[buscaReceita,sBuscaReceita]=useState("");
+  /* Agente de Retenção — estados no topo do componente (regra dos hooks React) */
+  const[retMsgGeradas,sRetMsgGeradas]=useState({});
+  const[retGerando,sRetGerando]=useState({});
+  const[retCfgModal,sRetCfgModal]=useState(false);
   const[subTab,sSubTab]=useState("patrimonio"); 
   const[showAum,sShowAum]=useState(false);
   const[showCarteiras,sShowCarteiras]=useState(false); 
@@ -1435,6 +1763,105 @@ function Dash({data:d,onSel:os,goTo}){
   const[relAprovados,sRelAprovados]=useState({});
   const[relEnviados,sRelEnviados]=useState({});
   const[relEnviando,sRelEnviando]=useState(null);
+  const[emailStatus,sEmailStatus]=useState({}); /* {clienteId: "enviando"|"ok"|"erro"} */
+
+  /* ===== ENVIO DE RELATÓRIO POR E-MAIL (EmailJS) =====
+     Requer config em d.config.emailjs: { publicKey, serviceId, templateId }
+     Template deve ter vars: to_email, to_name, mes_ref, patrimonio, rentabilidade, ganho, obs
+     O e-mail traz um resumo (GP: patrimônio/rentabilidade/fee · GF: fee mensal) + um botão
+     "Baixar relatório em PDF" com link do Firebase Storage (não é anexo — o plano Free do
+     EmailJS não suporta anexo; ver gerarPdfLinkCourinvest). Se a geração/upload do PDF falhar
+     por qualquer motivo, o e-mail ainda é enviado, só sem o botão — nunca trava o envio. */
+  var sendReportEmail=function(c,tipoRel,mesRefNomeParam){
+    return new Promise(function(resolve,reject){
+      var cfg=d.config&&d.config.emailjs;
+      if(!cfg||!cfg.publicKey||!cfg.serviceId||!cfg.templateId){
+        reject(new Error("EmailJS não configurado. Acesse Configurações → E-mail para configurar."));return;
+      }
+      if(!c.email){reject(new Error("Cliente sem e-mail cadastrado."));return;}
+      try{
+        if(window.emailjs)window.emailjs.init({publicKey:cfg.publicKey,limitRate:false});
+        else{reject(new Error("SDK EmailJS não carregou."));return;}
+      }catch(e){reject(e);return;}
+
+      var isPlan=tipoRel==="planejamento";
+      var pat=c.patGorila||c.pat||0;
+      var rent=c._gorilaRent&&c._gorilaRent.periods?(function(){
+        var p=c._gorilaRent.periods.find(function(x){var s=String(x.p||"").toLowerCase();return s.indexOf("ltimo")>=0||s.indexOf("mes")>=0;});
+        return p&&typeof p.rent==="number"?(p.rent*100).toFixed(2)+"%":"—";
+      })():"—";
+      var fmV=function(v){return "R$ "+parseFloat(v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});};
+      var MN_EMAIL=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+      var hoje=new Date();var mesE=hoje.getMonth();var anoE=hoje.getFullYear();
+      /* Sem "/" no texto exibido: o EmailJS escapa "/" como "&#x2F;" em campos de texto puro
+         (ex: o Assunto do e-mail), e "Julho&#x2F;2026" aparecia literalmente pro cliente.
+         "Julho de 2026" evita esse problema na raiz, em qualquer campo do template. */
+      var mesRefStr=MN_EMAIL[mesE]+" de "+anoE;
+      /* Formato AAAA-MM só pro nome do arquivo/caminho no Storage — não depende do texto exibido */
+      var mesRefArquivo=anoE+"-"+String(mesE+1).padStart(2,"0");
+
+      /* Informação de fee/taxa de gestão NÃO aparece no e-mail (pedido explícito) — fica só no
+         relatório em PDF completo, quando aplicável. Rentabilidade do mês também não aparece mais
+         aqui (pedido explícito) — só o "destaque" (patrimônio) e, pra GP, um panorama do mês
+         (comentário + Selic/IPCA), reaproveitando o mesmo overview de mercado mantido na aba
+         "Overview IA" e usado no relatório completo em PDF — não faz nenhuma chamada de API nova. */
+      var destaque=isPlan
+        ?{icon:"📊",label:"Serviço Ativo",value:"Gestão Financeira"}
+        :(pat>0?{icon:"💰",label:"Patrimônio Atual",value:fmV(pat)}:{icon:"💎",label:"Serviço Ativo",value:"Gestão de Patrimônio"});
+      var mercado=isPlan?null:montarResumoMercadoEmail(obterOverviewMercadoRecente(d));
+
+      var introTxt=isPlan
+        ?"Seu planejamento financeiro segue em acompanhamento. Segue abaixo o resumo referente a <strong>"+mesRefStr+"</strong>."
+        :"Segue abaixo o resumo do seu relatório mensal de gestão de patrimônio referente a <strong>"+mesRefStr+"</strong>.";
+
+      /* Gera o HTML do corpo do e-mail (com placeholder pro botão de PDF) */
+      var reportHtml="";
+      try{
+        reportHtml=montarEmailRelatorioHtml({
+          nome:c.nome,
+          mesRefStr:mesRefStr,
+          tituloTopo:isPlan?"Acompanhamento Financeiro":"Relatório Mensal",
+          introTxt:introTxt,
+          destaque:destaque,
+          mercado:mercado,
+          remetente:cfg.remetente||"contato@courinvest.com.br"
+        });
+      }catch(e){console.warn("Erro ao gerar HTML do e-mail:",e);}
+
+      /* Gera o PDF e sobe pro Storage. Tenta primeiro o RELATÓRIO COMPLETO real (a mesma ficha
+         detalhada — capa, resumo executivo, benchmarks, alocação, proventos, movimentações, taxa
+         de administração — que a aba "Relatório" do cliente gera), montando uma instância oculta
+         da ficha só pra isso (gerarRelatorioHtmlHeadless). Se isso falhar ou demorar demais, cai
+         pro resumo curto (o card com os KPIs) como PDF — nunca bloqueia o envio do e-mail. */
+      var pathStorage="relatorios/"+c.id+"/"+mesRefArquivo+"_"+(isPlan?"gf":"gp")+".pdf";
+      var tipoRelatorioCompleto=isPlan?"planejamento":"mensal";
+      gerarRelatorioHtmlHeadless(c,d,tipoRelatorioCompleto).then(function(htmlCompleto){
+        var htmlParaPdf=htmlCompleto||reportHtml.replace("%%PDF_BUTTON%%","");
+        return gerarPdfLinkCourinvest(pathStorage,htmlParaPdf);
+      }).then(function(pdfUrl){
+        var botaoHtml=pdfUrl
+          ?'<a class="cta-btn" href="'+pdfUrl+'" target="_blank" rel="noopener">📄 Baixar Relatório Completo em PDF</a>'
+          :'<span class="cta-fallback">Entre em contato para receber o relatório completo em PDF.</span>';
+        var reportHtmlFinal=reportHtml.replace("%%PDF_BUTTON%%",botaoHtml);
+
+        var templateParams={
+          to_email:c.email,
+          to_name:c.nome.split(" ")[0],
+          mes_ref:mesRefStr,
+          patrimonio:pat>0?fmV(pat):"—",
+          rentabilidade:rent,
+          tipo_servico:isPlan?"Gestão Financeira":"Gestão de Patrimônio",
+          report_html:reportHtmlFinal,
+          from_name:cfg.nomeRemetente||"Courinvest",
+          reply_to:cfg.remetente||"",
+        };
+
+        return window.emailjs.send(cfg.serviceId,cfg.templateId,templateParams);
+      })
+        .then(function(){resolve();})
+        .catch(function(e){reject(new Error("EmailJS: "+(e&&e.text||e&&e.message||JSON.stringify(e))));});
+    });
+  };
   /* === RESPONSIVE: detecção reativa de mobile pro Dashboard === */
   const[isMob,sIsMob]=useState(typeof window!=="undefined"&&window.innerWidth<768);
   const[isXS,sIsXS]=useState(typeof window!=="undefined"&&window.innerWidth<420);
@@ -1623,6 +2050,26 @@ function Dash({data:d,onSel:os,goTo}){
       <Mo open={relModal} onClose={function(){sRelModal(false)}} title={"📬 Relatórios de "+mesRefNome} wide={true}>
           <div style={{maxWidth:700,width:"100%"}}>
 
+            {/* Config de e-mail acessível direto do modal */}
+            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
+              <button onClick={function(){
+                var cfg=d.config&&d.config.emailjs||{};
+                var pubKey=prompt("📧 CONFIGURAR E-MAIL AUTOMÁTICO\n\nPublic Key do EmailJS\n(emailjs.com → Account → API Keys):",cfg.publicKey||"");
+                if(pubKey===null)return;
+                if(!pubKey.trim()){dp({t:"CONFIG_SET",p:{key:"emailjs",value:null}});alert("❌ E-mail desativado.");return;}
+                var svcId=prompt("Service ID:\n(emailjs.com → Email Services)",cfg.serviceId||"service_zgq8elm");
+                if(!svcId)return;
+                var tplId=prompt("Template ID:\n(emailjs.com → Email Templates)",cfg.templateId||"template_847kwwg");
+                if(!tplId)return;
+                var nomeRem=prompt("Nome do remetente:",cfg.nomeRemetente||"Courinvest");
+                var emailRem=prompt("E-mail reply-to:",cfg.remetente||"courinvest.67@gmail.com");
+                dp({t:"CONFIG_SET",p:{key:"emailjs",value:{publicKey:pubKey.trim(),serviceId:svcId.trim(),templateId:tplId.trim(),nomeRemetente:(nomeRem||"Courinvest").trim(),remetente:(emailRem||"").trim()}}});
+                alert("✅ E-mail configurado! Relatórios serão enviados automaticamente por e-mail.");
+              }} style={{padding:"5px 12px",borderRadius:7,border:"1px solid "+(d.config&&d.config.emailjs?"rgba(45,212,160,0.4)":T.bdrL),background:d.config&&d.config.emailjs?"rgba(45,212,160,0.08)":"transparent",color:d.config&&d.config.emailjs?T.green:T.t3,fontSize:10,fontWeight:700,cursor:"pointer"}}>
+                📧 {d.config&&d.config.emailjs?"✅ E-mail ativo":"Configurar E-mail"}
+              </button>
+            </div>
+
             {/* Resumo */}
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:16}}>
               {[
@@ -1635,6 +2082,35 @@ function Dash({data:d,onSel:os,goTo}){
                   <div style={{fontSize:9,color:T.t3,marginTop:2}}>{k.l}</div>
                 </div>
               );})}
+            </div>
+
+            {/* Busca + Filtro GP/GF */}
+            {(function(){
+              if(!window._relFiltro)window._relFiltro={busca:"",tipo:"todos"};
+              return null;
+            })()}
+            <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+              <input
+                type="text"
+                placeholder="🔍 Buscar cliente..."
+                defaultValue=""
+                onChange={function(e){window._relBusca=e.target.value.toLowerCase();var el=document.getElementById("rel-lista");if(el){var rows=el.querySelectorAll("[data-rel-nome]");rows.forEach(function(r){var nome=r.getAttribute("data-rel-nome").toLowerCase();var tipo=r.getAttribute("data-rel-tipo")||"";var filtroTipo=window._relTipo||"todos";var matchBusca=!window._relBusca||nome.indexOf(window._relBusca)>=0;var matchTipo=filtroTipo==="todos"||(filtroTipo==="gp"&&tipo.indexOf("patrimonio")>=0)||(filtroTipo==="gf"&&tipo.indexOf("planejamento")>=0);r.style.display=(matchBusca&&matchTipo)?"flex":"none";});}}}
+                style={{flex:1,minWidth:160,padding:"8px 12px",borderRadius:8,background:T.w3,border:"1px solid "+T.bdrL,color:T.t1,fontSize:12,outline:"none"}}
+              />
+              {["todos","gp","gf"].map(function(tp){
+                var lbl=tp==="todos"?"Todos":tp==="gp"?"💎 GP":"📊 GF";
+                return (
+                  <button key={tp} onClick={function(){
+                    window._relTipo=tp;
+                    var input=document.querySelector("[placeholder='🔍 Buscar cliente...']");
+                    var busca=input?input.value.toLowerCase():"";
+                    var el=document.getElementById("rel-lista");
+                    if(el){var rows=el.querySelectorAll("[data-rel-nome]");rows.forEach(function(r){var nome=r.getAttribute("data-rel-nome").toLowerCase();var tipo=r.getAttribute("data-rel-tipo")||"";var matchBusca=!busca||nome.indexOf(busca)>=0;var matchTipo=tp==="todos"||(tp==="gp"&&tipo.indexOf("patrimonio")>=0)||(tp==="gf"&&tipo.indexOf("planejamento")>=0);r.style.display=(matchBusca&&matchTipo)?"flex":"none";});}
+                  }} style={{padding:"7px 12px",borderRadius:8,border:"1px solid "+T.bdrL,background:"transparent",color:T.t2,fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                    {lbl}
+                  </button>
+                );
+              })}
             </div>
 
             {/* Botões de ação em lote */}
@@ -1710,8 +2186,33 @@ function Dash({data:d,onSel:os,goTo}){
                     }
                   }catch(e){console.warn("Rel PDF:",e);}
 
-                  /* 2. Abre WhatsApp com mensagem pronta (2s depois para não bloquear popup) */
+                  /* 2. Canal PRIORITÁRIO: e-mail. Se o cliente tem e-mail cadastrado e o EmailJS
+                     está configurado, envia por e-mail e NÃO abre o WhatsApp também — evita
+                     contato duplicado. WhatsApp só entra como fallback pra quem não tem e-mail
+                     cadastrado (ou se o EmailJS não estiver configurado). */
+                  var tipoRelEmail=(Array.isArray(cl.sv)?cl.sv:(cl.sv?[cl.sv]:[])).includes("planejamento")&&!(Array.isArray(cl.sv)?cl.sv:(cl.sv?[cl.sv]:[])).includes("patrimonio")?"planejamento":"mensal";
+                  var emailConfigurado=!!(d.config&&d.config.emailjs&&d.config.emailjs.publicKey);
+                  var enviaPorEmail=emailConfigurado&&!!cl.email;
+
+                  if(enviaPorEmail){
+                    sEmailStatus(function(p){var n=Object.assign({},p);n[cl.id]="enviando";return n;});
+                    sendReportEmail(cl,tipoRelEmail,mesRefNome)
+                      .then(function(){
+                        sEmailStatus(function(p){var n=Object.assign({},p);n[cl.id]="ok";return n;});
+                        console.log("[E-mail] Enviado para",cl.nome,cl.email);
+                      })
+                      .catch(function(e){
+                        sEmailStatus(function(p){var n=Object.assign({},p);n[cl.id]="erro:"+e.message;return n;});
+                        console.warn("[E-mail] Erro",cl.nome,":",e.message);
+                      });
+                  }
+
+                  /* 3. WhatsApp: só dispara se NÃO enviamos por e-mail (fallback) */
                   setTimeout(function(){
+                    if(enviaPorEmail){
+                      setTimeout(enviarProximo,300);
+                      return;
+                    }
                     var waGrupo=(cl.waGrupo||"").trim();
                     var nome1=cl.nome.split(" ")[0];
                     var msg=encodeURIComponent(
@@ -1728,49 +2229,60 @@ function Dash({data:d,onSel:os,goTo}){
                     }else{
                       var tel=(cl.tel||"").replace(/\D/g,"");
                       if(tel)window.open("https://wa.me/55"+tel+"?text="+msg,"_blank");
-                      else console.warn("Sem WhatsApp:",cl.nome);
+                      else console.warn("Sem WhatsApp nem e-mail cadastrado:",cl.nome);
                     }
                     setTimeout(enviarProximo,2000);
                   },500);
                 };
                 enviarProximo();
-              }} style={{padding:"7px 18px",background:relEnviando?"rgba(37,211,102,0.1)":"#25D366",color:relEnviando?"#25D366":"#fff",border:"1px solid #25D366",borderRadius:8,fontSize:11,fontWeight:800,cursor:"pointer"}}>
-                {relEnviando?"⏳ Enviando...":"📱 Enviar aprovados via WhatsApp"}
+              }} style={{padding:"7px 18px",background:relEnviando?"rgba(212,163,40,0.12)":"linear-gradient(135deg,#D4A328,#E8C158)",color:relEnviando?T.gold:"#0A1628",border:"1px solid "+T.gold,borderRadius:8,fontSize:11,fontWeight:800,cursor:"pointer"}}>
+                {relEnviando?"⏳ Enviando...":"📧 Enviar aprovados por e-mail"}
               </button>
             </div>
 
-            {/* Aviso sobre PDF */}
-            <div style={{padding:"10px 14px",background:"rgba(56,189,248,0.06)",border:"1px solid rgba(56,189,248,0.2)",borderRadius:8,fontSize:10,color:T.cyan,lineHeight:1.6,marginBottom:8}}>
-              💡 <strong>Como funciona o envio:</strong> O WhatsApp abre com a mensagem já digitada. Para enviar o PDF do relatório, salve-o como PDF pelo navegador (Ctrl+P → Salvar como PDF) e anexe no WhatsApp antes de enviar.
-            </div>
+            {/* Info sobre e-mail automático */}
+            {d.config&&d.config.emailjs&&d.config.emailjs.publicKey?(
+              <div style={{padding:"10px 14px",background:"rgba(45,212,160,0.06)",border:"1px solid rgba(45,212,160,0.2)",borderRadius:8,fontSize:10,color:T.green,lineHeight:1.6,marginBottom:8}}>
+                ✅ <strong>E-mail automático ativado (canal prioritário).</strong> Ao aprovar e clicar em Enviar, quem tem e-mail cadastrado recebe o relatório por e-mail. O WhatsApp só é aberto automaticamente para quem <strong>não</strong> tem e-mail cadastrado.
+              </div>
+            ):(
+              <div style={{padding:"10px 14px",background:"rgba(212,163,40,0.06)",border:"1px solid rgba(212,163,40,0.2)",borderRadius:8,fontSize:10,color:T.gold,lineHeight:1.6,marginBottom:8}}>
+                📧 <strong>Ative o envio automático por e-mail:</strong> Acesse <strong>Configurações → E-mail (EmailJS)</strong> para configurar. Depois de configurado, o e-mail passa a ser o canal prioritário — o WhatsApp só é usado automaticamente para quem não tem e-mail cadastrado.
+              </div>
+            )}
 
             {/* Lista de clientes */}
-            <div style={{maxHeight:420,overflowY:"auto",display:"flex",flexDirection:"column",gap:6}}>
+            <div id="rel-lista" style={{maxHeight:420,overflowY:"auto",display:"flex",flexDirection:"column",gap:6}}>
               {clRelatorio.map(function(c){
+                var svArr=Array.isArray(c.sv)?c.sv:(c.sv?[c.sv]:[]);
+                var svStr=svArr.join(",");
                 var aprovado=!!relAprovados[c.id+"-"+mesRefKey];
                 var enviado=!!relEnviados[c.id+"-"+mesRefKey];
                 var enviando=relEnviando===c.id;
                 var temWa=!!(c.waGrupo||c.tel);
                 var pat=c.patGorila||c.pat||0;
+                var svArr=Array.isArray(c.sv)?c.sv:(c.sv?[c.sv]:[]);
+                var isGP=svArr.includes("patrimonio");
+                var isGF=svArr.includes("planejamento");
                 return (
-                  <div key={c.id} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",background:enviado?"rgba(45,212,160,0.06)":aprovado?"rgba(212,163,40,0.06)":T.w3,borderRadius:10,border:"1px solid "+(enviado?T.green+"44":aprovado?T.gold+"44":T.bdrL),transition:"all 0.2s"}}>
+                  <div key={c.id} data-rel-nome={c.nome} data-rel-tipo={svStr} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",background:enviado?"rgba(45,212,160,0.06)":aprovado?"rgba(212,163,40,0.06)":T.w3,borderRadius:10,border:"1px solid "+(enviado?T.green+"44":aprovado?T.gold+"44":T.bdrL),transition:"all 0.2s"}}>
                     {/* Checkbox */}
                     <div onClick={function(){if(!enviado)sRelAprovados(function(prev){var n=Object.assign({},prev);n[c.id+"-"+mesRefKey]=!prev[c.id+"-"+mesRefKey];return n;})}} style={{width:20,height:20,borderRadius:5,border:"1.5px solid "+(enviado?T.green:aprovado?T.gold:T.bdrL),background:enviado?"rgba(45,212,160,0.2)":aprovado?T.goldD:"transparent",display:"flex",alignItems:"center",justifyContent:"center",cursor:enviado?"default":"pointer",flexShrink:0,fontSize:12}}>
                       {enviado?"✓":aprovado?"✓":""}
                     </div>
                     {/* Avatar */}
-                    <div style={{width:32,height:32,borderRadius:8,background:T.goldD,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,color:T.gold,flexShrink:0}}>
+                    <div style={{width:32,height:32,borderRadius:8,background:isGP?T.goldD:"rgba(56,189,248,0.15)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,color:isGP?T.gold:T.cyan,flexShrink:0}}>
                       {c.nome.split(" ").slice(0,2).map(function(w){return w[0]}).join("")}
                     </div>
                     {/* Info */}
                     <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:12,fontWeight:700,color:T.t1,display:"flex",alignItems:"center",gap:6}}>
+                      <div style={{fontSize:12,fontWeight:700,color:T.t1,display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}>
                         {c.nome}
-                        {c.sv&&c.sv.includes("patrimonio")&&<span style={{fontSize:8,background:"rgba(212,163,40,0.15)",color:T.gold,padding:"1px 5px",borderRadius:3,fontWeight:700}}>GP</span>}
-                        {c.sv&&c.sv.includes("planejamento")&&<span style={{fontSize:8,background:"rgba(56,189,248,0.15)",color:T.cyan,padding:"1px 5px",borderRadius:3,fontWeight:700}}>GF</span>}
+                        {isGP&&<span style={{fontSize:8,background:"rgba(212,163,40,0.18)",color:T.gold,padding:"2px 6px",borderRadius:4,fontWeight:800}}>💎 GP</span>}
+                        {isGF&&<span style={{fontSize:8,background:"rgba(56,189,248,0.18)",color:T.cyan,padding:"2px 6px",borderRadius:4,fontWeight:800}}>📊 GF</span>}
                       </div>
                       <div style={{fontSize:10,color:T.t3,marginTop:1}}>
-                        {(pat/1e6).toFixed(2).replace(".",",")}M · {c.risco||"Moderado"}
+                        {pat>0?(pat/1e6).toFixed(2).replace(".",",")+("M"):isGF?"Gestão Financeira":""} · {c.risco||"Moderado"}
                         {!temWa&&<span style={{color:T.orange,marginLeft:6}}>⚠️ sem WhatsApp</span>}
                       </div>
                     </div>
@@ -1781,18 +2293,23 @@ function Dash({data:d,onSel:os,goTo}){
                       {!enviado&&aprovado&&!enviando&&<div style={{fontSize:10,color:T.gold,fontWeight:700}}>✓ aprovado</div>}
                       {!enviado&&!aprovado&&<div style={{fontSize:10,color:T.t3}}>pendente</div>}
                     </div>
-                    {/* Ver relatório direto */}
+                    {/* Status do e-mail */}
+                    {emailStatus[c.id]&&(
+                      <div style={{fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:5,background:emailStatus[c.id]==="ok"?"rgba(45,212,160,0.15)":emailStatus[c.id]==="enviando"?"rgba(56,189,248,0.15)":"rgba(239,100,97,0.15)",color:emailStatus[c.id]==="ok"?T.green:emailStatus[c.id]==="enviando"?T.cyan:T.red,whiteSpace:"nowrap"}}>
+                        {emailStatus[c.id]==="ok"?"📧✅":emailStatus[c.id]==="enviando"?"📧⏳":"📧❌"}
+                      </div>
+                    )}
+                    {/* PDF com tipo correto baseado no serviço */}
                     <button onClick={function(){
-                      /* Abre o cliente e navega para a aba Relatório com preview automático */
                       sRelModal(false);
                       os(c);
-                      /* Sinaliza para abrir o relatório automaticamente */
                       setTimeout(function(){
-                        var ev=new CustomEvent("courinvest:abrirRelatorio",{detail:{clienteId:c.id}});
+                        var tipoRel=isGF&&!isGP?"planejamento":"mensal";
+                        var ev=new CustomEvent("courinvest:abrirRelatorio",{detail:{clienteId:c.id,abrirPdf:true,tipoRelatorio:tipoRel}});
                         window.dispatchEvent(ev);
                       },400);
-                    }} style={{padding:"4px 10px",background:"rgba(212,163,40,0.08)",border:"1px solid "+T.gold+"44",borderRadius:6,color:T.gold,fontSize:10,cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
-                      📄 Ver
+                    }} style={{padding:"4px 10px",background:isGP?"rgba(212,163,40,0.08)":"rgba(56,189,248,0.08)",border:"1px solid "+(isGP?T.gold:T.cyan)+"44",borderRadius:6,color:isGP?T.gold:T.cyan,fontSize:10,cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
+                      {isGP?"📈 PDF GP":"📋 PDF GF"}
                     </button>
                   </div>
                 );
@@ -1806,7 +2323,7 @@ function Dash({data:d,onSel:os,goTo}){
           </div>
         </Mo>
 
-      <div style={{display:"flex",gap:5,marginBottom:18,flexWrap:"wrap"}}>{[{id:"geral",l:"Visão Geral"},{id:"receita",l:"💰 Receita"},{id:"negocio",l:"Métricas do Negócio"},{id:"clientes",l:"Base de Clientes"},{id:"oport",l:"🎯 Oportunidades"},{id:"agenda",l:"📅 Agenda"}].map(t=><button key={t.id} onClick={()=>sDt(t.id)} style={{padding:"8px 16px",borderRadius:12,fontSize:11,fontWeight:600,cursor:"pointer",border:dt===t.id?"1.5px solid "+T.gold:"1px solid "+T.bdrL,background:dt===t.id?T.goldD:"transparent",color:dt===t.id?T.gold:T.t3}}>{t.l}</button>)}</div>
+      <div style={{display:"flex",gap:5,marginBottom:18,flexWrap:"wrap"}}>{[{id:"geral",l:"Visão Geral"},{id:"receita",l:"💰 Receita"},{id:"negocio",l:"Métricas do Negócio"},{id:"clientes",l:"Base de Clientes"},{id:"oport",l:"🎯 Oportunidades"},{id:"retencao",l:"🛡 Retenção IA"},{id:"agenda",l:"📅 Agenda"}].map(t=><button key={t.id} onClick={()=>sDt(t.id)} style={{padding:"8px 16px",borderRadius:12,fontSize:11,fontWeight:600,cursor:"pointer",border:dt===t.id?"1.5px solid "+(t.id==="retencao"?T.cyan:T.gold):"1px solid "+T.bdrL,background:dt===t.id?(t.id==="retencao"?"rgba(56,189,248,0.1)":T.goldD):"transparent",color:dt===t.id?(t.id==="retencao"?T.cyan:T.gold):T.t3}}>{t.l}</button>)}</div>
 
       {dt==="geral" && (
         <div>
@@ -2091,6 +2608,8 @@ function Dash({data:d,onSel:os,goTo}){
 
                   </div>
                 )}
+
+
               </div>
             );
           })()}
@@ -2986,11 +3505,20 @@ function Dash({data:d,onSel:os,goTo}){
       {/* ============ ABA: AGENDA & PRODUTIVIDADE ============
          Eventos pendentes, clientes sem contato recente, relatórios não gerados. */}
       {dt==="receita" && (function(){
+        var matchBuscaReceita=function(c){return !buscaReceita || c.nome.toLowerCase().indexOf(buscaReceita.toLowerCase())>=0;};
         return (
           <div>
             <div style={{marginBottom:18}}>
               <div style={{fontSize:13,fontWeight:800,color:T.t1,marginBottom:4}}>💰 Receita Projetada do Mês</div>
               <div style={{fontSize:11,color:T.t3}}>Consolidado de todos os serviços — atualizado em tempo real</div>
+            </div>
+
+            {}
+            <div style={{position:"relative",marginBottom:14,maxWidth:340}}>
+              <input value={buscaReceita} onChange={function(e){sBuscaReceita(e.target.value)}}
+                placeholder="Buscar cliente..."
+                style={{width:"100%",padding:"9px 12px 9px 34px",borderRadius:10,border:"1px solid "+T.bdrL,background:T.card,color:T.t1,fontSize:12,boxSizing:"border-box",outline:"none"}}/>
+              <span style={{position:"absolute",left:11,top:"50%",transform:"translateY(-50%)",fontSize:12,opacity:.4}}>🔍</span>
             </div>
 
             {}
@@ -3028,13 +3556,19 @@ function Dash({data:d,onSel:os,goTo}){
                     <div style={{fontSize:10,color:T.gold,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",marginBottom:5}}>💎 Gestão de Patrimônio</div>
                     <div style={{fontSize:24,fontWeight:900,color:T.gold,fontFamily:"'JetBrains Mono',monospace"}}>{fm(mrrPat)}</div>
                     <div style={{fontSize:9,color:T.t3,marginTop:3}}>{clPat.length} cliente{clPat.length!==1?"s":""} · taxa média {(taxaMediaGestao*100||0).toFixed(3)}%/mês</div>
+                    {clPat.length>0 && mrrPat>0 && (
+                      <div style={{marginTop:6,display:"inline-flex",alignItems:"center",gap:5,padding:"3px 8px",background:"rgba(212,163,40,0.08)",borderRadius:6,border:"1px solid rgba(212,163,40,0.2)"}}>
+                        <span style={{fontSize:9,color:T.t3,fontWeight:600}}>TICKET MÉDIO</span>
+                        <span style={{fontSize:11,fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono',monospace"}}>{fm(mrrPat/clPat.length)}</span>
+                      </div>
+                    )}
                   </div>
                   <div style={{fontSize:28,opacity:.4}}>💎</div>
                 </div>
                 {}
                 <div style={{borderTop:"1px solid "+T.bdrL,paddingTop:12}}>
                   <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:.8,marginBottom:8,textTransform:"uppercase"}}>Por cliente</div>
-                  {clPat.filter(function(c){return feeBaseDoCliente(c).fee>0}).sort(function(a,b){return feeBaseDoCliente(b).fee-feeBaseDoCliente(a).fee}).map(function(c,i){
+                  {clPat.filter(function(c){return feeBaseDoCliente(c).fee>0 && matchBuscaReceita(c)}).sort(function(a,b){return feeBaseDoCliente(b).fee-feeBaseDoCliente(a).fee}).map(function(c,i){
                     var fee=feeBaseDoCliente(c).fee;
                     var pct=mrrPat>0?(fee/mrrPat*100):0;
                     return <div key={c.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid "+T.bdrL}}>
@@ -3044,9 +3578,9 @@ function Dash({data:d,onSel:os,goTo}){
                       <div style={{fontSize:11,fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono',monospace",flexShrink:0}}>{fm(fee)}</div>
                     </div>;
                   })}
-                  {clPat.filter(function(c){return feeBaseDoCliente(c).fee===0}).length>0 && (
+                  {clPat.filter(function(c){return feeBaseDoCliente(c).fee===0 && matchBuscaReceita(c)}).length>0 && (
                     <div style={{fontSize:9,color:T.t3,fontStyle:"italic",marginTop:6}}>
-                      {clPat.filter(function(c){return feeBaseDoCliente(c).fee===0}).length} cliente(s) sem fee configurado
+                      {clPat.filter(function(c){return feeBaseDoCliente(c).fee===0 && matchBuscaReceita(c)}).length} cliente(s) sem fee configurado
                     </div>
                   )}
                 </div>
@@ -3059,12 +3593,18 @@ function Dash({data:d,onSel:os,goTo}){
                     <div style={{fontSize:10,color:T.cyan,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",marginBottom:5}}>📊 Gestão Financeira</div>
                     <div style={{fontSize:24,fontWeight:900,color:T.cyan,fontFamily:"'JetBrains Mono',monospace"}}>{fm(mrrFin)}</div>
                     <div style={{fontSize:9,color:T.t3,marginTop:3}}>{clFin.length} cliente{clFin.length!==1?"s":""} · fee fixo mensal</div>
+                    {clFin.length>0 && (
+                      <div style={{marginTop:6,display:"inline-flex",alignItems:"center",gap:5,padding:"3px 8px",background:"rgba(56,189,248,0.08)",borderRadius:6,border:"1px solid rgba(56,189,248,0.18)"}}>
+                        <span style={{fontSize:9,color:T.t3,fontWeight:600}}>TICKET MÉDIO</span>
+                        <span style={{fontSize:11,fontWeight:800,color:T.cyan,fontFamily:"'JetBrains Mono',monospace"}}>{fm(mrrFin/clFin.length)}</span>
+                      </div>
+                    )}
                   </div>
                   <div style={{fontSize:28,opacity:.4}}>📊</div>
                 </div>
                 <div style={{borderTop:"1px solid "+T.bdrL,paddingTop:12}}>
                   <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:.8,marginBottom:8,textTransform:"uppercase"}}>Por cliente</div>
-                  {clFin.filter(function(c){return feeMensalBRL(c)>0}).sort(function(a,b){return feeMensalBRL(b)-feeMensalBRL(a)}).map(function(c,i){
+                  {clFin.filter(function(c){return feeMensalBRL(c)>0 && matchBuscaReceita(c)}).sort(function(a,b){return feeMensalBRL(b)-feeMensalBRL(a)}).map(function(c,i){
                     var fee=feeMensalBRL(c);
                     var pct=mrrFin>0?(fee/mrrFin*100):0;
                     return <div key={c.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid "+T.bdrL}}>
@@ -3074,14 +3614,238 @@ function Dash({data:d,onSel:os,goTo}){
                       <div style={{fontSize:11,fontWeight:700,color:T.cyan,fontFamily:"'JetBrains Mono',monospace",flexShrink:0}}>{fm(fee)}</div>
                     </div>;
                   })}
-                  {clFin.filter(function(c){return feeMensalBRL(c)===0}).length>0 && (
+                  {clFin.filter(function(c){return feeMensalBRL(c)===0 && matchBuscaReceita(c)}).length>0 && (
                     <div style={{fontSize:9,color:T.t3,fontStyle:"italic",marginTop:6}}>
-                      {clFin.filter(function(c){return feeMensalBRL(c)===0}).length} cliente(s) sem fee configurado
+                      {clFin.filter(function(c){return feeMensalBRL(c)===0 && matchBuscaReceita(c)}).length} cliente(s) sem fee configurado
                     </div>
                   )}
                 </div>
               </Cd>
             </div>
+          </div>
+        );
+      })()}
+
+      {/* ===== 🛡 AGENTE DE RETENÇÃO IA ===== */}
+      {dt==="retencao" && (function(){
+        /* Config do agente */
+        var cfgRet=d.config&&d.config.retencao||{};
+        var nomeSocio1=cfgRet.nomeSocio1||"Igor";
+        var nomeSocio2=cfgRet.nomeSocio2||"";
+        var assinatura=nomeSocio2?nomeSocio1+" e "+nomeSocio2:nomeSocio1;
+
+        /* ── Cálculo de Score de Retenção (0-100) ── */
+        var hoje=new Date();
+        var scoreCliente=function(c){
+          var score=100;
+          var motivos=[];
+          var alertas=[];
+
+          /* 1. Última interação */
+          var itsC=(d.it||[]).filter(function(i){return i.cliId===c.id;}).sort(function(a,b){return new Date(b.dt)-new Date(a.dt);});
+          var diasSemContato=itsC.length>0?Math.round((hoje-new Date(itsC[0].dt))/864e5):999;
+          if(diasSemContato>90){score-=35;motivos.push("sem contato há "+diasSemContato+" dias");alertas.push("🚨 "+diasSemContato+"d sem contato");}
+          else if(diasSemContato>60){score-=25;motivos.push(diasSemContato+" dias sem contato");alertas.push("⚠️ "+diasSemContato+"d sem contato");}
+          else if(diasSemContato>30){score-=10;motivos.push(diasSemContato+" dias sem contato");}
+
+          /* 2. Carteira atualizada */
+          var diasSemGorila=c._ativosTs?Math.round((hoje-new Date(c._ativosTs))/864e5):999;
+          if(diasSemGorila>60){score-=20;alertas.push("📊 Gorila "+diasSemGorila+"d desatualizado");}
+          else if(diasSemGorila>30){score-=8;}
+
+          /* 3. Rentabilidade negativa recente */
+          var rentMes=null;
+          if(c._gorilaRent&&c._gorilaRent.periods){
+            var pm=c._gorilaRent.periods.find(function(p){var s=String(p.p||"").toLowerCase();return s.indexOf("ltimo")>=0||s.indexOf("mes")>=0;});
+            if(pm&&typeof pm.rent==="number")rentMes=pm.rent*100;
+          }
+          if(rentMes!==null&&rentMes<-3){score-=15;alertas.push("📉 Rent. "+rentMes.toFixed(1)+"% no mês");}
+          else if(rentMes!==null&&rentMes<0){score-=5;}
+
+          /* 4. Sem objetivos definidos */
+          if(!c.objetivos||c.objetivos.length===0){score-=5;motivos.push("sem objetivos cadastrados");}
+
+          /* 5. Fee alto em relação ao patrimônio */
+          var pat=c.patGorila||c.pat||0;
+          var fee=feeBaseDoCliente(c).fee||0;
+          var txEf=pat>0?(fee/pat*100):0;
+          if(txEf>0.5&&pat<200000){score-=5;}
+
+          /* Urgência da ação */
+          var urgencia=score<=35?"critico":score<=60?"atencao":"saudavel";
+          var corUrg=urgencia==="critico"?T.red:urgencia==="atencao"?T.orange:T.green;
+
+          return{
+            cli:c,score:Math.max(0,score),urgencia:urgencia,cor:corUrg,
+            diasSemContato:diasSemContato,diasSemGorila:diasSemGorila,
+            rentMes:rentMes,motivos:motivos,alertas:alertas,
+            ultimaInt:itsC.length>0?itsC[0]:null,pat:pat,fee:fee,
+            qtdInteracoes:itsC.length,
+          };
+        };
+
+        var clientes=d.cl.filter(function(c){return Array.isArray(c.sv)?c.sv.includes("patrimonio")||c.sv.includes("planejamento"):false;});
+        var scores=clientes.map(scoreCliente).sort(function(a,b){return a.score-b.score;});
+        var criticos=scores.filter(function(s){return s.urgencia==="critico";});
+        var atencao=scores.filter(function(s){return s.urgencia==="atencao";});
+        var saudaveis=scores.filter(function(s){return s.urgencia==="saudavel";});
+
+        /* Estado local para mensagens geradas pela IA — usa estados do topo do componente */
+        var msgGeradas=retMsgGeradas;
+        var sMsgGeradas=sRetMsgGeradas;
+        var gerando=retGerando;
+        var sGerando=sRetGerando;
+        var cfgModal=retCfgModal;
+        var sCfgModal=sRetCfgModal;
+
+        /* Gera mensagem personalizada via Claude */
+        var gerarMensagem=function(s){
+          if(gerando[s.cli.id])return;
+          sGerando(function(p){var n=Object.assign({},p);n[s.cli.id]=true;return n;});
+          var c=s.cli;
+          var svArr=Array.isArray(c.sv)?c.sv:(c.sv?[c.sv]:[]);
+          var tipoSrv=svArr.includes("patrimonio")?"Gestão de Patrimônio":"Gestão Financeira";
+          var nome1=c.nome.split(" ")[0];
+          var contextoPat=s.pat>0?"com patrimônio investido de R$ "+s.pat.toLocaleString("pt-BR",{maximumFractionDigits:0}):"";
+          var contextoRent=s.rentMes!==null?"A carteira rendeu "+(s.rentMes>=0?"+":"")+s.rentMes.toFixed(2)+"% no último mês. ":"";
+          var contextoObs=s.diasSemContato<999?"O último contato foi há "+s.diasSemContato+" dias. ":"Este é o primeiro contato. ";
+          var objetivosStr=(c.objetivos||[]).length>0?"Os objetivos financeiros incluem: "+c.objetivos.map(function(o){return o.nome;}).join(", ")+". ":"";
+          var perfilStr=c.risco?"Perfil "+c.risco+". ":"";
+          var prompt="Você é "+assinatura+", sócio(a) da Courinvest Consultoria em Investimentos. Escreva uma mensagem de WhatsApp pessoal e calorosa para o cliente "+c.nome+" ("+tipoSrv+") "+contextoPat+". "+contextoRent+contextoObs+objetivosStr+perfilStr+"O tom deve ser completamente humano, como se você estivesse escrevendo pessoalmente do seu celular. Use o primeiro nome ("+nome1+"). Seja genuíno e interessado no bem-estar financeiro dele(a), não comercial. Máximo 3 parágrafos curtos. Assine como "+assinatura+". Escreva em português brasileiro. Não use emojis em excesso — apenas 1-2 no máximo para ser natural.";
+
+          fetch("https://api.anthropic.com/v1/messages",{
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({
+              model:"claude-sonnet-4-6",max_tokens:400,
+              system:"Você é um consultor financeiro humano, caloroso e genuíno. Suas mensagens parecem escritas à mão, não por IA. Nunca mencione que é IA.",
+              messages:[{role:"user",content:prompt}]
+            })
+          }).then(function(r){return r.json();})
+          .then(function(data){
+            var txt=data.content&&data.content[0]&&data.content[0].text;
+            if(txt){
+              sMsgGeradas(function(p){var n=Object.assign({},p);n[c.id]=txt;return n;});
+            }
+          }).catch(function(e){console.warn("Agente retenção:",e);})
+          .finally(function(){sGerando(function(p){var n=Object.assign({},p);n[c.id]=false;return n;});});
+        };
+
+        var gerarTodos=function(lista){lista.forEach(function(s,i){setTimeout(function(){gerarMensagem(s);},i*1200);});};
+
+        return (
+          <div>
+            {/* Header do agente */}
+            <div style={{marginBottom:20}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
+                <div>
+                  <div style={{fontSize:18,fontWeight:800,color:T.cyan,marginBottom:4}}>🛡 Agente de Retenção</div>
+                  <div style={{fontSize:12,color:T.t3,maxWidth:480}}>IA que monitora o engajamento de cada cliente e gera mensagens personalizadas no seu tom, como se fossem escritas por você. Foco em retenção e relacionamento genuíno.</div>
+                </div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  <button onClick={function(){sCfgModal(true);}} style={{padding:"7px 14px",borderRadius:9,border:"1px solid "+T.bdrL,background:"transparent",color:T.t3,fontSize:11,fontWeight:700,cursor:"pointer"}}>⚙️ Configurar Agente</button>
+                  {(criticos.length>0||atencao.length>0)&&<button onClick={function(){gerarTodos(criticos.concat(atencao));}} style={{padding:"7px 14px",borderRadius:9,border:"1px solid "+T.cyan+"55",background:"rgba(56,189,248,0.08)",color:T.cyan,fontSize:11,fontWeight:700,cursor:"pointer"}}>🤖 Gerar mensagens para todos em risco</button>}
+                </div>
+              </div>
+
+              {/* Modal de configuração do agente */}
+              {cfgModal&&<Mo open={true} onClose={function(){sCfgModal(false);}} title="⚙️ Configurar Agente de Retenção">
+                <div style={{maxWidth:420,display:"flex",flexDirection:"column",gap:14}}>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:T.t2,marginBottom:6}}>Nome do Sócio 1 (como assina as mensagens)</div>
+                    <input defaultValue={nomeSocio1} onBlur={function(e){dp({t:"CONFIG_SET",p:{key:"retencao",value:Object.assign({},cfgRet,{nomeSocio1:e.target.value.trim()})}});}} style={{width:"100%",padding:"10px 12px",borderRadius:9,background:T.w3,border:"1px solid "+T.bdrL,color:T.t1,fontSize:13,outline:"none"}} placeholder="Ex: Igor"/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:T.t2,marginBottom:6}}>Nome do Sócio 2 (opcional — aparece como "Igor e [Nome]")</div>
+                    <input defaultValue={nomeSocio2} onBlur={function(e){dp({t:"CONFIG_SET",p:{key:"retencao",value:Object.assign({},cfgRet,{nomeSocio2:e.target.value.trim()})}});}} style={{width:"100%",padding:"10px 12px",borderRadius:9,background:T.w3,border:"1px solid "+T.bdrL,color:T.t1,fontSize:13,outline:"none"}} placeholder="Ex: Ana (deixe vazio se for só um)"/>
+                  </div>
+                  <div style={{padding:"10px 12px",background:"rgba(56,189,248,0.06)",border:"1px solid rgba(56,189,248,0.2)",borderRadius:9,fontSize:11,color:T.cyan,lineHeight:1.6}}>
+                    💡 As mensagens são geradas no seu tom pessoal, como se você estivesse escrevendo do celular. O cliente não percebe que foi gerado por IA.
+                  </div>
+                  <Bt onClick={function(){sCfgModal(false);}}>Salvar e fechar</Bt>
+                </div>
+              </Mo>}
+
+              {/* KPIs de risco */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginTop:16}}>
+                {[
+                  {l:"🚨 Risco crítico",v:criticos.length,c:T.red,d:"score ≤ 35 · ação imediata"},
+                  {l:"⚠️ Atenção",v:atencao.length,c:T.orange,d:"score 36-60 · contato proativo"},
+                  {l:"✅ Saudáveis",v:saudaveis.length,c:T.green,d:"score > 60 · manter ritmo"},
+                ].map(function(k,i){return (
+                  <Cd key={i} style={{padding:"14px 16px"}} hov={false}>
+                    <div style={{fontSize:11,color:T.t3,marginBottom:4}}>{k.l}</div>
+                    <div style={{fontSize:28,fontWeight:900,color:k.c,fontFamily:"'JetBrains Mono'"}}>{k.v}</div>
+                    <div style={{fontSize:9,color:T.t3,marginTop:2}}>{k.d}</div>
+                  </Cd>
+                );})}
+              </div>
+            </div>
+
+            {/* Lista de clientes por risco */}
+            {[
+              {titulo:"🚨 Ação Imediata — Risco Crítico",lista:criticos,cor:T.red,bg:"rgba(239,100,97,0.05)"},
+              {titulo:"⚠️ Contato Proativo — Atenção",lista:atencao,cor:T.orange,bg:"rgba(249,115,22,0.05)"},
+              {titulo:"✅ Engajados — Manter Ritmo",lista:saudaveis,cor:T.green,bg:"rgba(45,212,160,0.04)"},
+            ].map(function(grupo,gi){
+              if(grupo.lista.length===0)return null;
+              return (
+                <div key={gi} style={{marginBottom:24}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                    <div style={{fontSize:13,fontWeight:800,color:grupo.cor}}>{grupo.titulo}</div>
+                    {gi<2&&grupo.lista.length>0&&<button onClick={function(){gerarTodos(grupo.lista);}} style={{padding:"5px 12px",borderRadius:8,border:"1px solid "+grupo.cor+"44",background:grupo.cor+"11",color:grupo.cor,fontSize:10,fontWeight:700,cursor:"pointer"}}>🤖 Gerar mensagens para este grupo</button>}
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                    {grupo.lista.map(function(s){
+                      var msg=msgGeradas[s.cli.id];
+                      var carregando=gerando[s.cli.id];
+                      var nome1=s.cli.nome.split(" ")[0];
+                      var tel=(s.cli.tel||"").replace(/\D/g,"");
+                      return (
+                        <Cd key={s.cli.id} style={{padding:"14px 16px",border:"1px solid "+grupo.cor+"22",background:grupo.bg}} hov={false}>
+                          <div style={{display:"flex",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+                            {/* Avatar + info */}
+                            <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:200}}>
+                              <Av name={s.cli.nome} sz={38}/>
+                              <div>
+                                <div style={{fontSize:13,fontWeight:800,color:T.t1,marginBottom:2}}>{s.cli.nome}</div>
+                                <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                                  {s.alertas.map(function(a,i){return <span key={i} style={{fontSize:9,color:grupo.cor,background:grupo.cor+"15",padding:"1px 6px",borderRadius:4,fontWeight:700}}>{a}</span>;})}
+                                  {s.motivos.length>0&&!s.alertas.length&&<span style={{fontSize:9,color:T.t3}}>{s.motivos[0]}</span>}
+                                </div>
+                              </div>
+                            </div>
+                            {/* Score */}
+                            <div style={{textAlign:"center",flexShrink:0}}>
+                              <div style={{width:44,height:44,borderRadius:"50%",border:"2px solid "+grupo.cor,display:"flex",alignItems:"center",justifyContent:"center",background:grupo.cor+"10"}}>
+                                <span style={{fontSize:13,fontWeight:800,color:grupo.cor}}>{s.score}</span>
+                              </div>
+                              <div style={{fontSize:8,color:T.t3,marginTop:2}}>score</div>
+                            </div>
+                            {/* Botões */}
+                            <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap",alignItems:"center"}}>
+                              {!msg&&!carregando&&<button onClick={function(){gerarMensagem(s);}} style={{padding:"6px 12px",borderRadius:8,border:"1px solid "+T.cyan+"44",background:"rgba(56,189,248,0.08)",color:T.cyan,fontSize:10,fontWeight:700,cursor:"pointer"}}>🤖 Gerar mensagem</button>}
+                              {carregando&&<span style={{fontSize:10,color:T.cyan}}>✨ escrevendo...</span>}
+                              {msg&&tel&&<button onClick={function(){window.open("https://wa.me/55"+tel+"?text="+encodeURIComponent(msg),"_blank");}} style={{padding:"6px 12px",borderRadius:8,border:"1px solid rgba(37,211,102,0.4)",background:"rgba(37,211,102,0.08)",color:"#25D366",fontSize:10,fontWeight:700,cursor:"pointer"}}>📱 Enviar WA</button>}
+                              {msg&&<button onClick={function(){navigator.clipboard&&navigator.clipboard.writeText(msg).then(function(){alert("Mensagem copiada!");});}} style={{padding:"6px 12px",borderRadius:8,border:"1px solid "+T.bdrL,background:"transparent",color:T.t3,fontSize:10,fontWeight:700,cursor:"pointer"}}>📋 Copiar</button>}
+                              {msg&&<button onClick={function(){sMsgGeradas(function(p){var n=Object.assign({},p);delete n[s.cli.id];return n;});}} style={{padding:"6px 10px",borderRadius:8,border:"1px solid "+T.bdrL,background:"transparent",color:T.t3,fontSize:10,cursor:"pointer"}}>🔄</button>}
+                            </div>
+                          </div>
+                          {/* Mensagem gerada */}
+                          {msg&&(
+                            <div style={{marginTop:12,padding:"12px 14px",background:"rgba(56,189,248,0.04)",border:"1px solid rgba(56,189,248,0.15)",borderRadius:10}}>
+                              <div style={{fontSize:9,color:T.cyan,fontWeight:700,letterSpacing:.5,marginBottom:8}}>✉️ MENSAGEM GERADA — revise antes de enviar</div>
+                              <textarea defaultValue={msg} onChange={function(e){sMsgGeradas(function(p){var n=Object.assign({},p);n[s.cli.id]=e.target.value;return n;});}} style={{width:"100%",minHeight:100,padding:"8px 10px",borderRadius:7,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",color:T.t1,fontSize:12,lineHeight:1.6,resize:"vertical",outline:"none",fontFamily:"inherit"}}/>
+                              <div style={{fontSize:9,color:T.t3,marginTop:4}}>💡 Edite se quiser personalizar ainda mais antes de enviar.</div>
+                            </div>
+                          )}
+                        </Cd>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         );
       })()}
@@ -4610,6 +5374,34 @@ function CL({data:d,onSel:os,dispatch:dp}){
         <Bt onClick={()=>sShowAdd(true)} style={{fontSize:12,padding:"10px 18px"}}>＋ Novo</Bt>
         <input ref={gorilaRef} type="file" accept=".xlsx,.xls,.csv,.pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf,text/csv,text/plain,*/*" onChange={function(e){if(e.target.files[0])importGorilaCliente(e.target.files[0]);e.target.value=""}} style={{display:"none"}}/>
         <Bt v="secondary" onClick={function(){gorilaRef.current&&gorilaRef.current.click()}} style={{fontSize:11,padding:"10px 14px"}}>📥 Importar Gorila</Bt>
+        <Bt v="secondary" onClick={function(){
+          try{
+            var lista=d&&d.cl?d.cl:[];
+            var S=function(v){try{return v===null||v===undefined?"":String(v);}catch(e){return "";}};
+            var N=function(v){try{var n=parseFloat(String(v||0));return isNaN(n)?"0":String(Math.round(n*100)/100);}catch(e){return "0";}};
+            var rows=[["Nome","Servico","Perfil","Patrimonio R$","Fee Mensal R$","Taxa Gestao %","Email","Telefone","Cidade","Base IPCA","Aniversario"]];
+            for(var xi=0;xi<lista.length;xi++){
+              var xc=lista[xi];if(!xc)continue;
+              var xsv="";
+              if(Array.isArray(xc.sv)){var sp=[];for(var si=0;si<xc.sv.length;si++){var ss=xc.sv[si];sp.push(ss==="patrimonio"?"Gestao Patrimonio":ss==="planejamento"?"Gestao Financeira":ss==="milhas"?"Couri Miles":S(ss));};xsv=sp.join("|");}
+              else xsv=S(xc.sv);
+              rows.push([S(xc.nome),xsv,S(xc.risco),N(xc.patGorila||xc.pat),N(xc.feeFixo),N(xc.txGestao),S(xc.email),S(xc.tel),S(xc.cidade),S(xc.baseIpca),S(xc.aniversario)]);
+            }
+            var ws=XLSX.utils.aoa_to_sheet(rows);
+            ws["!cols"]=[{wch:28},{wch:22},{wch:14},{wch:16},{wch:14},{wch:12},{wch:32},{wch:16},{wch:14},{wch:10},{wch:12}];
+            var wb=XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb,ws,"Clientes");
+            var wbout=XLSX.write(wb,{bookType:"xlsx",type:"binary"});
+            var buf=new ArrayBuffer(wbout.length);
+            var view=new Uint8Array(buf);
+            for(var i=0;i<wbout.length;i++)view[i]=wbout.charCodeAt(i)&0xFF;
+            var blob=new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+            var url=URL.createObjectURL(blob);
+            var a=document.createElement("a");a.href=url;a.download="clientes_"+new Date().toISOString().slice(0,10)+".xlsx";
+            document.body.appendChild(a);a.click();
+            setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},2000);
+          }catch(xerr){alert("Erro: "+(xerr&&xerr.message?xerr.message:String(xerr)));}
+        }} style={{fontSize:11,padding:"10px 14px"}}>📊 Exportar Excel</Bt>
 
         <input ref={bulkRef} type="file" accept=".xlsx,.xls,.csv,.pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf,text/csv,text/plain,*/*" multiple onChange={function(e){if(e.target.files.length>0)importGorilaBulk(e.target.files);e.target.value=""}} style={{display:"none"}}/>
         {/* Input de PASTA — webkitdirectory + filtro de extensões em runtime já que o atributo não filtra */}
@@ -4877,7 +5669,7 @@ function CL({data:d,onSel:os,dispatch:dp}){
                   <div style={{minWidth:0}}><div style={{fontSize:10,color:T.t3,fontWeight:600}}>PATRIMÔNIO</div><div style={{fontSize:patReal>=10000000?15:patReal>=1000000?17:18,fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{fm(patReal)}</div></div>
                   <div style={{textAlign:"right",flexShrink:0}} title={tooltipRend}><div style={{fontSize:10,color:T.t3,fontWeight:600,whiteSpace:"nowrap"}}>REND. {rendLabel}</div><div style={{fontSize:14,fontWeight:700,color:rendCor,marginTop:2,fontFamily:"'JetBrains Mono'",whiteSpace:"nowrap"}}>{rendSinal}{rend.toFixed(2)}%</div></div>
                 </>);
-              })() : (<><div style={{minWidth:0}}><div style={{fontSize:10,color:T.t3,fontWeight:600}}>FEE MENSAL</div><div style={{fontSize:18,fontWeight:800,color:T.cyan,fontFamily:"'JetBrains Mono'",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{fm(c.feeFixo)}</div></div><div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:10,color:T.t3,fontWeight:600,whiteSpace:"nowrap"}}>BASE IPCA</div><div style={{fontSize:14,fontWeight:600,color:T.t2,marginTop:2,whiteSpace:"nowrap"}}>{c.feeBase||"—"}</div></div></>)}
+              })() : (<><div style={{minWidth:0}}><div style={{fontSize:10,color:T.t3,fontWeight:600}}>FEE MENSAL</div><div style={{fontSize:18,fontWeight:800,color:T.cyan,fontFamily:"'JetBrains Mono'",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{fmCli(c.feeFixo,c)}</div></div><div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:10,color:T.t3,fontWeight:600,whiteSpace:"nowrap"}}>BASE IPCA</div><div style={{fontSize:14,fontWeight:600,color:T.t2,marginTop:2,whiteSpace:"nowrap"}}>{c.feeBase||"—"}</div></div></>)}
             </div>
             <div style={{display:"flex",gap:5}}>{c.sv.map(s=><Bg key={s} c={SC[s]}>{SL[s]}</Bg>)}</div>
           </Cd>
@@ -5035,10 +5827,14 @@ function TaxaGestaoInput({txGestao,clienteId,dispatch:dp}){
   />;
 }
 
-function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
+function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onReportReady,headlessTipoRelatorio}){
   /* Salva d globalmente para acesso em closures como gerarRelatorio */
   window._courinvestData=d;
-  const[tab,sTab]=useState("geral");
+  /* === MODO HEADLESS (sem UI, usado pra gerar o relatório completo em segundo plano) ===
+     Quando headlessTipoRelatorio vem preenchido, essa instância do CD nasce direto na aba
+     "relatorio" com autoRelatorio já setado — dispensa esperar o listener de evento
+     (courinvest:abrirRelatorio) e evita qualquer corrida de timing no primeiro render. */
+  const[tab,sTab]=useState(function(){return headlessTipoRelatorio?"relatorio":"geral"});
   /* === FIRE: único estado objeto para evitar problemas de inicialização === */
   const[fireParams,sFireParams]=useState({
     idadeAlvo:60,rendaMensal:15000,aporteMensal:5000,
@@ -5052,14 +5848,16 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
   const[escopoRelatorio,setEscopoRelatorio]=useState("titular");
   const[editNome,setEditNome]=useState(false);
   const[nomeTemp,setNomeTemp]=useState("");
-  const[autoRelatorio,sAutoRelatorio]=useState(false);
+  const[autoRelatorio,sAutoRelatorio]=useState(function(){return headlessTipoRelatorio||false});
+  const[autoPrint,sAutoPrint]=useState(false);
   /* Listener: abre relatório automaticamente quando vem do modal de aprovação */
   React.useEffect(function(){
     var cId=c&&c.id;
     var handler=function(ev){
       if(ev.detail&&ev.detail.clienteId===cId){
         sTab("relatorio");
-        sAutoRelatorio(true);
+        sAutoRelatorio(ev.detail.tipoRelatorio||"mensal");
+        if(ev.detail.abrirPdf)sAutoPrint(true);
       }
     };
     window.addEventListener("courinvest:abrirRelatorio",handler);
@@ -5348,7 +6146,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
   const FIAGRO_TICKERS_OVERRIDE={"GCRA11":1,"RZAG11":1,"RZEO11":1,"SNAG11":1,"SNFZ11":1,"VCRA11":1,"VGIA11":1,"BBGO11":1,"CCFA11":1,"CPTR11":1,"DCRA11":1,"EGAF11":1,"AGRX11":1,"JGPX11":1,"FGAA11":1,"HGAG11":1,"LSAG11":1,"NCRA11":1,"OIAG11":1,"PLCA11":1,"IAGR11":1,"XPCA11":1,"BTAG11":1,"FZDA11":1,"FZDB11":1,"GRWA11":1,"SMRT11":1,"BIDB11":1,"CRAA11":1,"CPCA11":1,"DEVA11":1,"FICA11":1,"FZCA11":1,"GAIA11":1,"HABT11":1,"JGPA11":1,"KGUA11":1,"MVCA11":1,"PCAR11":1,"SNCA11":1,"TRCE11":1,"URCA11":1,"VICA11":1,"XPCA11":1};
   const ativosBase=(function(){
     var t=c._ativosImport||[];
-    if(!c.isCasal)return t;
+    if(!(c.tipoCli==="casal"||c.tipoCli==="familia"||!!c.conjuge))return t;
     var cj=(c.conjuge&&c.conjuge._ativosImport)||[];
     if(viewCasal==="titular")return t;
     if(viewCasal==="conjuge")return cj;
@@ -6209,7 +7007,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
   
   const patDisplay=(function(){
     var patTit=c.patGorila||c.pat||tCV||0;
-    if(!c.isCasal)return patTit;
+    if(!(c.tipoCli==="casal"||c.tipoCli==="familia"||!!c.conjuge))return patTit;
     var patConj=(c.conjuge&&(c.conjuge.patGorila||0))||0;
     if(patConj===0&&c.conjuge&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
       patConj=c.conjuge._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
@@ -6579,7 +7377,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
        DARK:  mensal, anual, irpf, aporte            (layout institucional padrão novo)
        LIGHT: irpf_light, aporte_light, planejamento (fundo branco pra impressão/uso rápido)
        Mantive "trimestral"/"completo" como dark por compatibilidade se chamados programaticamente */
-    var isDarkReport=(tipo==="mensal"||tipo==="anual"||tipo==="trimestral"||tipo==="completo"||tipo==="irpf"||tipo==="aporte");
+    var isDarkReport=(tipo==="mensal"||tipo==="anual"||tipo==="trimestral"||tipo==="completo"||tipo==="irpf"||tipo==="aporte"||tipo==="planejamento");
 
     var cssDark='<style>@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&family=JetBrains+Mono:wght@500;700&display=swap");'
       +'@page{size:A4;margin:0}'
@@ -7021,13 +7819,88 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
           ganhoPeriodo=patBaseGanho*(rentPeriodo/100);
         }
         var labelPeriodo=tipo==="mensal"?"do mês":(tipo==="anual"?"em 12 meses":"do trimestre");
-        body+='<div class="kpi-grid">';
-        (function(){var txt=fmF(tCV);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value gold" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">posição atual</div></div>';})();
-        body+='<div class="kpi"><div class="kpi-label">Rentabilidade</div><div class="kpi-value '+(rentPeriodo>=0?"green":"red")+'">'+(rentPeriodo>=0?"+":"")+rentPeriodo.toFixed(2)+'%</div><div class="kpi-sub">'+rentLabel+'</div></div>';
-        (function(){var txt=(ganhoPeriodo>=0?"+":"")+fmRel(ganhoPeriodo);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Ganho '+labelPeriodo+'</div><div class="kpi-value '+(ganhoPeriodo>=0?"green":"red")+'" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">variação estimada</div></div>';})();
-        body+='<div class="kpi"><div class="kpi-label">vs CDI</div><div class="kpi-value '+(vsC>=0?"green":"red")+'">'+(vsC>=0?"+":"")+vsC.toFixed(2)+'pp</div><div class="kpi-sub">'+(vsC>=0?"acima do":"abaixo do")+' benchmark</div></div>';
-        body+='</div>';
-      }else{
+
+        /* Helper para bloco de KPIs de uma carteira */
+        var _kpiBlock=function(titulo,pat,rent,ganho,vsCdi,label){
+          var txt=fmF(pat);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;
+          var b='';
+          if(titulo)b+='<div style="font-size:10px;font-weight:800;color:#D4A328;letter-spacing:.8px;margin:10px 0 6px;text-transform:uppercase;">'+titulo+'</div>';
+          b+='<div class="kpi-grid">';
+          b+='<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value gold" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">posição atual</div></div>';
+          b+='<div class="kpi"><div class="kpi-label">Rentabilidade</div><div class="kpi-value '+(rent>=0?"green":"red")+'">'+(rent>=0?"+":"")+rent.toFixed(2)+'%</div><div class="kpi-sub">'+label+'</div></div>';
+          var gtxt=(ganho>=0?"+":"")+fmF(ganho);var gsz=gtxt.length>=16?12:gtxt.length>=14?13:gtxt.length>=12?14:gtxt.length>=10?15:17;
+          b+='<div class="kpi"><div class="kpi-label">Ganho '+labelPeriodo+'</div><div class="kpi-value '+(ganho>=0?"green":"red")+'" style="font-size:'+gsz+'px">'+gtxt+'</div><div class="kpi-sub">variação estimada</div></div>';
+          b+='<div class="kpi"><div class="kpi-label">vs CDI</div><div class="kpi-value '+(vsCdi>=0?"green":"red")+'">'+(vsCdi>=0?"+":"")+vsCdi.toFixed(2)+'pp</div><div class="kpi-sub">'+(vsCdi>=0?"acima do":"abaixo do")+' benchmark</div></div>';
+          b+='</div>';
+          return b;
+        };
+
+        var _ehCasalRel=(c.tipoCli==="casal"||c.tipoCli==="familia")&&c.conjuge;
+        if(_ehCasalRel){
+          /* Patrimônio individual do titular (sem cônjuge) */
+          var _patTit=c.patGorila||c.pat||0;
+          if(_patTit===0&&c._ativosImport&&c._ativosImport.length>0){
+            _patTit=c._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
+          }
+          var _patConj=c.conjuge.patGorila||0;
+          if(_patConj===0&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
+            _patConj=c.conjuge._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
+          }
+          var _rentConj=0,_ganhoConj=0;
+          if(c.conjuge._gorilaRent){
+            if(typeof c.conjuge._gorilaRent.rentMes==="number")_rentConj=c.conjuge._gorilaRent.rentMes*100;
+            if(typeof c.conjuge._gorilaRent.resultado==="number")_ganhoConj=c.conjuge._gorilaRent.resultado;
+            else _ganhoConj=_patConj*(_rentConj/100);
+          }
+          var _cdiMes=(c._gorilaRent&&typeof c._gorilaRent.cdiMes==="number")?c._gorilaRent.cdiMes*100:cdiPeriodo;
+          var _vsCdiConj=_rentConj-_cdiMes;
+          /* Consolidado: usa patrimônios individuais, não tCV (que pode estar consolidado) */
+          var _patTotal=_patTit+_patConj;
+          var _ganhoTotal=ganhoPeriodo+_ganhoConj;
+          var _rentTotal=_patTotal>0?(_ganhoTotal/_patTotal*100):(rentPeriodo+_rentConj)/2;
+          var _vsCdiTotal=_rentTotal-_cdiMes;
+          var _nomeConj=c.conjuge.nome||c.conjuge.nomeConjuge||"Cônjuge";
+          body+=_kpiBlock("👤 "+c.nome.split(" ")[0],_patTit,rentPeriodo,ganhoPeriodo,vsC,rentLabel);
+          body+='<hr style="border:none;border-top:1px solid #E8E0C8;margin:14px 0;"/>';
+          body+=_kpiBlock("👤 "+_nomeConj.split(" ")[0],_patConj,_rentConj,_ganhoConj,_vsCdiConj,rentLabel);
+          body+='<hr style="border:none;border-top:2px solid #D4A328;margin:14px 0;"/>';
+          body+=_kpiBlock("👫 Consolidado do Casal",_patTotal,_rentTotal,_ganhoTotal,_vsCdiTotal,rentLabel);
+        }else{
+          body+='<div class="kpi-grid">';
+          (function(){var txt=fmF(tCV);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value gold" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">posição atual</div></div>';})();
+          body+='<div class="kpi"><div class="kpi-label">Rentabilidade</div><div class="kpi-value '+(rentPeriodo>=0?"green":"red")+'">'+(rentPeriodo>=0?"+":"")+rentPeriodo.toFixed(2)+'%</div><div class="kpi-sub">'+rentLabel+'</div></div>';
+          (function(){var txt=(ganhoPeriodo>=0?"+":"")+fmRel(ganhoPeriodo);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Ganho '+labelPeriodo+'</div><div class="kpi-value '+(ganhoPeriodo>=0?"green":"red")+'" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">variação estimada</div></div>';})();
+          body+='<div class="kpi"><div class="kpi-label">vs CDI</div><div class="kpi-value '+(vsC>=0?"green":"red")+'">'+(vsC>=0?"+":"")+vsC.toFixed(2)+'pp</div><div class="kpi-sub">'+(vsC>=0?"acima do":"abaixo do")+' benchmark</div></div>';
+          body+='</div>';
+        }
+
+        /* ===== PATRIMÔNIO CONSOLIDADO DO CASAL ===== */
+        if((c.tipoCli==="casal"||c.tipoCli==="familia") && c.conjuge){
+          var _patTit=c.patGorila||c.pat||0;
+          var _patConj=(c.conjuge.patGorila||0);
+          if(_patConj===0&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
+            _patConj=c.conjuge._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
+          }
+          if(_patTit>0&&_patConj>0){
+            var _patTotal=_patTit+_patConj;
+            var _nomeConj=(c.conjuge.nome||c.conjuge.nomeConjuge||"Cônjuge");
+            body+='<div style="margin:16px 0;padding:16px;background:#f8f6f0;border-radius:12px;border:1px solid #E8E0C8">';
+            body+='<div style="font-size:11px;font-weight:700;color:#D4A328;letter-spacing:1px;margin-bottom:10px">👫 PATRIMÔNIO CONSOLIDADO DO CASAL</div>';
+            body+='<table style="width:100%;border-collapse:collapse">';
+            body+='<tr><td style="padding:7px 10px;font-size:12px;color:#555">'+(tipo==="casal"?"Titular":"")+'</td><td style="padding:7px 10px;font-size:12px;font-weight:700;color:#1A1A2E">'+c.nome+'</td><td style="padding:7px 10px;text-align:right;font-size:14px;font-weight:800;color:#D4A328;font-family:Outfit,monospace">'+fmF(_patTit)+'</td></tr>';
+            body+='<tr><td style="padding:7px 10px;font-size:12px;color:#555">Cônjuge</td><td style="padding:7px 10px;font-size:12px;font-weight:700;color:#1A1A2E">'+_nomeConj+'</td><td style="padding:7px 10px;text-align:right;font-size:14px;font-weight:800;color:#D4A328;font-family:Outfit,monospace">'+fmF(_patConj)+'</td></tr>';
+            body+='<tr style="border-top:2px solid #D4A328"><td colspan="2" style="padding:10px 10px;font-size:13px;font-weight:800;color:#1A1A2E">Total do Casal</td><td style="padding:10px 10px;text-align:right;font-size:18px;font-weight:900;color:#D4A328;font-family:Outfit,monospace">'+fmF(_patTotal)+'</td></tr>';
+            body+='</table>';
+            var _pctTit=(_patTotal>0?(_patTit/_patTotal*100):0);
+            var _pctConj=(_patTotal>0?(_patConj/_patTotal*100):0);
+            body+='<div style="margin-top:10px;height:8px;background:#E8E0C8;border-radius:4px;overflow:hidden;display:flex">';
+            body+='<div style="width:'+_pctTit.toFixed(1)+'%;background:#D4A328;border-radius:4px 0 0 4px"></div>';
+            body+='<div style="width:'+_pctConj.toFixed(1)+'%;background:#F5C94B;border-radius:0 4px 4px 0"></div>';
+            body+='</div>';
+            body+='<div style="display:flex;justify-content:space-between;font-size:9px;color:#888;margin-top:4px"><span>'+c.nome.split(" ")[0]+': '+_pctTit.toFixed(1)+'%</span><span>'+_nomeConj.split(" ")[0]+': '+_pctConj.toFixed(1)+'%</span></div>';
+            body+='</div>';
+          }
+        }
         
         body+='<div class="kpi-grid">';
         (function(){var txt=fmF(tCV);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value gold" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">posição atual</div></div>';})();
@@ -9006,12 +9879,193 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
 
 
     if(tipo==="planejamento"){
-      if(isFin){
-        body+='<h2>Planejamento Financeiro</h2>';
-        body+='<div class="kpi-grid"><div class="kpi"><div class="kpi-label">Receitas</div><div class="kpi-value green">'+fmF(tRec)+'</div></div><div class="kpi"><div class="kpi-label">Despesas</div><div class="kpi-value red">'+fmF(tDesp)+'</div></div><div class="kpi"><div class="kpi-label">Saldo</div><div class="kpi-value '+(saldo>=0?"green":"red")+'">'+(saldo>=0?"+":"")+fmF(saldo)+'</div></div><div class="kpi"><div class="kpi-label">Taxa Poupança</div><div class="kpi-value">'+txPoup.toFixed(0)+'%</div></div></div>';
-        body+='<h2>Metas Financeiras</h2><table><tr><th>Meta</th><th>Alvo</th><th>Atual</th><th>Progresso</th><th>Aporte/mês</th></tr>';
-        metas.forEach(function(m){var pct=m.alvo>0?(m.atual/m.alvo*100):0;var prazoDate=new Date(m.prazo+"-01");var mesesRest=Math.max(1,Math.ceil((prazoDate-new Date())/(30*864e5)));var aporteMes=Math.max(0,(m.alvo-m.atual)/mesesRest);body+='<tr><td><strong>'+m.ic+" "+m.nome+'</strong></td><td>'+fmF(m.alvo)+'</td><td>'+fmF(m.atual)+'</td><td><span class="badge badge-'+(pct>=100?"green":pct>=50?"gold":"red")+'">'+pct.toFixed(0)+'%</span></td><td>'+fmF(aporteMes)+'</td></tr>'});
-        body+='</table>';
+      /* ===== RELATÓRIO MENSAL DE GESTÃO FINANCEIRA — mesmo formato dark do GP ===== */
+      var gfMeses=c.orcamento&&c.orcamento.mensais?c.orcamento.mensais:{};
+      var gfKeys=Object.keys(gfMeses).sort();
+      var gfUlt=gfKeys.slice(-12); /* últimos 12 meses */
+      var gfAtual=gfKeys.length>0?gfMeses[gfKeys[gfKeys.length-1]]:{};
+
+      /* Calcula KPIs do mês atual */
+      var gfRec=(gfAtual.receitas||[]).reduce(function(s,r){return s+(r.valor||0)},0);
+      var gfDesp=(gfAtual.despesas||[]).reduce(function(s,d){return s+(d.valor||0)},0);
+      var gfInv=(gfAtual.investimentos||[]).reduce(function(s,i){return s+(i.valor||0)},0);
+      var gfSaldo=gfRec-gfDesp;
+      var gfPoup=gfRec>0?((gfInv/gfRec)*100):0;
+
+      /* Evolução dos últimos meses */
+      var gfHist=gfUlt.map(function(k){
+        var snap=gfMeses[k];
+        var rec=(snap.receitas||[]).reduce(function(s,r){return s+(r.valor||0)},0);
+        var desp=(snap.despesas||[]).reduce(function(s,d){return s+(d.valor||0)},0);
+        var inv=(snap.investimentos||[]).reduce(function(s,i){return s+(i.valor||0)},0);
+        var partes=k.split("-");
+        var label=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"][+(partes[1]||1)-1]+"/"+(partes[0]||"").slice(-2);
+        return{k:k,label:label,rec:rec,desp:desp,inv:inv,saldo:rec-desp,poup:rec>0?(inv/rec*100):0};
+      });
+
+      /* Despesas por categoria do mês atual */
+      var gfCats={};
+      (gfAtual.despesas||[]).forEach(function(d){var cat=d.categoria||d.cat||"Outros";gfCats[cat]=(gfCats[cat]||0)+(d.valor||0);});
+      var gfCatList=Object.entries(gfCats).sort(function(a,b){return b[1]-a[1]});
+
+      /* Metas financeiras */
+      var gfMetas=(c.objetivos||[]).filter(function(m){return m.alvo>0;});
+
+      /* Cor por performance */
+      var gfCor=function(v){return v>=0?"#2DD4A0":"#EF6461";};
+
+      /* ── Seção: Resumo do mês ── */
+      body+=secTitle("📊","Resumo Financeiro — "+MN[mesAtualIdx]+"/"+anoAtual);
+      body+='<div class="kpi-grid">';
+      body+='<div class="kpi"><div class="kpi-label">Receita Total</div><div class="kpi-value green">'+fmF(gfRec)+'</div><div class="kpi-sub">no mês</div></div>';
+      body+='<div class="kpi"><div class="kpi-label">Despesas</div><div class="kpi-value red">'+fmF(gfDesp)+'</div><div class="kpi-sub">no mês</div></div>';
+      body+='<div class="kpi"><div class="kpi-label">Saldo</div><div class="kpi-value '+(gfSaldo>=0?"green":"red")+'">'+(gfSaldo>=0?"+":"")+fmF(gfSaldo)+'</div><div class="kpi-sub">receita − despesas</div></div>';
+      body+='<div class="kpi"><div class="kpi-label">Taxa de Poupança</div><div class="kpi-value '+(gfPoup>=20?"green":gfPoup>=10?"gold":"red")+'">'+gfPoup.toFixed(1)+'%</div><div class="kpi-sub">'+(gfPoup>=20?"✅ saudável":gfPoup>=10?"⚡ moderada":"⚠️ abaixo do ideal")+'</div></div>';
+      body+='</div>';
+
+      if(gfInv>0){
+        body+='<div style="margin-top:12px;padding:12px 16px;background:rgba(45,212,160,0.07);border:1px solid rgba(45,212,160,0.2);border-radius:10px;display:flex;justify-content:space-between;align-items:center">';
+        body+='<div><div style="font-size:10px;font-weight:700;color:#2DD4A0;text-transform:uppercase;letter-spacing:.8px">💰 Investido no mês</div><div style="font-size:22px;font-weight:800;color:#2DD4A0;font-family:JetBrains Mono,monospace;margin-top:2px">'+fmF(gfInv)+'</div></div>';
+        body+='<div style="text-align:right"><div style="font-size:10px;color:#8B94A7">'+gfPoup.toFixed(1)+'% da receita</div><div style="font-size:11px;color:#2DD4A0;margin-top:2px">→ patrimônio construído</div></div>';
+        body+='</div>';
+      }
+
+      /* ── Seção: Evolução dos últimos meses ── */
+      if(gfHist.length>1){
+        body+="<!-- PAGE_BREAK -->";
+        body+=secTitle("📈","Evolução dos Últimos "+gfHist.length+" Meses");
+
+        /* Tabela de evolução */
+        body+='<div style="border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,0.06);margin-bottom:16px">';
+        body+='<table style="width:100%;border-collapse:collapse;font-size:10px">';
+        body+='<thead><tr style="background:rgba(212,163,40,0.08)">'
+          +'<th style="padding:9px 12px;text-align:left;color:#D4A328;font-weight:700;font-size:9px;letter-spacing:.8px">MÊS</th>'
+          +'<th style="padding:9px 10px;text-align:right;color:#2DD4A0;font-weight:700;font-size:9px">RECEITA</th>'
+          +'<th style="padding:9px 10px;text-align:right;color:#EF6461;font-weight:700;font-size:9px">DESPESA</th>'
+          +'<th style="padding:9px 10px;text-align:right;color:#D4A328;font-weight:700;font-size:9px">INVESTIDO</th>'
+          +'<th style="padding:9px 10px;text-align:right;color:#60a5fa;font-weight:700;font-size:9px">SALDO</th>'
+          +'<th style="padding:9px 10px;text-align:right;color:#A78BFA;font-weight:700;font-size:9px">POUPANÇA</th>'
+          +'</tr></thead><tbody>';
+        var gfRecMedia=gfHist.reduce(function(s,h){return s+h.rec},0)/(gfHist.length||1);
+        var gfDespMedia=gfHist.reduce(function(s,h){return s+h.desp},0)/(gfHist.length||1);
+        gfHist.forEach(function(h,i){
+          var isUlt=i===gfHist.length-1;
+          var bg=isUlt?"background:rgba(212,163,40,0.06)":"background:"+(i%2===0?"transparent":"rgba(255,255,255,0.015)");
+          body+='<tr style="border-top:1px solid rgba(255,255,255,0.04);'+bg+(isUlt?";border-top:1px solid rgba(212,163,40,0.2);border-bottom:1px solid rgba(212,163,40,0.2)":"")+';">'
+            +'<td style="padding:8px 12px;font-weight:'+(isUlt?800:600)+';color:'+(isUlt?"#D4A328":"#C5CDD8")+'">'+h.label+(isUlt?" ◀":"")+'</td>'
+            +'<td style="padding:8px 10px;text-align:right;color:#2DD4A0;font-weight:700;font-family:JetBrains Mono,monospace">'+fmF(h.rec)+'</td>'
+            +'<td style="padding:8px 10px;text-align:right;color:#EF6461;font-family:JetBrains Mono,monospace">'+fmF(h.desp)+'</td>'
+            +'<td style="padding:8px 10px;text-align:right;color:#D4A328;font-weight:700;font-family:JetBrains Mono,monospace">'+(h.inv>0?fmF(h.inv):"—")+'</td>'
+            +'<td style="padding:8px 10px;text-align:right;color:'+(h.saldo>=0?"#2DD4A0":"#EF6461")+';font-weight:700;font-family:JetBrains Mono,monospace">'+(h.saldo>=0?"+":"")+fmF(h.saldo)+'</td>'
+            +'<td style="padding:8px 10px;text-align:right;color:'+(h.poup>=20?"#2DD4A0":h.poup>=10?"#D4A328":"#EF6461")+';font-weight:700">'+h.poup.toFixed(1)+'%</td>'
+            +'</tr>';
+        });
+        /* Linha de média */
+        var gfInvMedia=gfHist.reduce(function(s,h){return s+h.inv},0)/(gfHist.length||1);
+        var gfSaldoMedia=gfHist.reduce(function(s,h){return s+h.saldo},0)/(gfHist.length||1);
+        var gfPoupMedia=gfHist.reduce(function(s,h){return s+h.poup},0)/(gfHist.length||1);
+        body+='<tr style="border-top:2px solid rgba(212,163,40,0.3);background:rgba(212,163,40,0.04)">'
+          +'<td style="padding:9px 12px;font-weight:800;color:#D4A328;font-size:9px">MÉDIA '+gfHist.length+'M</td>'
+          +'<td style="padding:9px 10px;text-align:right;font-weight:800;color:#2DD4A0;font-size:9px;font-family:JetBrains Mono,monospace">'+fmF(gfRecMedia)+'</td>'
+          +'<td style="padding:9px 10px;text-align:right;font-weight:800;color:#EF6461;font-size:9px;font-family:JetBrains Mono,monospace">'+fmF(gfDespMedia)+'</td>'
+          +'<td style="padding:9px 10px;text-align:right;font-weight:800;color:#D4A328;font-size:9px;font-family:JetBrains Mono,monospace">'+fmF(gfInvMedia)+'</td>'
+          +'<td style="padding:9px 10px;text-align:right;font-weight:800;font-size:9px;color:'+(gfSaldoMedia>=0?"#2DD4A0":"#EF6461")+';font-family:JetBrains Mono,monospace">'+(gfSaldoMedia>=0?"+":"")+fmF(gfSaldoMedia)+'</td>'
+          +'<td style="padding:9px 10px;text-align:right;font-weight:800;font-size:9px;color:'+(gfPoupMedia>=20?"#2DD4A0":gfPoupMedia>=10?"#D4A328":"#EF6461")+'">'+gfPoupMedia.toFixed(1)+'%</td>'
+          +'</tr>';
+        body+='</tbody></table></div>';
+
+        /* Gráfico de barras visual — receita vs despesa vs investimento */
+        var gfMaxVal=Math.max.apply(null,gfHist.map(function(h){return Math.max(h.rec,h.desp)}));
+        if(gfMaxVal>0){
+          body+='<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:16px 18px;margin-bottom:16px">';
+          body+='<div style="font-size:10px;font-weight:700;color:#8B94A7;text-transform:uppercase;letter-spacing:.8px;margin-bottom:12px">Receita vs Despesa</div>';
+          body+='<div style="display:flex;flex-direction:column;gap:6px">';
+          gfHist.forEach(function(h){
+            var wRec=(h.rec/gfMaxVal*100).toFixed(1);
+            var wDesp=(h.desp/gfMaxVal*100).toFixed(1);
+            body+='<div style="display:flex;align-items:center;gap:8px">'
+              +'<div style="width:40px;font-size:8px;color:#8B94A7;text-align:right;flex-shrink:0">'+h.label+'</div>'
+              +'<div style="flex:1">'
+              +'<div style="display:flex;gap:2px;height:10px;border-radius:4px;overflow:hidden;background:rgba(255,255,255,0.04)">'
+              +'<div style="width:'+wRec+'%;background:#2DD4A0;border-radius:4px 0 0 4px"></div>'
+              +'</div>'
+              +'<div style="display:flex;gap:2px;height:6px;border-radius:4px;overflow:hidden;background:rgba(255,255,255,0.02);margin-top:2px">'
+              +'<div style="width:'+wDesp+'%;background:#EF6461;border-radius:4px 0 0 4px"></div>'
+              +'</div>'
+              +'</div>'
+              +'<div style="width:70px;font-size:8px;color:#8B94A7;text-align:right;flex-shrink:0">'+(h.saldo>=0?"<span style=\"color:#2DD4A0\">+"+fmF(h.saldo).replace("R$ ","")+"</span>":"<span style=\"color:#EF6461\">"+fmF(h.saldo).replace("R$ ","")+"</span>")+'</div>'
+              +'</div>';
+          });
+          body+='</div>';
+          body+='<div style="display:flex;gap:16px;margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.05)">';
+          body+='<div style="display:flex;align-items:center;gap:5px"><div style="width:10px;height:10px;background:#2DD4A0;border-radius:2px"></div><span style="font-size:9px;color:#8B94A7">Receita</span></div>';
+          body+='<div style="display:flex;align-items:center;gap:5px"><div style="width:10px;height:6px;background:#EF6461;border-radius:2px"></div><span style="font-size:9px;color:#8B94A7">Despesa</span></div>';
+          body+='</div></div>';
+        }
+      }
+
+      /* ── Seção: Despesas por categoria ── */
+      if(gfCatList.length>0){
+        body+=secTitle("💸","Despesas por Categoria");
+        var gfDespTotal=gfCatList.reduce(function(s,e){return s+e[1]},0);
+        body+='<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">';
+        gfCatList.forEach(function(e){
+          var pct=gfDespTotal>0?(e[1]/gfDespTotal*100):0;
+          body+='<div style="display:flex;align-items:center;gap:10px">'
+            +'<div style="width:120px;font-size:10px;color:#C5CDD8;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+e[0]+'</div>'
+            +'<div style="flex:1;height:12px;background:rgba(255,255,255,0.04);border-radius:4px;overflow:hidden">'
+            +'<div style="height:100%;width:'+pct.toFixed(1)+'%;background:rgba(239,100,97,0.6);border-radius:4px"></div>'
+            +'</div>'
+            +'<div style="width:70px;text-align:right;font-size:10px;font-weight:700;color:#EF6461;font-family:JetBrains Mono,monospace;flex-shrink:0">'+fmF(e[1])+'</div>'
+            +'<div style="width:35px;text-align:right;font-size:9px;color:#8B94A7;flex-shrink:0">'+pct.toFixed(0)+'%</div>'
+            +'</div>';
+        });
+        body+='</div>';
+      }
+
+      /* ── Seção: Metas Financeiras ── */
+      if(gfMetas.length>0){
+        body+=secTitle("🎯","Metas Financeiras");
+        gfMetas.forEach(function(m){
+          var pct=m.alvo>0?(m.atual/m.alvo*100):0;
+          var prazoDate=m.prazo?new Date(m.prazo+"-01"):null;
+          var mesesRest=prazoDate?Math.max(1,Math.ceil((prazoDate-new Date())/(30*864e5))):24;
+          var aporteMes=Math.max(0,((m.alvo||0)-(m.atual||0))/mesesRest);
+          var corPct=pct>=100?"#2DD4A0":pct>=50?"#D4A328":"#EF6461";
+          body+='<div style="margin-bottom:14px;padding:14px 16px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px">';
+          body+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+          body+='<div style="font-size:12px;font-weight:700;color:#E2E8F0">'+(m.ic||"🎯")+" "+m.nome+'</div>';
+          body+='<div style="font-size:13px;font-weight:800;color:'+corPct+'">'+Math.min(pct,100).toFixed(0)+'%</div>';
+          body+='</div>';
+          body+='<div style="height:8px;background:rgba(255,255,255,0.06);border-radius:4px;overflow:hidden;margin-bottom:8px">'
+            +'<div style="height:100%;width:'+Math.min(pct,100).toFixed(1)+'%;background:'+corPct+';border-radius:4px"></div>'
+            +'</div>';
+          body+='<div style="display:flex;justify-content:space-between;font-size:9px;color:#8B94A7">';
+          body+='<span>Atual: <strong style="color:#E2E8F0">'+fmF(m.atual||0)+'</strong></span>';
+          body+='<span>Meta: <strong style="color:#D4A328">'+fmF(m.alvo||0)+'</strong></span>';
+          if(prazoDate)body+='<span>Prazo: <strong style="color:#E2E8F0">'+m.prazo.replace("-","/")+' — aporte sugerido: '+fmF(aporteMes)+'/mês</strong></span>';
+          body+='</div></div>';
+        });
+      }
+
+      /* ── Recomendações automáticas ── */
+      var gfRecs=[];
+      if(gfPoup<10)gfRecs.push({cor:"#EF6461",ic:"⚠️",txt:"Taxa de poupança abaixo de 10%. O ideal é poupar ao menos 20% da receita mensal para construção de patrimônio."});
+      else if(gfPoup>=20)gfRecs.push({cor:"#2DD4A0",ic:"✅",txt:"Excelente taxa de poupança de "+gfPoup.toFixed(1)+"%. Continue mantendo a disciplina!"});
+      if(gfSaldo<0)gfRecs.push({cor:"#EF6461",ic:"🚨",txt:"Saldo negativo de "+fmF(Math.abs(gfSaldo))+" no mês. Revise as despesas para retornar ao equilíbrio."});
+      if(gfHist.length>=3){
+        var ultTres=gfHist.slice(-3);
+        var tendDespesa=(ultTres[2].desp-ultTres[0].desp)/Math.max(1,ultTres[0].desp)*100;
+        if(tendDespesa>15)gfRecs.push({cor:"#D4A328",ic:"📈",txt:"Despesas crescendo "+tendDespesa.toFixed(0)+"% nos últimos 3 meses. Atenção para manter o controle."});
+      }
+      if(gfRecs.length>0){
+        body+='<div style="margin-top:8px">';
+        body+=secTitle("💡","Análise e Recomendações");
+        gfRecs.forEach(function(r){
+          body+='<div style="margin-bottom:10px;padding:12px 14px;background:'+r.cor+'0d;border:1px solid '+r.cor+'33;border-radius:10px;font-size:11px;color:#C5CDD8;line-height:1.6">'
+            +'<span style="font-size:14px;margin-right:8px">'+r.ic+'</span>'+r.txt+'</div>';
+        });
+        body+='</div>';
       }
     }
 
@@ -9027,8 +10081,51 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
 
     var bgDecor=isDarkReport?'<div class="bg-pattern"></div>':'';
 
-    /* === Capa Courinvest para relatórios de Patrimônio (mensal/anual/trimestral/completo) === */
-    var capaPat='';
+    /* === Capa GF (Gestão Financeira) — mesmo formato escuro do GP === */
+    var capaGF='';
+    if(isDarkReport && isFin && tipo==="planejamento"){
+      var MN_GF=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+      var _dcGF=new Date();_dcGF.setDate(1);_dcGF.setMonth(_dcGF.getMonth()-1);
+      var mesGFIdx=_dcGF.getMonth();var anoGF=_dcGF.getFullYear();
+      var logoGF='<div style="display:flex;align-items:center;gap:14px">'
+        +'<svg width="48" height="48" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
+        +'<defs><linearGradient id="lgGF" x1="0" y1="0" x2="100" y2="100"><stop offset="0%" stop-color="#60D8C0"/><stop offset="100%" stop-color="#38BDF8"/></linearGradient></defs>'
+        +'<circle cx="50" cy="50" r="46" stroke="url(#lgGF)" stroke-width="0.5" opacity=".15" fill="none"/>'
+        +'<path d="M50 6 C18 6,6 26,6 50 C6 74,18 94,50 94" stroke="url(#lgGF)" stroke-width="5" stroke-linecap="round" fill="none"/>'
+        +'<path d="M50 18 C28 18,18 32,18 50 C18 68,28 82,50 82" stroke="url(#lgGF)" stroke-width="4" stroke-linecap="round" fill="none" opacity=".7"/>'
+        +'<circle cx="58" cy="50" r="4" fill="url(#lgGF)"/></svg>'
+        +'<div><div style="font-size:18px;font-weight:800;color:#fff;letter-spacing:1.5px;line-height:1">COURINVEST</div>'
+        +'<div style="font-size:8.5px;font-weight:600;color:#B8C4D6;letter-spacing:3px;margin-top:3px">CONSULTORIA EM INVESTIMENTOS</div>'
+        +'</div></div>';
+      var svgGF='<svg width="420" height="420" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:-60px;right:-100px;opacity:0.35;pointer-events:none;z-index:1">'
+        +'<g stroke="#38BDF8" fill="none"><path d="M200,60 L340,200 L200,340 L60,200 Z" stroke-width="1" opacity=".3"/>'
+        +'<path d="M200,100 L300,200 L200,300 L100,200 Z" stroke-width="1.5" opacity=".4"/>'
+        +'<path d="M200,140 L260,200 L200,260 L140,200 Z" stroke-width="2" opacity=".55"/>'
+        +'<circle cx="200" cy="200" r="20" stroke-width="3" opacity=".5"/></g></svg>';
+      var gfMesActual=c.orcamento&&c.orcamento.mensais?Object.keys(c.orcamento.mensais).sort():[];
+      var gfAteual=gfMesActual.length>0?c.orcamento.mensais[gfMesActual[gfMesActual.length-1]]:{};
+      var gfRecCapa=(gfAteual.receitas||[]).reduce(function(s,r){return s+(r.valor||0)},0);
+      capaGF='<div class="cv-cover" style="position:relative;overflow:hidden;page-break-after:always;min-height:100vh">'
+        +'<div class="cv-cover-pattern"></div>'+svgGF
+        +'<div class="cv-cover-content">'
+        +'<div class="cv-cover-top">'+logoGF+'</div>'
+        +'<div class="cv-cover-mid">'
+        +'<div style="font-size:11px;font-weight:700;color:#38BDF8;letter-spacing:5px;text-transform:uppercase;margin-bottom:14px">📊 Gestão Financeira · Relatório Mensal</div>'
+        +'<div class="cv-cover-title">Controle e<br><span class="cv-cover-title-gold" style="color:#38BDF8;font-style:italic">Planejamento</span><br>Financeiro.</div>'
+        +'<p class="cv-cover-sub">Acompanhamento das receitas, despesas, poupança e metas financeiras. Evolução mensal com análise e recomendações personalizadas.</p>'
+        +'</div>'
+        +'<div class="cv-cover-bottom">'
+        +'<div class="cv-cover-cliente">'
+        +'<div class="cv-cover-cli-label">CLIENTE</div>'
+        +'<div class="cv-cover-cli-name">'+c.nome+'</div>'
+        +'<div class="cv-cover-cli-meta">Período de referência: <strong>'+MN_GF[mesGFIdx]+"/"+anoGF+'</strong></div>'
+        +(c.risco?'<div class="cv-cover-cli-meta">Perfil: <strong>'+c.risco+'</strong></div>':'')
+        +'</div>'
+        +'<div class="cv-cover-data"><div class="cv-cover-data-year">'+anoGF+'</div>'
+        +'<div style="font-size:11px;color:#9CADC9;margin-top:4px">'+MN_GF[mesGFIdx]+'</div>'
+        +(gfRecCapa>0?'<div style="font-size:11px;color:#38BDF8;margin-top:6px;font-weight:700">Receita: '+fmF(gfRecCapa)+'</div>':'')
+        +'</div></div></div></div>';
+    }
     if(isDarkReport && isPat && (tipo==="mensal"||tipo==="anual"||tipo==="trimestral"||tipo==="completo")){
       var MN_CAPA=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
       var _dcapa=new Date();_dcapa.setDate(1);_dcapa.setMonth(_dcapa.getMonth()-1);
@@ -9131,7 +10228,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       
       return true;
     })();
-    var capaFinal=_capaSecAtiva?capaPat:'';
+    var capaFinal=tipo==="planejamento"?capaGF:(_capaSecAtiva?capaPat:'');
 
     /* === FASE 3: PÁGINA DE SUMÁRIO === 
        Aparece entre capa e conteúdo. Lista as seções ativas com numeração e ícone.
@@ -10709,7 +11806,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       +eyebrow(ehMultiplo?("RELATÓRIO MENSAL · "+tipoLabel.toUpperCase()):"RELATÓRIO MENSAL")
       +'<h1 class="cover-title">Diagnóstico<br/>financeiro do<br/><span class="cover-title-gold">mês de '+(MN[+partes[1]-1]||"").toLowerCase()+'.</span></h1>'
       +'<p class="cover-sub">'+(ehMultiplo
-        ?"Análise consolidada do orçamento "+(tipoCli==="casal"?"do casal":"da família")+". Receitas, despesas, investimentos e objetivos vistos como uma unidade financeira única."
+        ?"Visão integrada das finanças "+(tipoCli==="casal"?"do casal":"da família")+". Receitas, despesas, investimentos e metas analisados em conjunto — porque o crescimento financeiro começa com planejamento compartilhado."
         :"Acompanhamento mensal personalizado. Análise inteligente do seu orçamento, evolução, alertas e recomendações estratégicas para construção de patrimônio.")+'</p>'
       +'</div>'
       +'<div class="cover-bottom">'
@@ -10833,7 +11930,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
 
     
     var carteira=(function(){
-      if(!c.isCasal)return c._ativosImport||[];
+      if(!(c.tipoCli==="casal"||c.tipoCli==="familia"||!!c.conjuge))return c._ativosImport||[];
       if(viewCasal==="conjuge")return (c.conjuge&&c.conjuge._ativosImport)||[];
       if(viewCasal==="titular")return c._ativosImport||[];
       
@@ -10843,7 +11940,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
     })();
     var patReal=(function(){
     var pt=c.patGorila||c.pat||0;
-    if(!c.isCasal)return pt;
+    var ehCasal=(c.tipoCli==="casal"||c.tipoCli==="familia")&&c.conjuge;
+    if(!ehCasal)return pt;
     var pc=(c.conjuge&&(c.conjuge.patGorila||0))||0;
     if(pc===0&&c.conjuge&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
       pc=c.conjuge._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
@@ -12422,7 +13520,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
       {tab==="carteira" && (isPat||isFin) && (
         <div>
           <div style={{display:"flex",gap:4,marginBottom:14,alignItems:"center",flexWrap:"wrap"}}>
-            {c.isCasal && (
+            {(c.tipoCli==="casal"||c.tipoCli==="familia"||!!c.conjuge) && (
               <div style={{display:"flex",background:T.w2,borderRadius:10,padding:3,border:"1px solid "+T.bdrL,marginRight:4,gap:2,flexShrink:0}}>
                 {[{k:"consolidado",l:"👫 Consolidado"},{k:"titular",l:"👤 "+(c.nome||"").split(" ")[0]},{k:"conjuge",l:"👤 "+((c.conjuge&&c.conjuge.nome)||"Cônjuge").split(" ")[0]}].map(function(opt){
                   var atv=viewCasal===opt.k;
@@ -12436,6 +13534,53 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
               <Bt v="secondary" onClick={fetchCotacoes} style={{fontSize:10,padding:"5px 12px"}}>{cotLoading?"⏳ Buscando...":"🔄 Cotações"}</Bt>
             </div>
           </div>
+
+          {}
+          {/* ===== PAINEL DO CASAL ===== */}
+          {c.conjuge && cTab==="pos" && (function(){
+            var patTit=c.patGorila||c.pat||0;
+            var patConj=c.conjuge.patGorila||0;
+            if(patConj===0&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
+              patConj=c.conjuge._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
+            }
+            var total=patTit+patConj;
+            var nomeConj=c.conjuge.nome||c.conjuge.nomeConjuge||"Cônjuge";
+            return (
+              <Cd style={{padding:16,marginBottom:14,border:"1px solid rgba(167,139,250,0.25)"}} hov={false}>
+                <div style={{fontSize:11,fontWeight:800,color:T.purple,marginBottom:12}}>👫 Patrimônio do Casal</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:total>0?12:0}}>
+                  <div style={{padding:"10px 12px",background:"rgba(212,163,40,0.06)",borderRadius:10,border:"1px solid rgba(212,163,40,0.2)"}}>
+                    <div style={{fontSize:9,color:T.t3,fontWeight:600,marginBottom:4}}>👤 {(c.nome||"").split(" ")[0].toUpperCase()}</div>
+                    <div style={{fontSize:13,fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(patTit)}</div>
+                    {total>0&&<div style={{fontSize:9,color:T.t3,marginTop:2}}>{(patTit/total*100).toFixed(1)}% do total</div>}
+                  </div>
+                  <div style={{padding:"10px 12px",background:"rgba(167,139,250,0.06)",borderRadius:10,border:"1px solid rgba(167,139,250,0.2)"}}>
+                    <div style={{fontSize:9,color:T.purple,fontWeight:600,marginBottom:4}}>👤 {nomeConj.split(" ")[0].toUpperCase()}</div>
+                    <div style={{fontSize:13,fontWeight:800,color:T.purple,fontFamily:"'JetBrains Mono'"}}>{patConj>0?fm(patConj):"Sem dados"}</div>
+                    {total>0&&patConj>0&&<div style={{fontSize:9,color:T.t3,marginTop:2}}>{(patConj/total*100).toFixed(1)}% do total</div>}
+                  </div>
+                  <div style={{padding:"10px 12px",background:"rgba(45,212,160,0.06)",borderRadius:10,border:"1px solid rgba(45,212,160,0.2)"}}>
+                    <div style={{fontSize:9,color:T.green,fontWeight:600,marginBottom:4}}>👫 CONSOLIDADO</div>
+                    <div style={{fontSize:13,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{total>0?fm(total):"—"}</div>
+                    <div style={{fontSize:9,color:T.t3,marginTop:2}}>patrimônio total</div>
+                  </div>
+                </div>
+                {total>0 && <div>
+                  <div style={{height:8,background:"rgba(255,255,255,0.06)",borderRadius:4,overflow:"hidden",display:"flex"}}>
+                    <div style={{height:"100%",width:(patTit/total*100).toFixed(1)+"%",background:T.gold,borderRadius:"4px 0 0 4px"}}/>
+                    <div style={{height:"100%",width:(patConj/total*100).toFixed(1)+"%",background:T.purple,borderRadius:"0 4px 4px 0"}}/>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:T.t3,marginTop:3}}>
+                    <span style={{color:T.gold}}>{(c.nome||"").split(" ")[0]} {(patTit/total*100).toFixed(0)}%</span>
+                    <span style={{color:T.purple}}>{nomeConj.split(" ")[0]} {(patConj/total*100).toFixed(0)}%</span>
+                  </div>
+                </div>}
+                {patConj===0&&<div style={{fontSize:10,color:T.orange,padding:"6px 10px",background:T.orangeD,borderRadius:7,marginTop:8}}>
+                  ⚠️ Importe o Gorila de {nomeConj} usando <strong>"Gorila Cônjuge"</strong> nos botões acima.
+                </div>}
+              </Cd>
+            );
+          })()}
 
           {}
           {(function(){
@@ -12470,7 +13615,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
 
           {}
           {isFin && ativos.length>0 && (function(){
-            var objLabels={emergencia:"🛡 Reserva de Emergência",aposentadoria:"🏖 Aposentadoria",casa:"🏠 Casa Própria",viagem:"✈️ Viagem",carro:"🚗 Veículo",educacao:"🎓 Educação",filhos:"👶 Filhos",casamento:"💍 Casamento",negocio:"💼 Negócio Próprio",patrimonio:"💰 Formação Patrimônio",curto_prazo:"⚡ Curto Prazo",longo_prazo:"📈 Longo Prazo",outros:"📌 Outros"};
+            var objLabels={emergencia:"🛡 Reserva de Emergência",aposentadoria:"🏖 Aposentadoria",casa:"🏠 Casa Própria",viagem:"✈️ Viagem",carro:"🚗 Veículo",educacao:"🎓 Educação",filhos:"👶 Filhos",casamento:"💍 Casamento",negocio:"💼 Negócio Próprio",patrimonio:"💰 Formação Patrimônio",curto_prazo:"⚡ Curto Prazo",longo_prazo:"📈 Longo Prazo",renda_passiva:"💸 Renda Passiva",outros:"📌 Outros"};
             var objIcons={emergencia:"🛡",aposentadoria:"🏖",casa:"🏠",viagem:"✈️",carro:"🚗",educacao:"🎓",filhos:"👶",casamento:"💍",negocio:"💼",patrimonio:"💰",curto_prazo:"⚡",longo_prazo:"📈",outros:"📌"};
             var objColors={emergencia:T.green,aposentadoria:T.cyan,casa:T.gold,viagem:T.purple,carro:T.orange,educacao:T.cyan,filhos:T.purple,casamento:T.gold,negocio:T.red,patrimonio:T.gold,curto_prazo:T.orange,longo_prazo:T.cyan,outros:T.t2};
             var byObj={};var semObj=0;
@@ -12942,10 +14087,13 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
                   <Bt v="secondary" onClick={function(){corrFileRef.current&&corrFileRef.current.click()}} style={{fontSize:9,padding:"4px 8px"}}>📥 Gorila</Bt>
                   <input ref={perf12mRef} type="file" accept=".xlsx,.xls" onChange={function(e){if(e.target.files[0])importPerf12m(e.target.files[0]);e.target.value=""}} style={{display:"none"}}/>
                   <Bt v="secondary" onClick={function(){perf12mRef.current&&perf12mRef.current.click()}} title="Importa SOMENTE performance/benchmarks (12m, 24m, Início). Não altera ativos nem patrimônio do mês." style={{fontSize:9,padding:"4px 8px",color:T.cyan,border:"1px solid rgba(56,189,248,0.3)"}}>📊 12M</Bt>
-                  {c.isCasal && <React.Fragment>
+                  {(c.tipoCli==="casal"||c.tipoCli==="familia"||c.conjuge) && <React.Fragment>
                     <input ref={gorilaConjRef} type="file" accept=".xlsx,.xls" onChange={function(e){if(e.target.files[0])importarGorilaConjuge(e.target.files[0]);e.target.value="";}} style={{display:"none"}}/>
-                    <Bt v="secondary" onClick={function(){gorilaConjRef.current&&gorilaConjRef.current.click()}} style={{fontSize:9,padding:"4px 8px",color:T.purple,border:"1px solid rgba(167,139,250,0.3)"}}>👤 Cônjuge</Bt>
+                    <Bt v="secondary" onClick={function(){gorilaConjRef.current&&gorilaConjRef.current.click()}} style={{fontSize:9,padding:"4px 8px",color:T.purple,border:"1px solid rgba(167,139,250,0.3)"}} title={c.conjuge?"Reimportar Gorila do cônjuge":"Importar Gorila do cônjuge"}>{c.conjuge?"🔄 Gorila Cônjuge":"👫 Add Cônjuge"}</Bt>
                   </React.Fragment>}
+                  {!c.conjuge && (c.tipoCli==="casal"||c.tipoCli==="familia") && (
+                    <span style={{fontSize:9,color:T.orange,fontWeight:600}}>← importe o Gorila do cônjuge</span>
+                  )}
                   <Bt v="secondary" onClick={function(){sShowAddAt(true)}} style={{fontSize:9,padding:"4px 8px"}}>＋ Ativo</Bt>
                 </div>
               </div>
@@ -13249,6 +14397,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
                                 <option value="patrimonio">💰 Formação Patrimônio</option>
                                 <option value="curto_prazo">⚡ Curto Prazo</option>
                                 <option value="longo_prazo">📈 Longo Prazo</option>
+                                <option value="renda_passiva">💸 Renda Passiva</option>
                                 <option value="outros">📌 Outros</option>
                               </select>
                               {a.obj && <input type="text" placeholder="Ex: Maldivas" value={a.objNome||""} onChange={function(e){upAt(a.tk,"objNome",e.target.value)}} style={{padding:"3px 4px",background:"rgba(255,255,255,0.02)",border:"1px solid rgba(167,139,250,0.15)",borderRadius:4,color:T.purple,fontSize:9,fontWeight:600,outline:"none",width:"100%",marginTop:3,fontStyle:"italic"}}/>}
@@ -14707,6 +15856,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
               {ic:"✈️",nome:"Viagem",cor:"#38BDF8",desc:"Viagem dos sonhos, lua de mel, etc."},
               {ic:"🏠",nome:"Compra de Imóvel",cor:"#D4A328",desc:"Entrada ou compra à vista"},
               {ic:"🚗",nome:"Compra de Veículo",cor:"#F59E0B",desc:"Carro novo, moto, etc."},
+              {ic:"💸",nome:"Renda Passiva",cor:"#2DD4A0",desc:"Meta de renda mensal com investimentos"},
               {ic:"🎓",nome:"Educação",cor:"#A78BFA",desc:"Faculdade dos filhos, MBA, intercâmbio"},
               {ic:"💍",nome:"Casamento",cor:"#F472B6",desc:"Cerimônia, festa, aliança"},
               {ic:"👶",nome:"Filhos",cor:"#FBBF24",desc:"Reserva para nascimento e primeiros anos"},
@@ -14791,10 +15941,22 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
                     Aparece só quando há objetivos cadastrados. Ajuda a identificar:
                     1. Se há ativos não-vinculados (sobra)
                     2. Se há ativos vinculados em mais de um objetivo (overlap — soma > patrimônio)
-                    3. Lista os ativos não-vinculados pra facilitar correção. */}
+                    3. Lista os ativos não-vinculados pra facilitar correção.
+                    4. Se o "Patrimônio Total" (patGorila, vindo do total declarado no arquivo
+                       importado) é maior que a soma dos ativos individualmente importados —
+                       nesse caso a diferença é saldo/categoria que a Gorila totaliza mas não
+                       detalha linha-a-linha, então NÃO existe um "produto" pra vincular a um
+                       objetivo (só dá pra cobrir esse valor usando o modo "Valor Manual"). */}
                 {objetivos.length>0 && (function(){
-                  /* Calcula patrimônio total (só ativos brasileiros se cliente é BR — exterior fora) */
-                  var patTotal=enr.reduce(function(s,a){return s+(a.vA||0)},0);
+                  /* Patrimônio total = MESMO valor exibido no cabeçalho do cliente (patGorila/pat,
+                     com fallback pra soma dos ativos) — evita mostrar dois números diferentes na mesma tela */
+                  var patTotal=patDisplay;
+                  /* Soma dos ativos individualmente importados (o universo que PODE ser vinculado via "Vincular Ativos") */
+                  var somaItens=enr.reduce(function(s,a){return s+(a.vA||0)},0);
+                  /* Parte do patrimônio total que não corresponde a nenhum ativo importado linha-a-linha
+                     (ex: saldo agregado ou categoria que a Gorila não detalha no extrato) */
+                  var gapNaoImportado=patTotal-somaItens;
+                  var temGap=Math.abs(gapNaoImportado)>=10;
                   /* Soma todos os atingidos com modo "ativos" + manuais */
                   var somaVinc=0;
                   var manualSum=0;
@@ -14822,11 +15984,12 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
                   var somaNaoVinc=naoVinculados.reduce(function(s,a){return s+(a.vA||0)},0);
                   /* Detecta overlaps (tickers vinculados em mais de 1 objetivo) */
                   var overlaps=Object.keys(tkUsages).filter(function(tk){return tkUsages[tk]>1});
-                  /* Diferença esperada: patTotal - (somaVinc - overlaps_extra) - manualSum_não_é_da_carteira */
-                  var diff=patTotal-somaVinc;
+                  /* Diferença calculada SÓ dentro do universo de ativos importados (não considera o
+                     gapNaoImportado, que por definição nunca vai poder ser vinculado a um ativo) */
+                  var diff=somaItens-somaVinc;
                   var corDiff=Math.abs(diff)<10?T.green:(diff>0?T.orange:T.red);
                   var statusTxt=Math.abs(diff)<10?"✅ Tudo vinculado":(diff>0?"⚠ Faltam ativos":"⚠ Há overlap (ativo em vários objetivos)");
-                  
+
                   return (
                     <Cd style={{padding:14,marginBottom:14,background:"rgba(43,90,255,0.04)",border:"1px solid rgba(139,157,195,0.15)"}} hov={false}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:14,flexWrap:"wrap"}}>
@@ -14835,6 +15998,12 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
                             <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:1,marginBottom:3}}>PATRIMÔNIO TOTAL</div>
                             <div style={{fontSize:14,fontWeight:800,color:T.t1,fontFamily:"'JetBrains Mono'"}}>{fmF(patTotal)}</div>
                           </div>
+                          {temGap && (
+                            <div>
+                              <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:1,marginBottom:3}}>ATIVOS IMPORTADOS</div>
+                              <div style={{fontSize:14,fontWeight:800,color:T.t1,fontFamily:"'JetBrains Mono'"}}>{fmF(somaItens)}</div>
+                            </div>
+                          )}
                           <div>
                             <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:1,marginBottom:3}}>VINCULADO EM OBJETIVOS</div>
                             <div style={{fontSize:14,fontWeight:800,color:T.t2,fontFamily:"'JetBrains Mono'"}}>{fmF(somaVinc)}</div>
@@ -14849,6 +16018,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
                           </div>
                         </div>
                       </div>
+                      {temGap && (function(){
+                        var ehSobra=gapNaoImportado>0;
+                        var valorGap=Math.abs(gapNaoImportado);
+                        return (
+                          <div style={{marginTop:12,padding:"8px 10px",background:"rgba(245,158,11,0.06)",border:"1px solid rgba(245,158,11,0.18)",borderRadius:8,fontSize:10,color:T.t2,lineHeight:1.5}}>
+                            ℹ️ {ehSobra?"Há ":"O total importado supera em "}<b style={{color:T.orange}}>{fmF(valorGap)}</b>{ehSobra?" no Patrimônio Total que não corresponde a nenhum ativo individual importado":" o valor declarado como Patrimônio Total"}. {ehSobra?"Isso costuma acontecer quando o extrato traz um saldo agregado (ex: previdência, imóvel, categoria não detalhada) que não vem como linha individual — por isso não aparece como \"produto\" pra selecionar em Vincular Ativos. Pra cobrir esse valor num objetivo, use o modo \"Valor Manual\".":"Reimporte o extrato mais recente pra atualizar o Patrimônio Total."}
+                          </div>
+                        );
+                      })()}
                       {naoVinculados.length>0 && (
                         <details style={{marginTop:12,fontSize:11}}>
                           <summary style={{cursor:"pointer",color:T.orange,fontWeight:700,padding:"6px 0"}}>📋 {naoVinculados.length} ativo{naoVinculados.length>1?"s":""} não vinculado{naoVinculados.length>1?"s":""} ({fmF(somaNaoVinc)}) — clique para ver</summary>
@@ -15032,6 +16210,51 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
                             <input type="color" value={obj.cor||"#D4A328"} onChange={function(e){setField("cor",e.target.value)}} style={{width:"100%",height:36,padding:0,borderRadius:8,background:T.w3,border:"1px solid "+T.bdrL,cursor:"pointer"}}/>
                           </div>
                         </div>
+
+                        {}
+                        {/* === CAMPOS ESPECÍFICOS: RENDA PASSIVA === */}
+                        {(obj.nome==="Renda Passiva"||obj.tipo==="renda_passiva") && (
+                          <Cd style={{padding:14,border:"1px solid rgba(45,212,160,0.2)"}} hov={false}>
+                            <div style={{fontSize:11,fontWeight:800,color:T.green,marginBottom:12}}>💸 Renda Passiva — Configuração</div>
+                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                              <div>
+                                <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:.5,marginBottom:4}}>RENDA MENSAL DESEJADA (R$)</div>
+                                <input type="number" value={obj.rendaMensalAlvo||""} onChange={function(e){setField("rendaMensalAlvo",+e.target.value)}} placeholder="Ex: 10000" style={{width:"100%",padding:"8px 10px",borderRadius:8,background:T.w3,border:"1px solid rgba(45,212,160,0.3)",color:T.green,fontSize:14,fontWeight:700,outline:"none",fontFamily:"'JetBrains Mono'"}}/>
+                              </div>
+                              <div>
+                                <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:.5,marginBottom:4}}>TAXA RETORNO MENSAL ESTIMADA (%)</div>
+                                <input type="number" step="0.01" value={obj.taxaRetornoMes||0.5} onChange={function(e){setField("taxaRetornoMes",+e.target.value)}} placeholder="0.5" style={{width:"100%",padding:"8px 10px",borderRadius:8,background:T.w3,border:"1px solid rgba(45,212,160,0.3)",color:T.green,fontSize:14,fontWeight:700,outline:"none",fontFamily:"'JetBrains Mono'"}}/>
+                              </div>
+                            </div>
+                            {obj.rendaMensalAlvo>0 && (function(){
+                              var txMes=(obj.taxaRetornoMes||0.5)/100;
+                              var patNecessario=txMes>0?obj.rendaMensalAlvo/txMes:0;
+                              var patAtual=(function(){if(obj.modo==="ativos"&&(obj.ativosVinculados||[]).length>0){return enr.filter(function(a){return(obj.ativosVinculados||[]).indexOf(a.tk)>=0}).reduce(function(s,a){return s+(a.vA||0)},0);}return obj.acumuladoManual||0;})();
+                              var rendaAtual=patAtual*txMes;
+                              var pct=patNecessario>0?(patAtual/patNecessario*100):0;
+                              /* Atualiza automaticamente o alvo */
+                              if(Math.abs((obj.alvo||0)-patNecessario)>100)setTimeout(function(){setField("alvo",Math.round(patNecessario));},0);
+                              return (
+                                <div style={{padding:"10px 12px",background:"rgba(45,212,160,0.05)",borderRadius:8,border:"1px solid rgba(45,212,160,0.15)"}}>
+                                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                                    <div>
+                                      <div style={{fontSize:8,color:T.t3,fontWeight:600}}>PATRIMÔNIO NECESSÁRIO</div>
+                                      <div style={{fontSize:13,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(patNecessario)}</div>
+                                    </div>
+                                    <div>
+                                      <div style={{fontSize:8,color:T.t3,fontWeight:600}}>RENDA ATUAL ESTIMADA</div>
+                                      <div style={{fontSize:13,fontWeight:800,color:rendaAtual>=obj.rendaMensalAlvo?T.green:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(rendaAtual)}<span style={{fontSize:9,color:T.t3}}>/mês</span></div>
+                                    </div>
+                                    <div>
+                                      <div style={{fontSize:8,color:T.t3,fontWeight:600}}>PROGRESSO</div>
+                                      <div style={{fontSize:13,fontWeight:800,color:pct>=100?T.green:T.gold,fontFamily:"'JetBrains Mono'"}}>{Math.min(pct,100).toFixed(1)}%</div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </Cd>
+                        )}
 
                         {}
                         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
@@ -17365,11 +18588,35 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
         <div>
           {/* Auto-gera relatório quando vem do modal de aprovação */}
           {autoRelatorio && !reportHtml && (function(){
+            var tipoRel=typeof autoRelatorio==="string"&&autoRelatorio!=="true"?autoRelatorio:"mensal";
             sAutoRelatorio(false);
             try{
-              var html=gerarRelatorio("mensal",d);
-              if(html)sReportHtml(html);
-            }catch(e){console.error("Auto relatório:",e);}
+              var html=gerarRelatorio(tipoRel,d);
+              if(html){
+                /* Modo headless (envio automático de e-mail): devolve o HTML pra quem montou
+                   essa instância oculta do CD e não mexe em UI (print/tela) — a instância é
+                   descartada logo em seguida por quem chamou. */
+                if(onReportReady){
+                  try{onReportReady(html,tipoRel);}catch(_e){}
+                }else if(autoPrint){
+                  sAutoPrint(false);
+                  var w=window.open("","_blank","width=900,height=700");
+                  if(w){
+                    w.document.write(html);
+                    w.document.close();
+                    w.focus();
+                    setTimeout(function(){try{w.print();}catch(e){}},800);
+                  }
+                }else{
+                  sReportHtml(html);
+                }
+              }else if(onReportReady){
+                try{onReportReady(null,tipoRel);}catch(_e){}
+              }
+            }catch(e){
+              console.error("Auto relatório:",e);
+              if(onReportReady){try{onReportReady(null,tipoRel);}catch(_e){}}
+            }
             return null;
           })()}
           {irpfMode ? (
@@ -18456,18 +19703,25 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus}){
             </Cd>
             {/* === CASAL === */}
             <Cd style={{padding:18,marginBottom:12}} hov={false}>
-              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:c.isCasal?14:0}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:(c.tipoCli==="casal"||c.tipoCli==="familia"||!!c.conjuge)?14:0}}>
                 <span style={{fontSize:20}}>👫</span>
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:800,color:T.gold}}>Gestão de Casal</div>
                   <div style={{fontSize:10,color:T.t3,marginTop:2}}>Ative para gerenciar carteira do cônjuge separadamente</div>
                 </div>
-                <div onClick={function(){dp({t:"UC",p:{id:c.id,isCasal:!c.isCasal}})}}
-                  style={{width:40,height:22,borderRadius:11,background:c.isCasal?T.gold:"rgba(255,255,255,0.1)",cursor:"pointer",position:"relative",transition:"all .2s",border:"1px solid "+(c.isCasal?T.gold:T.bdrL),flexShrink:0}}>
-                  <div style={{position:"absolute",top:2,left:c.isCasal?20:2,width:16,height:16,borderRadius:8,background:c.isCasal?"#0A1628":"#6B7489",transition:"all .2s"}}/>
+                <div onClick={function(){
+                    var ehCasal=(c.tipoCli==="casal"||c.tipoCli==="familia"||!!c.conjuge);
+                    if(ehCasal){
+                      dp({t:"UC",p:{id:c.id,tipoCli:"individual",conjuge:null}});
+                    }else{
+                      dp({t:"UC",p:{id:c.id,tipoCli:"casal"}});
+                    }
+                  }}
+                  style={{width:40,height:22,borderRadius:11,background:(c.tipoCli==="casal"||c.tipoCli==="familia"||!!c.conjuge)?T.gold:"rgba(255,255,255,0.1)",cursor:"pointer",position:"relative",transition:"all .2s",border:"1px solid "+((c.tipoCli==="casal"||c.tipoCli==="familia"||!!c.conjuge)?T.gold:T.bdrL),flexShrink:0}}>
+                  <div style={{position:"absolute",top:2,left:(c.tipoCli==="casal"||c.tipoCli==="familia"||!!c.conjuge)?20:2,width:16,height:16,borderRadius:8,background:(c.tipoCli==="casal"||c.tipoCli==="familia"||!!c.conjuge)?"#0A1628":"#6B7489",transition:"all .2s"}}/>
                 </div>
               </div>
-              {c.isCasal && (
+              {(c.tipoCli==="casal"||c.tipoCli==="familia"||!!c.conjuge) && (
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
                   <input type="text" placeholder="Nome do cônjuge" value={(c.conjuge&&c.conjuge.nome)||""}
                     onChange={function(e){dp({t:"UC",p:{id:c.id,conjuge:Object.assign({},c.conjuge||{},{nome:e.target.value})}})}}
@@ -19391,15 +20645,15 @@ function FinanceiroView({data:d,dispatch:dp}){
 
               {}
               {selYear==="todos" && anos.length>1 && (
-                <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:14}}>
+                <div style={{display:"grid",gridTemplateColumns:isMob?"1fr":"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:14}}>
                   {anos.map(function(yr){var d=byYear[yr]||{rec:0,count:0};var prevYr=String(+yr-1);var prevRec=byYear[prevYr]?byYear[prevYr].rec:0;var evolYr=prevRec>0?(((d.rec/prevRec)-1)*100):0;return (
-                    <Cd key={yr} onClick={function(){sSelYear(yr);sSelMonth(null)}} style={{padding:"14px 18px",flex:1,minWidth:160,cursor:"pointer"}} glow={true}>
+                    <Cd key={yr} onClick={function(){sSelYear(yr);sSelMonth(null)}} style={{padding:"14px 18px",cursor:"pointer"}} glow={true}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                         <span style={{fontSize:18,fontWeight:800,color:T.gold}}>{yr}</span>
                         {prevRec>0 && <span style={{fontSize:11,fontWeight:700,color:evolYr>=0?T.green:T.red,background:evolYr>=0?T.greenD:T.redD,padding:"2px 8px",borderRadius:6}}>{evolYr>=0?"▲ +":"▼ "}{evolYr.toFixed(1)}%</span>}
                       </div>
-                      <div style={{fontSize:20,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(d.rec)}</div>
-                      <div style={{display:"flex",justifyContent:"space-between",marginTop:4,fontSize:10,color:T.t3}}>
+                      <div style={{fontSize:isMob?18:20,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(d.rec)}</div>
+                      <div style={{display:"flex",justifyContent:"space-between",marginTop:4,fontSize:10,color:T.t3,flexWrap:"wrap",gap:2}}>
                         <span>{d.count} entradas</span>
                         <span>Média {fm(d.rec/(Object.keys(byMonth).filter(function(m){return m.startsWith(yr)}).length||1))}/mês</span>
                       </div>
@@ -19408,18 +20662,18 @@ function FinanceiroView({data:d,dispatch:dp}){
                 </div>
               )}
 
-              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
+              <div style={{display:"grid",gridTemplateColumns:isMob?"1fr 1fr":"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:16}}>
                 {[
                   {l:"RECEITA "+(selYear==="todos"?"TOTAL":selYear),v:fm(totalEntradas),c:T.green},
-                  {l:"DESPESA OPERACIONAL "+(selYear==="todos"?"TOTAL":selYear),v:fm(totalDespOperacional),c:T.red,sub:"excl. remuneração sócios"},
-                  {l:"LUCRO OPERACIONAL "+(selYear==="todos"?"":""+selYear),v:fm(lucroOperacional),c:lucroOperacional>=0?T.green:T.red,sub:"excl. remuneração sócios"},
+                  {l:"DESPESA OPERACIONAL",v:fm(totalDespOperacional),c:T.red,sub:"excl. rem. sócios"},
+                  {l:"LUCRO OPERACIONAL",v:fm(lucroOperacional),c:lucroOperacional>=0?T.green:T.red,sub:"excl. rem. sócios"},
                   {l:"MARGEM OPERACIONAL",v:margemOperacional.toFixed(0)+"%",c:margemOperacional>=50?T.green:T.gold,sub:"sem rem. sócios"},
                   {l:"ENTRADAS",v:String(entradasFilt.length),c:T.cyan},
                   {l:"MESES",v:String(mesesOrdenados.length),c:T.purple},
                 ].map(function(k,i){return (
-                  <Cd key={i} style={{padding:"12px 16px",flex:1,minWidth:120}} hov={false} glow={i===2}>
+                  <Cd key={i} style={{padding:isMob?"10px 12px":"12px 16px"}} hov={false} glow={i===2}>
                     <div style={{fontSize:7,color:T.t3,fontWeight:600,letterSpacing:1}}>{k.l}</div>
-                    <div style={{fontSize:17,fontWeight:800,color:k.c,marginTop:2,fontFamily:"'JetBrains Mono'"}}>{k.v}</div>
+                    <div style={{fontSize:isMob?14:17,fontWeight:800,color:k.c,marginTop:2,fontFamily:"'JetBrains Mono'"}}>{k.v}</div>
                     {k.sub&&<div style={{fontSize:7,color:T.t3,marginTop:2,opacity:0.7}}>{k.sub}</div>}
                   </Cd>
                 )})}
@@ -21658,6 +22912,7 @@ function NewsView({data,dispatch}){
   var s9=useState({}),macroData=s9[0],sMacroData=s9[1];
   var s10=useState(false),macroLoad=s10[0],sMacroLoad=s10[1];
   var s11=useState(false),iaLoad=s11[0],sIaLoad=s11[1];
+  var s12=useState(false),testSending=s12[0],sTestSending=s12[1];
 
   /* === NOTÍCIAS AO VIVO via RSS === */
   var nState=useState({mercado:[],rendaFixa:[],fii:[],internacional:[]});var newsLive=nState[0];var sNewsLive=nState[1];
@@ -22383,6 +23638,82 @@ function NewsView({data,dispatch}){
                 }
               }} style={{padding:"6px 10px",borderRadius:8,border:"1px solid "+T.bdrL,background:T.w3,color:T.t3,fontSize:10,fontWeight:600,cursor:"pointer"}}>⚙️ {(data&&data.config&&data.config.anthropicKey)?"IA configurada":"Configurar IA"}</button>
             )}
+            <button onClick={function(){
+              var cfg=data.config&&data.config.emailjs||{};
+              var pubKey=prompt("EmailJS — Chave Pública (Public Key):\n\nObtido em emailjs.com → Account → API Keys\n\nDeixe vazio para desativar.",cfg.publicKey||"");
+              if(pubKey===null)return;
+              if(!pubKey.trim()){dispatch({t:"CONFIG_SET",p:{key:"emailjs",value:null}});alert("❌ E-mail automático desativado.");return;}
+              var svcId=prompt("EmailJS — Service ID:\n\nExemplo: service_abc123\n\nEncontrado em emailjs.com → Email Services",cfg.serviceId||"");
+              if(!svcId)return;
+              var tplId=prompt("EmailJS — Template ID:\n\nExemplo: template_xyz789\n\nEncontrado em emailjs.com → Email Templates",cfg.templateId||"");
+              if(!tplId)return;
+              var nomeRem=prompt("Nome do remetente (como aparece no e-mail):",cfg.nomeRemetente||"Courinvest");
+              var emailRem=prompt("E-mail de resposta (reply-to):",cfg.remetente||"");
+              dispatch({t:"CONFIG_SET",p:{key:"emailjs",value:{publicKey:pubKey.trim(),serviceId:svcId.trim(),templateId:tplId.trim(),nomeRemetente:(nomeRem||"Courinvest").trim(),remetente:(emailRem||"").trim()}}});
+              alert("✅ E-mail automático configurado! Ao enviar relatórios, eles serão enviados por e-mail automaticamente.");
+            }} style={{padding:"6px 10px",borderRadius:8,border:"1px solid "+(data.config&&data.config.emailjs?"rgba(45,212,160,0.4)":T.bdrL),background:data.config&&data.config.emailjs?"rgba(45,212,160,0.08)":T.w3,color:data.config&&data.config.emailjs?T.green:T.t3,fontSize:10,fontWeight:600,cursor:"pointer"}}>
+              📧 {data.config&&data.config.emailjs?"E-mail ativo":"Configurar E-mail"}
+            </button>
+            {data.config&&data.config.emailjs&&data.config.emailjs.publicKey&&data.config.emailjs.serviceId&&data.config.emailjs.templateId && (
+              <button disabled={testSending} onClick={function(){
+                var cfg=data.config.emailjs;
+                var testEmail=prompt("Enviar e-mail de teste para qual endereço?\n\nUse seu e-mail pessoal para conferir o template antes de enviar aos clientes.","courinvest.67@gmail.com");
+                if(!testEmail||!testEmail.trim())return;
+                testEmail=testEmail.trim();
+                sTestSending(true);
+                try{
+                  if(window.emailjs)window.emailjs.init({publicKey:cfg.publicKey,limitRate:false});
+                  else{alert("⚠️ SDK do EmailJS não carregou. Recarregue a página e tente novamente.");sTestSending(false);return;}
+                }catch(e){alert("Erro ao iniciar EmailJS: "+e.message);sTestSending(false);return;}
+
+                var hojeT=new Date();
+                var MN_T=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+                var mesRefT=MN_T[hojeT.getMonth()]+" de "+hojeT.getFullYear();
+                var reportHtmlT=montarEmailRelatorioHtml({
+                  nome:"Teste",
+                  mesRefStr:mesRefT,
+                  tituloTopo:"🧪 E-mail de Teste",
+                  introTxt:"Este é um e-mail de teste para validar o template, a integração do EmailJS e a geração do PDF antes do envio real aos clientes.",
+                  destaque:{icon:"💰",label:"Patrimônio Atual",value:"R$ 1.250.000,00"},
+                  mercado:montarResumoMercadoEmail(obterOverviewMercadoRecente(data)),
+                  remetente:cfg.remetente||"contato@courinvest.com.br",
+                  notaExtra:"Se você recebeu este e-mail corretamente, com a formatação preservada e o botão de PDF funcionando, a configuração está 100% pronta."
+                });
+
+                gerarPdfLinkCourinvest("relatorios/_teste/teste_"+Date.now()+".pdf",reportHtmlT.replace("%%PDF_BUTTON%%","")).then(function(pdfUrl){
+                  var botaoHtml=pdfUrl
+                    ?'<a class="cta-btn" href="'+pdfUrl+'" target="_blank" rel="noopener">📄 Baixar Relatório Completo em PDF</a>'
+                    :'<span class="cta-fallback" style="color:#c00">⚠️ PDF não foi gerado/enviado ao Storage (veja o alerta após o envio).</span>';
+                  var reportHtmlFinal=reportHtmlT.replace("%%PDF_BUTTON%%",botaoHtml);
+
+                  var templateParams={
+                    to_email:testEmail,
+                    to_name:"Teste",
+                    mes_ref:mesRefT,
+                    patrimonio:"R$ 1.250.000,00",
+                    rentabilidade:"+1,85%",
+                    tipo_servico:"🧪 TESTE — Gestão de Patrimônio",
+                    report_html:reportHtmlFinal,
+                    from_name:cfg.nomeRemetente||"Courinvest",
+                    reply_to:cfg.remetente||"",
+                  };
+
+                  window.emailjs.send(cfg.serviceId,cfg.templateId,templateParams).then(function(){
+                    sTestSending(false);
+                    if(pdfUrl){
+                      alert("✅ E-mail de teste enviado para "+testEmail+", com o PDF gerado e o link de download incluído!\n\nVerifique a caixa de entrada (e o spam) em alguns instantes.");
+                    }else{
+                      alert("⚠️ E-mail de teste enviado para "+testEmail+", mas o PDF NÃO foi gerado/enviado ao Storage.\n\nCausas comuns: Storage não habilitado no projeto Firebase, ou regras do Storage bloqueando o upload. Veja o console do navegador (F12) para o erro exato.");
+                    }
+                  }).catch(function(e){
+                    sTestSending(false);
+                    alert("❌ Erro ao enviar e-mail de teste:\n\n"+(e&&e.text||e&&e.message||JSON.stringify(e)));
+                  });
+                });
+              }} style={{padding:"6px 10px",borderRadius:8,border:"1px solid rgba(56,189,248,0.4)",background:testSending?"rgba(56,189,248,0.05)":"rgba(56,189,248,0.1)",color:T.cyan,fontSize:10,fontWeight:600,cursor:testSending?"not-allowed":"pointer",opacity:testSending?0.6:1}}>
+                {testSending?"⏳ Enviando...":"🧪 Enviar teste"}
+              </button>
+            )}
           </div>
           <div style={{height:18}}/>
 
@@ -22520,29 +23851,52 @@ function NewsView({data,dispatch}){
 
 /* ============ PROPOSTAS COMERCIAIS ============ */
 
+/* === TABELA DE PREÇOS COURINVEST (vigente) ===
+   R$1 – R$100.000        → Consultoria Financeira Pontual → R$ 990 fixo
+   R$100.001 – R$200.000  → Consultoria Financeira Pontual → 1% do patrimônio
+   R$200.001 – R$1.000.000→ Gestão de Patrimônio          → 0,15% a.m. (sobre o total)
+   Acima de R$1.000.000   → Gestão de Patrimônio          → 0,10% a.m. (sobre o total)
+   Obs: cliente com pat > R$200k que opte por Consultoria → cobra 1% (pontual)
+*/
+var TABELA_PRECOS_CI=[
+  {de:0,        ate:100000,  servico:"consultoria", tipo:"fixo",       valor:990,    label:"Consultoria Financeira (pontual)",pct:null,  txMes:null},
+  {de:100000,   ate:200000,  servico:"consultoria", tipo:"percentual",  valor:null,   label:"Consultoria Financeira (pontual)",pct:1.0,   txMes:null},
+  {de:200000,   ate:1000000, servico:"patrimonio",  tipo:"taxa_mensal", valor:null,   label:"Gestão de Patrimônio",            pct:null,  txMes:0.15},
+  {de:1000000,  ate:null,    servico:"patrimonio",  tipo:"taxa_mensal", valor:null,   label:"Gestão de Patrimônio",            pct:null,  txMes:0.10},
+];
+
+function faixaPrecoCI(patrimonio){
+  var p=patrimonio||0;
+  for(var i=0;i<TABELA_PRECOS_CI.length;i++){
+    var f=TABELA_PRECOS_CI[i];
+    if(p>f.de&&(f.ate===null||p<=f.ate))return f;
+  }
+  return TABELA_PRECOS_CI[TABELA_PRECOS_CI.length-1];
+}
+
+function servicoSugeridoCI(patrimonio){
+  var f=faixaPrecoCI(patrimonio||0);
+  return f?f.servico:"consultoria";
+}
+
 function txGestaoRegressiva(patrimonio){
   if(!patrimonio||patrimonio<=0)return null;
-  if(patrimonio<=200000)return 0.200;
-  if(patrimonio<=600000)return 0.175;
-  if(patrimonio<=1500000)return 0.150;
-  if(patrimonio<=3000000)return 0.125;
-  return 0.100;
+  if(patrimonio<=1000000)return 0.15;
+  return 0.10;
 }
 /* Consultoria Financeira (trabalho pontual, 2 sessões):
-   - patrimônio < R$ 100k: valor fixo de R$ 990
-   - patrimônio >= R$ 100k: 1% sobre o patrimônio
+   - patrimônio <= R$ 100k: valor fixo de R$ 990
+   - patrimônio > R$ 100k: 1% sobre o patrimônio (inclusive para pat > R$200k que escolha consultoria)
 */
 function precoConsultoria(patrimonio){
   var p=patrimonio||0;
-  if(p<100000)return{tipo:"fixo",valor:990,base:0,pct:0};
+  if(p<=100000)return{tipo:"fixo",valor:990,base:0,pct:0};
   return{tipo:"percentual",valor:p*0.01,base:p,pct:1.0};
 }
 const TABELA_TX_GP=[
-  {de:0,ate:200000,tx:0.200,label:"Até R$ 200 mil"},
-  {de:200000,ate:600000,tx:0.175,label:"R$ 200 mil a R$ 600 mil"},
-  {de:600000,ate:1500000,tx:0.150,label:"R$ 600 mil a R$ 1,5 mi"},
-  {de:1500000,ate:3000000,tx:0.125,label:"R$ 1,5 mi a R$ 3 mi"},
-  {de:3000000,ate:null,tx:0.100,label:"Acima de R$ 3 milhões"}
+  {de:0,ate:200000,tx:0.15,label:"Até R$ 200 mil"},
+  {de:200000,ate:1000000,tx:0.15,label:"R$ 200 mil a R$ 1 milhão"},
+  {de:1000000,ate:null,tx:0.10,label:"Acima de R$ 1 milhão"}
 ];
 const SERVICOS_CI={
   patrimonio:{
@@ -24034,12 +25388,25 @@ function PropostasView({data,dispatch}){
   
   
   useEffect(function(){
-    if(!form||form.servico!=="patrimonio")return;
-    var tx=txGestaoRegressiva(form.valorPatrimonio);
-    if(tx!==null&&Math.abs((form.taxaMensal||0)-tx)>0.0001){
-      sForm(function(p){return{...p,taxaMensal:tx}});
+    if(!form||!form.valorPatrimonio)return;
+    var pat=form.valorPatrimonio||0;
+    var faixa=faixaPrecoCI(pat);
+    if(!faixa)return;
+    var updates={};
+    /* Auto-sugere serviço baseado no patrimônio (só se usuário não alterou manualmente) */
+    if(form._servicoAutoSugerido!==false){
+      if(faixa.servico!==form.servico){
+        updates.servico=faixa.servico;
+        updates._servicoAutoSugerido=true;
+      }
     }
-  },[form&&form.valorPatrimonio,form&&form.servico]);
+    /* Taxa mensal para GP */
+    if((updates.servico||form.servico)==="patrimonio"){
+      var tx=txGestaoRegressiva(pat);
+      if(tx!==null&&Math.abs((form.taxaMensal||0)-tx)>0.0001)updates.taxaMensal=tx;
+    }
+    if(Object.keys(updates).length>0)sForm(function(p){return{...p,...updates}});
+  },[form&&form.valorPatrimonio]);
 
   const novaProposta=function(){
     var p={
@@ -24060,7 +25427,10 @@ function PropostasView({data,dispatch}){
       perfilRisco:"Moderado",
       portfolioSugerido:[],
       observacoes:"",
-      validadeDias:30
+      validadeDias:30,
+      /* Defaults para comparativo de payback */
+      rentAtual:10.0,    /* CDI ~10-14% — usuário ajusta conforme carteira atual */
+      melhoriaPP:2.0,    /* melhoria esperada de 2pp — valor conservador */
     };
     sForm(p);
     sEditingId(p.id);
@@ -24981,14 +26351,26 @@ function PropostasView({data,dispatch}){
               <select value={form.clienteId||""} onChange={function(e){
                 var c=clientes.find(function(x){return x.id===e.target.value});
                 if(c){
+                  var patC=c.patGorila||c.pat||0;
+                  /* Tenta pegar rentabilidade atual do Gorila (12m) para pré-preencher payback */
+                  var rentAtualC=10.0;
+                  if(c._gorilaRent&&c._gorilaRent.periods){
+                    var p12=c._gorilaRent.periods.find(function(p){return String(p.p||"").toLowerCase().indexOf("12m")>=0;});
+                    if(p12&&typeof p12.rent==="number"&&p12.rent>0)rentAtualC=+(p12.rent*100).toFixed(1);
+                    else{var pMesC=c._gorilaRent.periods.find(function(p){return String(p.p||"").toLowerCase().indexOf("último")>=0||String(p.p||"").toLowerCase().indexOf("mes")>=0;});
+                    if(pMesC&&typeof pMesC.cdi==="number"&&pMesC.cdi>0)rentAtualC=+(pMesC.cdi*100*12).toFixed(1);}
+                  }
                   upF("clienteId",c.id);
                   upF("clienteNome",c.nome);
                   upF("clienteEmail",c.email||"");
                   upF("clienteTel",c.tel||"");
-                  upF("valorPatrimonio",c.patGorila||c.pat||0);
-                  upF("taxaMensal",c.txGestao||0.083);
+                  upF("valorPatrimonio",patC);
+                  upF("taxaMensal",patC>0?txGestaoRegressiva(patC):0.15);
                   upF("feeFixo",c.feeFixo||0);
                   upF("perfilRisco",c.risco||"Moderado");
+                  upF("rentAtual",rentAtualC);
+                  /* auto-sugere serviço baseado no patrimônio */
+                  if(patC>0)upF("servico",servicoSugeridoCI(patC));
                 }else{
                   upF("clienteId",null);
                 }
@@ -25029,12 +26411,97 @@ function PropostasView({data,dispatch}){
         {wizard===2 && (
           <Cd style={{padding:24}} hov={false}>
             <div style={{fontSize:14,fontWeight:700,color:T.gold,marginBottom:16}}>2. Serviço Oferecido</div>
-            
+
+            {/* Tabela de preços */}
+            <div style={{marginBottom:18,borderRadius:10,overflow:"hidden",border:"1px solid "+T.bdrL}}>
+              <div style={{padding:"8px 14px",background:"rgba(212,163,40,0.08)",fontSize:10,fontWeight:800,color:T.gold,letterSpacing:1}}>📋 TABELA DE PREÇOS COURINVEST</div>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
+                <thead>
+                  <tr style={{background:"rgba(255,255,255,0.02)"}}>
+                    <th style={{padding:"7px 12px",textAlign:"left",color:T.t3,fontWeight:600,fontSize:9,letterSpacing:.5}}>FAIXA DE PATRIMÔNIO</th>
+                    <th style={{padding:"7px 12px",textAlign:"left",color:T.t3,fontWeight:600,fontSize:9,letterSpacing:.5}}>SERVIÇO</th>
+                    <th style={{padding:"7px 12px",textAlign:"right",color:T.t3,fontWeight:600,fontSize:9,letterSpacing:.5}}>PREÇO</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    {de:"R$ 1",ate:"R$ 100.000",srv:"Consultoria Financeira (pontual)",preco:"R$ 990 fixo",cor:T.cyan},
+                    {de:"R$ 100.000,01",ate:"R$ 200.000",srv:"Consultoria Financeira (pontual)",preco:"1% do patrimônio",cor:T.cyan},
+                    {de:"R$ 200.000,01",ate:"R$ 1.000.000",srv:"Gestão de Patrimônio",preco:"0,15% a.m. (sobre o total)",cor:T.gold},
+                    {de:"Acima de",ate:"R$ 1.000.000",srv:"Gestão de Patrimônio",preco:"0,10% a.m. (sobre o total)",cor:T.gold},
+                  ].map(function(row,i){
+                    var ativo=form.valorPatrimonio>0&&(function(){
+                      if(i===0)return form.valorPatrimonio<=100000;
+                      if(i===1)return form.valorPatrimonio>100000&&form.valorPatrimonio<=200000;
+                      if(i===2)return form.valorPatrimonio>200000&&form.valorPatrimonio<=1000000;
+                      if(i===3)return form.valorPatrimonio>1000000;
+                    })();
+                    return (
+                      <tr key={i} style={{borderTop:"1px solid "+T.bdrL,background:ativo?"rgba(212,163,40,0.06)":"transparent"}}>
+                        <td style={{padding:"8px 12px",color:T.t2,fontSize:10}}>
+                          {i===3?"Acima de R$ 1.000.000":row.de+" → "+row.ate}
+                          {ativo&&<span style={{marginLeft:6,fontSize:8,color:T.gold,fontWeight:700,padding:"1px 5px",background:"rgba(212,163,40,0.15)",borderRadius:4}}>← VOCÊ</span>}
+                        </td>
+                        <td style={{padding:"8px 12px",color:row.cor,fontWeight:700,fontSize:10}}>{row.srv}</td>
+                        <td style={{padding:"8px 12px",textAlign:"right",color:T.t1,fontWeight:800,fontFamily:"'JetBrains Mono'",fontSize:10}}>{row.preco}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <div style={{padding:"6px 12px 8px",fontSize:9,color:T.t3,lineHeight:1.5,borderTop:"1px solid "+T.bdrL}}>
+                ⚠️ Cliente com patrimônio acima de R$200k que opte por Consultoria pontual: cobra 1% do patrimônio total.
+              </div>
+            </div>
+
+            {/* Auto-sugestão */}
+            {form.valorPatrimonio>0 && (function(){
+              var faixa=faixaPrecoCI(form.valorPatrimonio);
+              if(!faixa)return null;
+              var sugerido=faixa.servico;
+              var precoLabel=faixa.tipo==="fixo"?"R$ 990 fixo":faixa.tipo==="percentual"?"1% = "+fm(form.valorPatrimonio*0.01):"Taxa: "+faixa.txMes+"% a.m. = "+fm(form.valorPatrimonio*faixa.txMes/100)+"/mês";
+              var cor=sugerido==="patrimonio"?T.gold:T.cyan;
+              return (
+                <div style={{marginBottom:16,padding:"10px 14px",background:cor+"11",border:"1px solid "+cor+"33",borderRadius:10,display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontSize:16}}>{sugerido==="patrimonio"?"💎":"🎯"}</span>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:800,color:cor}}>
+                      Sugestão para {fm(form.valorPatrimonio)}: <strong>{sugerido==="patrimonio"?"Gestão de Patrimônio":"Consultoria Financeira"}</strong>
+                    </div>
+                    <div style={{fontSize:10,color:T.t3}}>{precoLabel}</div>
+                  </div>
+                  {form.servico!==sugerido&&(
+                    <Bt v="secondary" onClick={function(){upF("servico",sugerido);upF("_servicoAutoSugerido",true);upF("_forcarConsultoria",false);}} style={{marginLeft:"auto",fontSize:9,padding:"4px 10px",color:cor,border:"1px solid "+cor+"44"}}>Aplicar</Bt>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Opção especial: forçar consultoria pontual mesmo com pat > R$200k */}
+            {form.valorPatrimonio>200000 && (
+              <div style={{marginBottom:16,padding:"10px 14px",background:"rgba(45,212,160,0.05)",border:"1px solid rgba(45,212,160,0.2)",borderRadius:10}}>
+                <label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer"}}>
+                  <input type="checkbox" checked={!!form._forcarConsultoria} onChange={function(e){
+                    var fc=e.target.checked;
+                    upF("_forcarConsultoria",fc);
+                    upF("servico",fc?"consultoria":"patrimonio");
+                    upF("_servicoAutoSugerido",false);
+                  }} style={{marginTop:2,accentColor:"#2DD4A0",width:16,height:16,flexShrink:0}}/>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:T.cyan,marginBottom:2}}>🎯 Cliente prefere Consultoria Pontual (mesmo com patrimônio acima de R$200k)</div>
+                    <div style={{fontSize:10,color:T.t3,lineHeight:1.5}}>
+                      Neste caso, cobrar <strong style={{color:T.t1}}>1% do patrimônio total</strong> ({fm(form.valorPatrimonio*0.01)}) como pagamento único, conforme tabela de preços.
+                    </div>
+                  </div>
+                </label>
+              </div>
+            )}
+
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:12,marginBottom:20}}>
               {Object.values(SERVICOS_CI).map(function(s){
                 var sel=form.servico===s.id;
                 return (
-                  <div key={s.id} onClick={function(){upF("servico",s.id)}} style={{padding:20,borderRadius:12,border:sel?"2px solid "+s.cor:"1px solid "+T.bdrL,background:sel?s.cor+"11":T.w3,cursor:"pointer",transition:"all 0.2s"}}>
+                  <div key={s.id} onClick={function(){upF("servico",s.id);upF("_servicoAutoSugerido",false);}} style={{padding:20,borderRadius:12,border:sel?"2px solid "+s.cor:"1px solid "+T.bdrL,background:sel?s.cor+"11":T.w3,cursor:"pointer",transition:"all 0.2s"}}>
                     <div style={{fontSize:28,marginBottom:8}}>{s.icone}</div>
                     <div style={{fontSize:15,fontWeight:800,color:sel?s.cor:T.t1,marginBottom:4}}>{s.nome}</div>
                     <div style={{fontSize:10,color:T.t3,lineHeight:1.4}}>{s.publico}</div>
@@ -25310,6 +26777,24 @@ function PropostasView({data,dispatch}){
         {wizard===4 && (
           <Cd style={{padding:24}} hov={false}>
             <div style={{fontSize:14,fontWeight:700,color:T.gold,marginBottom:16}}>4. Portfólio Sugerido e Precificação</div>
+
+            {/* Checkbox: cliente acima de R$200k prefere Consultoria Pontual */}
+            {form.valorPatrimonio>200000 && (
+              <div style={{marginBottom:16,padding:"10px 14px",background:"rgba(45,212,160,0.05)",border:"1px solid rgba(45,212,160,0.25)",borderRadius:10}}>
+                <label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer"}}>
+                  <input type="checkbox" checked={!!form._forcarConsultoria} onChange={function(e){
+                    var fc=e.target.checked;
+                    sForm(function(p){return{...p,_forcarConsultoria:fc,servico:fc?"consultoria":"patrimonio",_servicoAutoSugerido:false}});
+                  }} style={{marginTop:3,accentColor:"#2DD4A0",width:16,height:16,flexShrink:0}}/>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:T.cyan}}>🎯 Cliente prefere Consultoria Pontual (mesmo com patrimônio acima de R$ 200k)</div>
+                    <div style={{fontSize:10,color:T.t3,marginTop:2,lineHeight:1.5}}>
+                      Cobra <strong style={{color:T.t1}}>1% do patrimônio total</strong> = <strong style={{color:T.green}}>{fm(form.valorPatrimonio*0.01)}</strong> — pagamento único.
+                    </div>
+                  </div>
+                </label>
+              </div>
+            )}
 
             {form.servico==="patrimonio"?(
               <div style={{marginBottom:16}}>
@@ -27027,12 +28512,15 @@ function App({authUser}){
       var fbMes=parseInt(fb[0]),fbAno=parseInt(fb[1]);
       if(isNaN(fbMes)||isNaN(fbAno))return;
       if(fbAno<100)fbAno+=2000;
-      /* Período: de feeBase até o mês atual */
+      /* Período: de feeBase até o mês ANTERIOR ao atual (BCB não tem dados do mês corrente) */
       var mesAtual=hoje.getMonth()+1;
       var anoAtual=hoje.getFullYear();
-      /* Mês anterior ao início (para capturar o acumulado do período completo) */
+      /* Usa mês anterior para evitar 400 (dados do mês atual ainda não publicados) */
+      var mesFim=mesAtual-1;
+      var anoFim=anoAtual;
+      if(mesFim===0){mesFim=12;anoFim--;}
       var mesIni=fbMes,anoIni=fbAno;
-      fetchIpcaAcumulado(anoIni,mesIni,anoAtual,mesAtual).then(function(res){
+      fetchIpcaAcumulado(anoIni,mesIni,anoFim,mesFim).then(function(res){
         if(!res)return;
         dp({t:"UC",p:{id:c.id,_ipcaReajuste:{acumulado:res.acumulado,periodo:res.periodo,meses:res.meses,fetchedAt:Date.now()}}});
       });
@@ -27298,23 +28786,49 @@ function App({authUser}){
   const notsReais=React.useMemo(function(){return gerarNotificacoesReais(d)},[d.cl]);
   const nL=notsReais.filter(function(n){return !n.lido && n.tipo!=="placeholder"}).length;
 
-  /* ===== PUSH NOTIFICATIONS NATIVAS ===== */
+  /* ===== PUSH NOTIFICATIONS NATIVAS =====
+     Usa navigator.serviceWorker.ready para showNotification — compatível com Android PWA.
+     new Notification() não funciona em muitos Androids sem passar pelo SW. */
   const[pushPerm,sPushPerm]=useState(typeof Notification!=="undefined"?Notification.permission:"default");
+  const[showPushModal,sShowPushModal]=useState(false);
+
+  /* Mostra modal de permissão na 1ª visita se ainda não respondeu */
+  React.useEffect(function(){
+    if(typeof Notification==="undefined")return;
+    if(Notification.permission==="default"){
+      /* Aguarda 4s para o app carregar antes de pedir */
+      var t=setTimeout(function(){sShowPushModal(true);},4000);
+      return function(){clearTimeout(t);};
+    }
+  },[]);
+
+  /* Helper: mostra notificação via SW (Android-friendly) ou fallback Notification() */
+  var _showPushNotif=function(title,body,tag){
+    if(typeof Notification==="undefined"||Notification.permission!=="granted")return;
+    var icon="/icon-192.png";
+    if("serviceWorker" in navigator){
+      navigator.serviceWorker.ready.then(function(sw){
+        sw.showNotification(title,{body:body,icon:icon,badge:icon,tag:tag||"courinvest",vibrate:[200,100,200]});
+      }).catch(function(){
+        try{new Notification(title,{body:body,icon:icon});}catch(e){}
+      });
+    }else{
+      try{new Notification(title,{body:body,icon:icon});}catch(e){}
+    }
+  };
 
   const pedirPermissaoPush=function(){
     if(typeof Notification==="undefined")return;
     Notification.requestPermission().then(function(p){
       sPushPerm(p);
+      sShowPushModal(false);
       if(p==="granted"){
-        new Notification("🔔 Courinvest Hub",{
-          body:"Notificações ativadas! Você receberá alertas de vencimentos, rentabilidade e aniversários.",
-          icon:"/courinvest-hub/icon-192.png"
-        });
+        _showPushNotif("🔔 Courinvest Hub","Notificações ativadas! Você receberá alertas de vencimentos e reajustes.","setup");
       }
     });
   };
 
-  /* Dispara push para alertas urgentes não lidos (roda 1x ao abrir o app) */
+  /* Dispara push para alertas urgentes não lidos (roda 1x por dia ao abrir o app) */
   React.useEffect(function(){
     if(pushPerm!=="granted")return;
     var urgentes=notsReais.filter(function(n){
@@ -27322,18 +28836,11 @@ function App({authUser}){
     });
     if(!urgentes.length)return;
     var chaveHoje="push_enviado_"+new Date().toISOString().slice(0,10);
-    if(sessionStorage.getItem(chaveHoje))return; /* só 1x por dia */
+    if(sessionStorage.getItem(chaveHoje))return;
     sessionStorage.setItem(chaveHoje,"1");
     urgentes.slice(0,3).forEach(function(n,i){
       setTimeout(function(){
-        try{
-          new Notification("⚡ "+n.cliNome||"Alerta",{
-            body:n.msg,
-            icon:"/courinvest-hub/icon-192.png",
-            badge:"/courinvest-hub/icon-192.png",
-            tag:"courinvest-"+n.id
-          });
-        }catch(e){}
+        _showPushNotif("⚡ "+(n.cliNome||"Alerta"),n.msg,"courinvest-"+(n.id||i));
       },i*1500);
     });
   },[notsReais,pushPerm]);
@@ -27356,7 +28863,7 @@ function App({authUser}){
 
       {}
       {isMobile && (
-        <div style={{padding:"10px 16px",borderBottom:"1px solid "+T.bdr,background:T.bg2,display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,zIndex:50}}>
+        <>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <button onClick={function(){sShowMenu(!showMenu)}} style={{background:"none",border:"none",color:T.gold,fontSize:22,cursor:"pointer",padding:4}}>☰</button>
             <Logo sz={28} full={false}/>
@@ -27370,10 +28877,29 @@ function App({authUser}){
               </button>
             </div>
           </div>
-        </div>
+        </>
       )}
 
       {}
+      {/* === MODAL DE PERMISSÃO DE PUSH (aparece automaticamente na 1ª vez) === */}
+      {showPushModal && (
+        <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"flex-end",justifyContent:"center",padding:16}}>
+          <div style={{background:T.bg2,borderRadius:20,padding:24,maxWidth:400,width:"100%",border:"1px solid "+T.bdr,boxShadow:"0 -8px 40px rgba(0,0,0,0.5)"}}>
+            <div style={{fontSize:32,textAlign:"center",marginBottom:12}}>🔔</div>
+            <div style={{fontSize:17,fontWeight:800,color:T.gold,textAlign:"center",marginBottom:8}}>Ativar Notificações</div>
+            <div style={{fontSize:13,color:T.t2,textAlign:"center",lineHeight:1.6,marginBottom:20}}>
+              Receba alertas no celular sobre <strong style={{color:T.t1}}>reajustes de fee</strong>, <strong style={{color:T.t1}}>vencimentos</strong> e <strong style={{color:T.t1}}>carteiras desatualizadas</strong> — mesmo com o app em segundo plano.
+            </div>
+            <button onClick={pedirPermissaoPush} style={{width:"100%",padding:"14px",borderRadius:14,border:"none",background:T.gold,color:"#1a1505",fontSize:15,fontWeight:800,cursor:"pointer",marginBottom:10}}>
+              ✅ Ativar notificações
+            </button>
+            <button onClick={function(){sShowPushModal(false);}} style={{width:"100%",padding:"10px",borderRadius:14,border:"none",background:"transparent",color:T.t3,fontSize:13,cursor:"pointer"}}>
+              Agora não
+            </button>
+          </div>
+        </div>
+      )}
+
       {isMobile && showMenu && (
         <div style={{position:"fixed",inset:0,zIndex:200,display:"flex"}} onClick={function(){sShowMenu(false)}}>
           <div onClick={function(e){e.stopPropagation()}} style={{width:260,background:T.bg2,borderRight:"1px solid "+T.bdr,display:"flex",flexDirection:"column",height:"100%",boxShadow:"4px 0 30px rgba(0,0,0,0.5)"}}>
@@ -27721,7 +29247,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '314';
+  var SW_VERSION = '354';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
