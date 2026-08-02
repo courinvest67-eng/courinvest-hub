@@ -8101,18 +8101,10 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
            (👤 titular, 👤 cônjuge, 👫 Consolidado do Casal — cada um já traz o patrimônio
            individual e o "👫 Consolidado do Casal" já traz o total). */
 
-        /* Bloco "desde o início" (Patrimônio/Investido/Ganho/Rentabilidade) — omitido pra
-           clientes casal porque tCV/tCT/ganhoV/rentPct aqui refletem só o titular (dependem
-           do viewCasal ambiente), e duplicavam/confundiam com o Patrimônio Total do casal já
-           mostrado nos blocos de KPI acima. */
-        if(!_ehCasalRel){
-          body+='<div class="kpi-grid">';
-          (function(){var txt=fmF(tCV);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value gold" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">posição atual</div></div>';})();
-          body+='<div class="kpi"><div class="kpi-label">Investido</div><div class="kpi-value">'+fmF(tCT)+'</div><div class="kpi-sub">custo total</div></div>';
-          body+='<div class="kpi"><div class="kpi-label">Ganho / Perda</div><div class="kpi-value '+(ganhoV>=0?"green":"red")+'">'+(ganhoV>=0?"+":"")+fmF(ganhoV)+'</div><div class="kpi-sub">acumulado</div></div>';
-          body+='<div class="kpi"><div class="kpi-label">Rentabilidade</div><div class="kpi-value '+(ganhoV>=0?"green":"red")+'">'+(ganhoV>=0?"+":"")+rentPct+'%</div><div class="kpi-sub">desde o início</div></div>';
-          body+='</div>';
-        }
+        /* Bloco "desde o início" (Patrimônio/Investido/Ganho/Rentabilidade) — REMOVIDO a pedido
+           do usuário: duplicava o Patrimônio já mostrado na primeira linha de KPIs acima e
+           misturava rentabilidade "no mês" com rentabilidade "desde o início" na mesma seção,
+           confundindo o cliente. */
       }else{
         leadResumo='Visão consolidada da carteira '+(_ehCasalRel?'do <span class="cv-lead-strong">casal</span>':'<span class="cv-lead-strong">'+c.nome.split(" ")[0]+'</span>')+', com posição atual, custo de aquisição e ganho acumulado desde o início.';
         body+='<p class="cv-lead">'+leadResumo+'</p>';
