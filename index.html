@@ -432,7 +432,7 @@ const gerarRelatorioHtmlHeadless=function(cliente,dadosApp,tipoRelatorio){
 
 /* === BUSCA O OVERVIEW DE MERCADO MAIS RECENTE (o mesmo texto/dados usados no "Resumo do Mercado
    Financeiro" do relatório completo em PDF, mantido pelo usuário na aba "Overview IA") ===
-   Mesma lógica de busca do gerarRelatorio (mês anterior → mês atual → qualquer chave disponível
+   Mesma lógica de busca do gerarRelatorio (mês atual → mês anterior → qualquer chave disponível
    com texto), só que reutilizável fora do componente CD. */
 const obterOverviewMercadoRecente=function(dadosApp){
   if(!dadosApp||!dadosApp.overviewMercado)return null;
@@ -440,7 +440,7 @@ const obterOverviewMercadoRecente=function(dadosApp){
   var refAnt=new Date();refAnt.setDate(1);refAnt.setMonth(refAnt.getMonth()-1);
   var chaveAnt=refAnt.getFullYear()+"-"+String(refAnt.getMonth()+1).padStart(2,"0");
   var chaveAtual=hoje.getFullYear()+"-"+String(hoje.getMonth()+1).padStart(2,"0");
-  var ov=dadosApp.overviewMercado[chaveAnt]||dadosApp.overviewMercado[chaveAtual]||null;
+  var ov=dadosApp.overviewMercado[chaveAtual]||dadosApp.overviewMercado[chaveAnt]||null;
   if(!ov){
     var chaves=Object.keys(dadosApp.overviewMercado).sort().reverse();
     for(var i=0;i<chaves.length;i++){
@@ -7861,13 +7861,19 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
          Busca o mais recente disponível se não achar o mês exato. */
       if(tipo==="mensal" && secAtiva("overview")){
         /* DEBUG: log do overviewMercado */
-        /* Busca overview: mês anterior, mês atual, ou qualquer chave disponível */
+        /* Busca overview: mês atual (o que foi publicado agora, na aba Overview IA) primeiro,
+           mês anterior como fallback (caso o overview deste mês ainda não tenha sido publicado),
+           ou qualquer chave disponível como último recurso. A aba Overview IA salva a chave pelo
+           mês em que o texto é PUBLICADO (ex: publica em agosto, descrevendo julho) — por isso
+           "mês atual" tem que vir primeiro na busca, senão um overview antigo (do ciclo passado)
+           sempre "ganha" do que acabou de ser publicado, mesmo depois de clicar em "Salvar e
+           publicar nos relatórios". Isso causava o relatório mostrar o texto do mês errado. */
         var _ovRef=new Date();_ovRef.setDate(1);_ovRef.setMonth(_ovRef.getMonth()-1);
         var chaveOvRel=_ovRef.getFullYear()+"-"+String(_ovRef.getMonth()+1).padStart(2,"0");
         var chaveOvAtual=new Date().getFullYear()+"-"+String(new Date().getMonth()+1).padStart(2,"0");
         var ovDataRel=null;
         if(_d&&_d.overviewMercado){
-          ovDataRel=_d.overviewMercado[chaveOvRel]||_d.overviewMercado[chaveOvAtual]||null;
+          ovDataRel=_d.overviewMercado[chaveOvAtual]||_d.overviewMercado[chaveOvRel]||null;
           if(!ovDataRel){
             var todasChaves=Object.keys(_d.overviewMercado).sort().reverse();
             for(var _ki=0;_ki<todasChaves.length;_ki++){
@@ -10498,7 +10504,11 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       var MESES_TOC=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
       var _tocRef=new Date();_tocRef.setDate(1);_tocRef.setMonth(_tocRef.getMonth()-1);
       var chaveOvToc=_tocRef.getFullYear()+"-"+String(_tocRef.getMonth()+1).padStart(2,"0");
-      var temOvToc=secAtiva("overview") && d&&d.overviewMercado&&d.overviewMercado[chaveOvToc] && d.overviewMercado[chaveOvToc].texto;
+      var chaveOvTocAtual=new Date().getFullYear()+"-"+String(new Date().getMonth()+1).padStart(2,"0");
+      /* Mesma prioridade do corpo do relatório: mês atual (recém-publicado) primeiro, mês
+         anterior como fallback — pra o índice bater com o que de fato aparece no relatório. */
+      var _ovTocEfetivo=(d&&d.overviewMercado&&(d.overviewMercado[chaveOvTocAtual]||d.overviewMercado[chaveOvToc]))||null;
+      var temOvToc=secAtiva("overview") && _ovTocEfetivo && _ovTocEfetivo.texto;
       var subTpoToc=tipo==="anual"?"RELATÓRIO ANUAL":"RELATÓRIO MENSAL";
       var subPerToc=tipo==="anual"?(MESES_TOC[_tocRef.getMonth()]+"/"+_tocRef.getFullYear()):(mes+"/"+ano);
 
