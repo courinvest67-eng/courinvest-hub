@@ -6477,94 +6477,171 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       try{
         var wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array",cellDates:true});
         var ws=wb.Sheets[wb.SheetNames[0]];
-        var jsonRows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:""});
-        
+        /* raw:true (igual ao import do titular em importGorilaCliente) — pega os NÚMEROS
+           brutos das células (ex: 0.0116 pra uma célula formatada como "1,16%", 1876.816573
+           pra uma célula de posição em R$), em vez de raw:false, que devolve o TEXTO já
+           formatado pelo Excel (ex: "1.02%", às vezes com vírgula como separador de milhar
+           em vez de decimal dependendo da coluna). Foi o raw:false que causava a confusão de
+           unidade (fração vs ponto percentual) que gerou o bug do "116%" nesta função — com
+           raw:true os dois imports (titular e cônjuge) usam exatamente a mesma convenção
+           numérica, então getRentAtivoPer() interpreta os dois da mesma forma sem precisar
+           adivinhar. IMPORTANTE: quem já importou o extrato do cônjuge ANTES desta correção
+           precisa reimportar pra os dados ficarem no formato novo. */
+        var jsonRows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:""});
+        var pv=function(v){if(typeof v==="number")return v;var s=String(v||"0").trim().replace(/R\$\s*/g,"").replace(/%/g,"").replace(/\s/g,"");if(s.match(/,\d{3}\./)){s=s.replace(/,/g,"")}else if(s.match(/\.\d{3},/)){s=s.replace(/\./g,"").replace(",",".")}else if(s.match(/,\d{1,2}$/)){s=s.replace(",",".")}return parseFloat(s)||0};
+        var toISO=function(v){if(v instanceof Date)return v.toISOString().split("T")[0];if(typeof v==="number"&&v>40000&&v<60000)return new Date(Math.round((v-25569)*86400000)).toISOString().split("T")[0];return String(v||"").substring(0,10);};
+
+        var patConj=0,resultadoConj=0,dI="",dF="",aportesConj=0,retiradasConj=0,captacaoConj=0;
+        for(var li=0;li<Math.min(jsonRows.length,30);li++){
+          var lbl=String((jsonRows[li]||[])[0]||"").toLowerCase().trim();
+          var rawVal=(jsonRows[li]||[])[1];
+          if(!lbl)continue;
+          if(lbl.indexOf("patrim")>=0 && patConj===0)patConj=typeof rawVal==="number"?rawVal:pv(rawVal);
+          else if(lbl.indexOf("resultado")>=0 && resultadoConj===0)resultadoConj=typeof rawVal==="number"?rawVal:pv(rawVal);
+          else if(lbl.indexOf("data inicial")>=0)dI=toISO(rawVal);
+          else if(lbl.indexOf("data final")>=0)dF=toISO(rawVal);
+          else if(lbl.indexOf("aporte")>=0||lbl.indexOf("aplica")>=0||lbl.indexOf("depos")>=0)aportesConj=typeof rawVal==="number"?rawVal:pv(rawVal);
+          else if(lbl.indexOf("resgate")>=0||lbl.indexOf("retirad")>=0||lbl.indexOf("saqu")>=0)retiradasConj=typeof rawVal==="number"?rawVal:pv(rawVal);
+          else if(lbl.indexOf("capta")>=0||lbl.indexOf("fluxo")>=0)captacaoConj=typeof rawVal==="number"?rawVal:pv(rawVal);
+        }
+        if(captacaoConj===0)captacaoConj=aportesConj-retiradasConj;
+
+        /* Tabela "Rentabilidade da Carteira" — mesma busca por rótulo usada no import do titular
+           (importGorilaCliente), em vez de procurar "%" em texto (que nunca batia com células
+           numéricas formatadas como %, deixando c.conjuge._gorilaRent.periods sempre vazio e
+           forçando o relatório a cair no fallback por ativo — menos preciso). */
+        var gRentConj={periods:[],atribuicao:[],aportes:aportesConj,retiradas:retiradasConj,captacao:captacaoConj};
+        var rentSectionRow=-1;
+        for(var i=0;i<Math.min(jsonRows.length,30);i++){
+          var c0=String((jsonRows[i]||[])[0]||"").toLowerCase();
+          if(c0.indexOf("rentabilidade da carteira")>=0){rentSectionRow=i;break}
+        }
+        if(rentSectionRow>=0){
+          for(var i=rentSectionRow+2;i<Math.min(rentSectionRow+10,jsonRows.length);i++){
+            var r=jsonRows[i];if(!r)continue;
+            var per=String(r[0]||"").trim();
+            if(!per||per.toLowerCase().indexOf("atribui")>=0||per.toLowerCase().indexOf("posição")>=0)break;
+            var rent=typeof r[3]==="number"?r[3]:pv(r[3]);
+            var ibov=typeof r[4]==="number"?r[4]:pv(r[4]);
+            var cdi=typeof r[5]==="number"?r[5]:pv(r[5]);
+            var ipca=typeof r[6]==="number"?r[6]:pv(r[6]);
+            gRentConj.periods.push({p:per,rent:rent,ibov:ibov,cdi:cdi,ipca:ipca});
+          }
+        }
+        var atribRow=-1;
+        for(var i=0;i<Math.min(jsonRows.length,35);i++){
+          var c0=String((jsonRows[i]||[])[0]||"").toLowerCase();
+          if(c0.indexOf("atribuição de performance")>=0||c0.indexOf("atribuicao de performance")>=0){atribRow=i;break}
+        }
+        if(atribRow>=0){
+          for(var i=atribRow+2;i<Math.min(atribRow+15,jsonRows.length);i++){
+            var r=jsonRows[i];if(!r)continue;
+            var classe=String(r[0]||"").trim();
+            if(!classe||classe.toLowerCase()==="posição"||classe.toLowerCase()==="total")break;
+            var pct=typeof r[1]==="number"?r[1]:pv(r[1]);
+            if(classe&&classe.toLowerCase()!=="classe")gRentConj.atribuicao.push({classe:classe,pct:pct});
+          }
+        }
+
+        /* Header da tabela de ativos — busca pela linha com "corretora"+"ativo"+"classe",
+           igual ao import do titular, em vez de assumir índices fixos de coluna. */
+        var headerRow=-1;
+        for(var i=0;i<Math.min(jsonRows.length,50);i++){
+          var joined=(jsonRows[i]||[]).join("|").toLowerCase();
+          if(joined.indexOf("corretora")>=0&&joined.indexOf("ativo")>=0&&joined.indexOf("classe")>=0){headerRow=i;break}
+        }
+
         var ativosConj=[];
-        var patConj=0;
-        var toISO=function(v){if(v instanceof Date)return v.toISOString().split("T")[0];if(typeof v==="number"&&v>40000)return new Date(Math.round((v-25569)*86400000)).toISOString().split("T")[0];return String(v||"").substring(0,10);};
-        var dI="",dF="";
-        var gRentConj={periods:[],atribuicao:[],aportes:0,retiradas:0};
-        jsonRows.forEach(function(row){
-          var lbl=String(row[0]||"").toLowerCase().trim();
-          if(lbl.indexOf("data inicial")>=0)dI=toISO(row[1]);
-          if(lbl.indexOf("data final")>=0)dF=toISO(row[1]);
-          if(lbl.indexOf("patrimônio")>=0||lbl.indexOf("patrimonio")>=0){var pv=parseFloat(String(row[1]||"").replace(/[^0-9.,-]/g,"").replace(",","."));if(!isNaN(pv)&&pv>0)patConj=pv;}
-          
-          if(row[0]&&row[1]){var s=String(row[1]||"");if(s.indexOf("%")>=0){var rv=parseFloat(s.replace("%","").replace(",","."));if(!isNaN(rv))gRentConj.periods.push({p:String(row[0]).trim(),rent:rv/100});}}
-          /* Ativos — formato Gorila completo:
-           col0=Corretora, col1=Ativo, col2=Sub-Classe, col3=Classe,
-           col4=Quantidade, col5=Posição(R$), col6=Preço(R$),
-           col7=Preço Médio(R$), col8=Vencimento, col9=Rentabilidade */
-          if(row.length>=6&&row[1]&&row[3]){
-            var inst2=String(row[0]||"").trim();
-            var nm2=String(row[1]||"").trim();
-            var subCl=String(row[2]||"").trim().toLowerCase();
-            var cl=String(row[3]||"").trim();
-            var qtd2=parseFloat(String(row[4]||"0").replace(",","."));
-            var pos2=parseFloat(String(row[5]||"0").replace(/[^0-9.,-]/g,"").replace(",","."));
-            var preco2=parseFloat(String(row[6]||"0").replace(",",".")); 
-            var pm2=parseFloat(String(row[7]||"0").replace(",",".")); 
-            var venc2=row[8]?String(row[8]).substring(0,10):""; 
-            var rentPer2=parseFloat(String(row[9]||"0").replace(",",".")); 
-            
+        if(headerRow>=0){
+          var hdr=(jsonRows[headerRow]||[]).map(function(h){return String(h).toLowerCase().trim()});
+          var ci=function(pats){for(var p=0;p<pats.length;p++){for(var j=0;j<hdr.length;j++){if(hdr[j].indexOf(pats[p])>=0)return j}}return-1};
+          var iC=ci(["corretora"]),iA=ci(["ativo"]),iSC=ci(["sub-classe","sub classe","subclasse"]);
+          var iCl=-1;for(var hi=0;hi<hdr.length;hi++){if(hdr[hi]==="classe"){iCl=hi;break}}
+          if(iCl<0)iCl=ci(["classe"]);
+          if(iCl===iSC){for(var hi=0;hi<hdr.length;hi++){if(hdr[hi]==="classe"&&hi!==iSC){iCl=hi;break}}}
+          var iQ=ci(["quantidade"]),iP=ci(["posição","posicao"]),iPr=ci(["preço (r","cotação"]),iPM=ci(["preço médio","preco medio"]),iV=ci(["vencimento"]);
+          /* Mesma lógica do titular: 5 cols de % seguidas de 5 cols de R$, ambas com os mesmos
+             rótulos (Periodo/Ano/12m/24m/Início da Carteira) — usa índice pra não confundir. */
+          var idxsPeriodo=[];
+          for(var hi=0;hi<hdr.length;hi++){if(hdr[hi]==="periodo"||hdr[hi]==="período")idxsPeriodo.push(hi);}
+          var pctStart=idxsPeriodo[0]>=0?idxsPeriodo[0]:-1;
+          var rsStart=idxsPeriodo.length>=2?idxsPeriodo[1]:-1;
+          var COL_LABELS=["periodo","ano","12m","24m","início da carteira"];
+
+          for(var i=headerRow+1;i<jsonRows.length;i++){
+            var row=jsonRows[i];if(!row||row.length<6)continue;
+            var nm2=iA>=0?String(row[iA]||"").trim():"";
+            var cl=iCl>=0?String(row[iCl]||"").trim():"";
+            if(!nm2||!cl)continue;
+            var inst2=iC>=0?String(row[iC]||"").trim():"";
+            var subCl=iSC>=0?String(row[iSC]||"").trim().toLowerCase():"";
+            var qtd2=iQ>=0?pv(row[iQ]):0;
+            var pos2=iP>=0?pv(row[iP]):0;
+            var preco2=iPr>=0?pv(row[iPr]):0;
+            var pm2=iPM>=0?pv(row[iPM]):0;
+            var venc2=iV>=0?row[iV]:"";
+
             var CLASSES_VALIDAS=["Renda Fixa","Renda Variável","Renda Variavel","Investimento No Exterior","Previdência","Previdencia","Criptomoeda","Caixa","Multimercado","Outros"];
             var isClasseValida=CLASSES_VALIDAS.some(function(cv){return cl.indexOf(cv)>=0||cv.indexOf(cl)>=0});
             var isHeader=cl==="Classe"||cl===""||nm2==="Ativo"||nm2===""||nm2.toLowerCase()==="total"||!isClasseValida;
-            if(!isHeader&&!isNaN(pos2)&&pos2>0.01&&nm2.length>1){
-              
-              var tp2="outros";
-              if(cl==="Renda Fixa"){
-                if(subCl.indexOf("prefixado")>=0||subCl.indexOf("inflação")>=0||subCl.indexOf("inflacao")>=0)tp2="tesouro";
-                else if(subCl.indexOf("fund")>=0)tp2="fundo_rf";
-                else if(subCl.indexOf("prev")>=0)tp2="prev";
-                else tp2="cdb";
-              }else if(cl.indexOf("Renda Variável")>=0||cl.indexOf("Renda Variavel")>=0){
-                if(subCl.indexOf("fii")>=0||(/^[A-Z]{4}11$/).test(nm2.replace(/\s/g,"")))tp2="fii";
-                else if(subCl.indexOf("etf")>=0)tp2="etf_br";
-                else if(subCl.indexOf("bdr")>=0)tp2="bdr";
-                else tp2="acao";
-              }else if(cl.indexOf("Exterior")>=0){
-                if(subCl.indexOf("reit")>=0)tp2="reit";
-                else if(subCl.indexOf("etf")>=0)tp2="etf_int";
-                else tp2="stock_us";
-              }else if(cl.indexOf("Previd")>=0||cl.indexOf("previd")>=0)tp2="prev";
-              else if(cl.indexOf("Cripto")>=0||cl.indexOf("cripto")>=0)tp2="cripto";
-              else if(cl==="Caixa")tp2="caixa";
-              else if(cl.indexOf("Multi")>=0)tp2="fundo_mm";
-              
-              var pmReal=(!isNaN(pm2)&&pm2>0)?pm2:(qtd2>0?pos2/qtd2:preco2||0);
-              var cTotal=pmReal*qtd2; 
-              var ganho2=pos2-cTotal; 
-              var gPct2=cTotal>0?(ganho2/cTotal*100):0;
-              
-              var rentGorila=(!isNaN(rentPer2)&&rentPer2!==0)?(rentPer2*100):null;
-              
-              var vencFmt="";
-              if(venc2&&venc2.length>=10){var vp=venc2.split("-");vencFmt=vp.length===3?vp[0]+"-"+vp[1]+"-"+vp[2]:"";}
-              
-              var tk2base=nm2.substring(0,15).replace(/[^A-Za-z0-9]/g,"").toUpperCase()||"AT";
-              var tk2=tk2base;var tkIdx=0;
-              while(ativosConj.some(function(a){return a.tk===tk2})){tkIdx++;tk2=tk2base+tkIdx;}
-              ativosConj.push({
-                tk:tk2,nm:nm2,posR:pos2,qtd:qtd2||0,
-                pa:preco2||pmReal, 
-                pm:pmReal, 
-                cT:cTotal,ganho:ganho2,gPct:gPct2,
-                /* periodo gravado como FRAÇÃO (ex: 0.0116 = 1,16%) — mesmo formato numérico
-                   bruto que o import do titular grava (valor da célula % do Excel do Gorila,
-                   sem multiplicar por 100). Antes gravava em pontos percentuais (1.16), o que
-                   fazia getRentAtivoPer() (usado na Rentabilidade por Moeda / Carteira Brasil
-                   pra carteiras casal/família) multiplicar por 100 de novo — um ativo do
-                   cônjuge com rentabilidade real de 1,16% virava 116% no relatório consolidado,
-                   distorcendo a rentabilidade da carteira toda quando havia ativo só dela. */
-                _gRentPct:{periodo:(!isNaN(rentPer2)&&rentPer2!==0)?rentPer2/100:null},
-                tp:tp2,inst:inst2,cat:cl,
-                venc:vencFmt||undefined
-              });
+            if(isHeader||isNaN(pos2)||pos2<=0.01||nm2.length<=1)continue;
+
+            var tp2="outros";
+            if(cl==="Renda Fixa"){
+              if(subCl.indexOf("prefixado")>=0||subCl.indexOf("inflação")>=0||subCl.indexOf("inflacao")>=0)tp2="tesouro";
+              else if(subCl.indexOf("fund")>=0)tp2="fundo_rf";
+              else if(subCl.indexOf("prev")>=0)tp2="prev";
+              else tp2="cdb";
+            }else if(cl.indexOf("Renda Variável")>=0||cl.indexOf("Renda Variavel")>=0){
+              if(subCl.indexOf("fii")>=0||(/^[A-Z]{4}11$/).test(nm2.replace(/\s/g,"")))tp2="fii";
+              else if(subCl.indexOf("etf")>=0)tp2="etf_br";
+              else if(subCl.indexOf("bdr")>=0)tp2="bdr";
+              else tp2="acao";
+            }else if(cl.indexOf("Exterior")>=0){
+              if(subCl.indexOf("reit")>=0)tp2="reit";
+              else if(subCl.indexOf("etf")>=0)tp2="etf_int";
+              else tp2="stock_us";
+            }else if(cl.indexOf("Previd")>=0||cl.indexOf("previd")>=0)tp2="prev";
+            else if(cl.indexOf("Cripto")>=0||cl.indexOf("cripto")>=0)tp2="cripto";
+            else if(cl==="Caixa")tp2="caixa";
+            else if(cl.indexOf("Multi")>=0)tp2="fundo_mm";
+
+            var pmReal=(!isNaN(pm2)&&pm2>0)?pm2:(qtd2>0?pos2/qtd2:preco2||0);
+            var cTotal=pmReal*qtd2;
+            var ganho2=pos2-cTotal;
+            var gPct2=cTotal>0?(ganho2/cTotal*100):0;
+
+            /* Rentabilidade por posição — mesmas 5 cols % + 5 cols R$ do import do titular,
+               já como FRAÇÃO (raw:true), sem nenhuma conversão de unidade necessária. */
+            var rentAtivo={},rentAtivoRs={};
+            if(pctStart>=0){
+              for(var k=0;k<5;k++){var idxPct=pctStart+k;if(idxPct<row.length)rentAtivo[COL_LABELS[k]]=typeof row[idxPct]==="number"?row[idxPct]:pv(row[idxPct]);}
             }
+            if(rsStart>=0){
+              for(var k=0;k<5;k++){var idxRs=rsStart+k;if(idxRs<row.length)rentAtivoRs[COL_LABELS[k]]=typeof row[idxRs]==="number"?row[idxRs]:pv(row[idxRs]);}
+            }
+
+            var vencFmt="";
+            var vencISO=toISO(venc2);
+            if(vencISO&&vencISO.length>=10)vencFmt=vencISO;
+
+            var tk2base=nm2.substring(0,15).replace(/[^A-Za-z0-9]/g,"").toUpperCase()||"AT";
+            var tk2=tk2base;var tkIdx=0;
+            while(ativosConj.some(function(a){return a.tk===tk2})){tkIdx++;tk2=tk2base+tkIdx;}
+            ativosConj.push({
+              tk:tk2,nm:nm2,posR:pos2,qtd:qtd2||0,
+              pa:preco2||pmReal,
+              pm:pmReal,
+              cT:cTotal,ganho:ganho2,gPct:gPct2,
+              _gRentPct:rentAtivo,_gRentRs:rentAtivoRs,
+              tp:tp2,inst:inst2,cat:cl,
+              venc:vencFmt||undefined
+            });
           }
-        });
-        gRentConj.dataIni=dI;gRentConj.dataFim=dF;if(patConj>0)gRentConj.patTotal=patConj;
+        }
+        gRentConj.dataIni=dI;gRentConj.dataFim=dF;
+        gRentConj.resultado=resultadoConj;
+        if(patConj>0)gRentConj.patTotal=patConj;
         dp({t:"UC",p:{id:c.id,conjuge:Object.assign({},c.conjuge||{},{
           _ativosImport:ativosConj.length>0?ativosConj:(c.conjuge&&c.conjuge._ativosImport||[]),
           _gorilaRent:gRentConj,
