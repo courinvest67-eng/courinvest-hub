@@ -319,24 +319,36 @@ const _gerarPdfLinkCourinvestInner=function(pathStorage,htmlContent){
       wrapper.style.cssText="position:fixed;top:0;left:0;width:0;height:0;overflow:hidden;";
       wrapper.appendChild(container);
       document.body.appendChild(wrapper);
-      html2pdf().set({
-        margin:0,
-        filename:"relatorio.pdf",
-        image:{type:"jpeg",quality:0.95},
-        html2canvas:{scale:2,useCORS:true,backgroundColor:"#ffffff"},
-        jsPDF:{unit:"pt",format:"a4",orientation:"portrait"}
-      }).from(container).toPdf().output("blob").then(function(blob){
-        try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
-        var ref=window._fbStorage.ref().child(pathStorage);
-        return ref.put(blob,{contentType:"application/pdf"});
-      }).then(function(snap){
-        return snap.ref.getDownloadURL();
-      }).then(function(url){
-        resolve(url);
-      }).catch(function(e){
-        console.warn("[PDF] Falha ao gerar/subir PDF:",e);
-        try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
-        resolve(null);
+      /* Força um reflow síncrono e espera dois frames antes de capturar. Sem isso, o html2canvas
+         às vezes começa a desenhar ANTES do layout do HTML recém-injetado (via innerHTML) estar
+         totalmente calculado pelo navegador — e elementos com fundo em gradiente (muito comuns
+         nesse relatório: cards de KPI, badges, faixas coloridas) acabam com bounding box 0x0 no
+         momento em que o html2canvas lê o layout, o que quebra o createPattern interno dele com
+         "InvalidStateError: ...canvas element with a width or height of 0". Essa era a causa real
+         do botão de PDF sumir sempre (não era lentidão/timeout — falhava na hora, todo envio). */
+      void container.offsetHeight;
+      requestAnimationFrame(function(){
+        requestAnimationFrame(function(){
+          html2pdf().set({
+            margin:0,
+            filename:"relatorio.pdf",
+            image:{type:"jpeg",quality:0.95},
+            html2canvas:{scale:2,useCORS:true,backgroundColor:"#ffffff"},
+            jsPDF:{unit:"pt",format:"a4",orientation:"portrait"}
+          }).from(container).toPdf().output("blob").then(function(blob){
+            try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
+            var ref=window._fbStorage.ref().child(pathStorage);
+            return ref.put(blob,{contentType:"application/pdf"});
+          }).then(function(snap){
+            return snap.ref.getDownloadURL();
+          }).then(function(url){
+            resolve(url);
+          }).catch(function(e){
+            console.warn("[PDF] Falha ao gerar/subir PDF:",e);
+            try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
+            resolve(null);
+          });
+        });
       });
     }catch(e){
       console.warn("[PDF] Erro inesperado ao gerar PDF:",e);
