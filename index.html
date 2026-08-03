@@ -20712,6 +20712,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
 
 function FinanceiroView({data:d,dispatch:dp}){
   const[fTab,sFTab]=useState("importar");
+  /* === RESPONSIVE: detecção reativa de mobile === usado em vários pontos do layout abaixo
+     (grids, tamanhos de fonte, gráfico de barras) — faltava declarar nesse componente, causando
+     "ReferenceError: isMob is not defined" e travando a tela inteira com o Error Boundary. */
+  const[isMob,sIsMob]=useState(typeof window!=="undefined"&&window.innerWidth<768);
+  React.useEffect(function(){
+    var onResize=function(){sIsMob(window.innerWidth<768)};
+    window.addEventListener("resize",onResize);
+    return function(){window.removeEventListener("resize",onResize)};
+  },[]);
   const fileRef=useRef(null);
   const fileDespRef=useRef(null);
   
