@@ -9462,8 +9462,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           
           if(!temMovGorila && movManuaisDoMes.length>0){
             movManuaisDoMes.forEach(function(m){
-              if(m.tipo==="aporte"||(m.valor||0)>0){apValor+=(m.valor||0);}
-              else if(m.tipo==="resgate"||(m.valor||0)<0){retValor+=Math.abs(m.valor||0);}
+              /* O campo "tipo" ("aporte"/"resgate") é sempre o dado confiável — o formulário de
+                 Nova Movimentação salva "valor" SEMPRE positivo (Math.max(0,...)), o sinal nunca
+                 vem embutido no valor. Por isso "tipo" tem que ser checado ANTES de olhar o sinal
+                 do valor: senão um resgate (valor positivo, tipo="resgate") caía no "OR" do
+                 aporte por causa de "(m.valor||0)>0", contando resgate como aporte no relatório. */
+              if(m.tipo==="aporte"){apValor+=Math.abs(m.valor||0);}
+              else if(m.tipo==="resgate"){retValor+=Math.abs(m.valor||0);}
+              else if((m.valor||0)>0){apValor+=(m.valor||0);}
+              else if((m.valor||0)<0){retValor+=Math.abs(m.valor||0);}
             });
             captLiq=apValor-retValor;
           }
@@ -9510,7 +9517,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           body+='<div style="font-size:10px;color:#6B7489;font-weight:700;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">📋 Movimentações do mês</div>';
           body+='<table><tr><th>Data</th><th>Descrição</th><th>Tipo</th><th style="text-align:right">Valor</th></tr>';
           movManuaisDoMes.slice(0,15).forEach(function(m){
-            var isAporte=m.tipo==="aporte"||(m.valor||0)>0;
+            /* Mesma correção: "tipo" é a fonte confiável, valor é sempre positivo no dado salvo. */
+            var isAporte=m.tipo?(m.tipo==="aporte"):((m.valor||0)>=0);
             var cor=isAporte?"#0F9D58":"#EF6461";
             var sinal=isAporte?"+":"-";
             var dataFmt=m.data?m.data.split("-").reverse().join("/"):"—";
