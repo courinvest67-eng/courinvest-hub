@@ -358,21 +358,58 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent){
     var doc=new jsPDFCtor({unit:"pt",format:"a4",orientation:"portrait"});
     var pageW=doc.internal.pageSize.getWidth();
     var pageH=doc.internal.pageSize.getHeight();
-    for(var pi=0;pi<pageEls.length;pi++){
-      var canvas=await window.html2canvas(pageEls[pi],{scale:2,useCORS:true,backgroundColor:"#ffffff"});
-      if(!canvas||canvas.width===0||canvas.height===0){
-        console.warn("[PDF] Página "+pi+" gerou canvas vazio, pulando.");
-        continue;
+    var pagesOk=0;
+    /* CINTO DE SEGURANÇA contra o "InvalidStateError: createPattern...width or height of 0":
+       mesmo com o relatório dividido em páginas normais (v395), esse erro específico ainda pode
+       acontecer em certos navegadores/placas de vídeo — o html2canvas cria um canvas
+       intermediário toda vez que desenha um fundo em gradiente (linear-gradient), e em alguns
+       dispositivos esse canvas intermediário sai com largura/altura 0 (limite de memória/GPU
+       específico da máquina, fora do nosso controle). Em vez de deixar isso derrubar a página
+       inteira, intercepta temporariamente o createPattern: se o "canvas" de origem estiver
+       zerado, devolve um padrão transparente de 1x1 (só aquele fundo específico fica sem o
+       gradiente — o resto da página renderiza normalmente) em vez de lançar o erro. Restaura o
+       método original no final, pra não afetar mais nada no app. */
+    var _origCreatePattern=CanvasRenderingContext2D.prototype.createPattern;
+    CanvasRenderingContext2D.prototype.createPattern=function(image,repetition){
+      try{
+        if(!image||!image.width||!image.height){
+          var _fb=document.createElement("canvas");_fb.width=1;_fb.height=1;
+          return _origCreatePattern.call(this,_fb,repetition||"repeat");
+        }
+        return _origCreatePattern.apply(this,arguments);
+      }catch(_patErr){
+        console.warn("[PDF] createPattern falhou num fundo específico, usando fallback transparente:",_patErr);
+        var _fb2=document.createElement("canvas");_fb2.width=1;_fb2.height=1;
+        return _origCreatePattern.call(this,_fb2,"repeat");
       }
-      var imgData=canvas.toDataURL("image/jpeg",0.95);
-      var imgH=pageW*(canvas.height/canvas.width);
-      if(pi>0)doc.addPage();
-      /* Se a página de conteúdo ficar mais alta que uma folha A4 (ex.: Composição Detalhada com
-         muitos ativos), encaixa pela largura mesmo assim — o link do relatório é só um resumo de
-         apoio, o relatório completo em HTML/impressão continua disponível na tela. */
-      doc.addImage(imgData,"JPEG",0,0,pageW,imgH);
+    };
+    try{
+      for(var pi=0;pi<pageEls.length;pi++){
+        var canvas=null;
+        try{
+          canvas=await window.html2canvas(pageEls[pi],{scale:2,useCORS:true,backgroundColor:"#ffffff"});
+        }catch(_pageErr){
+          console.warn("[PDF] Página "+pi+" falhou ao renderizar, pulando:",_pageErr);
+          continue;
+        }
+        if(!canvas||canvas.width===0||canvas.height===0){
+          console.warn("[PDF] Página "+pi+" gerou canvas vazio, pulando.");
+          continue;
+        }
+        var imgData=canvas.toDataURL("image/jpeg",0.95);
+        var imgH=pageW*(canvas.height/canvas.width);
+        if(pagesOk>0)doc.addPage();
+        /* Se a página de conteúdo ficar mais alta que uma folha A4 (ex.: Composição Detalhada com
+           muitos ativos), encaixa pela largura mesmo assim — o link do relatório é só um resumo de
+           apoio, o relatório completo em HTML/impressão continua disponível na tela. */
+        doc.addImage(imgData,"JPEG",0,0,pageW,imgH);
+        pagesOk++;
+      }
+    }finally{
+      CanvasRenderingContext2D.prototype.createPattern=_origCreatePattern;
     }
     try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
+    if(pagesOk===0){console.warn("[PDF] Nenhuma página renderizou com sucesso.");return null;}
 
     var blob=doc.output("blob");
     var ref=window._fbStorage.ref().child(pathStorage);
