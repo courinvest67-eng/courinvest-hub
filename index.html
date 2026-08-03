@@ -396,14 +396,34 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent){
           console.warn("[PDF] Página "+pi+" gerou canvas vazio, pulando.");
           continue;
         }
-        var imgData=canvas.toDataURL("image/jpeg",0.95);
         var imgH=pageW*(canvas.height/canvas.width);
-        if(pagesOk>0)doc.addPage();
-        /* Se a página de conteúdo ficar mais alta que uma folha A4 (ex.: Composição Detalhada com
-           muitos ativos), encaixa pela largura mesmo assim — o link do relatório é só um resumo de
-           apoio, o relatório completo em HTML/impressão continua disponível na tela. */
-        doc.addImage(imgData,"JPEG",0,0,pageW,imgH);
-        pagesOk++;
+        if(imgH<=pageH+1){
+          /* Cabe numa folha A4 normal — caso mais comum. */
+          if(pagesOk>0)doc.addPage();
+          doc.addImage(canvas.toDataURL("image/jpeg",0.95),"JPEG",0,0,pageW,imgH);
+          pagesOk++;
+        }else{
+          /* Página de conteúdo mais alta que uma folha A4 (comum em Objetivos com várias metas
+             vinculadas, ou Composição Detalhada com muitos ativos) — antes isso era cortado no
+             fim da folha e a informação sumia. Corrige fatiando o canvas em pedaços do tamanho de
+             uma página A4 e distribuindo cada fatia numa página do PDF, sem perder conteúdo. */
+          var pxPorPagina=canvas.width*(pageH/pageW);
+          var totalFatias=Math.ceil(canvas.height/pxPorPagina);
+          for(var sf=0;sf<totalFatias;sf++){
+            var alturaFatiaPx=Math.min(pxPorPagina,canvas.height-sf*pxPorPagina);
+            var fatiaCanvas=document.createElement("canvas");
+            fatiaCanvas.width=canvas.width;
+            fatiaCanvas.height=alturaFatiaPx;
+            var fctx=fatiaCanvas.getContext("2d");
+            fctx.fillStyle="#ffffff";
+            fctx.fillRect(0,0,fatiaCanvas.width,fatiaCanvas.height);
+            fctx.drawImage(canvas,0,sf*pxPorPagina,canvas.width,alturaFatiaPx,0,0,canvas.width,alturaFatiaPx);
+            var fatiaImgH=pageW*(alturaFatiaPx/canvas.width);
+            if(pagesOk>0)doc.addPage();
+            doc.addImage(fatiaCanvas.toDataURL("image/jpeg",0.95),"JPEG",0,0,pageW,fatiaImgH);
+            pagesOk++;
+          }
+        }
       }
     }finally{
       CanvasRenderingContext2D.prototype.createPattern=_origCreatePattern;
