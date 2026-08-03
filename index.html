@@ -1699,9 +1699,15 @@ const TIPOS_AGENDA_DEFAULT=[
 ];
 
 function rd(st,ac){
-  if(ac.t==="AC") return {...st,cl:[...st.cl,{...ac.p,id:ac.p.id||("c"+Date.now())}]};
-  if(ac.t==="UC") return {...st,cl:st.cl.map(c=>c.id===ac.p.id?{...c,...ac.p}:c)};
-  if(ac.t==="RC"){var _rcId=ac.p.id,_rcNm=ac.p.nome.toLowerCase();return {...st,cl:[...st.cl.filter(function(c){return c.id!==_rcId&&c.nome.toLowerCase()!==_rcNm;}),ac.p]};}
+  /* _updatedAt: carimbo de hora em CADA cliente tocado (AC/UC/RC), usado pelo merge de sync
+     (ver mergeClientes mais abaixo, perto do useEffect do Firestore) pra decidir, cliente por
+     cliente, qual versão é mais nova quando dois dispositivos editam ao mesmo tempo — em vez de
+     substituir a lista de clientes inteira só porque UM cliente mudou em algum dos dois lados
+     (o que antes podia apagar silenciosamente uma importação ou movimentação feita no celular,
+     por exemplo, se o desktop salvasse por qualquer outro motivo logo em seguida). */
+  if(ac.t==="AC") return {...st,cl:[...st.cl,{...ac.p,id:ac.p.id||("c"+Date.now()),_updatedAt:Date.now()}]};
+  if(ac.t==="UC") return {...st,cl:st.cl.map(c=>c.id===ac.p.id?{...c,...ac.p,_updatedAt:Date.now()}:c)};
+  if(ac.t==="RC"){var _rcId=ac.p.id,_rcNm=ac.p.nome.toLowerCase();return {...st,cl:[...st.cl.filter(function(c){return c.id!==_rcId&&c.nome.toLowerCase()!==_rcNm;}),{...ac.p,_updatedAt:Date.now()}]};}
   if(ac.t==="AI") return {...st,it:[{...ac.p,id:"i"+Date.now()},...st.it]};
   if(ac.t==="DC") return {...st,cl:st.cl.filter(c=>c.id!==ac.p),it:st.it.filter(i=>i.cid!==ac.p)};
   
@@ -29120,7 +29126,37 @@ function App({authUser}){
   useEffect(function(){finRef.current=d.fin;},[d.fin]);
   const ovRef=useRef(d.overviewMercado||{}); /* FIX: ref para overviewMercado — evita closure stale no merge */
   useEffect(function(){ovRef.current=d.overviewMercado||{};},[d.overviewMercado]);
-  
+  const clRef=useRef(d.cl); /* ref pro array de clientes atual — evita closure stale no merge do onSnapshot */
+  useEffect(function(){clRef.current=d.cl;},[d.cl]);
+
+  /* MERGE POR CLIENTE (em vez de substituir a lista inteira): antes, tanto o carregamento
+     inicial quanto o listener em tempo real (onSnapshot) trocavam a lista de clientes local pela
+     que veio do Firestore por INTEIRO sempre que o local não "parecia" ter mais dados (heurística
+     baseada só em tamanho de lista). Isso tinha um buraco real: se dois dispositivos estivessem
+     abertos ao mesmo tempo (ex: celular fazendo uma importação nova do Gorila, desktop aberto de
+     antes) e o desktop salvasse por QUALQUER outro motivo (confirmar um indicador, aprovar um
+     envio de relatório — qualquer dp() que mude d) logo depois da importação do celular, o
+     desktop reenviava sua própria cópia desatualizada de TODOS os clientes, apagando em silêncio
+     a importação/movimentação recém-feita no celular. Agora cada cliente é comparado individual-
+     mente pelo carimbo _updatedAt (gravado pelo reducer em todo AC/UC/RC) — o mais recente vence,
+     cliente por cliente, então uma mudança nova em QUALQUER dispositivo sobrevive mesmo que o
+     outro dispositivo salve algo não relacionado logo depois. */
+  var mergeClientes=function(localCl,remoteCl){
+    var localById={},remoteById={};
+    (localCl||[]).forEach(function(c){localById[c.id]=c;});
+    (remoteCl||[]).forEach(function(c){remoteById[c.id]=c;});
+    var ids=[],seen={};
+    (localCl||[]).forEach(function(c){if(!seen[c.id]){seen[c.id]=true;ids.push(c.id);}});
+    (remoteCl||[]).forEach(function(c){if(!seen[c.id]){seen[c.id]=true;ids.push(c.id);}});
+    return ids.map(function(id){
+      var lc=localById[id],rc=remoteById[id];
+      if(lc&&!rc)return lc; /* só existe local — criado/editado aqui, ainda não sincronizado */
+      if(rc&&!lc)return rc; /* só existe remoto — criado em outro dispositivo */
+      var lTs=lc._updatedAt||0,rTs=rc._updatedAt||0;
+      return (lTs>=rTs)?lc:rc; /* empate ou local mais novo fica com local; senão remoto vence */
+    });
+  };
+
   /* helper: strip campos pesados antes de salvar no Firestore */
   var _clParaFirestore=function(clientes){
     var ativosMap={};
@@ -29183,13 +29219,20 @@ function App({authUser}){
             (d.it.length>data.it.length) ||
             ((d.lds||[]).length>(data.lds||[]).length) ||
             (localEntradas>remoteEntradas);
+          /* Em ambos os ramos abaixo, a lista de clientes é combinada cliente por cliente (ver
+             mergeClientes acima) em vez de "local inteiro" ou "remoto inteiro" — protege contra
+             perder uma importação/edição feita em OUTRO dispositivo mesmo quando a heurística de
+             "quem tem mais dados" (baseada no total de it/lds/fin) aponta pro lado errado. */
+          var clMesclados=mergeClientes(d.cl,data.cl);
           if(localTemMaisDados){
             console.log("[Sync] Local tem mais dados"+(pendingFlagLocal?" (havia mudança pendente de sessão anterior)":"")+". Fazendo UPLOAD.");
             pendingLocalRef.current=true;
-            _salvarFirestore(d.cl,{it:d.it,lds:d.lds||[],fin:finRef.current||{entradas:[],despesas:[]},overviewMercado:ovRef.current||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[]}).then(function(){
+            _salvarFirestore(clMesclados,{it:d.it,lds:d.lds||[],fin:finRef.current||{entradas:[],despesas:[]},overviewMercado:ovRef.current||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[]}).then(function(){
               pendingLocalRef.current=false;
               try{localStorage.removeItem("courinvest_pending_v1")}catch(e){}
             }).catch(function(e){console.warn("Upload migration failed:",e)});
+            skipNextSaveRef.current=true;
+            dp({t:"REPLACE_ALL",p:{cl:clMesclados,it:d.it,lds:d.lds||[],fin:finRef.current||{entradas:[],despesas:[]},overviewMercado:ovRef.current||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[]}});
             sSyncState("synced");
             isInitialLoadRef.current=false;
             return;
@@ -29198,8 +29241,8 @@ function App({authUser}){
           var _localOv=ovRef.current||{};
           var _mergedOv=Object.assign({},data.overviewMercado||{},_localOv);
           var _mergedCfg=Object.assign({},data.config||{},d.config||{});
-          dp({t:"REPLACE_ALL",p:{cl:data.cl,it:data.it,lds:data.lds||[],fin:data.fin||{entradas:[],despesas:[]},overviewMercado:_mergedOv,config:_mergedCfg,ag:data.ag||[],tpAg:data.tpAg||[]}});
-          console.log("[Sync] Carregado do Firestore: "+data.cl.length+" clientes");
+          dp({t:"REPLACE_ALL",p:{cl:clMesclados,it:data.it,lds:data.lds||[],fin:data.fin||{entradas:[],despesas:[]},overviewMercado:_mergedOv,config:_mergedCfg,ag:data.ag||[],tpAg:data.tpAg||[]}});
+          console.log("[Sync] Carregado do Firestore: "+data.cl.length+" clientes, mesclados: "+clMesclados.length);
         }
       }else{
         console.log("[Sync] Workspace vazio. Upload inicial.");
@@ -29277,6 +29320,7 @@ function App({authUser}){
   useEffect(function(){
     if(!window._fbDB)return;
     var docRef=window._fbDB.collection("workspaces").doc("main");
+    var ativosRefSnap=window._fbDB.collection("workspaces").doc("main_ativos");
     var unsub=docRef.onSnapshot(function(snap){
       if(!snap.exists)return;
       if(isInitialLoadRef.current)return;
@@ -29293,7 +29337,33 @@ function App({authUser}){
       }
       var data=snap.data();
       if(!data||!Array.isArray(data.cl)||!Array.isArray(data.it))return;
-      
+      /* CORREÇÃO DE PERDA DE DADOS (2ª parte): o doc "main" NUNCA guarda _ativosImport — ele é
+         salvo à parte em "main_ativos" (ver _clParaFirestore) justamente pra não deixar o doc
+         principal gigante. Só que essa atualização em tempo real escutava SÓ o doc "main" — ou
+         seja, TODA atualização vinda de outro dispositivo apagava _ativosImport da memória local
+         de TODOS os clientes (não só do que mudou), porque data.cl simplesmente não tem esse
+         campo. Se o app salvasse qualquer coisa localmente depois disso (ex: confirmar um
+         indicador), _clParaFirestore ia reconstruir "main_ativos" a partir dessa memória já sem
+         os ativos — apagando os ativos importados de TODOS os clientes no Firestore, não só do
+         cliente que mudou. Busca "main_ativos" aqui também e mescla de volta antes de aplicar. */
+      ativosRefSnap.get().then(function(ativosSnap){
+        var ativosData=(ativosSnap&&ativosSnap.exists)?(ativosSnap.data()||{}):{};
+        data.cl=(data.cl||[]).map(function(c){
+          var at=ativosData[c.id];
+          if(at&&at.ativos&&at.ativos.length>0){
+            return Object.assign({},c,{_ativosImport:at.ativos,_ativosTs:at.ts||c._ativosTs});
+          }
+          return c;
+        });
+        aplicarAtualizacaoRemota(data);
+      }).catch(function(e){
+        console.warn("[Sync] Falha ao buscar main_ativos no listener, aplicando sem merge de ativos:",e);
+        aplicarAtualizacaoRemota(data);
+      });
+    },function(err){
+      console.warn("[Sync] Listener error:",err);
+    });
+    function aplicarAtualizacaoRemota(data){
       console.log("[Sync] Atualização recebida do Firestore: "+data.cl.length+" clientes");
       /* Não sobrescreve dados financeiros locais se o local tem mais entradas
          (evita apagar importações recentes que ainda não foram salvas no Firestore) */
@@ -29302,11 +29372,19 @@ function App({authUser}){
       var finParaUsar=(localEnt>remoteEnt)?(finRef.current||{entradas:[],despesas:[]}):(data.fin||{entradas:[],despesas:[]});
       if(localEnt>remoteEnt) console.log("[Sync] onSnapshot: mantendo fin local ("+localEnt+" > "+remoteEnt+" do Firestore)");
       else console.log("[Sync] onSnapshot: usando fin do Firestore ("+remoteEnt+" entradas)");
-      skipNextSaveRef.current=true; 
-      dp({t:"REPLACE_ALL",p:{cl:data.cl,it:data.it,lds:data.lds||[],fin:finParaUsar,overviewMercado:data.overviewMercado||{},config:data.config||{},ag:data.ag||[],tpAg:data.tpAg||[]}});
-    },function(err){
-      console.warn("[Sync] Listener error:",err);
-    });
+      /* CORREÇÃO DE PERDA DE DADOS: antes essa atualização em tempo real substituía a lista de
+         clientes local pela do Firestore por INTEIRO. Cenário real que isso quebrava: celular faz
+         uma importação nova do Gorila pro cliente X (grava no Firestore) enquanto o desktop está
+         aberto de antes; se o desktop salvar por QUALQUER outro motivo (ex: confirmar um
+         indicador, aprovar envio de relatório) antes de receber essa atualização, ele reenviava
+         sua própria cópia desatualizada de TODOS os clientes — apagando em silêncio a importação
+         recém-feita no celular. Agora mescla cliente por cliente (ver mergeClientes acima),
+         usando o carimbo _updatedAt de cada um: o mais recente vence, então a importação do
+         celular sobrevive mesmo que o desktop salve algo não relacionado logo depois. */
+      var clMescladosSnap=mergeClientes(clRef.current,data.cl);
+      skipNextSaveRef.current=true;
+      dp({t:"REPLACE_ALL",p:{cl:clMescladosSnap,it:data.it,lds:data.lds||[],fin:finParaUsar,overviewMercado:data.overviewMercado||{},config:data.config||{},ag:data.ag||[],tpAg:data.tpAg||[]}});
+    }
     return function(){if(unsub)unsub()};
   },[]);
   /* === PRESENCE TRACKING ===
