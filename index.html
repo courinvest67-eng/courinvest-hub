@@ -404,24 +404,69 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent){
           pagesOk++;
         }else{
           /* Página de conteúdo mais alta que uma folha A4 (comum em Objetivos com várias metas
-             vinculadas, ou Composição Detalhada com muitos ativos) — antes isso era cortado no
-             fim da folha e a informação sumia. Corrige fatiando o canvas em pedaços do tamanho de
-             uma página A4 e distribuindo cada fatia numa página do PDF, sem perder conteúdo. */
+             vinculadas, ou Composição Detalhada com muitos ativos). ANTES fatiava em pedaços de
+             altura FIXA (pxPorPagina) — um corte "cego" por pixel, sem noção do conteúdo. Isso
+             podia cortar no meio de uma seção em DUAS COLUNAS (ex: "Objetivos & Metas
+             Financeiras", cada meta com sua lista de investimentos vinculados lado a lado): uma
+             coluna terminava sua lista antes da outra, o corte caía no meio da coluna mais curta,
+             e a página seguinte mostrava aquela coluna em branco enquanto só a outra continuava —
+             parecendo relatório quebrado. Também podia sobrar uma última "fatia" minúscula (só
+             rodapé + uma notinha no meio de um gráfico cortado), virando uma página do PDF quase
+             inteiramente em branco. CORREÇÃO: em vez de cortar por pixel fixo, mede a posição de
+             cada bloco de conteúdo (filho direto da página — cada card/seção/linha de duas
+             colunas) e corta sempre na BORDA de um bloco, nunca no meio dele. Um bloco só
+             continua sendo cortado no meio se ele sozinho já for mais alto que uma página A4
+             inteira (caso raro, ex: tabela de Composição Detalhada com muitos ativos) — aí o
+             fatiamento por pixel entra como último recurso, igual antes, só pra esse bloco. */
           var pxPorPagina=canvas.width*(pageH/pageW);
-          var totalFatias=Math.ceil(canvas.height/pxPorPagina);
-          for(var sf=0;sf<totalFatias;sf++){
-            var alturaFatiaPx=Math.min(pxPorPagina,canvas.height-sf*pxPorPagina);
-            var fatiaCanvas=document.createElement("canvas");
-            fatiaCanvas.width=canvas.width;
-            fatiaCanvas.height=alturaFatiaPx;
-            var fctx=fatiaCanvas.getContext("2d");
-            fctx.fillStyle="#ffffff";
-            fctx.fillRect(0,0,fatiaCanvas.width,fatiaCanvas.height);
-            fctx.drawImage(canvas,0,sf*pxPorPagina,canvas.width,alturaFatiaPx,0,0,canvas.width,alturaFatiaPx);
-            var fatiaImgH=pageW*(alturaFatiaPx/canvas.width);
-            if(pagesOk>0)doc.addPage();
-            doc.addImage(fatiaCanvas.toDataURL("image/jpeg",0.95),"JPEG",0,0,pageW,fatiaImgH);
-            pagesOk++;
+          var elRect=pageEls[pi].getBoundingClientRect();
+          var scaleFactor=elRect.width>0?(canvas.width/elRect.width):2;
+          var blocos=Array.prototype.filter.call(pageEls[pi].children,function(el){
+            var r=el.getBoundingClientRect&&el.getBoundingClientRect();
+            return r&&r.height>0;
+          });
+          var cortesPx=[];
+          if(blocos.length>0){
+            var pageStartPx=0;
+            blocos.forEach(function(bl){
+              var r=bl.getBoundingClientRect();
+              var topoPx=(r.top-elRect.top)*scaleFactor;
+              var fimPx=(r.bottom-elRect.top)*scaleFactor;
+              if(fimPx-pageStartPx>pxPorPagina){
+                if(topoPx>pageStartPx && (fimPx-topoPx)<=pxPorPagina){
+                  /* Bloco cabe inteiro numa página nova — corta ANTES dele, não no meio. */
+                  cortesPx.push(topoPx);
+                  pageStartPx=topoPx;
+                }else if((fimPx-topoPx)>pxPorPagina){
+                  /* Bloco sozinho maior que uma página inteira — sem como evitar corte no meio
+                     dele; o fatiamento por pixel abaixo cuida disso como antes. */
+                  pageStartPx=fimPx;
+                }
+              }
+            });
+          }
+          cortesPx.push(canvas.height);
+          var inicioSeg=0;
+          for(var ci=0;ci<cortesPx.length;ci++){
+            var fimSeg=cortesPx[ci];
+            if(fimSeg<=inicioSeg+1){inicioSeg=fimSeg;continue;}
+            var subFatias=Math.ceil((fimSeg-inicioSeg)/pxPorPagina);
+            for(var sf=0;sf<subFatias;sf++){
+              var subInicio=inicioSeg+sf*pxPorPagina;
+              var subAltura=Math.min(pxPorPagina,fimSeg-subInicio);
+              var fatiaCanvas=document.createElement("canvas");
+              fatiaCanvas.width=canvas.width;
+              fatiaCanvas.height=subAltura;
+              var fctx=fatiaCanvas.getContext("2d");
+              fctx.fillStyle="#ffffff";
+              fctx.fillRect(0,0,fatiaCanvas.width,fatiaCanvas.height);
+              fctx.drawImage(canvas,0,subInicio,canvas.width,subAltura,0,0,canvas.width,subAltura);
+              var fatiaImgH=pageW*(subAltura/canvas.width);
+              if(pagesOk>0)doc.addPage();
+              doc.addImage(fatiaCanvas.toDataURL("image/jpeg",0.95),"JPEG",0,0,pageW,fatiaImgH);
+              pagesOk++;
+            }
+            inicioSeg=fimSeg;
           }
         }
       }
@@ -8142,6 +8187,14 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       var _ehCasalRel=(c.tipoCli==="casal"||c.tipoCli==="familia")&&c.conjuge;
       var _saudacao=_ehCasalRel?"casal":c.nome.split(" ")[0];
       var _rentParaNarrativa=rentPeriodo,_vsCdiParaNarrativa=vsC;
+      /* _ganhoPeriodoAutoritativo: valor de "Ganho do Período" em R$ que deve ficar IGUAL em todo
+         o relatório. Antes o KPI "Ganho do Período" (Resumo Executivo) e a linha TOTAL CARTEIRA
+         (Composição Detalhada) calculavam esse número de dois jeitos diferentes — o KPI usava o
+         campo "Resultado" exato do extrato Gorila importado (ou patrimônio INICIAL × rent%), já a
+         linha TOTAL CARTEIRA multiplicava o patrimônio FINAL × rent%. Isso fazia o relatório
+         mostrar dois "ganho do mês" diferentes pro mesmo período. Agora calculamos uma única vez
+         aqui e reusamos nos dois lugares. */
+      var _ganhoPeriodoAutoritativo=null;
       if(_ehCasalRel){
         /* Patrimônio individual do titular (sem cônjuge) */
         var _patTit=c.patGorila||c.pat||0;
@@ -8212,6 +8265,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         var _patTotal=_patTit+_patConj;
         var _baseRentTotal=_patTit+(_temDadoConj?_patConj:0);
         var _ganhoTotal=_ganhoPeriodoPreCalc+(_temDadoConj?_ganhoConj:0);
+        _ganhoPeriodoAutoritativo=_ganhoTotal;
         var _rentTotal=_baseRentTotal>0?(_ganhoTotal/_baseRentTotal*100):rentPeriodo;
         var _vsCdiTotal=_rentTotal-_cdiMes;
         var _nomeConj=c.conjuge.nome||c.conjuge.nomeConjuge||"Cônjuge";
@@ -8246,6 +8300,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           }
           ganhoPeriodo=patBaseGanho*(rentPeriodo/100);
         }
+        if(!_ehCasalRel)_ganhoPeriodoAutoritativo=ganhoPeriodo;
         var labelPeriodo=tipo==="mensal"?"do mês":(tipo==="anual"?"em 12 meses":"do trimestre");
 
         /* Helper para bloco de KPIs de uma carteira.
@@ -9938,7 +9993,10 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       /* Usa a rentabilidade consolidada (do casal, se aplicável) como fonte preferida —
          enr/tCV aqui já somam titular+cônjuge, então a linha TOTAL precisa da mesma base. */
       var totalRentPer=_rentParaNarrativa!==null?_rentParaNarrativa:(tCV>0?(totalGanhoPer/tCV*100):0);
-      var totalGanhoExib=_rentParaNarrativa!==null?(tCV*_rentParaNarrativa/100):totalGanhoPer;
+      /* Usa o mesmo valor autoritativo do KPI "Ganho do Período" (ver _ganhoPeriodoAutoritativo
+         acima) em vez de recalcular tCV×rent% — evita a linha TOTAL CARTEIRA mostrar um "Ganho
+         Mês" diferente do KPI do Resumo Executivo pro mesmo período. */
+      var totalGanhoExib=_ganhoPeriodoAutoritativo!==null?_ganhoPeriodoAutoritativo:(_rentParaNarrativa!==null?(tCV*_rentParaNarrativa/100):totalGanhoPer);
       body+='<tr class="total-row"><td>TOTAL CARTEIRA</td>'
         +'<td style="text-align:right;font-family:\'JetBrains Mono\',monospace;color:#5a5a6e">'+fmF(tCV-totalGanhoExib)+'</td>'
         +'<td style="text-align:right;font-family:\'JetBrains Mono\',monospace;color:#D4A328">'+fmF(tCV)+'</td>'
@@ -29903,7 +29961,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '355';
+  var SW_VERSION = '356';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
