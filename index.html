@@ -309,7 +309,23 @@ const _gerarPdfLinkCourinvestInner=function(pathStorage,htmlContent){
       if(!window._fbStorage){console.warn("[PDF] Firebase Storage indisponível (verifique se o Storage está habilitado no projeto Firebase).");resolve(null);return;}
       var container=document.createElement("div");
       container.style.cssText="width:800px;background:#fff;";
-      container.innerHTML=htmlContent;
+      /* O diagnóstico do v392 não achou nenhum elemento 0x0 na hora da captura — porque o
+         html2canvas clona o documento inteiro pra um iframe PRÓPRIO antes de desenhar, e é
+         só DENTRO desse clone interno que o problema acontece (por isso nosso scan no DOM
+         original não via nada de errado). Os únicos elementos do relatório com fundo em
+         padrão REPETIDO (background-size pequeno tipo 32px 32px, os pontinhos decorativos de
+         fundo: .bg-pattern/.bg-dots/.cv-cover-pattern/.cv-toc-pattern) são exatamente o tipo de
+         fundo que força o html2canvas a passar pelo createPattern internamente — os outros
+         gradientes do relatório (cards, capa, badges) pintam a caixa toda de uma vez só, sem
+         repetição, e não passam por esse caminho. Em vez de tentar adivinhar por que esse
+         padrão específico fica 0x0 dentro do clone do html2canvas, a saída mais segura é nem
+         deixar esse fundo chegar na versão usada pra gerar o PDF — são só pontinhos decorativos
+         de textura (opacidade 3-5%), removê-los aqui não muda nada visível no PDF final. */
+      var htmlSemPadroes=htmlContent.replace(
+        "<\/head>",
+        '<style>.bg-pattern,.bg-dots,.cv-cover-pattern,.cv-toc-pattern{background-image:none!important}<\/style><\/head>'
+      );
+      container.innerHTML=htmlSemPadroes;
       /* Esconde do usuário SEM mexer em opacity/visibility do conteúdo — o html2canvas captura o
          estilo computado, e opacity:quase-zero deixa o PDF "lavado"/em branco (já vimos isso
          acontecer). Em vez disso, o container fica com opacidade normal (100%) dentro de um
