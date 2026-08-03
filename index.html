@@ -349,10 +349,14 @@ const gerarPdfLinkCourinvest=function(pathStorage,htmlContent){
   return new Promise(function(resolve){
     var settled=false;
     var finish=function(v){if(settled)return;settled=true;resolve(v);};
+    /* 45s (era 25s) — um relatório completo multi-página (capa, resumo, benchmarks, alocação,
+       proventos, movimentações...) pode levar mais que 25s pra renderizar via html2canvas em
+       scale:2, especialmente em carteiras casal/família com muitos ativos. Timeout curto demais
+       fazia o e-mail sair sem o botão de PDF mesmo quando a geração estava OK, só lenta. */
     var timeoutId=setTimeout(function(){
-      console.warn("[PDF] Timeout de 25s atingido — seguindo sem o link do PDF.");
+      console.warn("[PDF] Timeout de 45s atingido — seguindo sem o link do PDF.");
       finish(null);
-    },25000);
+    },45000);
     _gerarPdfLinkCourinvestInner(pathStorage,htmlContent).then(function(url){
       clearTimeout(timeoutId);
       finish(url);
@@ -397,10 +401,13 @@ const gerarRelatorioHtmlHeadless=function(cliente,dadosApp,tipoRelatorio){
       try{if(container&&container.parentNode)document.body.removeChild(container);}catch(_e){}
       resolve(v);
     };
+    /* 60s (era 40s) — a montagem oculta da ficha faz chamadas reais a APIs externas (ex: preço de
+       fechamento por ativo dolarizado, via brapi.dev) antes de disparar onReportReady; carteiras
+       com muitos ativos no exterior podem legitimamente levar mais que 40s pra terminar. */
     var timeoutId=setTimeout(function(){
-      console.warn("[Relatório] Timeout de 40s ao gerar o relatório completo em segundo plano — usando o resumo como PDF.");
+      console.warn("[Relatório] Timeout de 60s ao gerar o relatório completo em segundo plano — usando o resumo como PDF.");
       finish(null);
-    },40000);
+    },60000);
     try{
       if(typeof CD==="undefined"||typeof ReactDOM==="undefined"||typeof React==="undefined"){
         clearTimeout(timeoutId);finish(null);return;
@@ -1808,7 +1815,12 @@ function Dash({data:d,onSel:os,goTo}){
       })():"—";
       var fmV=function(v){return "R$ "+parseFloat(v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});};
       var MN_EMAIL=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
-      var hoje=new Date();var mesE=hoje.getMonth();var anoE=hoje.getFullYear();
+      /* O e-mail é o FECHAMENTO do mês anterior (ex: enviado no início de agosto = fechamento de
+         julho), igual ao relatório em PDF e ao resto do sistema — usar o mês corrente (hoje.getMonth())
+         mostrava "Agosto de 2026" num e-mail que na verdade reporta o fechamento de julho. */
+      var hoje=new Date();
+      var refEmail=new Date(hoje.getFullYear(),hoje.getMonth()-1,1);
+      var mesE=refEmail.getMonth();var anoE=refEmail.getFullYear();
       /* Sem "/" no texto exibido: o EmailJS escapa "/" como "&#x2F;" em campos de texto puro
          (ex: o Assunto do e-mail), e "Julho&#x2F;2026" aparecia literalmente pro cliente.
          "Julho de 2026" evita esse problema na raiz, em qualquer campo do template. */
@@ -23540,8 +23552,15 @@ function NewsView({data,dispatch}){
     if(ovChk&&ovChk.texto){sAiText(ovChk.texto);}
   },[data&&data.overviewMercado]);
 
+  /* Considera os dados macro (Selic, IPCA, dólar...) "frescos" só por 1h — antes disso era só
+     "!macroData.atualizadoEm" (nunca buscou nessa sessão), então se o usuário deixasse a aba
+     aberta de um mês pro outro, "Gerar via Template" reaproveitava a Selic/IPCA buscados semanas
+     atrás em vez de buscar de novo, publicando overview novo com indicador de mercado velho
+     (ex: Selic desatualizada) mesmo com o texto narrativo certo. */
+  var MACRO_TTL_MS=60*60*1000;
+  var macroDataFresca=function(){return macroData.atualizadoEm && (Date.now()-macroData.atualizadoEm)<MACRO_TTL_MS;};
   React.useEffect(function(){
-    if((ntab==="overview"||ntab==="mercado") && !macroData.atualizadoEm){
+    if((ntab==="overview"||ntab==="mercado") && !macroDataFresca()){
       carregarMacro();
     }
   },[ntab]);
@@ -23551,8 +23570,8 @@ function NewsView({data,dispatch}){
      Se algum dado não estiver disponível, usa fallback genérico. */
   var gerarOverview=function(){
     sAiLoad(true);
-    
-    if(!macroData.atualizadoEm){
+
+    if(!macroDataFresca()){
       carregarMacro();
       setTimeout(gerarOverview,1500);
       return;
