@@ -8410,7 +8410,13 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         body+='<div><strong style="color:#6B7489">Ganho Líquido:</strong> patrimônio atual − custo de aquisição + proventos recebidos.</div>';
         if(ganhoTWR!==null) body+='<div><strong style="color:#6B7489">Rentabilidade TWR:</strong> performance ajustada por tempo (Time-Weighted Return).</div>';
         body+='</div>';
-        body+='<svg width="100%" viewBox="0 0 '+W+' '+H+'" style="overflow:visible">';
+        /* width fixo em px (não "100%") — o html2canvas (usado pra gerar o PDF do relatório) não
+           resolve width percentual de <svg> de forma confiável fora do fluxo normal de layout;
+           esse SVG especificamente ficava com bounding box 0x0 na hora da captura, e o canvas
+           interno que o html2canvas cria pra desenhar esse gradiente quebrava com "InvalidStateError:
+           ...canvas element with a width or height of 0" — a causa real do PDF do relatório falhar
+           sempre. viewBox continua garantindo que ele escale certinho dentro do container de 800px. */
+        body+='<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" style="overflow:visible;max-width:100%">';
         /* Grid horizontal */
         yLabels.forEach(function(yl){
           body+='<line x1="'+PL+'" y1="'+yl.y+'" x2="'+(W-PR)+'" y2="'+yl.y+'" stroke="rgba(10,22,40,0.06)" stroke-width="1" stroke-dasharray="4,4"/>';
@@ -24192,7 +24198,21 @@ function NewsView({data,dispatch}){
                      local do componente e sumia ao trocar de aba e voltar (useState reseta ao
                      desmontar/remontar). */
                   dispatch({t:"CONFIG_SET",p:{key:"macroManual",value:macroCorrigido}});
-                  alert("✅ Dados atualizados e salvos! Agora clique em Gerar via Template.");
+                  /* Se já existe um overview PUBLICADO pro mês corrente, corrige o "dados" dele
+                     também, na hora — sem isso "Confirmar dados" só preparava o número certo pro
+                     PRÓXIMO "Gerar via Template", mas o overview já publicado (o que o relatório e
+                     o e-mail realmente usam) continuava com o "dados" antigo/errado até alguém
+                     gerar e publicar o texto de novo. O texto em si (narrativa) não muda aqui —
+                     só os indicadores estruturados (Selic/IPCA/Fed) usados no card do e-mail. */
+                  var hojeConf=new Date();
+                  var chaveConf=hojeConf.getFullYear()+"-"+String(hojeConf.getMonth()+1).padStart(2,"0");
+                  var ovAtualConf=data&&data.overviewMercado&&data.overviewMercado[chaveConf];
+                  if(ovAtualConf){
+                    dispatch({t:"OV_SAVE",p:{chave:chaveConf,texto:ovAtualConf.texto||"",dados:macroCorrigido}});
+                    alert("✅ Dados atualizados! Também corrigi o overview já publicado de "+chaveConf+" (o texto não mudou, só os indicadores).");
+                  }else{
+                    alert("✅ Dados atualizados e salvos! Agora clique em Gerar via Template.");
+                  }
                 }} style={{padding:"4px 12px",borderRadius:6,border:"1px solid "+T.gold+"55",background:T.goldD,color:T.gold,fontSize:10,cursor:"pointer",fontWeight:700}}>
                   ✅ Confirmar dados
                 </button>
