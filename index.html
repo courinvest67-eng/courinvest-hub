@@ -316,16 +316,23 @@ const _gerarPdfLinkCourinvestInner=function(pathStorage,htmlContent){
          wrapper de tamanho zero com overflow:hidden, fixado fora da área visível — testado que
          isso preserva o contraste/cores corretamente. */
       wrapper=document.createElement("div");
-      wrapper.style.cssText="position:fixed;top:0;left:0;width:0;height:0;overflow:hidden;";
+      /* CAUSA RAIZ do "InvalidStateError: createPattern... canvas element with a width or height
+         of 0": o wrapper tinha width:0;height:0;overflow:hidden. Isso ESCONDE visualmente, mas o
+         html2canvas clona a subárvore inteira (incluindo ancestrais) pra medir/desenhar — e um
+         ancestral com caixa 0x0 + overflow:hidden faz o motor de layout tratar elementos com
+         fundo em gradiente/pattern (muito comuns aqui: cards de KPI, badges, faixas coloridas)
+         como tendo bounding box 0x0 no momento da captura, o que quebra o createPattern interno
+         dele. Isso explica por que os dois ajustes anteriores (timing/rAF e largura do SVG do
+         gráfico) não resolveram — nenhum dos dois tocava no problema real, que é estrutural.
+         Correção: NÃO colapsar o wrapper a 0x0. Em vez disso, ele mantém dimensão real (mesma
+         largura do container) e é jogado pra bem longe da viewport (left:-10000px), técnica
+         padrão e testada pra capturas invisíveis com html2canvas. */
+      wrapper.style.cssText="position:fixed;top:0;left:-10000px;width:800px;height:auto;overflow:visible;z-index:-1;";
       wrapper.appendChild(container);
       document.body.appendChild(wrapper);
-      /* Força um reflow síncrono e espera dois frames antes de capturar. Sem isso, o html2canvas
-         às vezes começa a desenhar ANTES do layout do HTML recém-injetado (via innerHTML) estar
-         totalmente calculado pelo navegador — e elementos com fundo em gradiente (muito comuns
-         nesse relatório: cards de KPI, badges, faixas coloridas) acabam com bounding box 0x0 no
-         momento em que o html2canvas lê o layout, o que quebra o createPattern interno dele com
-         "InvalidStateError: ...canvas element with a width or height of 0". Essa era a causa real
-         do botão de PDF sumir sempre (não era lentidão/timeout — falhava na hora, todo envio). */
+      /* Força um reflow síncrono e espera dois frames antes de capturar, garantindo que o layout
+         do HTML recém-injetado (via innerHTML) esteja totalmente calculado pelo navegador antes
+         do html2canvas começar a desenhar. */
       void container.offsetHeight;
       requestAnimationFrame(function(){
         requestAnimationFrame(function(){
@@ -29739,7 +29746,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '354';
+  var SW_VERSION = '355';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
