@@ -92,8 +92,14 @@ table{border-spacing:0}
 <!-- EmailJS SDK para envio automático de relatórios por e-mail -->
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script>if(typeof pdfjsLib!=="undefined")pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";</script>
-<!-- html2pdf.js: gera o PDF do relatório-resumo no navegador (envio automático por e-mail) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<!-- html2canvas + jsPDF: gera o PDF do relatório-resumo no navegador (envio automático por e-mail).
+     Antes usávamos o html2pdf.js (que embrulha essas duas libs e captura o relatório inteiro
+     numa tacada só, como UM canvas gigante — no caso de um relatório de várias páginas isso354
+     virava um canvas de dezenas de milhares de pixels de altura). Passamos a chamar as duas
+     libs diretamente pra renderizar PÁGINA POR PÁGINA (ver _gerarPdfLinkCourinvestInner), o que
+     evita canvases enormes que alguns navegadores/placas de vídeo não conseguem alocar. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <!-- Firebase SDK (compat for Babel standalone) -->
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
@@ -301,141 +307,97 @@ const feeMensalBRL=function(c){
    (ex.: 0.01) no container com o conteúdo é capturada pelo html2canvas no render, gerando
    um PDF "lavado"/quase invisível — por isso é o WRAPPER que fica de tamanho zero, não o
    conteúdo que fica com opacidade baixa. */
-const _gerarPdfLinkCourinvestInner=function(pathStorage,htmlContent){
-  return new Promise(function(resolve){
-    var wrapper=null;
-    try{
-      if(typeof window.html2pdf==="undefined"){console.warn("[PDF] html2pdf.js não carregou.");resolve(null);return;}
-      if(!window._fbStorage){console.warn("[PDF] Firebase Storage indisponível (verifique se o Storage está habilitado no projeto Firebase).");resolve(null);return;}
-      var container=document.createElement("div");
-      container.style.cssText="width:800px;background:#fff;";
-      /* O diagnóstico do v392 não achou nenhum elemento 0x0 na hora da captura — porque o
-         html2canvas clona o documento inteiro pra um iframe PRÓPRIO antes de desenhar, e é
-         só DENTRO desse clone interno que o problema acontece (por isso nosso scan no DOM
-         original não via nada de errado). Os únicos elementos do relatório com fundo em
-         padrão REPETIDO (background-size pequeno tipo 32px 32px, os pontinhos decorativos de
-         fundo: .bg-pattern/.bg-dots/.cv-cover-pattern/.cv-toc-pattern) são exatamente o tipo de
-         fundo que força o html2canvas a passar pelo createPattern internamente — os outros
-         gradientes do relatório (cards, capa, badges) pintam a caixa toda de uma vez só, sem
-         repetição, e não passam por esse caminho. Em vez de tentar adivinhar por que esse
-         padrão específico fica 0x0 dentro do clone do html2canvas, a saída mais segura é nem
-         deixar esse fundo chegar na versão usada pra gerar o PDF — são só pontinhos decorativos
-         de textura (opacidade 3-5%), removê-los aqui não muda nada visível no PDF final. */
-      var htmlSemPadroes=htmlContent.replace(
-        "<\/head>",
-        '<style>.bg-pattern,.bg-dots,.cv-cover-pattern,.cv-toc-pattern{background-image:none!important}<\/style><\/head>'
-      );
-      container.innerHTML=htmlSemPadroes;
-      /* Esconde do usuário SEM mexer em opacity/visibility do conteúdo — o html2canvas captura o
-         estilo computado, e opacity:quase-zero deixa o PDF "lavado"/em branco (já vimos isso
-         acontecer). Em vez disso, o container fica com opacidade normal (100%) dentro de um
-         wrapper de tamanho zero com overflow:hidden, fixado fora da área visível — testado que
-         isso preserva o contraste/cores corretamente. */
-      wrapper=document.createElement("div");
-      /* CAUSA RAIZ do "InvalidStateError: createPattern... canvas element with a width or height
-         of 0": o wrapper tinha width:0;height:0;overflow:hidden. Isso ESCONDE visualmente, mas o
-         html2canvas clona a subárvore inteira (incluindo ancestrais) pra medir/desenhar — e um
-         ancestral com caixa 0x0 + overflow:hidden faz o motor de layout tratar elementos com
-         fundo em gradiente/pattern (muito comuns aqui: cards de KPI, badges, faixas coloridas)
-         como tendo bounding box 0x0 no momento da captura, o que quebra o createPattern interno
-         dele. Isso explica por que os dois ajustes anteriores (timing/rAF e largura do SVG do
-         gráfico) não resolveram — nenhum dos dois tocava no problema real, que é estrutural.
-         Correção: NÃO colapsar o wrapper a 0x0. Em vez disso, ele mantém dimensão real (mesma
-         largura do container) e é jogado pra bem longe da viewport (left:-10000px), técnica
-         padrão e testada pra capturas invisíveis com html2canvas. */
-      wrapper.style.cssText="position:fixed;top:0;left:-10000px;width:800px;height:auto;overflow:visible;z-index:-1;";
-      wrapper.appendChild(container);
-      document.body.appendChild(wrapper);
-      /* Força um reflow síncrono e espera dois frames antes de capturar, garantindo que o layout
-         do HTML recém-injetado (via innerHTML) esteja totalmente calculado pelo navegador antes
-         do html2canvas começar a desenhar. */
-      void container.offsetHeight;
-      /* DIAGNÓSTICO TEMPORÁRIO: os dois ajustes anteriores (timing/rAF e SVG do gráfico) e o
-         ajuste do wrapper 0x0 não resolveram o "createPattern...width or height of 0". Em vez de
-         continuar tentando às cegas, varre TODOS os elementos do relatório logo antes de chamar o
-         html2canvas e reporta no console qual elemento específico está com bounding box 0x0 e tem
-         background-image (fundo em gradiente/pattern é o único caso que passa por createPattern
-         no html2canvas) — ou é um <svg>/<canvas>/<img> com largura/altura 0. Isso deve apontar o
-         elemento exato na próxima tentativa. Pode ser removido depois que a causa for confirmada. */
-      try{
-        var _diagAll=container.querySelectorAll("*");
-        var _diagAchados=[];
-        for(var _di=0;_di<_diagAll.length;_di++){
-          var _diagEl=_diagAll[_di];
-          var _diagR=_diagEl.getBoundingClientRect();
-          var _diagZero=(_diagR.width===0||_diagR.height===0);
-          if(!_diagZero)continue;
-          var _diagCs=window.getComputedStyle(_diagEl);
-          var _diagTag=_diagEl.tagName;
-          var _diagTemBg=_diagCs.backgroundImage&&_diagCs.backgroundImage!=="none";
-          if(_diagTemBg||_diagTag==="SVG"||_diagTag==="CANVAS"||_diagTag==="IMG"){
-            _diagAchados.push({tag:_diagTag,cls:(_diagEl.className||"").toString().slice(0,60),w:_diagR.width,h:_diagR.height,bg:_diagTemBg?_diagCs.backgroundImage.slice(0,80):null,html:_diagEl.outerHTML.slice(0,160)});
-          }
-        }
-        if(_diagAchados.length>0){
-          console.warn("[PDF DIAG] "+_diagAchados.length+" elemento(s) com bounding box 0x0 (candidatos ao erro createPattern):",_diagAchados);
-        }else{
-          console.warn("[PDF DIAG] Nenhum elemento 0x0 com background-image/svg/canvas/img encontrado no momento da captura.");
-        }
-      }catch(_diagE){console.warn("[PDF DIAG] Falha ao rodar diagnóstico:",_diagE);}
-      requestAnimationFrame(function(){
-        requestAnimationFrame(function(){
-          html2pdf().set({
-            margin:0,
-            filename:"relatorio.pdf",
-            image:{type:"jpeg",quality:0.95},
-            html2canvas:{scale:2,useCORS:true,backgroundColor:"#ffffff"},
-            jsPDF:{unit:"pt",format:"a4",orientation:"portrait"}
-          }).from(container).toPdf().output("blob").then(function(blob){
-            try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
-            var ref=window._fbStorage.ref().child(pathStorage);
-            return ref.put(blob,{contentType:"application/pdf"});
-          }).then(function(snap){
-            return snap.ref.getDownloadURL();
-          }).then(function(url){
-            resolve(url);
-          }).catch(function(e){
-            console.warn("[PDF] Falha ao gerar/subir PDF:",e);
-            /* DIAGNÓSTICO v394: as duas hipóteses anteriores (wrapper 0x0 e fundo repetido) não
-               resolveram, e o scan ao vivo não acha nada de errado no DOM original — sinal de que
-               o problema só aparece dentro do clone interno do próprio html2canvas, invisível pra
-               gente. Em vez de continuar apostando em hipóteses, baixa automaticamente o HTML
-               EXATO que foi usado nessa tentativa (o mesmo que gerou o erro) como um arquivo —
-               pra investigar com o conteúdo real, e não com suposições. */
-            try{
-              var _dbgBlob=new Blob([htmlSemPadroes],{type:"text/html"});
-              var _dbgUrl=URL.createObjectURL(_dbgBlob);
-              var _dbgA=document.createElement("a");
-              _dbgA.href=_dbgUrl;_dbgA.download="pdf_debug_"+Date.now()+".html";
-              document.body.appendChild(_dbgA);_dbgA.click();
-              document.body.removeChild(_dbgA);
-              setTimeout(function(){URL.revokeObjectURL(_dbgUrl)},10000);
-              console.warn("[PDF DIAG] HTML exato da tentativa que falhou foi baixado (arquivo pdf_debug_*.html) — envie esse arquivo pra investigação.");
-            }catch(_dbgE){console.warn("[PDF DIAG] Falha ao baixar HTML de debug:",_dbgE);}
-            try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
-            resolve(null);
-          });
-        });
-      });
-    }catch(e){
-      console.warn("[PDF] Erro inesperado ao gerar PDF:",e);
-      try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
-      resolve(null);
+const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent){
+  var wrapper=null;
+  try{
+    if(typeof window.html2canvas==="undefined"||!window.jspdf||typeof window.jspdf.jsPDF==="undefined"){
+      console.warn("[PDF] html2canvas/jsPDF não carregaram.");return null;
     }
-  });
+    if(!window._fbStorage){console.warn("[PDF] Firebase Storage indisponível (verifique se o Storage está habilitado no projeto Firebase).");return null;}
+    /* HISTÓRICO (v389→v394): usávamos o html2pdf.js, que captura o relatório inteiro numa
+       tacada só como UM canvas gigante (chegava a ~50 mil pixels de altura em scale:2, pra um
+       relatório de várias páginas). Testamos 4 hipóteses pro erro "InvalidStateError:
+       createPattern... canvas element with a width or height of 0" (timing/rAF, largura do SVG,
+       wrapper 0x0, fundo repetido) — nenhuma resolveu, e reproduzir com o HTML real do cliente
+       (baixado direto do navegador que dava erro) funcionou perfeitamente aqui, o que aponta pra
+       um limite de canvas/memória de GPU específico da máquina do usuário (não do código/dados).
+       CORREÇÃO DEFINITIVA (v395): em vez de um canvas gigante, renderiza PÁGINA POR PÁGINA (cada
+       página do relatório tem no máximo ~300mm de altura — um canvas perfeitamente normal) e
+       monta o PDF final juntando essas páginas com jsPDF. Isso elimina o canvas gigante de vez,
+       não importa a causa exata do limite no navegador do usuário. */
+    var container=document.createElement("div");
+    container.style.cssText="width:800px;background:#fff;";
+    /* Fundo com padrão repetido (pontinhos decorativos, opacidade 3-5%) removido por segurança —
+       é o único tipo de fundo do relatório que passa pelo createPattern interno do html2canvas
+       (os outros gradientes pintam a caixa toda de uma vez, sem repetição). Não muda nada visível
+       no PDF. */
+    var htmlSemPadroes=htmlContent.replace(
+      "<\/head>",
+      '<style>.bg-pattern,.bg-dots,.cv-cover-pattern,.cv-toc-pattern{background-image:none!important}<\/style><\/head>'
+    );
+    container.innerHTML=htmlSemPadroes;
+    wrapper=document.createElement("div");
+    wrapper.style.cssText="position:fixed;top:0;left:-10000px;width:800px;height:auto;overflow:visible;z-index:-1;";
+    wrapper.appendChild(container);
+    document.body.appendChild(wrapper);
+    void container.offsetHeight;
+    await new Promise(function(r){requestAnimationFrame(function(){requestAnimationFrame(r);});});
+
+    /* Cada "página" do relatório é um <div> filho direto do container (capa, sumário, cada
+       página de conteúdo) — o gerarRelatorio monta o HTML como capaFinal+tocPagina+pagesHtml,
+       tudo concatenado, então viram irmãos ao entrar via innerHTML. Filtra só DIVs (ignora
+       <style>/<title>/<meta> que sobraram do <head> do documento original). */
+    var pageEls=Array.prototype.filter.call(container.children,function(el){return el.tagName==="DIV";});
+    if(pageEls.length===0){
+      console.warn("[PDF] Nenhuma página encontrada no HTML do relatório.");
+      try{document.body.removeChild(wrapper)}catch(_e){}
+      return null;
+    }
+
+    var jsPDFCtor=window.jspdf.jsPDF;
+    var doc=new jsPDFCtor({unit:"pt",format:"a4",orientation:"portrait"});
+    var pageW=doc.internal.pageSize.getWidth();
+    var pageH=doc.internal.pageSize.getHeight();
+    for(var pi=0;pi<pageEls.length;pi++){
+      var canvas=await window.html2canvas(pageEls[pi],{scale:2,useCORS:true,backgroundColor:"#ffffff"});
+      if(!canvas||canvas.width===0||canvas.height===0){
+        console.warn("[PDF] Página "+pi+" gerou canvas vazio, pulando.");
+        continue;
+      }
+      var imgData=canvas.toDataURL("image/jpeg",0.95);
+      var imgH=pageW*(canvas.height/canvas.width);
+      if(pi>0)doc.addPage();
+      /* Se a página de conteúdo ficar mais alta que uma folha A4 (ex.: Composição Detalhada com
+         muitos ativos), encaixa pela largura mesmo assim — o link do relatório é só um resumo de
+         apoio, o relatório completo em HTML/impressão continua disponível na tela. */
+      doc.addImage(imgData,"JPEG",0,0,pageW,imgH);
+    }
+    try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
+
+    var blob=doc.output("blob");
+    var ref=window._fbStorage.ref().child(pathStorage);
+    await ref.put(blob,{contentType:"application/pdf"});
+    var url=await ref.getDownloadURL();
+    return url;
+  }catch(e){
+    console.warn("[PDF] Falha ao gerar/subir PDF:",e);
+    try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
+    return null;
+  }
 };
 const gerarPdfLinkCourinvest=function(pathStorage,htmlContent){
   return new Promise(function(resolve){
     var settled=false;
     var finish=function(v){if(settled)return;settled=true;resolve(v);};
-    /* 45s (era 25s) — um relatório completo multi-página (capa, resumo, benchmarks, alocação,
-       proventos, movimentações...) pode levar mais que 25s pra renderizar via html2canvas em
-       scale:2, especialmente em carteiras casal/família com muitos ativos. Timeout curto demais
-       fazia o e-mail sair sem o botão de PDF mesmo quando a geração estava OK, só lenta. */
+    /* 75s (era 45s) — desde a v395 a geração roda página por página (uma chamada ao html2canvas
+       por página do relatório, sequencial), o que é mais lento no total que a captura única de
+       antes, mas muito mais confiável. Carteiras casal/família com muitos ativos podem gerar
+       15-20+ páginas. Timeout curto demais fazia o e-mail sair sem o link do PDF mesmo quando a
+       geração estava OK, só lenta. */
     var timeoutId=setTimeout(function(){
-      console.warn("[PDF] Timeout de 45s atingido — seguindo sem o link do PDF.");
+      console.warn("[PDF] Timeout de 75s atingido — seguindo sem o link do PDF.");
       finish(null);
-    },45000);
+    },75000);
     _gerarPdfLinkCourinvestInner(pathStorage,htmlContent).then(function(url){
       clearTimeout(timeoutId);
       finish(url);
