@@ -4616,6 +4616,11 @@ function CL({data:d,onSel:os,dispatch:dp}){
             var vD="";if(venc.match(/^\d{2}\/\d{2}\/\d{4}$/)){var vp=venc.split("/");vD=vp[2]+"-"+vp[1]+"-"+vp[0]}else{vD=venc}
             var tk=ativo.length>20?ativo.split(/\s+/).slice(0,3).join(" "):ativo;
             if(tk.length>25)tk=ativo.split(/\s+/).slice(0,2).join(" ");
+            /* Evita colisão de tk entre ativos diferentes cujo nome truncado fica igual
+               (ex: "NTNB PRINCIPAL - 15/05/2029" e "NTNB PRINCIPAL - 15/08/2032" truncam
+               pros mesmos 3 primeiros termos "NTNB PRINCIPAL -"). Sem isso, os dois ativos
+               dividem o mesmo tk e objetivos vinculados a um passam a contar o outro. */
+            var tkBase1=tk,tkIdx1=0;while(ativos.some(function(x){return x.tk===tk})){tkIdx1++;tk=tkBase1+" "+tkIdx1;}
             var inst=corr;
             if(inst.match(/genial/i))inst="Genial";
             else if(inst.match(/btg/i))inst="BTG Pactual";
@@ -4637,6 +4642,33 @@ function CL({data:d,onSel:os,dispatch:dp}){
           var cleanCopy=Object.assign({},existing);delete cleanCopy._backupAntesImport;
           backup={timestamp:Date.now(),data:cleanCopy,stats:{proventos:(existing.proventos||[]).length,notasFiscais:(existing.notasFiscais||[]).length,interacoes:(existing.interacoes||[]).length,objetivos:(existing.objetivos||[]).length,ativos:(existing._ativosImport||[]).length}};
         }
+        /* === REMAPEIA VÍNCULOS DE OBJETIVOS (ativosVinculados) PRA OS NOVOS TICKERS ===
+           tk é gerado a partir do nome do ativo a cada importação — se o nome truncado colidir
+           entre dois ativos diferentes (corrigido acima) ou simplesmente mudar de posição/gerar
+           tk ligeiramente diferente entre extratos, o vínculo antigo (que guarda o tk como
+           string) deixa de bater com nenhum ativo da lista nova, e o objetivo "perde" o ativo
+           vinculado mesmo sem o usuário ter feito nada. Aqui pareamos ativo antigo x novo pelo
+           NOME COMPLETO (nm, não truncado) pra achar o tk novo correspondente ao tk antigo, e
+           atualizamos ativosVinculados de todos os objetivos existentes de acordo. Ativos que
+           somem da carteira (vendidos) não são remapeados — ficam órfãos no objetivo, sem
+           contar no total, que é o comportamento correto nesse caso. */
+        var objetivosPreservados=(existing&&existing.objetivos)||[];
+        if(existing&&existing._ativosImport&&existing._ativosImport.length>0&&objetivosPreservados.length>0){
+          var tkAntigoParaNovo={};
+          existing._ativosImport.forEach(function(aOld){
+            var nomeNorm=String(aOld.nm||"").trim().toLowerCase();
+            if(!nomeNorm)return;
+            var match=ativos.find(function(aNew){return String(aNew.nm||"").trim().toLowerCase()===nomeNorm});
+            if(match&&match.tk!==aOld.tk)tkAntigoParaNovo[aOld.tk]=match.tk;
+          });
+          if(Object.keys(tkAntigoParaNovo).length>0){
+            objetivosPreservados=objetivosPreservados.map(function(obj){
+              if(!obj.ativosVinculados||obj.ativosVinculados.length===0)return obj;
+              var novosVinc=obj.ativosVinculados.map(function(tkAntigo){return tkAntigoParaNovo[tkAntigo]||tkAntigo;});
+              return Object.assign({},obj,{ativosVinculados:novosVinc});
+            });
+          }
+        }
         var newC=Object.assign({},(existing||{}),{
           id:newId,nome:nomeCliente,email:existing?existing.email:"",tel:existing?existing.tel:"",risco:existing?existing.risco:"Moderado",pais:existing?(existing.pais||"BR"):"BR",investExterior:existing?!!existing.investExterior:false,
           sv:existing?existing.sv:["patrimonio"],pat:patReal,patGorila:patReal,
@@ -4648,7 +4680,7 @@ function CL({data:d,onSel:os,dispatch:dp}){
           /* === PRESERVAÇÃO EXPLÍCITA DE DADOS MANUAIS === sempre mantém, nunca sobrescreve na reimportação */
           proventos:(existing&&existing.proventos&&existing.proventos.length>0)?existing.proventos:(existing&&existing.proventos||[]),
           notasFiscais:(existing&&existing.notasFiscais)||[],
-          objetivos:(existing&&existing.objetivos)||[],
+          objetivos:objetivosPreservados,
           _contratos:(existing&&existing._contratos)||[],
           movimentacoes:(existing&&existing.movimentacoes)||[],
           histMensal:(existing&&existing.histMensal)||[],
@@ -5252,6 +5284,11 @@ function CL({data:d,onSel:os,dispatch:dp}){
             var vD="";if(venc.match(/^\d{2}\/\d{2}\/\d{4}$/)){var vp=venc.split("/");vD=vp[2]+"-"+vp[1]+"-"+vp[0]}else if(venc instanceof Date){vD=venc.toISOString().split("T")[0]}else{vD=venc}
             var tk=ativo.length>20?ativo.split(/\s+/).slice(0,3).join(" "):ativo;
             if(tk.length>25)tk=ativo.split(/\s+/).slice(0,2).join(" ");
+            /* Evita colisão de tk entre ativos diferentes cujo nome truncado fica igual
+               (ex: dois títulos "NTNB PRINCIPAL - <data>" com datas diferentes truncam pros
+               mesmos 3 primeiros termos). Sem isso, os dois ativos dividem o mesmo tk e
+               objetivos vinculados a um passam a contar o outro também. */
+            var tkBase1=tk,tkIdx1=0;while(ativos.some(function(x){return x.tk===tk})){tkIdx1++;tk=tkBase1+" "+tkIdx1;}
             var inst=corr;if(inst.match(/genial/i))inst="Genial";else if(inst.match(/btg/i))inst="BTG Pactual";else if(inst.match(/sproutfi/i))inst="Vest";else if(inst.match(/avenue/i))inst="Avenue";else if(inst.match(/xp\b/i))inst="Rico";else if(inst.match(/inter\b/i))inst="Inter";else if(inst.match(/c6/i))inst="C6";else if(inst.match(/wise/i))inst="Wise";else if(inst.match(/okx/i))inst="OKX";else if(inst.match(/99pay/i))inst="99Pay";
             
             var yieldA=iYieldA>=0?(typeof r[iYieldA]==="number"?r[iYieldA]:pv(r[iYieldA])):0;
@@ -5312,6 +5349,34 @@ function CL({data:d,onSel:os,dispatch:dp}){
            interações, objetivos, sucessório, aposentadoria, contratos, particularidades, etc)
            e sobrescreve só o que vem da planilha do Gorila. Sem esse spread, o reducer "RC"
            remove o cliente antigo e coloca o novo no lugar, apagando dados manuais. */
+        /* === REMAPEIA VÍNCULOS DE OBJETIVOS (ativosVinculados) PRA OS NOVOS TICKERS ===
+           tk é gerado a partir do nome do ativo a cada importação — se o nome truncado colidir
+           entre dois ativos diferentes (corrigido acima) ou gerar um tk levemente diferente
+           entre extratos, o vínculo antigo (obj.ativosVinculados guarda o tk como string) deixa
+           de bater com nenhum ativo da lista nova, e o objetivo "perde" o ativo vinculado mesmo
+           sem o usuário ter feito nada — foi exatamente esse sintoma relatado ("já tinha
+           vinculado os investimentos e ao reimportar foi eliminado"). Aqui pareamos ativo
+           antigo x novo pelo NOME COMPLETO (nm, não truncado) pra achar o tk novo
+           correspondente ao tk antigo, e atualizamos ativosVinculados de todos os objetivos
+           existentes de acordo. Ativos que somem da carteira (vendidos) não são remapeados —
+           ficam órfãos no objetivo, sem contar no total, que é o comportamento correto. */
+        var objetivosPreservados=(existing&&existing.objetivos)||[];
+        if(existing&&existing._ativosImport&&existing._ativosImport.length>0&&objetivosPreservados.length>0){
+          var tkAntigoParaNovo={};
+          existing._ativosImport.forEach(function(aOld){
+            var nomeNorm=String(aOld.nm||"").trim().toLowerCase();
+            if(!nomeNorm)return;
+            var match=ativos.find(function(aNew){return String(aNew.nm||"").trim().toLowerCase()===nomeNorm});
+            if(match&&match.tk!==aOld.tk)tkAntigoParaNovo[aOld.tk]=match.tk;
+          });
+          if(Object.keys(tkAntigoParaNovo).length>0){
+            objetivosPreservados=objetivosPreservados.map(function(obj){
+              if(!obj.ativosVinculados||obj.ativosVinculados.length===0)return obj;
+              var novosVinc=obj.ativosVinculados.map(function(tkAntigo){return tkAntigoParaNovo[tkAntigo]||tkAntigo;});
+              return Object.assign({},obj,{ativosVinculados:novosVinc});
+            });
+          }
+        }
         var newC=Object.assign({},(existing||{}),{
           id:newId,
           nome:nomeCliente,
@@ -5345,7 +5410,7 @@ function CL({data:d,onSel:os,dispatch:dp}){
           /* === PRESERVAÇÃO EXPLÍCITA DE DADOS MANUAIS === nunca sobrescreve na reimportação */
           proventos:(existing&&existing.proventos&&existing.proventos.length>0)?existing.proventos:(existing&&existing.proventos||[]),
           notasFiscais:(existing&&existing.notasFiscais)||[],
-          objetivos:(existing&&existing.objetivos)||[],
+          objetivos:objetivosPreservados,
           _contratos:(existing&&existing._contratos)||[],
           movimentacoes:(existing&&existing.movimentacoes)||[],
           histMensal:(existing&&existing.histMensal)||[],
@@ -6642,7 +6707,32 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         gRentConj.dataIni=dI;gRentConj.dataFim=dF;
         gRentConj.resultado=resultadoConj;
         if(patConj>0)gRentConj.patTotal=patConj;
-        dp({t:"UC",p:{id:c.id,conjuge:Object.assign({},c.conjuge||{},{
+        /* === REMAPEIA VÍNCULOS DE OBJETIVOS (ativosVinculados) PRA OS NOVOS TICKERS DO CÔNJUGE ===
+           Mesma lógica aplicada no import do titular: o tk do ativo do cônjuge é recalculado a
+           cada importação (nome truncado + índice de desempate), então pode mudar entre
+           extratos mesmo sem o ativo ter mudado de verdade. Objetivos que vincularam ativos do
+           cônjuge (via enr, a lista consolidada titular+cônjuge) perderiam esse vínculo na
+           reimportação. Pareamos ativo antigo x novo do cônjuge pelo nome completo e
+           atualizamos c.objetivos de acordo. */
+        var _objetivosConjPreservados=c.objetivos||[];
+        var _ativosConjAntigos=(c.conjuge&&c.conjuge._ativosImport)||[];
+        if(_ativosConjAntigos.length>0&&ativosConj.length>0&&_objetivosConjPreservados.length>0){
+          var _tkAntigoParaNovoConj={};
+          _ativosConjAntigos.forEach(function(aOld){
+            var nomeNorm=String(aOld.nm||"").trim().toLowerCase();
+            if(!nomeNorm)return;
+            var match=ativosConj.find(function(aNew){return String(aNew.nm||"").trim().toLowerCase()===nomeNorm});
+            if(match&&match.tk!==aOld.tk)_tkAntigoParaNovoConj[aOld.tk]=match.tk;
+          });
+          if(Object.keys(_tkAntigoParaNovoConj).length>0){
+            _objetivosConjPreservados=_objetivosConjPreservados.map(function(obj){
+              if(!obj.ativosVinculados||obj.ativosVinculados.length===0)return obj;
+              var novosVinc=obj.ativosVinculados.map(function(tkAntigo){return _tkAntigoParaNovoConj[tkAntigo]||tkAntigo;});
+              return Object.assign({},obj,{ativosVinculados:novosVinc});
+            });
+          }
+        }
+        dp({t:"UC",p:{id:c.id,objetivos:_objetivosConjPreservados,conjuge:Object.assign({},c.conjuge||{},{
           _ativosImport:ativosConj.length>0?ativosConj:(c.conjuge&&c.conjuge._ativosImport||[]),
           _gorilaRent:gRentConj,
           patGorila:patConj||0
