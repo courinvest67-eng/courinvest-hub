@@ -23307,7 +23307,12 @@ function NewsView({data,dispatch}){
   var s7=useState(""),aiText=s7[0],sAiText=s7[1];
   var s8=useState(false),aiLoad=s8[0],sAiLoad=s8[1];
   
-  var s9=useState({}),macroData=s9[0],sMacroData=s9[1];
+  /* Semeia o estado inicial com a última correção manual PERSISTIDA (data.config.macroManual) em
+     vez de sempre começar vazio — sem isso, "Confirmar dados" só atualizava o estado local do
+     componente (useState), então trocar de aba e voltar desmontava/remontava o NewsView, o
+     estado voltava a {} e o useEffect de baixo buscava tudo de novo nas APIs, jogando fora a
+     correção manual do usuário (ex: Selic ajustada pra 14,25 sumia e voltava o valor buscado). */
+  var s9=useState(function(){return (data&&data.config&&data.config.macroManual)||{};}),macroData=s9[0],sMacroData=s9[1];
   var s10=useState(false),macroLoad=s10[0],sMacroLoad=s10[1];
   var s11=useState(false),iaLoad=s11[0],sIaLoad=s11[1];
   var s12=useState(false),testSending=s12[0],sTestSending=s12[1];
@@ -24161,15 +24166,21 @@ function NewsView({data,dispatch}){
                   var sel=getV("selicEdit"),selAnt=getV("selicAntEdit");
                   var fed=getV("fedEdit"),fedAnt=getV("fedAntEdit");
                   var ipca=getV("ipcaEdit"),fSel=getV("focusSelicEdit"),fIpc=getV("focusIpcaEdit");
-                  sMacroData(function(prev){return Object.assign({},prev,{
-                    selic:sel!=null?sel:prev.selic,
-                    selicAnterior:selAnt!=null?selAnt:prev.selicAnterior,
-                    fed:fed!=null?{atual:fed,anterior:fedAnt!=null?fedAnt:prev.fed&&prev.fed.anterior}:prev.fed,
-                    ipca:ipca!=null?ipca:prev.ipca,
-                    focusSelic:fSel!=null?fSel:prev.focusSelic,
-                    focusIpca:fIpc!=null?fIpc:prev.focusIpca
-                  });});
-                  alert("✅ Dados atualizados! Agora clique em Gerar via Template.");
+                  var macroCorrigido=Object.assign({},macroData,{
+                    selic:sel!=null?sel:macroData.selic,
+                    selicAnterior:selAnt!=null?selAnt:macroData.selicAnterior,
+                    fed:fed!=null?{atual:fed,anterior:fedAnt!=null?fedAnt:macroData.fed&&macroData.fed.anterior}:macroData.fed,
+                    ipca:ipca!=null?ipca:macroData.ipca,
+                    focusSelic:fSel!=null?fSel:macroData.focusSelic,
+                    focusIpca:fIpc!=null?fIpc:macroData.focusIpca,
+                    atualizadoEm:Date.now()
+                  });
+                  sMacroData(macroCorrigido);
+                  /* Persiste em data.config (Firestore) — sem isso a correção só vivia no estado
+                     local do componente e sumia ao trocar de aba e voltar (useState reseta ao
+                     desmontar/remontar). */
+                  dispatch({t:"CONFIG_SET",p:{key:"macroManual",value:macroCorrigido}});
+                  alert("✅ Dados atualizados e salvos! Agora clique em Gerar via Template.");
                 }} style={{padding:"4px 12px",borderRadius:6,border:"1px solid "+T.gold+"55",background:T.goldD,color:T.gold,fontSize:10,cursor:"pointer",fontWeight:700}}>
                   ✅ Confirmar dados
                 </button>
