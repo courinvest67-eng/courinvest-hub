@@ -396,6 +396,22 @@ const _gerarPdfLinkCourinvestInner=function(pathStorage,htmlContent){
             resolve(url);
           }).catch(function(e){
             console.warn("[PDF] Falha ao gerar/subir PDF:",e);
+            /* DIAGNÓSTICO v394: as duas hipóteses anteriores (wrapper 0x0 e fundo repetido) não
+               resolveram, e o scan ao vivo não acha nada de errado no DOM original — sinal de que
+               o problema só aparece dentro do clone interno do próprio html2canvas, invisível pra
+               gente. Em vez de continuar apostando em hipóteses, baixa automaticamente o HTML
+               EXATO que foi usado nessa tentativa (o mesmo que gerou o erro) como um arquivo —
+               pra investigar com o conteúdo real, e não com suposições. */
+            try{
+              var _dbgBlob=new Blob([htmlSemPadroes],{type:"text/html"});
+              var _dbgUrl=URL.createObjectURL(_dbgBlob);
+              var _dbgA=document.createElement("a");
+              _dbgA.href=_dbgUrl;_dbgA.download="pdf_debug_"+Date.now()+".html";
+              document.body.appendChild(_dbgA);_dbgA.click();
+              document.body.removeChild(_dbgA);
+              setTimeout(function(){URL.revokeObjectURL(_dbgUrl)},10000);
+              console.warn("[PDF DIAG] HTML exato da tentativa que falhou foi baixado (arquivo pdf_debug_*.html) — envie esse arquivo pra investigação.");
+            }catch(_dbgE){console.warn("[PDF DIAG] Falha ao baixar HTML de debug:",_dbgE);}
             try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
             resolve(null);
           });
