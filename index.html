@@ -334,6 +334,34 @@ const _gerarPdfLinkCourinvestInner=function(pathStorage,htmlContent){
          do HTML recém-injetado (via innerHTML) esteja totalmente calculado pelo navegador antes
          do html2canvas começar a desenhar. */
       void container.offsetHeight;
+      /* DIAGNÓSTICO TEMPORÁRIO: os dois ajustes anteriores (timing/rAF e SVG do gráfico) e o
+         ajuste do wrapper 0x0 não resolveram o "createPattern...width or height of 0". Em vez de
+         continuar tentando às cegas, varre TODOS os elementos do relatório logo antes de chamar o
+         html2canvas e reporta no console qual elemento específico está com bounding box 0x0 e tem
+         background-image (fundo em gradiente/pattern é o único caso que passa por createPattern
+         no html2canvas) — ou é um <svg>/<canvas>/<img> com largura/altura 0. Isso deve apontar o
+         elemento exato na próxima tentativa. Pode ser removido depois que a causa for confirmada. */
+      try{
+        var _diagAll=container.querySelectorAll("*");
+        var _diagAchados=[];
+        for(var _di=0;_di<_diagAll.length;_di++){
+          var _diagEl=_diagAll[_di];
+          var _diagR=_diagEl.getBoundingClientRect();
+          var _diagZero=(_diagR.width===0||_diagR.height===0);
+          if(!_diagZero)continue;
+          var _diagCs=window.getComputedStyle(_diagEl);
+          var _diagTag=_diagEl.tagName;
+          var _diagTemBg=_diagCs.backgroundImage&&_diagCs.backgroundImage!=="none";
+          if(_diagTemBg||_diagTag==="SVG"||_diagTag==="CANVAS"||_diagTag==="IMG"){
+            _diagAchados.push({tag:_diagTag,cls:(_diagEl.className||"").toString().slice(0,60),w:_diagR.width,h:_diagR.height,bg:_diagTemBg?_diagCs.backgroundImage.slice(0,80):null,html:_diagEl.outerHTML.slice(0,160)});
+          }
+        }
+        if(_diagAchados.length>0){
+          console.warn("[PDF DIAG] "+_diagAchados.length+" elemento(s) com bounding box 0x0 (candidatos ao erro createPattern):",_diagAchados);
+        }else{
+          console.warn("[PDF DIAG] Nenhum elemento 0x0 com background-image/svg/canvas/img encontrado no momento da captura.");
+        }
+      }catch(_diagE){console.warn("[PDF DIAG] Falha ao rodar diagnóstico:",_diagE);}
       requestAnimationFrame(function(){
         requestAnimationFrame(function(){
           html2pdf().set({
