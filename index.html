@@ -2080,7 +2080,18 @@ function Dash({data:d,onSel:os,goTo}){
   var mesRef=new Date();mesRef.setDate(1);mesRef.setMonth(mesRef.getMonth()-1);
   var mesRefNome=MES_NOMES[mesRef.getMonth()]+" de "+mesRef.getFullYear();
   var mesRefKey=mesRef.getFullYear()+"-"+String(mesRef.getMonth()+1).padStart(2,"0");
-  
+  /* isEnviadoPersistido: o status "enviado" (relEnviados) era guardado só num useState local —
+     ao dar F5 esse estado resetava pra {} e o painel voltava a mostrar TODO MUNDO como pendente,
+     mesmo depois de já ter enviado (o e-mail/WhatsApp realmente saiu, só o "lembrete" de que já
+     saiu não sobrevivia ao reload). Só que o próprio fluxo de envio (mais abaixo) JÁ grava
+     c.particularidades.relatorios[mesAno].publicado=true no Firestore a cada envio — só que
+     ninguém lia esse campo de volta. Agora o status "enviado" é calculado a partir dele (dado
+     persistido e sincronizado de verdade), com o useState relEnviados servindo só de reforço
+     otimista pra já marcar como enviado na hora, sem esperar o round-trip do Firestore. */
+  var isEnviadoPersistido=function(c){
+    return !!(c&&c.particularidades&&c.particularidades.relatorios&&c.particularidades.relatorios[mesRefKey]&&c.particularidades.relatorios[mesRefKey].publicado);
+  };
+
   const fmCompact=function(v){
     if(v===null||v===undefined||isNaN(v))return"R$ 0";
     var abs=Math.abs(v),sig=v<0?"-":"";
@@ -2198,7 +2209,7 @@ function Dash({data:d,onSel:os,goTo}){
 
       {/* ===== BANNER: RELATÓRIOS MENSAIS PENDENTES ===== */}
       {clRelatorio.length>0 && !relModal && (function(){
-        var jaEnviados=clRelatorio.filter(function(c){return relEnviados[c.id+"-"+mesRefKey]});
+        var jaEnviados=clRelatorio.filter(function(c){return relEnviados[c.id+"-"+mesRefKey]||isEnviadoPersistido(c)});
         var pendentes=clRelatorio.length-jaEnviados.length;
         if(pendentes===0)return null;
         return (
@@ -2252,7 +2263,7 @@ function Dash({data:d,onSel:os,goTo}){
               {[
                 {l:"Total de clientes",v:clRelatorio.length,c:T.t1},
                 {l:"Aprovados",v:Object.keys(relAprovados).filter(function(k){return relAprovados[k]&&k.endsWith(mesRefKey)}).length,c:T.gold},
-                {l:"Enviados",v:Object.keys(relEnviados).filter(function(k){return relEnviados[k]&&k.endsWith(mesRefKey)}).length,c:T.green},
+                {l:"Enviados",v:clRelatorio.filter(function(c){return relEnviados[c.id+"-"+mesRefKey]||isEnviadoPersistido(c)}).length,c:T.green},
               ].map(function(k,i){return (
                 <div key={i} style={{background:T.w3,borderRadius:8,padding:"10px 12px",textAlign:"center"}}>
                   <div style={{fontSize:18,fontWeight:800,color:k.c,fontFamily:"'JetBrains Mono'"}}>{k.v}</div>
@@ -2308,7 +2319,7 @@ function Dash({data:d,onSel:os,goTo}){
               </button>
               <div style={{flex:1}}/>
               <button onClick={function(){
-                var aprovList=clRelatorio.filter(function(c){return relAprovados[c.id+"-"+mesRefKey]&&!relEnviados[c.id+"-"+mesRefKey]});
+                var aprovList=clRelatorio.filter(function(c){return relAprovados[c.id+"-"+mesRefKey]&&!(relEnviados[c.id+"-"+mesRefKey]||isEnviadoPersistido(c))});
                 if(!aprovList.length){alert("Nenhum relatório aprovado para envio.");return;}
                 var idx=0;
                 var enviarProximo=function(){
@@ -2344,7 +2355,15 @@ function Dash({data:d,onSel:os,goTo}){
                             dtPublicacao: new Date().toISOString(),
                             notificado: false
                           };
-                          return Object.assign({}, c, {particularidades: Object.assign({}, particularidades, {relatorios: relatorios})});
+                          /* _updatedAt:Date.now() — sem isso, esse cliente ficava com o MESMO
+                             _updatedAt de antes (essa gravação vai direto pro Firestore, sem
+                             passar pelo reducer local). Quando o listener em tempo real (ver
+                             mergeClientes) buscasse essa atualização de volta, um empate de
+                             _updatedAt favorece o lado LOCAL — e o dispositivo que acabou de
+                             enviar o relatório tem em memória a versão ANTIGA (sem o
+                             particularidades.relatorios[mesAno].publicado) até o round-trip
+                             completar, o que apagaria essa marcação de "enviado" de volta. */
+                          return Object.assign({}, c, {particularidades: Object.assign({}, particularidades, {relatorios: relatorios}), _updatedAt: Date.now()});
                         });
                         window._fbDB.collection("workspaces").doc("main").update({cl: clientes});
                       }).catch(function(e){console.warn("Rel push:", e)});
@@ -2433,8 +2452,8 @@ function Dash({data:d,onSel:os,goTo}){
               {clRelatorio.map(function(c){
                 var svArr=Array.isArray(c.sv)?c.sv:(c.sv?[c.sv]:[]);
                 var svStr=svArr.join(",");
-                var aprovado=!!relAprovados[c.id+"-"+mesRefKey];
-                var enviado=!!relEnviados[c.id+"-"+mesRefKey];
+                var enviado=!!(relEnviados[c.id+"-"+mesRefKey]||isEnviadoPersistido(c));
+                var aprovado=!!relAprovados[c.id+"-"+mesRefKey]||enviado;
                 var enviando=relEnviando===c.id;
                 var temWa=!!(c.waGrupo||c.tel);
                 var pat=c.patGorila||c.pat||0;
@@ -29961,7 +29980,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '356';
+  var SW_VERSION = '357';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
