@@ -8097,7 +8097,14 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         else if(tipo==="trimestral"){rentPeriodo=base*0.22;cdiPeriodo=3.18;ibovPeriodo=5.4;ipcaPeriodo=1.35;rentLabel="no trimestre"}
         else{rentPeriodo=base;cdiPeriodo=13.25;ibovPeriodo=15.3;ipcaPeriodo=4.87;rentLabel="no período"}
       }
-      var vsC=rentPeriodo-cdiPeriodo;
+      /* Benchmark principal do Resumo Executivo: IPCA (não CDI) — a pedido do usuário, porque a
+         carteira tem várias classes de ativos (renda fixa, FIIs, ações, exterior...) e o CDI é
+         uma referência específica de renda fixa pós-fixada; o IPCA (inflação) é mais aderente
+         pra mostrar ao cliente se o patrimônio está preservando/ganhando poder de compra numa
+         carteira diversificada. O quadro "Rentabilidade vs Benchmarks" mais abaixo continua
+         mostrando CDI, IBOVESPA, IFIX, IPCA e Poupança lado a lado — só o comparativo em
+         destaque (KPI "vs Benchmark" + narrativa) passou a usar o IPCA como referência. */
+      var vsC=rentPeriodo-ipcaPeriodo;
 
       /* ===== IMPACTO CAMBIAL ===== */
       var TP_EXT_CAMBIAL=["stock_us","etf_int","etf_eu","reit"];
@@ -8279,7 +8286,10 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
             _notaConj='* rentabilidade estimada a partir da rentabilidade por ativo do extrato importado';
           }
         }
-        var _cdiMes=(c._gorilaRent&&typeof c._gorilaRent.cdiMes==="number")?c._gorilaRent.cdiMes*100:cdiPeriodo;
+        /* Benchmark principal = IPCA (ver comentário em "var vsC" acima). Não existe um campo
+           "ipcaMes" específico importado por cônjuge (só cdiMes existia), então usa direto o
+           ipcaPeriodo do período do relatório pra ambos titular e cônjuge. */
+        var _cdiMes=ipcaPeriodo;
         var _vsCdiConj=_rentConj-_cdiMes;
         var _patTotal=_patTit+_patConj;
         var _baseRentTotal=_patTit+(_temDadoConj?_patConj:0);
@@ -8323,7 +8333,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         var labelPeriodo=tipo==="mensal"?"do mês":(tipo==="anual"?"em 12 meses":"do trimestre");
 
         /* Helper para bloco de KPIs de uma carteira.
-           opts.semDado=true → mostra "—" em Rentabilidade/Ganho/vs CDI em vez de 0,00%/R$0,00
+           opts.semDado=true → mostra "—" em Rentabilidade/Ganho/vs IPCA em vez de 0,00%/R$0,00
            (usado quando não há NENHUM dado de rentabilidade pro período, pra não parecer
            que a carteira realmente rendeu zero). opts.nota = texto explicativo opcional. */
         var _kpiBlock=function(titulo,pat,rent,ganho,vsCdi,label,opts){
@@ -8337,12 +8347,12 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           if(semDado){
             b+='<div class="kpi"><div class="kpi-label">Rentabilidade</div><div class="kpi-value" style="color:#9AA0AE">—</div><div class="kpi-sub">sem dado no período</div></div>';
             b+='<div class="kpi"><div class="kpi-label">Ganho '+labelPeriodo+'</div><div class="kpi-value" style="color:#9AA0AE">—</div><div class="kpi-sub">sem dado no período</div></div>';
-            b+='<div class="kpi"><div class="kpi-label">vs CDI</div><div class="kpi-value" style="color:#9AA0AE">—</div><div class="kpi-sub">sem dado no período</div></div>';
+            b+='<div class="kpi"><div class="kpi-label">vs IPCA</div><div class="kpi-value" style="color:#9AA0AE">—</div><div class="kpi-sub">sem dado no período</div></div>';
           }else{
             b+='<div class="kpi"><div class="kpi-label">Rentabilidade</div><div class="kpi-value '+(rent>=0?"green":"red")+'">'+(rent>=0?"+":"")+rent.toFixed(2)+'%</div><div class="kpi-sub">'+label+'</div></div>';
             var gtxt=(ganho>=0?"+":"")+fmF(ganho);var gsz=gtxt.length>=16?12:gtxt.length>=14?13:gtxt.length>=12?14:gtxt.length>=10?15:17;
             b+='<div class="kpi"><div class="kpi-label">Ganho '+labelPeriodo+'</div><div class="kpi-value '+(ganho>=0?"green":"red")+'" style="font-size:'+gsz+'px">'+gtxt+'</div><div class="kpi-sub">variação estimada</div></div>';
-            b+='<div class="kpi"><div class="kpi-label">vs CDI</div><div class="kpi-value '+(vsCdi>=0?"green":"red")+'">'+(vsCdi>=0?"+":"")+vsCdi.toFixed(2)+'pp</div><div class="kpi-sub">'+(vsCdi>=0?"acima do":"abaixo do")+' benchmark</div></div>';
+            b+='<div class="kpi"><div class="kpi-label">vs IPCA</div><div class="kpi-value '+(vsCdi>=0?"green":"red")+'">'+(vsCdi>=0?"+":"")+vsCdi.toFixed(2)+'pp</div><div class="kpi-sub">'+(vsCdi>=0?"acima do":"abaixo do")+' benchmark</div></div>';
           }
           b+='</div>';
           if(opts.nota)b+='<div style="font-size:9px;color:#9AA0AE;font-style:italic;margin-top:4px">'+opts.nota+'</div>';
@@ -8354,7 +8364,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
            foram calculados acima (antes do secAtiva("resumoExec")), pra ficarem disponíveis
            pras seções seguintes mesmo se o Resumo Executivo estiver desativado. Só reusa aqui. */
         if(_rentParaNarrativa>=0){
-          leadResumo='Sua carteira encerrou o período com <span class="cv-lead-strong">rentabilidade de +'+_rentParaNarrativa.toFixed(2)+'%</span>'+(_vsCdiParaNarrativa>=0?', superando o CDI':'')+' e mantendo o ritmo consistente de crescimento esperado para o seu perfil '+c.risco+'.';
+          leadResumo='Sua carteira encerrou o período com <span class="cv-lead-strong">rentabilidade de +'+_rentParaNarrativa.toFixed(2)+'%</span>'+(_vsCdiParaNarrativa>=0?', superando o IPCA':'')+' e mantendo o ritmo consistente de crescimento esperado para o seu perfil '+c.risco+'.';
         }else{
           leadResumo='Sua carteira apresentou <span class="cv-lead-strong">variação de '+_rentParaNarrativa.toFixed(2)+'%</span> no período, refletindo movimentos do mercado que serão analisados em detalhe nas próximas seções.';
         }
@@ -8371,7 +8381,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           (function(){var txt=fmF(tCV);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value gold" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">posição atual</div></div>';})();
           body+='<div class="kpi"><div class="kpi-label">Rentabilidade</div><div class="kpi-value '+(rentPeriodo>=0?"green":"red")+'">'+(rentPeriodo>=0?"+":"")+rentPeriodo.toFixed(2)+'%</div><div class="kpi-sub">'+rentLabel+'</div></div>';
           (function(){var txt=(ganhoPeriodo>=0?"+":"")+fmRel(ganhoPeriodo);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Ganho '+labelPeriodo+'</div><div class="kpi-value '+(ganhoPeriodo>=0?"green":"red")+'" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">variação estimada</div></div>';})();
-          body+='<div class="kpi"><div class="kpi-label">vs CDI</div><div class="kpi-value '+(vsC>=0?"green":"red")+'">'+(vsC>=0?"+":"")+vsC.toFixed(2)+'pp</div><div class="kpi-sub">'+(vsC>=0?"acima do":"abaixo do")+' benchmark</div></div>';
+          body+='<div class="kpi"><div class="kpi-label">vs IPCA</div><div class="kpi-value '+(vsC>=0?"green":"red")+'">'+(vsC>=0?"+":"")+vsC.toFixed(2)+'pp</div><div class="kpi-sub">'+(vsC>=0?"acima do":"abaixo do")+' benchmark</div></div>';
           body+='</div>';
         }
 
@@ -8395,9 +8405,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       narrativa+='Olá <strong>'+_saudacao+'</strong>, segue a síntese da sua carteira em <strong>'+periodoLabel+'</strong>. ';
       narrativa+='A carteira '+(_rentParaNarrativa>=0?'rendeu <span class="highlight-green">+'+_rentParaNarrativa.toFixed(2)+'%</span>':'variou <span class="highlight-red">'+_rentParaNarrativa.toFixed(2)+'%</span>')+' '+rentLabel+', ';
       if(_vsCdiParaNarrativa>=0){
-        narrativa+='<span class="highlight-green">superando o CDI em '+_vsCdiParaNarrativa.toFixed(2)+' pontos percentuais</span> — resultado consistente com o perfil <strong>'+c.risco+'</strong>. ';
+        narrativa+='<span class="highlight-green">superando o IPCA em '+_vsCdiParaNarrativa.toFixed(2)+' pontos percentuais</span> — resultado consistente com o perfil <strong>'+c.risco+'</strong>. ';
       }else{
-        narrativa+='ficando <span class="highlight-red">'+Math.abs(_vsCdiParaNarrativa).toFixed(2)+'pp abaixo do CDI</span> no período. ';
+        narrativa+='ficando <span class="highlight-red">'+Math.abs(_vsCdiParaNarrativa).toFixed(2)+'pp abaixo do IPCA</span> no período. ';
       }
       var totalClasses=(function(){var bt={};enr.forEach(function(a){var t=tipoAtivoLabel(a);bt[t]=true});return Object.keys(bt).length})();
       narrativa+='A composição é de <strong>'+enr.length+' ativos</strong> em '+totalClasses+' classes distintas.';
@@ -8715,9 +8725,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           +'<div style="font-size:8.5px;color:#6B7489;margin:-2px 0 8px 88px;font-style:italic">'+(BENCH_DESC[b.l]||"")+'</div>';
       });
       if(_vsCdiParaNarrativa>=0){
-        body+='<div class="nota-inline">✅ <strong>Sua carteira superou o CDI</strong> em '+_vsCdiParaNarrativa.toFixed(2)+' pontos percentuais. Capital crescendo acima da taxa básica de mercado.</div>';
+        body+='<div class="nota-inline">✅ <strong>Sua carteira superou o IPCA</strong> em '+_vsCdiParaNarrativa.toFixed(2)+' pontos percentuais. Patrimônio ganhando poder de compra acima da inflação.</div>';
       }else{
-        body+='<div class="nota-inline">⚠️ <strong>Sua carteira ficou '+Math.abs(_vsCdiParaNarrativa).toFixed(2)+'pp abaixo do CDI</strong> no período. Revisamos alocação e riscos conforme suas metas.</div>';
+        body+='<div class="nota-inline">⚠️ <strong>Sua carteira ficou '+Math.abs(_vsCdiParaNarrativa).toFixed(2)+'pp abaixo do IPCA</strong> no período. Revisamos alocação e riscos conforme suas metas.</div>';
       }
 
       /* === FUNÇÃO HELPER: getRentAtivoPer ===
@@ -19721,7 +19731,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
               var SECOES=[
                 {k:"capa",            l:"Capa personalizada",       ic:"🎨", desc:"Página de abertura com logo Courinvest e nome do cliente"},
                 {k:"overview",        l:"Resumo de Mercado",         ic:"📰", desc:"Panorama macro do mês (Ibovespa, Selic, Copom, cenário) — só relatório mensal"},
-                {k:"resumoExec",      l:"Resumo executivo",          ic:"📋", desc:"KPIs principais (patrimônio, rentabilidade, vs CDI) + narrativa"},
+                {k:"resumoExec",      l:"Resumo executivo",          ic:"📋", desc:"KPIs principais (patrimônio, rentabilidade, vs IPCA) + narrativa"},
                 {k:"evolucao",        l:"Evolução Patrimonial",      ic:"📈", desc:"Gráfico de evolução do patrimônio ao longo do tempo"},
                 {k:"rentabilidade",   l:"Rentabilidade vs benchmarks",ic:"📈", desc:"Performance vs CDI, IBOV, IPCA, Poupança + Atribuição por Classe"},
                 {k:"carteira",        l:"Carteira (alocação)",       ic:"🎨", desc:"Alocação por classes + Top 5 melhores e piores + Composição detalhada"},
@@ -29980,7 +29990,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '357';
+  var SW_VERSION = '358';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
