@@ -430,61 +430,91 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent){
              linha de cabeçalho (recortada do MESMO canvas já renderizado) é redesenhada no topo
              dessa página antes do conteúdo. */
           var segmentos=[];
-          var pageStartPx=0;
-          var fecharAteAqui=function(corte){
-            if(corte>pageStartPx+1){
-              segmentos.push({inicio:pageStartPx,fim:corte,headerTopo:null,headerFim:null});
-            }
-            pageStartPx=corte;
-          };
-
-          blocos.forEach(function(bl){
-            var r=bl.getBoundingClientRect();
-            var topoPx=(r.top-elRect.top)*scaleFactor;
-            var fimPx=(r.bottom-elRect.top)*scaleFactor;
-            if(fimPx-pageStartPx<=pxPorPagina)return; /* cabe folgado no que já foi acumulado */
-            if(topoPx>pageStartPx && (fimPx-topoPx)<=pxPorPagina){
-              /* Bloco cabe inteiro numa página nova — corta ANTES dele, não no meio. */
-              fecharAteAqui(topoPx);
-              return;
-            }
-            /* Bloco sozinho não cabe nem numa página vazia. Tenta fatiar ESTE bloco de forma
-               inteligente — sem NECESSARIAMENTE fechar a página atual antes dele: se for uma
-               tabela, o primeiro pedaço aproveita o espaço que já sobrou na página atual (ex: o
-               título da seção que veio logo antes da tabela), em vez de jogar fora esse espaço
-               só pra começar a tabela numa folha em branco. */
-            var tabela=(bl.tagName==="TABLE")?bl:(bl.querySelector?bl.querySelector("table"):null);
-            if(tabela&&tabela.rows&&tabela.rows.length>1){
-              var linhas=Array.prototype.slice.call(tabela.rows);
-              var hr=linhas[0].getBoundingClientRect();
-              var headerTopoPx=(hr.top-elRect.top)*scaleFactor;
-              var headerFimPx=(hr.bottom-elRect.top)*scaleFactor;
-              var headerAlturaPx=Math.max(0,headerFimPx-headerTopoPx);
-              var curInicio=pageStartPx; /* não topoPx — reaproveita o espaço restante da página atual */
-              var curEhContinuacao=false;
-              for(var li=1;li<linhas.length;li++){
-                var lr=linhas[li].getBoundingClientRect();
-                var linhaTopoPx=(lr.top-elRect.top)*scaleFactor;
-                var linhaFimPx=(lr.bottom-elRect.top)*scaleFactor;
-                var limiteAtual=curInicio+(curEhContinuacao?(pxPorPagina-headerAlturaPx):pxPorPagina);
-                if(linhaFimPx>limiteAtual&&linhaTopoPx>curInicio){
-                  /* Fecha o pedaço atual da tabela na borda desta linha (nunca no meio dela). */
-                  segmentos.push({inicio:curInicio,fim:linhaTopoPx,headerTopo:curEhContinuacao?headerTopoPx:null,headerFim:curEhContinuacao?headerFimPx:null});
-                  curInicio=linhaTopoPx;
-                  curEhContinuacao=true;
-                }
+          /* fatiarLista: percorre uma lista de elementos-irmãos (os blocos-filho da página, ou —
+             recursivamente — os filhos de um bloco grande demais pra caber sozinho numa página) e
+             vai fechando "segmentos" (cada um vira 1 página do PDF) sempre em BORDAS de elemento,
+             nunca no meio. Recebe de onde já tem espaço acumulado ("pos", equivalente ao antigo
+             pageStartPx) e devolve a nova posição depois de processar a lista inteira. Importante:
+             quando um bloco não tem tabela mas também não cabe sozinho numa página (ex: uma caixa
+             de texto comprida com título+parágrafos+lista), a versão anterior simplesmente pulava
+             pageStartPx pro fim do bloco SEM nunca gerar segmento nenhum pra ele — o conteúdo
+             inteiro do bloco sumia do PDF. Agora ele é fatiado recursivamente pelos PRÓPRIOS
+             filhos (título, parágrafo, lista...), então o corte cai numa borda de parágrafo/item
+             em vez de no meio de uma linha de texto, e nenhum trecho de conteúdo é perdido. */
+          var fatiarLista=function(lista,posInicial){
+            var pos=posInicial;
+            var fechar=function(corte){
+              if(corte>pos+1)segmentos.push({inicio:pos,fim:corte,headerTopo:null,headerFim:null});
+              pos=corte;
+            };
+            lista.forEach(function(bl){
+              var r=bl.getBoundingClientRect();
+              var topoPx=(r.top-elRect.top)*scaleFactor;
+              var fimPx=(r.bottom-elRect.top)*scaleFactor;
+              if(fimPx-pos<=pxPorPagina)return; /* cabe folgado no que já foi acumulado */
+              if(topoPx>pos && (fimPx-topoPx)<=pxPorPagina){
+                /* Bloco cabe inteiro numa página nova — corta ANTES dele, não no meio. */
+                fechar(topoPx);
+                return;
               }
-              segmentos.push({inicio:curInicio,fim:fimPx,headerTopo:curEhContinuacao?headerTopoPx:null,headerFim:curEhContinuacao?headerFimPx:null});
-              pageStartPx=fimPx;
-            }else{
-              /* Bloco grande sem tabela dentro (raríssimo) — sem um jeito melhor de particionar
-                 por conteúdo, então este caso (só esse) ainda fecha a página antes dele e cai no
-                 fatiamento por pixel fixo abaixo, igual ao comportamento anterior. */
-              if(topoPx>pageStartPx)fecharAteAqui(topoPx);
-              pageStartPx=fimPx;
-            }
-          });
-          fecharAteAqui(canvas.height);
+              /* Bloco sozinho não cabe nem numa página vazia. Tenta fatiar ESTE bloco de forma
+                 inteligente — sem NECESSARIAMENTE fechar a página atual antes dele: se for uma
+                 tabela, o primeiro pedaço aproveita o espaço que já sobrou na página atual (ex: o
+                 título da seção que veio logo antes da tabela), em vez de jogar fora esse espaço
+                 só pra começar a tabela numa folha em branco. */
+              var tabela=(bl.tagName==="TABLE")?bl:(bl.querySelector?bl.querySelector("table"):null);
+              if(tabela&&tabela.rows&&tabela.rows.length>1){
+                var linhas=Array.prototype.slice.call(tabela.rows);
+                var hr=linhas[0].getBoundingClientRect();
+                var headerTopoPx=(hr.top-elRect.top)*scaleFactor;
+                var headerFimPx=(hr.bottom-elRect.top)*scaleFactor;
+                var headerAlturaPx=Math.max(0,headerFimPx-headerTopoPx);
+                var curInicio=pos; /* não topoPx — reaproveita o espaço restante da página atual */
+                var curEhContinuacao=false;
+                for(var li=1;li<linhas.length;li++){
+                  var lr=linhas[li].getBoundingClientRect();
+                  var linhaTopoPx=(lr.top-elRect.top)*scaleFactor;
+                  var linhaFimPx=(lr.bottom-elRect.top)*scaleFactor;
+                  var limiteAtual=curInicio+(curEhContinuacao?(pxPorPagina-headerAlturaPx):pxPorPagina);
+                  if(linhaFimPx>limiteAtual&&linhaTopoPx>curInicio){
+                    /* Fecha o pedaço atual da tabela na borda desta linha (nunca no meio dela). */
+                    segmentos.push({inicio:curInicio,fim:linhaTopoPx,headerTopo:curEhContinuacao?headerTopoPx:null,headerFim:curEhContinuacao?headerFimPx:null});
+                    curInicio=linhaTopoPx;
+                    curEhContinuacao=true;
+                  }
+                }
+                segmentos.push({inicio:curInicio,fim:fimPx,headerTopo:curEhContinuacao?headerTopoPx:null,headerFim:curEhContinuacao?headerFimPx:null});
+                pos=fimPx;
+                return;
+              }
+              /* Sem tabela dentro: tenta fatiar pelos FILHOS deste bloco (ex: título + parágrafo +
+                 lista + parágrafo, dentro de uma caixa de texto comprida) — mesma lógica acima,
+                 aplicada recursivamente, reaproveitando o espaço restante ("pos") igual à tabela. */
+              var filhos=Array.prototype.filter.call(bl.children||[],function(el2){
+                var rr=el2.getBoundingClientRect&&el2.getBoundingClientRect();
+                return rr&&rr.height>0;
+              });
+              if(filhos.length>1){
+                pos=fatiarLista(filhos,pos);
+                return;
+              }
+              /* Último recurso: elemento realmente indivisível (folha, sem sub-elementos) maior
+                 que uma página sozinho — ex: um único parágrafo gigante. Fatia por pixel fixo, MAS
+                 cobrindo o bloco INTEIRO em 1+ segmentos, nunca pulando/perdendo o conteúdo dele
+                 (esse "pular o bloco inteiro sem gerar segmento" era o bug: fazia trechos do
+                 relatório sumirem do PDF quando um bloco sem tabela era mais alto que uma página). */
+              var cursor=pos;
+              while(fimPx-cursor>pxPorPagina+1){
+                segmentos.push({inicio:cursor,fim:cursor+pxPorPagina,headerTopo:null,headerFim:null});
+                cursor+=pxPorPagina;
+              }
+              if(fimPx-cursor>1)segmentos.push({inicio:cursor,fim:fimPx,headerTopo:null,headerFim:null});
+              pos=fimPx;
+            });
+            return pos;
+          };
+          var posFinal=fatiarLista(blocos,0);
+          if(canvas.height>posFinal+1)segmentos.push({inicio:posFinal,fim:canvas.height,headerTopo:null,headerFim:null});
 
           segmentos.forEach(function(seg){
             if(seg.fim<=seg.inicio+1)return;
@@ -30043,7 +30073,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '359';
+  var SW_VERSION = '360';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
