@@ -430,32 +430,73 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent){
              linha de cabeçalho (recortada do MESMO canvas já renderizado) é redesenhada no topo
              dessa página antes do conteúdo. */
           var segmentos=[];
+          /* fecharSegmento: fecha em "segmentos" o pedaço [estado.pos,corte) — vira 1 página do
+             PDF — e devolve o novo "estado" (página seguinte, ainda ABERTA/não fechada). Manter a
+             próxima página como um estado aberto (em vez de já fechá-la) é o que permite que o
+             conteúdo seguinte reaproveite o espaço que sobrou nela, em vez de começar do zero numa
+             folha nova — evitando página quase em branco. */
+          var fecharSegmento=function(estado,corte){
+            if(corte>estado.pos+1){
+              segmentos.push({inicio:estado.pos,fim:corte,headerTopo:estado.headerTopo,headerFim:estado.headerFim});
+            }
+            return{pos:corte,headerTopo:null,headerFim:null};
+          };
           /* fatiarLista: percorre uma lista de elementos-irmãos (os blocos-filho da página, ou —
              recursivamente — os filhos de um bloco grande demais pra caber sozinho numa página) e
              vai fechando "segmentos" (cada um vira 1 página do PDF) sempre em BORDAS de elemento,
-             nunca no meio. Recebe de onde já tem espaço acumulado ("pos", equivalente ao antigo
-             pageStartPx) e devolve a nova posição depois de processar a lista inteira. Importante:
-             quando um bloco não tem tabela mas também não cabe sozinho numa página (ex: uma caixa
-             de texto comprida com título+parágrafos+lista), a versão anterior simplesmente pulava
-             pageStartPx pro fim do bloco SEM nunca gerar segmento nenhum pra ele — o conteúdo
-             inteiro do bloco sumia do PDF. Agora ele é fatiado recursivamente pelos PRÓPRIOS
-             filhos (título, parágrafo, lista...), então o corte cai numa borda de parágrafo/item
-             em vez de no meio de uma linha de texto, e nenhum trecho de conteúdo é perdido. */
-          var fatiarLista=function(lista,posInicial){
-            var pos=posInicial;
-            var fechar=function(corte){
-              if(corte>pos+1)segmentos.push({inicio:pos,fim:corte,headerTopo:null,headerFim:null});
-              pos=corte;
-            };
-            lista.forEach(function(bl){
+             nunca no meio. Recebe o "estado" da página que já está sendo acumulada (posição +
+             se precisa repetir cabeçalho de tabela) e devolve o estado atualizado depois de
+             processar a lista inteira — SEM empurrar a última página pra "segmentos" ainda (fica
+             aberta, pra quem chamou poder continuar aproveitando o espaço que sobrou nela).
+             Importante: quando um bloco não tem tabela mas também não cabe sozinho numa página
+             (ex: uma caixa de texto comprida com título+parágrafos+lista), uma versão anterior
+             simplesmente pulava a posição pro fim do bloco SEM nunca gerar segmento nenhum pra
+             ele — o conteúdo inteiro do bloco sumia do PDF. Agora ele é fatiado recursivamente
+             pelos PRÓPRIOS filhos (título, parágrafo, lista...), então o corte cai numa borda de
+             parágrafo/item em vez de no meio de uma linha de texto, e nenhum trecho de conteúdo é
+             perdido. */
+          var fatiarLista=function(lista,estadoInicial){
+            var estado=estadoInicial;
+            /* candidatos: fins de bloco (fimPx) que já sabemos que coube na página atualmente
+               aberta, do mais antigo pro mais recente — pontos "seguros" onde poderíamos ter
+               cortado em vez de continuar acumulando. Reseta toda vez que uma página é fechada. */
+            var candidatos=[estado.pos];
+            var i=0;
+            while(i<lista.length){
+              var bl=lista[i];
               var r=bl.getBoundingClientRect();
               var topoPx=(r.top-elRect.top)*scaleFactor;
               var fimPx=(r.bottom-elRect.top)*scaleFactor;
-              if(fimPx-pos<=pxPorPagina)return; /* cabe folgado no que já foi acumulado */
-              if(topoPx>pos && (fimPx-topoPx)<=pxPorPagina){
-                /* Bloco cabe inteiro numa página nova — corta ANTES dele, não no meio. */
-                fechar(topoPx);
-                return;
+              var headerAltura=estado.headerTopo!=null?Math.max(0,estado.headerFim-estado.headerTopo):0;
+              var orcamento=pxPorPagina-headerAltura;
+              if(fimPx-estado.pos<=orcamento){candidatos.push(fimPx);i++;continue;} /* cabe folgado no que já foi acumulado */
+              if(topoPx>estado.pos && (fimPx-topoPx)<=pxPorPagina){
+                /* Bloco cabe inteiro numa página nova — corta ANTES dele, não no meio. Mas nunca
+                   além do orçamento da página ATUAL: se a margem/espaço antes deste bloco for
+                   grande, "topoPx" sozinho pode já passar do orçamento (mesmo com o bloco anterior
+                   tendo cabido certinho) — isso gerava um segmento maior que uma página inteira,
+                   que o jsPDF ou cortava errado ou travava. Corta no menor entre "bem antes do
+                   bloco" e "o orçamento que ainda resta", e RE-AVALIA o mesmo bloco em seguida
+                   (não avança "i") — na pior das hipóteses leva algumas voltas até ele caber. */
+                var corte=Math.min(topoPx,estado.pos+orcamento);
+                /* Evita "órfão": se TUDO que resta na lista (este bloco + os que vêm depois dele,
+                   ex: rodapé + disclaimer) coubesse junto numa página nova a partir de algum ponto
+                   já acumulado nesta página, não vale a pena lotar a página atual até o talo só
+                   pra sobrar um trechinho sozinho numa página quase em branco. Procura, entre os
+                   pontos seguros já vistos (do mais antigo pro mais recente), o PRIMEIRO que ainda
+                   deixa TODO o resto caber numa página só — ou seja, recua o quanto for preciso
+                   (não só o último bloco) pra próxima página sair "cheia" em vez de uma migalha. */
+                var ultimoDaLista=lista[lista.length-1];
+                var ultimoR=ultimoDaLista.getBoundingClientRect();
+                var finalListaFimPx=(ultimoR.bottom-elRect.top)*scaleFactor;
+                for(var ci=0;ci<candidatos.length;ci++){
+                  var cand=candidatos[ci];
+                  if(cand<=estado.pos)continue; /* não recua além do início desta página aberta (senão trava em loop) */
+                  if((finalListaFimPx-cand)<=pxPorPagina){corte=cand;break;}
+                }
+                estado=fecharSegmento(estado,corte);
+                candidatos=[estado.pos];
+                continue;
               }
               /* Bloco sozinho não cabe nem numa página vazia. Tenta fatiar ESTE bloco de forma
                  inteligente — sem NECESSARIAMENTE fechar a página atual antes dele: se for uma
@@ -469,52 +510,93 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent){
                 var headerTopoPx=(hr.top-elRect.top)*scaleFactor;
                 var headerFimPx=(hr.bottom-elRect.top)*scaleFactor;
                 var headerAlturaPx=Math.max(0,headerFimPx-headerTopoPx);
-                var curInicio=pos; /* não topoPx — reaproveita o espaço restante da página atual */
-                var curEhContinuacao=false;
+                var curInicio=estado.pos; /* não topoPx — reaproveita o espaço restante da página atual */
+                var curHeaderTopo=estado.headerTopo,curHeaderFim=estado.headerFim;
+                var curEhContinuacao=(estado.headerTopo!=null);
                 for(var li=1;li<linhas.length;li++){
                   var lr=linhas[li].getBoundingClientRect();
                   var linhaTopoPx=(lr.top-elRect.top)*scaleFactor;
                   var linhaFimPx=(lr.bottom-elRect.top)*scaleFactor;
-                  var limiteAtual=curInicio+(curEhContinuacao?(pxPorPagina-headerAlturaPx):pxPorPagina);
+                  var hAlt=curEhContinuacao?headerAlturaPx:0;
+                  var limiteAtual=curInicio+(pxPorPagina-hAlt);
                   if(linhaFimPx>limiteAtual&&linhaTopoPx>curInicio){
                     /* Fecha o pedaço atual da tabela na borda desta linha (nunca no meio dela). */
-                    segmentos.push({inicio:curInicio,fim:linhaTopoPx,headerTopo:curEhContinuacao?headerTopoPx:null,headerFim:curEhContinuacao?headerFimPx:null});
+                    segmentos.push({inicio:curInicio,fim:linhaTopoPx,headerTopo:curEhContinuacao?curHeaderTopo:null,headerFim:curEhContinuacao?curHeaderFim:null});
                     curInicio=linhaTopoPx;
                     curEhContinuacao=true;
+                    curHeaderTopo=headerTopoPx;curHeaderFim=headerFimPx;
                   }
                 }
-                segmentos.push({inicio:curInicio,fim:fimPx,headerTopo:curEhContinuacao?headerTopoPx:null,headerFim:curEhContinuacao?headerFimPx:null});
-                pos=fimPx;
-                return;
+                /* NÃO fecha o último pedaço da tabela ainda — fica "aberto" (mesma ideia do
+                   fecharSegmento) pra reaproveitar espaço com o que vier logo depois dela. Era
+                   isso que causava página quase em branco: o pedaço final da tabela, mesmo bem
+                   curto (ex: só a linha TOTAL CARTEIRA), virava uma página fechada sozinha e o
+                   conteúdo seguinte (ex: a caixa "Sobre a Oscilação") começava do zero numa folha
+                   nova, mesmo sobrando bastante espaço na página anterior. */
+                estado={pos:curInicio,headerTopo:curEhContinuacao?headerTopoPx:null,headerFim:curEhContinuacao?headerFimPx:null};
+                candidatos=[estado.pos];
+                i++;continue;
               }
               /* Sem tabela dentro: tenta fatiar pelos FILHOS deste bloco (ex: título + parágrafo +
                  lista + parágrafo, dentro de uma caixa de texto comprida) — mesma lógica acima,
-                 aplicada recursivamente, reaproveitando o espaço restante ("pos") igual à tabela. */
+                 aplicada recursivamente, reaproveitando o espaço restante ("estado") igual à
+                 tabela, e devolvendo a página final ainda ABERTA. */
               var filhos=Array.prototype.filter.call(bl.children||[],function(el2){
                 var rr=el2.getBoundingClientRect&&el2.getBoundingClientRect();
                 return rr&&rr.height>0;
               });
               if(filhos.length>1){
-                pos=fatiarLista(filhos,pos);
-                return;
+                estado=fatiarLista(filhos,estado);
+                candidatos=[estado.pos];
+                i++;continue;
               }
               /* Último recurso: elemento realmente indivisível (folha, sem sub-elementos) maior
                  que uma página sozinho — ex: um único parágrafo gigante. Fatia por pixel fixo, MAS
                  cobrindo o bloco INTEIRO em 1+ segmentos, nunca pulando/perdendo o conteúdo dele
                  (esse "pular o bloco inteiro sem gerar segmento" era o bug: fazia trechos do
-                 relatório sumirem do PDF quando um bloco sem tabela era mais alto que uma página). */
-              var cursor=pos;
-              while(fimPx-cursor>pxPorPagina+1){
-                segmentos.push({inicio:cursor,fim:cursor+pxPorPagina,headerTopo:null,headerFim:null});
-                cursor+=pxPorPagina;
+                 relatório sumirem do PDF quando um bloco sem tabela era mais alto que uma página).
+                 O último pedaço também fica aberto, pela mesma razão da tabela acima. */
+              var cursor=estado.pos;
+              var primeiraFatia=orcamento;
+              if(fimPx-cursor>primeiraFatia+1){
+                segmentos.push({inicio:cursor,fim:cursor+primeiraFatia,headerTopo:estado.headerTopo,headerFim:estado.headerFim});
+                cursor+=primeiraFatia;
+                while(fimPx-cursor>pxPorPagina+1){
+                  segmentos.push({inicio:cursor,fim:cursor+pxPorPagina,headerTopo:null,headerFim:null});
+                  cursor+=pxPorPagina;
+                }
               }
-              if(fimPx-cursor>1)segmentos.push({inicio:cursor,fim:fimPx,headerTopo:null,headerFim:null});
-              pos=fimPx;
-            });
-            return pos;
+              estado={pos:cursor,headerTopo:null,headerFim:null};
+              candidatos=[estado.pos];
+              i++;
+            }
+            return estado;
           };
-          var posFinal=fatiarLista(blocos,0);
-          if(canvas.height>posFinal+1)segmentos.push({inicio:posFinal,fim:canvas.height,headerTopo:null,headerFim:null});
+          var estadoFinal=fatiarLista(blocos,{pos:0,headerTopo:null,headerFim:null});
+          /* Fecha o que sobrou até o fim do canvas. Não empurra tudo cego num segmento só: o
+             canvas costuma ter uns pixels de padding/margem depois do último bloco medido, então
+             "canvas.height - estadoFinal.pos" pode passar por poucos pixels do orçamento de uma
+             página mesmo quando o último bloco em si coube certinho — sem este loop, esse resto
+             caía no fatiamento cego por pixel (subFatias) e gerava uma última página praticamente
+             em branco (só aquela sobrinha de poucos pixels). Fatiando aqui também, com o mesmo
+             orçamento por página, isso nunca acontece. */
+          (function(){
+            var cursor=estadoFinal.pos;
+            var headerTopo=estadoFinal.headerTopo,headerFim=estadoFinal.headerFim;
+            while(true){
+              var headerAltura=headerTopo!=null?Math.max(0,headerFim-headerTopo):0;
+              var orcamentoRestante=pxPorPagina-headerAltura;
+              if(canvas.height-cursor<=orcamentoRestante+1)break;
+              segmentos.push({inicio:cursor,fim:cursor+orcamentoRestante,headerTopo:headerTopo,headerFim:headerFim});
+              cursor+=orcamentoRestante;
+              headerTopo=null;headerFim=null;
+            }
+            /* Limiar de 20px (canvas, escala 2 => 10px CSS) em vez de 1px: o canvas às vezes tem
+               uns pixels a mais de padding/arredondamento depois do último elemento real medido.
+               Um resto assim (bem menor que qualquer linha de texto do relatório) não é conteúdo
+               de verdade — era isso que sobrava como uma "página" final praticamente em branco. */
+            if(canvas.height>cursor+20)segmentos.push({inicio:cursor,fim:canvas.height,headerTopo:headerTopo,headerFim:headerFim});
+          })();
 
           segmentos.forEach(function(seg){
             if(seg.fim<=seg.inicio+1)return;
@@ -523,12 +605,18 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent){
             var alturaTotalConteudo=seg.fim-seg.inicio;
             /* subFatias normalmente é 1 (o corte por linha já garante que cada segmento cabe
                numa página) — o Math.ceil aqui é só um último recurso pro caso raríssimo de um
-               bloco sem tabela, ou uma única linha, maior que uma página inteira sozinha. */
-            var subFatias=Math.max(1,Math.ceil(alturaTotalConteudo/alturaDisponivel));
+               bloco sem tabela, ou uma única linha, maior que uma página inteira sozinha. Usa uma
+               tolerância de meio pixel pra não deixar imprecisão de ponto flutuante (ex: um
+               segmento que devia caber EXATAMENTE numa página, mas o cálculo dá algo como
+               1,0000000000000002 página) criar uma "sub-fatia" fantasma de altura zero — isso
+               travava o jsPDF (addImage recusa imagem de altura zero) e derrubava a geração do
+               PDF inteiro. */
+            var subFatias=Math.max(1,Math.ceil((alturaTotalConteudo-0.5)/alturaDisponivel));
             var offsetConteudo=seg.inicio;
             for(var sf=0;sf<subFatias;sf++){
               var restante=seg.fim-offsetConteudo;
               var alturaConteudoFatia=Math.min(alturaDisponivel,restante);
+              if(alturaConteudoFatia<=0)break; /* nunca gera fatia de altura zero/negativa */
               var alturaTotalCanvas=headerAltura+alturaConteudoFatia;
               var fatiaCanvas=document.createElement("canvas");
               fatiaCanvas.width=canvas.width;
@@ -30073,7 +30161,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '360';
+  var SW_VERSION = '361';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
