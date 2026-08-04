@@ -404,20 +404,19 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent){
           pagesOk++;
         }else{
           /* Página de conteúdo mais alta que uma folha A4 (comum em Objetivos com várias metas
-             vinculadas, ou Composição Detalhada com muitos ativos). ANTES fatiava em pedaços de
-             altura FIXA (pxPorPagina) — um corte "cego" por pixel, sem noção do conteúdo. Isso
-             podia cortar no meio de uma seção em DUAS COLUNAS (ex: "Objetivos & Metas
-             Financeiras", cada meta com sua lista de investimentos vinculados lado a lado): uma
-             coluna terminava sua lista antes da outra, o corte caía no meio da coluna mais curta,
-             e a página seguinte mostrava aquela coluna em branco enquanto só a outra continuava —
-             parecendo relatório quebrado. Também podia sobrar uma última "fatia" minúscula (só
-             rodapé + uma notinha no meio de um gráfico cortado), virando uma página do PDF quase
-             inteiramente em branco. CORREÇÃO: em vez de cortar por pixel fixo, mede a posição de
-             cada bloco de conteúdo (filho direto da página — cada card/seção/linha de duas
-             colunas) e corta sempre na BORDA de um bloco, nunca no meio dele. Um bloco só
-             continua sendo cortado no meio se ele sozinho já for mais alto que uma página A4
-             inteira (caso raro, ex: tabela de Composição Detalhada com muitos ativos) — aí o
-             fatiamento por pixel entra como último recurso, igual antes, só pra esse bloco. */
+             vinculadas, ou Composição Detalhada com muitos ativos). Mede a posição de cada bloco
+             de conteúdo (filho direto da página — cada card/seção/linha de duas colunas) e corta
+             sempre na BORDA de um bloco, nunca no meio dele (evita, por ex, uma seção em duas
+             colunas ficar com uma coluna em branco na página seguinte enquanto só a outra
+             continua). Quando um bloco sozinho já é mais alto que uma página inteira — o caso
+             clássico é a tabela de Composição Detalhada com dezenas de ativos — em vez de cortar
+             cego por pixel no meio dele (cortava no meio de um grupo de ativos, sem repetir o
+             cabeçalho da tabela na página seguinte, o que ficava parecendo relatório quebrado pro
+             cliente), corta nas BORDAS DAS LINHAS da tabela (nunca no meio de uma linha) e REPETE
+             o cabeçalho (Ativo/Início/Fim/Rent./Ganho) no topo de cada página de continuação,
+             como qualquer tabela de várias páginas num documento profissional. Um bloco grande
+             sem tabela dentro (raríssimo) ainda cai no fatiamento por pixel fixo, como último
+             recurso, só pra esse trecho específico. */
           var pxPorPagina=canvas.width*(pageH/pageW);
           var elRect=pageEls[pi].getBoundingClientRect();
           var scaleFactor=elRect.width>0?(canvas.width/elRect.width):2;
@@ -425,49 +424,103 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent){
             var r=el.getBoundingClientRect&&el.getBoundingClientRect();
             return r&&r.height>0;
           });
-          var cortesPx=[];
-          if(blocos.length>0){
-            var pageStartPx=0;
-            blocos.forEach(function(bl){
-              var r=bl.getBoundingClientRect();
-              var topoPx=(r.top-elRect.top)*scaleFactor;
-              var fimPx=(r.bottom-elRect.top)*scaleFactor;
-              if(fimPx-pageStartPx>pxPorPagina){
-                if(topoPx>pageStartPx && (fimPx-topoPx)<=pxPorPagina){
-                  /* Bloco cabe inteiro numa página nova — corta ANTES dele, não no meio. */
-                  cortesPx.push(topoPx);
-                  pageStartPx=topoPx;
-                }else if((fimPx-topoPx)>pxPorPagina){
-                  /* Bloco sozinho maior que uma página inteira — sem como evitar corte no meio
-                     dele; o fatiamento por pixel abaixo cuida disso como antes. */
-                  pageStartPx=fimPx;
+
+          /* segmentos: cada item vira uma página do PDF. headerTopo/headerFim só ficam
+             preenchidos quando o segmento é CONTINUAÇÃO de uma tabela fatiada — nesse caso a
+             linha de cabeçalho (recortada do MESMO canvas já renderizado) é redesenhada no topo
+             dessa página antes do conteúdo. */
+          var segmentos=[];
+          var pageStartPx=0;
+          var fecharAteAqui=function(corte){
+            if(corte>pageStartPx+1){
+              segmentos.push({inicio:pageStartPx,fim:corte,headerTopo:null,headerFim:null});
+            }
+            pageStartPx=corte;
+          };
+
+          blocos.forEach(function(bl){
+            var r=bl.getBoundingClientRect();
+            var topoPx=(r.top-elRect.top)*scaleFactor;
+            var fimPx=(r.bottom-elRect.top)*scaleFactor;
+            if(fimPx-pageStartPx<=pxPorPagina)return; /* cabe folgado no que já foi acumulado */
+            if(topoPx>pageStartPx && (fimPx-topoPx)<=pxPorPagina){
+              /* Bloco cabe inteiro numa página nova — corta ANTES dele, não no meio. */
+              fecharAteAqui(topoPx);
+              return;
+            }
+            /* Bloco sozinho não cabe nem numa página vazia. Tenta fatiar ESTE bloco de forma
+               inteligente — sem NECESSARIAMENTE fechar a página atual antes dele: se for uma
+               tabela, o primeiro pedaço aproveita o espaço que já sobrou na página atual (ex: o
+               título da seção que veio logo antes da tabela), em vez de jogar fora esse espaço
+               só pra começar a tabela numa folha em branco. */
+            var tabela=(bl.tagName==="TABLE")?bl:(bl.querySelector?bl.querySelector("table"):null);
+            if(tabela&&tabela.rows&&tabela.rows.length>1){
+              var linhas=Array.prototype.slice.call(tabela.rows);
+              var hr=linhas[0].getBoundingClientRect();
+              var headerTopoPx=(hr.top-elRect.top)*scaleFactor;
+              var headerFimPx=(hr.bottom-elRect.top)*scaleFactor;
+              var headerAlturaPx=Math.max(0,headerFimPx-headerTopoPx);
+              var curInicio=pageStartPx; /* não topoPx — reaproveita o espaço restante da página atual */
+              var curEhContinuacao=false;
+              for(var li=1;li<linhas.length;li++){
+                var lr=linhas[li].getBoundingClientRect();
+                var linhaTopoPx=(lr.top-elRect.top)*scaleFactor;
+                var linhaFimPx=(lr.bottom-elRect.top)*scaleFactor;
+                var limiteAtual=curInicio+(curEhContinuacao?(pxPorPagina-headerAlturaPx):pxPorPagina);
+                if(linhaFimPx>limiteAtual&&linhaTopoPx>curInicio){
+                  /* Fecha o pedaço atual da tabela na borda desta linha (nunca no meio dela). */
+                  segmentos.push({inicio:curInicio,fim:linhaTopoPx,headerTopo:curEhContinuacao?headerTopoPx:null,headerFim:curEhContinuacao?headerFimPx:null});
+                  curInicio=linhaTopoPx;
+                  curEhContinuacao=true;
                 }
               }
-            });
-          }
-          cortesPx.push(canvas.height);
-          var inicioSeg=0;
-          for(var ci=0;ci<cortesPx.length;ci++){
-            var fimSeg=cortesPx[ci];
-            if(fimSeg<=inicioSeg+1){inicioSeg=fimSeg;continue;}
-            var subFatias=Math.ceil((fimSeg-inicioSeg)/pxPorPagina);
+              segmentos.push({inicio:curInicio,fim:fimPx,headerTopo:curEhContinuacao?headerTopoPx:null,headerFim:curEhContinuacao?headerFimPx:null});
+              pageStartPx=fimPx;
+            }else{
+              /* Bloco grande sem tabela dentro (raríssimo) — sem um jeito melhor de particionar
+                 por conteúdo, então este caso (só esse) ainda fecha a página antes dele e cai no
+                 fatiamento por pixel fixo abaixo, igual ao comportamento anterior. */
+              if(topoPx>pageStartPx)fecharAteAqui(topoPx);
+              pageStartPx=fimPx;
+            }
+          });
+          fecharAteAqui(canvas.height);
+
+          segmentos.forEach(function(seg){
+            if(seg.fim<=seg.inicio+1)return;
+            var headerAltura=(seg.headerTopo!=null)?Math.max(0,seg.headerFim-seg.headerTopo):0;
+            var alturaDisponivel=Math.max(1,pxPorPagina-headerAltura);
+            var alturaTotalConteudo=seg.fim-seg.inicio;
+            /* subFatias normalmente é 1 (o corte por linha já garante que cada segmento cabe
+               numa página) — o Math.ceil aqui é só um último recurso pro caso raríssimo de um
+               bloco sem tabela, ou uma única linha, maior que uma página inteira sozinha. */
+            var subFatias=Math.max(1,Math.ceil(alturaTotalConteudo/alturaDisponivel));
+            var offsetConteudo=seg.inicio;
             for(var sf=0;sf<subFatias;sf++){
-              var subInicio=inicioSeg+sf*pxPorPagina;
-              var subAltura=Math.min(pxPorPagina,fimSeg-subInicio);
+              var restante=seg.fim-offsetConteudo;
+              var alturaConteudoFatia=Math.min(alturaDisponivel,restante);
+              var alturaTotalCanvas=headerAltura+alturaConteudoFatia;
               var fatiaCanvas=document.createElement("canvas");
               fatiaCanvas.width=canvas.width;
-              fatiaCanvas.height=subAltura;
+              fatiaCanvas.height=alturaTotalCanvas;
               var fctx=fatiaCanvas.getContext("2d");
               fctx.fillStyle="#ffffff";
               fctx.fillRect(0,0,fatiaCanvas.width,fatiaCanvas.height);
-              fctx.drawImage(canvas,0,subInicio,canvas.width,subAltura,0,0,canvas.width,subAltura);
-              var fatiaImgH=pageW*(subAltura/canvas.width);
+              var yDestino=0;
+              if(headerAltura>0){
+                /* Redesenha a linha de cabeçalho da tabela (recortada do canvas original) no
+                   topo desta página de continuação. */
+                fctx.drawImage(canvas,0,seg.headerTopo,canvas.width,headerAltura,0,0,canvas.width,headerAltura);
+                yDestino=headerAltura;
+              }
+              fctx.drawImage(canvas,0,offsetConteudo,canvas.width,alturaConteudoFatia,0,yDestino,canvas.width,alturaConteudoFatia);
+              var fatiaImgH=pageW*(alturaTotalCanvas/canvas.width);
               if(pagesOk>0)doc.addPage();
               doc.addImage(fatiaCanvas.toDataURL("image/jpeg",0.95),"JPEG",0,0,pageW,fatiaImgH);
               pagesOk++;
+              offsetConteudo+=alturaConteudoFatia;
             }
-            inicioSeg=fimSeg;
-          }
+          });
         }
       }
     }finally{
@@ -29990,7 +30043,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '358';
+  var SW_VERSION = '359';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
