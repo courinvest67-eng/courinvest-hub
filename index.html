@@ -92,8 +92,14 @@ table{border-spacing:0}
 <!-- EmailJS SDK para envio automático de relatórios por e-mail -->
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script>if(typeof pdfjsLib!=="undefined")pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";</script>
-<!-- html2pdf.js: gera o PDF do relatório-resumo no navegador (envio automático por e-mail) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<!-- html2canvas + jsPDF: gera o PDF do relatório-resumo no navegador (envio automático por e-mail).
+     Antes usávamos o html2pdf.js (que embrulha essas duas libs e captura o relatório inteiro
+     numa tacada só, como UM canvas gigante — no caso de um relatório de várias páginas isso354
+     virava um canvas de dezenas de milhares de pixels de altura). Passamos a chamar as duas
+     libs diretamente pra renderizar PÁGINA POR PÁGINA (ver _gerarPdfLinkCourinvestInner), o que
+     evita canvases enormes que alguns navegadores/placas de vídeo não conseguem alocar. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <!-- Firebase SDK (compat for Babel standalone) -->
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
@@ -301,58 +307,397 @@ const feeMensalBRL=function(c){
    (ex.: 0.01) no container com o conteúdo é capturada pelo html2canvas no render, gerando
    um PDF "lavado"/quase invisível — por isso é o WRAPPER que fica de tamanho zero, não o
    conteúdo que fica com opacidade baixa. */
-const _gerarPdfLinkCourinvestInner=function(pathStorage,htmlContent){
-  return new Promise(function(resolve){
-    var wrapper=null;
-    try{
-      if(typeof window.html2pdf==="undefined"){console.warn("[PDF] html2pdf.js não carregou.");resolve(null);return;}
-      if(!window._fbStorage){console.warn("[PDF] Firebase Storage indisponível (verifique se o Storage está habilitado no projeto Firebase).");resolve(null);return;}
-      var container=document.createElement("div");
-      container.style.cssText="width:800px;background:#fff;";
-      container.innerHTML=htmlContent;
-      /* Esconde do usuário SEM mexer em opacity/visibility do conteúdo — o html2canvas captura o
-         estilo computado, e opacity:quase-zero deixa o PDF "lavado"/em branco (já vimos isso
-         acontecer). Em vez disso, o container fica com opacidade normal (100%) dentro de um
-         wrapper de tamanho zero com overflow:hidden, fixado fora da área visível — testado que
-         isso preserva o contraste/cores corretamente. */
-      wrapper=document.createElement("div");
-      wrapper.style.cssText="position:fixed;top:0;left:0;width:0;height:0;overflow:hidden;";
-      wrapper.appendChild(container);
-      document.body.appendChild(wrapper);
-      html2pdf().set({
-        margin:0,
-        filename:"relatorio.pdf",
-        image:{type:"jpeg",quality:0.95},
-        html2canvas:{scale:2,useCORS:true,backgroundColor:"#ffffff"},
-        jsPDF:{unit:"pt",format:"a4",orientation:"portrait"}
-      }).from(container).toPdf().output("blob").then(function(blob){
-        try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
-        var ref=window._fbStorage.ref().child(pathStorage);
-        return ref.put(blob,{contentType:"application/pdf"});
-      }).then(function(snap){
-        return snap.ref.getDownloadURL();
-      }).then(function(url){
-        resolve(url);
-      }).catch(function(e){
-        console.warn("[PDF] Falha ao gerar/subir PDF:",e);
-        try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
-        resolve(null);
-      });
-    }catch(e){
-      console.warn("[PDF] Erro inesperado ao gerar PDF:",e);
-      try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
-      resolve(null);
+const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent){
+  var wrapper=null;
+  try{
+    if(typeof window.html2canvas==="undefined"||!window.jspdf||typeof window.jspdf.jsPDF==="undefined"){
+      console.warn("[PDF] html2canvas/jsPDF não carregaram.");return null;
     }
-  });
+    if(!window._fbStorage){console.warn("[PDF] Firebase Storage indisponível (verifique se o Storage está habilitado no projeto Firebase).");return null;}
+    /* HISTÓRICO (v389→v394): usávamos o html2pdf.js, que captura o relatório inteiro numa
+       tacada só como UM canvas gigante (chegava a ~50 mil pixels de altura em scale:2, pra um
+       relatório de várias páginas). Testamos 4 hipóteses pro erro "InvalidStateError:
+       createPattern... canvas element with a width or height of 0" (timing/rAF, largura do SVG,
+       wrapper 0x0, fundo repetido) — nenhuma resolveu, e reproduzir com o HTML real do cliente
+       (baixado direto do navegador que dava erro) funcionou perfeitamente aqui, o que aponta pra
+       um limite de canvas/memória de GPU específico da máquina do usuário (não do código/dados).
+       CORREÇÃO DEFINITIVA (v395): em vez de um canvas gigante, renderiza PÁGINA POR PÁGINA (cada
+       página do relatório tem no máximo ~300mm de altura — um canvas perfeitamente normal) e
+       monta o PDF final juntando essas páginas com jsPDF. Isso elimina o canvas gigante de vez,
+       não importa a causa exata do limite no navegador do usuário. */
+    var container=document.createElement("div");
+    container.style.cssText="width:800px;background:#fff;";
+    /* Fundo com padrão repetido (pontinhos decorativos, opacidade 3-5%) removido por segurança —
+       é o único tipo de fundo do relatório que passa pelo createPattern interno do html2canvas
+       (os outros gradientes pintam a caixa toda de uma vez, sem repetição). Não muda nada visível
+       no PDF. */
+    var htmlSemPadroes=htmlContent.replace(
+      "<\/head>",
+      '<style>.bg-pattern,.bg-dots,.cv-cover-pattern,.cv-toc-pattern{background-image:none!important}<\/style><\/head>'
+    );
+    container.innerHTML=htmlSemPadroes;
+    wrapper=document.createElement("div");
+    wrapper.style.cssText="position:fixed;top:0;left:-10000px;width:800px;height:auto;overflow:visible;z-index:-1;";
+    wrapper.appendChild(container);
+    document.body.appendChild(wrapper);
+    void container.offsetHeight;
+    await new Promise(function(r){requestAnimationFrame(function(){requestAnimationFrame(r);});});
+
+    /* Cada "página" do relatório é um <div> filho direto do container (capa, sumário, cada
+       página de conteúdo) — o gerarRelatorio monta o HTML como capaFinal+tocPagina+pagesHtml,
+       tudo concatenado, então viram irmãos ao entrar via innerHTML. Filtra só DIVs (ignora
+       <style>/<title>/<meta> que sobraram do <head> do documento original). */
+    var pageEls=Array.prototype.filter.call(container.children,function(el){return el.tagName==="DIV";});
+    if(pageEls.length===0){
+      console.warn("[PDF] Nenhuma página encontrada no HTML do relatório.");
+      try{document.body.removeChild(wrapper)}catch(_e){}
+      return null;
+    }
+
+    var jsPDFCtor=window.jspdf.jsPDF;
+    var doc=new jsPDFCtor({unit:"pt",format:"a4",orientation:"portrait"});
+    var pageW=doc.internal.pageSize.getWidth();
+    var pageH=doc.internal.pageSize.getHeight();
+    var pagesOk=0;
+    /* CINTO DE SEGURANÇA contra o "InvalidStateError: createPattern...width or height of 0":
+       mesmo com o relatório dividido em páginas normais (v395), esse erro específico ainda pode
+       acontecer em certos navegadores/placas de vídeo — o html2canvas cria um canvas
+       intermediário toda vez que desenha um fundo em gradiente (linear-gradient), e em alguns
+       dispositivos esse canvas intermediário sai com largura/altura 0 (limite de memória/GPU
+       específico da máquina, fora do nosso controle). Em vez de deixar isso derrubar a página
+       inteira, intercepta temporariamente o createPattern: se o "canvas" de origem estiver
+       zerado, devolve um padrão transparente de 1x1 (só aquele fundo específico fica sem o
+       gradiente — o resto da página renderiza normalmente) em vez de lançar o erro. Restaura o
+       método original no final, pra não afetar mais nada no app. */
+    var _origCreatePattern=CanvasRenderingContext2D.prototype.createPattern;
+    CanvasRenderingContext2D.prototype.createPattern=function(image,repetition){
+      try{
+        if(!image||!image.width||!image.height){
+          var _fb=document.createElement("canvas");_fb.width=1;_fb.height=1;
+          return _origCreatePattern.call(this,_fb,repetition||"repeat");
+        }
+        return _origCreatePattern.apply(this,arguments);
+      }catch(_patErr){
+        console.warn("[PDF] createPattern falhou num fundo específico, usando fallback transparente:",_patErr);
+        var _fb2=document.createElement("canvas");_fb2.width=1;_fb2.height=1;
+        return _origCreatePattern.call(this,_fb2,"repeat");
+      }
+    };
+    try{
+      for(var pi=0;pi<pageEls.length;pi++){
+        var canvas=null;
+        try{
+          canvas=await window.html2canvas(pageEls[pi],{scale:2,useCORS:true,backgroundColor:"#ffffff"});
+        }catch(_pageErr){
+          console.warn("[PDF] Página "+pi+" falhou ao renderizar, pulando:",_pageErr);
+          continue;
+        }
+        if(!canvas||canvas.width===0||canvas.height===0){
+          console.warn("[PDF] Página "+pi+" gerou canvas vazio, pulando.");
+          continue;
+        }
+        var imgH=pageW*(canvas.height/canvas.width);
+        if(imgH<=pageH+1){
+          /* Cabe numa folha A4 normal — caso mais comum. */
+          if(pagesOk>0)doc.addPage();
+          doc.addImage(canvas.toDataURL("image/jpeg",0.95),"JPEG",0,0,pageW,imgH);
+          pagesOk++;
+        }else{
+          /* Página de conteúdo mais alta que uma folha A4 (comum em Objetivos com várias metas
+             vinculadas, ou Composição Detalhada com muitos ativos). Mede a posição de cada bloco
+             de conteúdo (filho direto da página — cada card/seção/linha de duas colunas) e corta
+             sempre na BORDA de um bloco, nunca no meio dele (evita, por ex, uma seção em duas
+             colunas ficar com uma coluna em branco na página seguinte enquanto só a outra
+             continua). Quando um bloco sozinho já é mais alto que uma página inteira — o caso
+             clássico é a tabela de Composição Detalhada com dezenas de ativos — em vez de cortar
+             cego por pixel no meio dele (cortava no meio de um grupo de ativos, sem repetir o
+             cabeçalho da tabela na página seguinte, o que ficava parecendo relatório quebrado pro
+             cliente), corta nas BORDAS DAS LINHAS da tabela (nunca no meio de uma linha) e REPETE
+             o cabeçalho (Ativo/Início/Fim/Rent./Ganho) no topo de cada página de continuação,
+             como qualquer tabela de várias páginas num documento profissional. Um bloco grande
+             sem tabela dentro (raríssimo) ainda cai no fatiamento por pixel fixo, como último
+             recurso, só pra esse trecho específico. */
+          var pxPorPagina=canvas.width*(pageH/pageW);
+          var elRect=pageEls[pi].getBoundingClientRect();
+          var scaleFactor=elRect.width>0?(canvas.width/elRect.width):2;
+          var blocos=Array.prototype.filter.call(pageEls[pi].children,function(el){
+            var r=el.getBoundingClientRect&&el.getBoundingClientRect();
+            return r&&r.height>0;
+          });
+
+          /* segmentos: cada item vira uma página do PDF. headerTopo/headerFim só ficam
+             preenchidos quando o segmento é CONTINUAÇÃO de uma tabela fatiada — nesse caso a
+             linha de cabeçalho (recortada do MESMO canvas já renderizado) é redesenhada no topo
+             dessa página antes do conteúdo. */
+          var segmentos=[];
+          /* fecharSegmento: fecha em "segmentos" o pedaço [estado.pos,corte) — vira 1 página do
+             PDF — e devolve o novo "estado" (página seguinte, ainda ABERTA/não fechada). Manter a
+             próxima página como um estado aberto (em vez de já fechá-la) é o que permite que o
+             conteúdo seguinte reaproveite o espaço que sobrou nela, em vez de começar do zero numa
+             folha nova — evitando página quase em branco. */
+          var fecharSegmento=function(estado,corte){
+            if(corte>estado.pos+1){
+              segmentos.push({inicio:estado.pos,fim:corte,headerTopo:estado.headerTopo,headerFim:estado.headerFim});
+            }
+            return{pos:corte,headerTopo:null,headerFim:null};
+          };
+          /* fatiarLista: percorre uma lista de elementos-irmãos (os blocos-filho da página, ou —
+             recursivamente — os filhos de um bloco grande demais pra caber sozinho numa página) e
+             vai fechando "segmentos" (cada um vira 1 página do PDF) sempre em BORDAS de elemento,
+             nunca no meio. Recebe o "estado" da página que já está sendo acumulada (posição +
+             se precisa repetir cabeçalho de tabela) e devolve o estado atualizado depois de
+             processar a lista inteira — SEM empurrar a última página pra "segmentos" ainda (fica
+             aberta, pra quem chamou poder continuar aproveitando o espaço que sobrou nela).
+             Importante: quando um bloco não tem tabela mas também não cabe sozinho numa página
+             (ex: uma caixa de texto comprida com título+parágrafos+lista), uma versão anterior
+             simplesmente pulava a posição pro fim do bloco SEM nunca gerar segmento nenhum pra
+             ele — o conteúdo inteiro do bloco sumia do PDF. Agora ele é fatiado recursivamente
+             pelos PRÓPRIOS filhos (título, parágrafo, lista...), então o corte cai numa borda de
+             parágrafo/item em vez de no meio de uma linha de texto, e nenhum trecho de conteúdo é
+             perdido. */
+          var fatiarLista=function(lista,estadoInicial){
+            var estado=estadoInicial;
+            /* candidatos: fins de bloco (fimPx) que já sabemos que coube na página atualmente
+               aberta, do mais antigo pro mais recente — pontos "seguros" onde poderíamos ter
+               cortado em vez de continuar acumulando. Reseta toda vez que uma página é fechada. */
+            var candidatos=[estado.pos];
+            var i=0;
+            while(i<lista.length){
+              var bl=lista[i];
+              var r=bl.getBoundingClientRect();
+              var topoPx=(r.top-elRect.top)*scaleFactor;
+              var fimPx=(r.bottom-elRect.top)*scaleFactor;
+              var headerAltura=estado.headerTopo!=null?Math.max(0,estado.headerFim-estado.headerTopo):0;
+              var orcamento=pxPorPagina-headerAltura;
+              if(fimPx-estado.pos<=orcamento){candidatos.push(fimPx);i++;continue;} /* cabe folgado no que já foi acumulado */
+              if(topoPx>estado.pos && (fimPx-topoPx)<=pxPorPagina){
+                /* Bloco cabe inteiro numa página nova — corta ANTES dele, não no meio. Mas nunca
+                   além do orçamento da página ATUAL: se a margem/espaço antes deste bloco for
+                   grande, "topoPx" sozinho pode já passar do orçamento (mesmo com o bloco anterior
+                   tendo cabido certinho) — isso gerava um segmento maior que uma página inteira,
+                   que o jsPDF ou cortava errado ou travava. Corta no menor entre "bem antes do
+                   bloco" e "o orçamento que ainda resta", e RE-AVALIA o mesmo bloco em seguida
+                   (não avança "i") — na pior das hipóteses leva algumas voltas até ele caber. */
+                var corte=Math.min(topoPx,estado.pos+orcamento);
+                /* Evita "órfão": se TUDO que resta na lista (este bloco + os que vêm depois dele,
+                   ex: rodapé + disclaimer) coubesse junto numa página nova a partir de algum ponto
+                   já acumulado nesta página, não vale a pena lotar a página atual até o talo só
+                   pra sobrar um trechinho sozinho numa página quase em branco. Procura, entre os
+                   pontos seguros já vistos (do mais antigo pro mais recente), o PRIMEIRO que ainda
+                   deixa TODO o resto caber numa página só — ou seja, recua o quanto for preciso
+                   (não só o último bloco) pra próxima página sair "cheia" em vez de uma migalha. */
+                var ultimoDaLista=lista[lista.length-1];
+                var ultimoR=ultimoDaLista.getBoundingClientRect();
+                var finalListaFimPx=(ultimoR.bottom-elRect.top)*scaleFactor;
+                for(var ci=0;ci<candidatos.length;ci++){
+                  var cand=candidatos[ci];
+                  if(cand<=estado.pos)continue; /* não recua além do início desta página aberta (senão trava em loop) */
+                  if((finalListaFimPx-cand)<=pxPorPagina){corte=cand;break;}
+                }
+                estado=fecharSegmento(estado,corte);
+                candidatos=[estado.pos];
+                continue;
+              }
+              /* Bloco sozinho não cabe nem numa página vazia. Tenta fatiar ESTE bloco de forma
+                 inteligente — sem NECESSARIAMENTE fechar a página atual antes dele: se for uma
+                 tabela, o primeiro pedaço aproveita o espaço que já sobrou na página atual (ex: o
+                 título da seção que veio logo antes da tabela), em vez de jogar fora esse espaço
+                 só pra começar a tabela numa folha em branco. */
+              var tabela=(bl.tagName==="TABLE")?bl:(bl.querySelector?bl.querySelector("table"):null);
+              if(tabela&&tabela.rows&&tabela.rows.length>1){
+                var linhas=Array.prototype.slice.call(tabela.rows);
+                var hr=linhas[0].getBoundingClientRect();
+                var headerTopoPx=(hr.top-elRect.top)*scaleFactor;
+                var headerFimPx=(hr.bottom-elRect.top)*scaleFactor;
+                var headerAlturaPx=Math.max(0,headerFimPx-headerTopoPx);
+                var curInicio=estado.pos; /* não topoPx — reaproveita o espaço restante da página atual */
+                var curHeaderTopo=estado.headerTopo,curHeaderFim=estado.headerFim;
+                var curEhContinuacao=(estado.headerTopo!=null);
+                for(var li=1;li<linhas.length;li++){
+                  var lr=linhas[li].getBoundingClientRect();
+                  var linhaTopoPx=(lr.top-elRect.top)*scaleFactor;
+                  var linhaFimPx=(lr.bottom-elRect.top)*scaleFactor;
+                  var hAlt=curEhContinuacao?headerAlturaPx:0;
+                  var limiteAtual=curInicio+(pxPorPagina-hAlt);
+                  if(linhaFimPx>limiteAtual&&linhaTopoPx>curInicio){
+                    /* Fecha o pedaço atual da tabela na borda desta linha (nunca no meio dela). */
+                    segmentos.push({inicio:curInicio,fim:linhaTopoPx,headerTopo:curEhContinuacao?curHeaderTopo:null,headerFim:curEhContinuacao?curHeaderFim:null});
+                    curInicio=linhaTopoPx;
+                    curEhContinuacao=true;
+                    curHeaderTopo=headerTopoPx;curHeaderFim=headerFimPx;
+                  }
+                }
+                /* NÃO fecha o último pedaço da tabela ainda — fica "aberto" (mesma ideia do
+                   fecharSegmento) pra reaproveitar espaço com o que vier logo depois dela. Era
+                   isso que causava página quase em branco: o pedaço final da tabela, mesmo bem
+                   curto (ex: só a linha TOTAL CARTEIRA), virava uma página fechada sozinha e o
+                   conteúdo seguinte (ex: a caixa "Sobre a Oscilação") começava do zero numa folha
+                   nova, mesmo sobrando bastante espaço na página anterior. */
+                estado={pos:curInicio,headerTopo:curEhContinuacao?headerTopoPx:null,headerFim:curEhContinuacao?headerFimPx:null};
+                candidatos=[estado.pos];
+                i++;continue;
+              }
+              /* Sem tabela dentro: tenta fatiar pelos FILHOS deste bloco (ex: título + parágrafo +
+                 lista + parágrafo, dentro de uma caixa de texto comprida) — mesma lógica acima,
+                 aplicada recursivamente, reaproveitando o espaço restante ("estado") igual à
+                 tabela, e devolvendo a página final ainda ABERTA. */
+              var filhos=Array.prototype.filter.call(bl.children||[],function(el2){
+                var rr=el2.getBoundingClientRect&&el2.getBoundingClientRect();
+                return rr&&rr.height>0;
+              });
+              if(filhos.length>1){
+                estado=fatiarLista(filhos,estado);
+                candidatos=[estado.pos];
+                i++;continue;
+              }
+              /* Último recurso: elemento realmente indivisível (folha, sem sub-elementos) maior
+                 que uma página sozinho — ex: um único parágrafo gigante. Fatia por pixel fixo, MAS
+                 cobrindo o bloco INTEIRO em 1+ segmentos, nunca pulando/perdendo o conteúdo dele
+                 (esse "pular o bloco inteiro sem gerar segmento" era o bug: fazia trechos do
+                 relatório sumirem do PDF quando um bloco sem tabela era mais alto que uma página).
+                 O último pedaço também fica aberto, pela mesma razão da tabela acima. */
+              var cursor=estado.pos;
+              var primeiraFatia=orcamento;
+              if(fimPx-cursor>primeiraFatia+1){
+                segmentos.push({inicio:cursor,fim:cursor+primeiraFatia,headerTopo:estado.headerTopo,headerFim:estado.headerFim});
+                cursor+=primeiraFatia;
+                while(fimPx-cursor>pxPorPagina+1){
+                  segmentos.push({inicio:cursor,fim:cursor+pxPorPagina,headerTopo:null,headerFim:null});
+                  cursor+=pxPorPagina;
+                }
+              }
+              estado={pos:cursor,headerTopo:null,headerFim:null};
+              candidatos=[estado.pos];
+              i++;
+            }
+            return estado;
+          };
+          var estadoFinal=fatiarLista(blocos,{pos:0,headerTopo:null,headerFim:null});
+          /* Fecha o que sobrou até o fim do canvas. Não empurra tudo cego num segmento só: o
+             canvas costuma ter uns pixels de padding/margem depois do último bloco medido, então
+             "canvas.height - estadoFinal.pos" pode passar por poucos pixels do orçamento de uma
+             página mesmo quando o último bloco em si coube certinho — sem este loop, esse resto
+             caía no fatiamento cego por pixel (subFatias) e gerava uma última página praticamente
+             em branco (só aquela sobrinha de poucos pixels). Fatiando aqui também, com o mesmo
+             orçamento por página, isso nunca acontece. */
+          (function(){
+            var cursor=estadoFinal.pos;
+            var headerTopo=estadoFinal.headerTopo,headerFim=estadoFinal.headerFim;
+            while(true){
+              var headerAltura=headerTopo!=null?Math.max(0,headerFim-headerTopo):0;
+              var orcamentoRestante=pxPorPagina-headerAltura;
+              if(canvas.height-cursor<=orcamentoRestante+1)break;
+              segmentos.push({inicio:cursor,fim:cursor+orcamentoRestante,headerTopo:headerTopo,headerFim:headerFim});
+              cursor+=orcamentoRestante;
+              headerTopo=null;headerFim=null;
+            }
+            /* Limiar de 20px (canvas, escala 2 => 10px CSS) em vez de 1px: o canvas às vezes tem
+               uns pixels a mais de padding/arredondamento depois do último elemento real medido.
+               Um resto assim (bem menor que qualquer linha de texto do relatório) não é conteúdo
+               de verdade — era isso que sobrava como uma "página" final praticamente em branco. */
+            if(canvas.height>cursor+20)segmentos.push({inicio:cursor,fim:canvas.height,headerTopo:headerTopo,headerFim:headerFim});
+          })();
+
+          /* REDE DE SEGURANÇA (v405): confere que os segmentos cobrem o canvas inteiro, em
+             ordem, sem sobreposição nem buraco — ou seja, que NENHUM trecho do relatório vai
+             sair duplicado (dois segmentos cobrindo o mesmo pedaço) nem sumir (um buraco entre
+             dois segmentos) no PDF final. Isso é o que garante, matematicamente, que "quebras"
+             como conteúdo repetido em duas páginas ou um trecho faltando NUNCA aconteçam,
+             mesmo num caso extremo de layout que a lógica acima não tenha previsto. Se a
+             verificação falhar, descarta os segmentos "inteligentes" (que cortam nas bordas de
+             cada bloco) e usa fatiamento cego por página inteira — nesse caso raríssimo o corte
+             pode cair no meio de um parágrafo (esteticamente pior), mas o conteúdo em si nunca
+             duplica nem desaparece. */
+          var _coberturaOk=segmentos.length>0;
+          if(_coberturaOk && segmentos[0].inicio>1)_coberturaOk=false;
+          for(var _vi=1;_coberturaOk && _vi<segmentos.length;_vi++){
+            if(Math.abs(segmentos[_vi].inicio-segmentos[_vi-1].fim)>1)_coberturaOk=false;
+          }
+          if(_coberturaOk && segmentos.length>0 && (canvas.height-segmentos[segmentos.length-1].fim)>21)_coberturaOk=false;
+          if(!_coberturaOk){
+            console.warn("[PDF] Fatiamento inteligente gerou segmentos inconsistentes — usando fatiamento seguro por página inteira (rede de segurança).");
+            segmentos=[];
+            var _curSeg=0;
+            while(canvas.height-_curSeg>pxPorPagina+1){
+              segmentos.push({inicio:_curSeg,fim:_curSeg+pxPorPagina,headerTopo:null,headerFim:null});
+              _curSeg+=pxPorPagina;
+            }
+            if(canvas.height>_curSeg+1)segmentos.push({inicio:_curSeg,fim:canvas.height,headerTopo:null,headerFim:null});
+          }
+
+          segmentos.forEach(function(seg){
+            if(seg.fim<=seg.inicio+1)return;
+            var headerAltura=(seg.headerTopo!=null)?Math.max(0,seg.headerFim-seg.headerTopo):0;
+            var alturaDisponivel=Math.max(1,pxPorPagina-headerAltura);
+            var alturaTotalConteudo=seg.fim-seg.inicio;
+            /* subFatias normalmente é 1 (o corte por linha já garante que cada segmento cabe
+               numa página) — o Math.ceil aqui é só um último recurso pro caso raríssimo de um
+               bloco sem tabela, ou uma única linha, maior que uma página inteira sozinha. Usa uma
+               tolerância de meio pixel pra não deixar imprecisão de ponto flutuante (ex: um
+               segmento que devia caber EXATAMENTE numa página, mas o cálculo dá algo como
+               1,0000000000000002 página) criar uma "sub-fatia" fantasma de altura zero — isso
+               travava o jsPDF (addImage recusa imagem de altura zero) e derrubava a geração do
+               PDF inteiro. */
+            var subFatias=Math.max(1,Math.ceil((alturaTotalConteudo-0.5)/alturaDisponivel));
+            var offsetConteudo=seg.inicio;
+            for(var sf=0;sf<subFatias;sf++){
+              var restante=seg.fim-offsetConteudo;
+              var alturaConteudoFatia=Math.min(alturaDisponivel,restante);
+              if(alturaConteudoFatia<=0)break; /* nunca gera fatia de altura zero/negativa */
+              var alturaTotalCanvas=headerAltura+alturaConteudoFatia;
+              var fatiaCanvas=document.createElement("canvas");
+              fatiaCanvas.width=canvas.width;
+              fatiaCanvas.height=alturaTotalCanvas;
+              var fctx=fatiaCanvas.getContext("2d");
+              fctx.fillStyle="#ffffff";
+              fctx.fillRect(0,0,fatiaCanvas.width,fatiaCanvas.height);
+              var yDestino=0;
+              if(headerAltura>0){
+                /* Redesenha a linha de cabeçalho da tabela (recortada do canvas original) no
+                   topo desta página de continuação. */
+                fctx.drawImage(canvas,0,seg.headerTopo,canvas.width,headerAltura,0,0,canvas.width,headerAltura);
+                yDestino=headerAltura;
+              }
+              fctx.drawImage(canvas,0,offsetConteudo,canvas.width,alturaConteudoFatia,0,yDestino,canvas.width,alturaConteudoFatia);
+              var fatiaImgH=pageW*(alturaTotalCanvas/canvas.width);
+              if(pagesOk>0)doc.addPage();
+              doc.addImage(fatiaCanvas.toDataURL("image/jpeg",0.95),"JPEG",0,0,pageW,fatiaImgH);
+              pagesOk++;
+              offsetConteudo+=alturaConteudoFatia;
+            }
+          });
+        }
+      }
+    }finally{
+      CanvasRenderingContext2D.prototype.createPattern=_origCreatePattern;
+    }
+    try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
+    if(pagesOk===0){console.warn("[PDF] Nenhuma página renderizou com sucesso.");return null;}
+
+    var blob=doc.output("blob");
+    var ref=window._fbStorage.ref().child(pathStorage);
+    await ref.put(blob,{contentType:"application/pdf"});
+    var url=await ref.getDownloadURL();
+    return url;
+  }catch(e){
+    console.warn("[PDF] Falha ao gerar/subir PDF:",e);
+    try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
+    return null;
+  }
 };
 const gerarPdfLinkCourinvest=function(pathStorage,htmlContent){
   return new Promise(function(resolve){
     var settled=false;
     var finish=function(v){if(settled)return;settled=true;resolve(v);};
+    /* 75s (era 45s) — desde a v395 a geração roda página por página (uma chamada ao html2canvas
+       por página do relatório, sequencial), o que é mais lento no total que a captura única de
+       antes, mas muito mais confiável. Carteiras casal/família com muitos ativos podem gerar
+       15-20+ páginas. Timeout curto demais fazia o e-mail sair sem o link do PDF mesmo quando a
+       geração estava OK, só lenta. */
     var timeoutId=setTimeout(function(){
-      console.warn("[PDF] Timeout de 25s atingido — seguindo sem o link do PDF.");
+      console.warn("[PDF] Timeout de 75s atingido — seguindo sem o link do PDF.");
       finish(null);
-    },25000);
+    },75000);
     _gerarPdfLinkCourinvestInner(pathStorage,htmlContent).then(function(url){
       clearTimeout(timeoutId);
       finish(url);
@@ -397,10 +742,13 @@ const gerarRelatorioHtmlHeadless=function(cliente,dadosApp,tipoRelatorio){
       try{if(container&&container.parentNode)document.body.removeChild(container);}catch(_e){}
       resolve(v);
     };
+    /* 60s (era 40s) — a montagem oculta da ficha faz chamadas reais a APIs externas (ex: preço de
+       fechamento por ativo dolarizado, via brapi.dev) antes de disparar onReportReady; carteiras
+       com muitos ativos no exterior podem legitimamente levar mais que 40s pra terminar. */
     var timeoutId=setTimeout(function(){
-      console.warn("[Relatório] Timeout de 40s ao gerar o relatório completo em segundo plano — usando o resumo como PDF.");
+      console.warn("[Relatório] Timeout de 60s ao gerar o relatório completo em segundo plano — usando o resumo como PDF.");
       finish(null);
-    },40000);
+    },60000);
     try{
       if(typeof CD==="undefined"||typeof ReactDOM==="undefined"||typeof React==="undefined"){
         clearTimeout(timeoutId);finish(null);return;
@@ -432,7 +780,7 @@ const gerarRelatorioHtmlHeadless=function(cliente,dadosApp,tipoRelatorio){
 
 /* === BUSCA O OVERVIEW DE MERCADO MAIS RECENTE (o mesmo texto/dados usados no "Resumo do Mercado
    Financeiro" do relatório completo em PDF, mantido pelo usuário na aba "Overview IA") ===
-   Mesma lógica de busca do gerarRelatorio (mês anterior → mês atual → qualquer chave disponível
+   Mesma lógica de busca do gerarRelatorio (mês atual → mês anterior → qualquer chave disponível
    com texto), só que reutilizável fora do componente CD. */
 const obterOverviewMercadoRecente=function(dadosApp){
   if(!dadosApp||!dadosApp.overviewMercado)return null;
@@ -440,7 +788,7 @@ const obterOverviewMercadoRecente=function(dadosApp){
   var refAnt=new Date();refAnt.setDate(1);refAnt.setMonth(refAnt.getMonth()-1);
   var chaveAnt=refAnt.getFullYear()+"-"+String(refAnt.getMonth()+1).padStart(2,"0");
   var chaveAtual=hoje.getFullYear()+"-"+String(hoje.getMonth()+1).padStart(2,"0");
-  var ov=dadosApp.overviewMercado[chaveAnt]||dadosApp.overviewMercado[chaveAtual]||null;
+  var ov=dadosApp.overviewMercado[chaveAtual]||dadosApp.overviewMercado[chaveAnt]||null;
   if(!ov){
     var chaves=Object.keys(dadosApp.overviewMercado).sort().reverse();
     for(var i=0;i<chaves.length;i++){
@@ -606,8 +954,24 @@ const montarEmailRelatorioHtml=function(opts){
    }
    Em cada ativo: ativo.reservaEmerg = true / ativo.holding = true */
 
+/* Se o cliente já tem um objetivo "Reserva de Emergência" (aba Carteira → Objetivos) com
+   ativos vinculados, usamos ELE como fonte única de verdade — evita ter que marcar os
+   mesmos ativos duas vezes (uma em Objetivos, outra em Particularidades). */
+const objetivoReservaEmerg=function(c){
+  if(!c||!c.objetivos)return null;
+  return c.objetivos.find(function(o){
+    return o.modo==="ativos" && (o.ativosVinculados||[]).length>0 &&
+      String(o.nome||"").toLowerCase().indexOf("reserva de emerg")>=0;
+  })||null;
+};
 const valorAtivosReserva=function(c){
   if(!c||!c._ativosImport)return 0;
+  var objRes=objetivoReservaEmerg(c);
+  if(objRes){
+    var tks=objRes.ativosVinculados||[];
+    return c._ativosImport.filter(function(a){return tks.indexOf(a.tk)>=0})
+      .reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
+  }
   return c._ativosImport.filter(function(a){return a.reservaEmerg===true})
     .reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
 };
@@ -1578,9 +1942,15 @@ const TIPOS_AGENDA_DEFAULT=[
 ];
 
 function rd(st,ac){
-  if(ac.t==="AC") return {...st,cl:[...st.cl,{...ac.p,id:ac.p.id||("c"+Date.now())}]};
-  if(ac.t==="UC") return {...st,cl:st.cl.map(c=>c.id===ac.p.id?{...c,...ac.p}:c)};
-  if(ac.t==="RC"){var _rcId=ac.p.id,_rcNm=ac.p.nome.toLowerCase();return {...st,cl:[...st.cl.filter(function(c){return c.id!==_rcId&&c.nome.toLowerCase()!==_rcNm;}),ac.p]};}
+  /* _updatedAt: carimbo de hora em CADA cliente tocado (AC/UC/RC), usado pelo merge de sync
+     (ver mergeClientes mais abaixo, perto do useEffect do Firestore) pra decidir, cliente por
+     cliente, qual versão é mais nova quando dois dispositivos editam ao mesmo tempo — em vez de
+     substituir a lista de clientes inteira só porque UM cliente mudou em algum dos dois lados
+     (o que antes podia apagar silenciosamente uma importação ou movimentação feita no celular,
+     por exemplo, se o desktop salvasse por qualquer outro motivo logo em seguida). */
+  if(ac.t==="AC") return {...st,cl:[...st.cl,{...ac.p,id:ac.p.id||("c"+Date.now()),_updatedAt:Date.now()}]};
+  if(ac.t==="UC") return {...st,cl:st.cl.map(c=>c.id===ac.p.id?{...c,...ac.p,_updatedAt:Date.now()}:c)};
+  if(ac.t==="RC"){var _rcId=ac.p.id,_rcNm=ac.p.nome.toLowerCase();return {...st,cl:[...st.cl.filter(function(c){return c.id!==_rcId&&c.nome.toLowerCase()!==_rcNm;}),{...ac.p,_updatedAt:Date.now()}]};}
   if(ac.t==="AI") return {...st,it:[{...ac.p,id:"i"+Date.now()},...st.it]};
   if(ac.t==="DC") return {...st,cl:st.cl.filter(c=>c.id!==ac.p),it:st.it.filter(i=>i.cid!==ac.p)};
   
@@ -1749,6 +2119,8 @@ const inpS={padding:"11px 14px",background:"rgba(255,255,255,0.025)",border:"1px
 
 function Dash({data:d,onSel:os,goTo}){
   const[dt,sDt]=useState("geral");
+  /* Busca por nome — usada na aba "💰 Receita" pra filtrar as listas "Por cliente" (GP e GF) */
+  const[buscaReceita,sBuscaReceita]=useState("");
   /* Agente de Retenção — estados no topo do componente (regra dos hooks React) */
   const[retMsgGeradas,sRetMsgGeradas]=useState({});
   const[retGerando,sRetGerando]=useState({});
@@ -1790,7 +2162,12 @@ function Dash({data:d,onSel:os,goTo}){
       })():"—";
       var fmV=function(v){return "R$ "+parseFloat(v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});};
       var MN_EMAIL=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
-      var hoje=new Date();var mesE=hoje.getMonth();var anoE=hoje.getFullYear();
+      /* O e-mail é o FECHAMENTO do mês anterior (ex: enviado no início de agosto = fechamento de
+         julho), igual ao relatório em PDF e ao resto do sistema — usar o mês corrente (hoje.getMonth())
+         mostrava "Agosto de 2026" num e-mail que na verdade reporta o fechamento de julho. */
+      var hoje=new Date();
+      var refEmail=new Date(hoje.getFullYear(),hoje.getMonth()-1,1);
+      var mesE=refEmail.getMonth();var anoE=refEmail.getFullYear();
       /* Sem "/" no texto exibido: o EmailJS escapa "/" como "&#x2F;" em campos de texto puro
          (ex: o Assunto do e-mail), e "Julho&#x2F;2026" aparecia literalmente pro cliente.
          "Julho de 2026" evita esse problema na raiz, em qualquer campo do template. */
@@ -1901,7 +2278,18 @@ function Dash({data:d,onSel:os,goTo}){
   var mesRef=new Date();mesRef.setDate(1);mesRef.setMonth(mesRef.getMonth()-1);
   var mesRefNome=MES_NOMES[mesRef.getMonth()]+" de "+mesRef.getFullYear();
   var mesRefKey=mesRef.getFullYear()+"-"+String(mesRef.getMonth()+1).padStart(2,"0");
-  
+  /* isEnviadoPersistido: o status "enviado" (relEnviados) era guardado só num useState local —
+     ao dar F5 esse estado resetava pra {} e o painel voltava a mostrar TODO MUNDO como pendente,
+     mesmo depois de já ter enviado (o e-mail/WhatsApp realmente saiu, só o "lembrete" de que já
+     saiu não sobrevivia ao reload). Só que o próprio fluxo de envio (mais abaixo) JÁ grava
+     c.particularidades.relatorios[mesAno].publicado=true no Firestore a cada envio — só que
+     ninguém lia esse campo de volta. Agora o status "enviado" é calculado a partir dele (dado
+     persistido e sincronizado de verdade), com o useState relEnviados servindo só de reforço
+     otimista pra já marcar como enviado na hora, sem esperar o round-trip do Firestore. */
+  var isEnviadoPersistido=function(c){
+    return !!(c&&c.particularidades&&c.particularidades.relatorios&&c.particularidades.relatorios[mesRefKey]&&c.particularidades.relatorios[mesRefKey].publicado);
+  };
+
   const fmCompact=function(v){
     if(v===null||v===undefined||isNaN(v))return"R$ 0";
     var abs=Math.abs(v),sig=v<0?"-":"";
@@ -2019,7 +2407,7 @@ function Dash({data:d,onSel:os,goTo}){
 
       {/* ===== BANNER: RELATÓRIOS MENSAIS PENDENTES ===== */}
       {clRelatorio.length>0 && !relModal && (function(){
-        var jaEnviados=clRelatorio.filter(function(c){return relEnviados[c.id+"-"+mesRefKey]});
+        var jaEnviados=clRelatorio.filter(function(c){return relEnviados[c.id+"-"+mesRefKey]||isEnviadoPersistido(c)});
         var pendentes=clRelatorio.length-jaEnviados.length;
         if(pendentes===0)return null;
         return (
@@ -2073,7 +2461,7 @@ function Dash({data:d,onSel:os,goTo}){
               {[
                 {l:"Total de clientes",v:clRelatorio.length,c:T.t1},
                 {l:"Aprovados",v:Object.keys(relAprovados).filter(function(k){return relAprovados[k]&&k.endsWith(mesRefKey)}).length,c:T.gold},
-                {l:"Enviados",v:Object.keys(relEnviados).filter(function(k){return relEnviados[k]&&k.endsWith(mesRefKey)}).length,c:T.green},
+                {l:"Enviados",v:clRelatorio.filter(function(c){return relEnviados[c.id+"-"+mesRefKey]||isEnviadoPersistido(c)}).length,c:T.green},
               ].map(function(k,i){return (
                 <div key={i} style={{background:T.w3,borderRadius:8,padding:"10px 12px",textAlign:"center"}}>
                   <div style={{fontSize:18,fontWeight:800,color:k.c,fontFamily:"'JetBrains Mono'"}}>{k.v}</div>
@@ -2129,7 +2517,7 @@ function Dash({data:d,onSel:os,goTo}){
               </button>
               <div style={{flex:1}}/>
               <button onClick={function(){
-                var aprovList=clRelatorio.filter(function(c){return relAprovados[c.id+"-"+mesRefKey]&&!relEnviados[c.id+"-"+mesRefKey]});
+                var aprovList=clRelatorio.filter(function(c){return relAprovados[c.id+"-"+mesRefKey]&&!(relEnviados[c.id+"-"+mesRefKey]||isEnviadoPersistido(c))});
                 if(!aprovList.length){alert("Nenhum relatório aprovado para envio.");return;}
                 var idx=0;
                 var enviarProximo=function(){
@@ -2165,7 +2553,15 @@ function Dash({data:d,onSel:os,goTo}){
                             dtPublicacao: new Date().toISOString(),
                             notificado: false
                           };
-                          return Object.assign({}, c, {particularidades: Object.assign({}, particularidades, {relatorios: relatorios})});
+                          /* _updatedAt:Date.now() — sem isso, esse cliente ficava com o MESMO
+                             _updatedAt de antes (essa gravação vai direto pro Firestore, sem
+                             passar pelo reducer local). Quando o listener em tempo real (ver
+                             mergeClientes) buscasse essa atualização de volta, um empate de
+                             _updatedAt favorece o lado LOCAL — e o dispositivo que acabou de
+                             enviar o relatório tem em memória a versão ANTIGA (sem o
+                             particularidades.relatorios[mesAno].publicado) até o round-trip
+                             completar, o que apagaria essa marcação de "enviado" de volta. */
+                          return Object.assign({}, c, {particularidades: Object.assign({}, particularidades, {relatorios: relatorios}), _updatedAt: Date.now()});
                         });
                         window._fbDB.collection("workspaces").doc("main").update({cl: clientes});
                       }).catch(function(e){console.warn("Rel push:", e)});
@@ -2254,8 +2650,8 @@ function Dash({data:d,onSel:os,goTo}){
               {clRelatorio.map(function(c){
                 var svArr=Array.isArray(c.sv)?c.sv:(c.sv?[c.sv]:[]);
                 var svStr=svArr.join(",");
-                var aprovado=!!relAprovados[c.id+"-"+mesRefKey];
-                var enviado=!!relEnviados[c.id+"-"+mesRefKey];
+                var enviado=!!(relEnviados[c.id+"-"+mesRefKey]||isEnviadoPersistido(c));
+                var aprovado=!!relAprovados[c.id+"-"+mesRefKey]||enviado;
                 var enviando=relEnviando===c.id;
                 var temWa=!!(c.waGrupo||c.tel);
                 var pat=c.patGorila||c.pat||0;
@@ -3503,11 +3899,20 @@ function Dash({data:d,onSel:os,goTo}){
       {/* ============ ABA: AGENDA & PRODUTIVIDADE ============
          Eventos pendentes, clientes sem contato recente, relatórios não gerados. */}
       {dt==="receita" && (function(){
+        var matchBuscaReceita=function(c){return !buscaReceita || c.nome.toLowerCase().indexOf(buscaReceita.toLowerCase())>=0;};
         return (
           <div>
             <div style={{marginBottom:18}}>
               <div style={{fontSize:13,fontWeight:800,color:T.t1,marginBottom:4}}>💰 Receita Projetada do Mês</div>
               <div style={{fontSize:11,color:T.t3}}>Consolidado de todos os serviços — atualizado em tempo real</div>
+            </div>
+
+            {}
+            <div style={{position:"relative",marginBottom:14,maxWidth:340}}>
+              <input value={buscaReceita} onChange={function(e){sBuscaReceita(e.target.value)}}
+                placeholder="Buscar cliente..."
+                style={{width:"100%",padding:"9px 12px 9px 34px",borderRadius:10,border:"1px solid "+T.bdrL,background:T.card,color:T.t1,fontSize:12,boxSizing:"border-box",outline:"none"}}/>
+              <span style={{position:"absolute",left:11,top:"50%",transform:"translateY(-50%)",fontSize:12,opacity:.4}}>🔍</span>
             </div>
 
             {}
@@ -3557,7 +3962,7 @@ function Dash({data:d,onSel:os,goTo}){
                 {}
                 <div style={{borderTop:"1px solid "+T.bdrL,paddingTop:12}}>
                   <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:.8,marginBottom:8,textTransform:"uppercase"}}>Por cliente</div>
-                  {clPat.filter(function(c){return feeBaseDoCliente(c).fee>0}).sort(function(a,b){return feeBaseDoCliente(b).fee-feeBaseDoCliente(a).fee}).map(function(c,i){
+                  {clPat.filter(function(c){return feeBaseDoCliente(c).fee>0 && matchBuscaReceita(c)}).sort(function(a,b){return feeBaseDoCliente(b).fee-feeBaseDoCliente(a).fee}).map(function(c,i){
                     var fee=feeBaseDoCliente(c).fee;
                     var pct=mrrPat>0?(fee/mrrPat*100):0;
                     return <div key={c.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid "+T.bdrL}}>
@@ -3567,9 +3972,9 @@ function Dash({data:d,onSel:os,goTo}){
                       <div style={{fontSize:11,fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono',monospace",flexShrink:0}}>{fm(fee)}</div>
                     </div>;
                   })}
-                  {clPat.filter(function(c){return feeBaseDoCliente(c).fee===0}).length>0 && (
+                  {clPat.filter(function(c){return feeBaseDoCliente(c).fee===0 && matchBuscaReceita(c)}).length>0 && (
                     <div style={{fontSize:9,color:T.t3,fontStyle:"italic",marginTop:6}}>
-                      {clPat.filter(function(c){return feeBaseDoCliente(c).fee===0}).length} cliente(s) sem fee configurado
+                      {clPat.filter(function(c){return feeBaseDoCliente(c).fee===0 && matchBuscaReceita(c)}).length} cliente(s) sem fee configurado
                     </div>
                   )}
                 </div>
@@ -3593,7 +3998,7 @@ function Dash({data:d,onSel:os,goTo}){
                 </div>
                 <div style={{borderTop:"1px solid "+T.bdrL,paddingTop:12}}>
                   <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:.8,marginBottom:8,textTransform:"uppercase"}}>Por cliente</div>
-                  {clFin.filter(function(c){return feeMensalBRL(c)>0}).sort(function(a,b){return feeMensalBRL(b)-feeMensalBRL(a)}).map(function(c,i){
+                  {clFin.filter(function(c){return feeMensalBRL(c)>0 && matchBuscaReceita(c)}).sort(function(a,b){return feeMensalBRL(b)-feeMensalBRL(a)}).map(function(c,i){
                     var fee=feeMensalBRL(c);
                     var pct=mrrFin>0?(fee/mrrFin*100):0;
                     return <div key={c.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid "+T.bdrL}}>
@@ -3603,9 +4008,9 @@ function Dash({data:d,onSel:os,goTo}){
                       <div style={{fontSize:11,fontWeight:700,color:T.cyan,fontFamily:"'JetBrains Mono',monospace",flexShrink:0}}>{fm(fee)}</div>
                     </div>;
                   })}
-                  {clFin.filter(function(c){return feeMensalBRL(c)===0}).length>0 && (
+                  {clFin.filter(function(c){return feeMensalBRL(c)===0 && matchBuscaReceita(c)}).length>0 && (
                     <div style={{fontSize:9,color:T.t3,fontStyle:"italic",marginTop:6}}>
-                      {clFin.filter(function(c){return feeMensalBRL(c)===0}).length} cliente(s) sem fee configurado
+                      {clFin.filter(function(c){return feeMensalBRL(c)===0 && matchBuscaReceita(c)}).length} cliente(s) sem fee configurado
                     </div>
                   )}
                 </div>
@@ -4589,6 +4994,11 @@ function CL({data:d,onSel:os,dispatch:dp}){
             var vD="";if(venc.match(/^\d{2}\/\d{2}\/\d{4}$/)){var vp=venc.split("/");vD=vp[2]+"-"+vp[1]+"-"+vp[0]}else{vD=venc}
             var tk=ativo.length>20?ativo.split(/\s+/).slice(0,3).join(" "):ativo;
             if(tk.length>25)tk=ativo.split(/\s+/).slice(0,2).join(" ");
+            /* Evita colisão de tk entre ativos diferentes cujo nome truncado fica igual
+               (ex: "NTNB PRINCIPAL - 15/05/2029" e "NTNB PRINCIPAL - 15/08/2032" truncam
+               pros mesmos 3 primeiros termos "NTNB PRINCIPAL -"). Sem isso, os dois ativos
+               dividem o mesmo tk e objetivos vinculados a um passam a contar o outro. */
+            var tkBase1=tk,tkIdx1=0;while(ativos.some(function(x){return x.tk===tk})){tkIdx1++;tk=tkBase1+" "+tkIdx1;}
             var inst=corr;
             if(inst.match(/genial/i))inst="Genial";
             else if(inst.match(/btg/i))inst="BTG Pactual";
@@ -4610,6 +5020,33 @@ function CL({data:d,onSel:os,dispatch:dp}){
           var cleanCopy=Object.assign({},existing);delete cleanCopy._backupAntesImport;
           backup={timestamp:Date.now(),data:cleanCopy,stats:{proventos:(existing.proventos||[]).length,notasFiscais:(existing.notasFiscais||[]).length,interacoes:(existing.interacoes||[]).length,objetivos:(existing.objetivos||[]).length,ativos:(existing._ativosImport||[]).length}};
         }
+        /* === REMAPEIA VÍNCULOS DE OBJETIVOS (ativosVinculados) PRA OS NOVOS TICKERS ===
+           tk é gerado a partir do nome do ativo a cada importação — se o nome truncado colidir
+           entre dois ativos diferentes (corrigido acima) ou simplesmente mudar de posição/gerar
+           tk ligeiramente diferente entre extratos, o vínculo antigo (que guarda o tk como
+           string) deixa de bater com nenhum ativo da lista nova, e o objetivo "perde" o ativo
+           vinculado mesmo sem o usuário ter feito nada. Aqui pareamos ativo antigo x novo pelo
+           NOME COMPLETO (nm, não truncado) pra achar o tk novo correspondente ao tk antigo, e
+           atualizamos ativosVinculados de todos os objetivos existentes de acordo. Ativos que
+           somem da carteira (vendidos) não são remapeados — ficam órfãos no objetivo, sem
+           contar no total, que é o comportamento correto nesse caso. */
+        var objetivosPreservados=(existing&&existing.objetivos)||[];
+        if(existing&&existing._ativosImport&&existing._ativosImport.length>0&&objetivosPreservados.length>0){
+          var tkAntigoParaNovo={};
+          existing._ativosImport.forEach(function(aOld){
+            var nomeNorm=String(aOld.nm||"").trim().toLowerCase();
+            if(!nomeNorm)return;
+            var match=ativos.find(function(aNew){return String(aNew.nm||"").trim().toLowerCase()===nomeNorm});
+            if(match&&match.tk!==aOld.tk)tkAntigoParaNovo[aOld.tk]=match.tk;
+          });
+          if(Object.keys(tkAntigoParaNovo).length>0){
+            objetivosPreservados=objetivosPreservados.map(function(obj){
+              if(!obj.ativosVinculados||obj.ativosVinculados.length===0)return obj;
+              var novosVinc=obj.ativosVinculados.map(function(tkAntigo){return tkAntigoParaNovo[tkAntigo]||tkAntigo;});
+              return Object.assign({},obj,{ativosVinculados:novosVinc});
+            });
+          }
+        }
         var newC=Object.assign({},(existing||{}),{
           id:newId,nome:nomeCliente,email:existing?existing.email:"",tel:existing?existing.tel:"",risco:existing?existing.risco:"Moderado",pais:existing?(existing.pais||"BR"):"BR",investExterior:existing?!!existing.investExterior:false,
           sv:existing?existing.sv:["patrimonio"],pat:patReal,patGorila:patReal,
@@ -4621,7 +5058,7 @@ function CL({data:d,onSel:os,dispatch:dp}){
           /* === PRESERVAÇÃO EXPLÍCITA DE DADOS MANUAIS === sempre mantém, nunca sobrescreve na reimportação */
           proventos:(existing&&existing.proventos&&existing.proventos.length>0)?existing.proventos:(existing&&existing.proventos||[]),
           notasFiscais:(existing&&existing.notasFiscais)||[],
-          objetivos:(existing&&existing.objetivos)||[],
+          objetivos:objetivosPreservados,
           _contratos:(existing&&existing._contratos)||[],
           movimentacoes:(existing&&existing.movimentacoes)||[],
           histMensal:(existing&&existing.histMensal)||[],
@@ -5225,6 +5662,11 @@ function CL({data:d,onSel:os,dispatch:dp}){
             var vD="";if(venc.match(/^\d{2}\/\d{2}\/\d{4}$/)){var vp=venc.split("/");vD=vp[2]+"-"+vp[1]+"-"+vp[0]}else if(venc instanceof Date){vD=venc.toISOString().split("T")[0]}else{vD=venc}
             var tk=ativo.length>20?ativo.split(/\s+/).slice(0,3).join(" "):ativo;
             if(tk.length>25)tk=ativo.split(/\s+/).slice(0,2).join(" ");
+            /* Evita colisão de tk entre ativos diferentes cujo nome truncado fica igual
+               (ex: dois títulos "NTNB PRINCIPAL - <data>" com datas diferentes truncam pros
+               mesmos 3 primeiros termos). Sem isso, os dois ativos dividem o mesmo tk e
+               objetivos vinculados a um passam a contar o outro também. */
+            var tkBase1=tk,tkIdx1=0;while(ativos.some(function(x){return x.tk===tk})){tkIdx1++;tk=tkBase1+" "+tkIdx1;}
             var inst=corr;if(inst.match(/genial/i))inst="Genial";else if(inst.match(/btg/i))inst="BTG Pactual";else if(inst.match(/sproutfi/i))inst="Vest";else if(inst.match(/avenue/i))inst="Avenue";else if(inst.match(/xp\b/i))inst="Rico";else if(inst.match(/inter\b/i))inst="Inter";else if(inst.match(/c6/i))inst="C6";else if(inst.match(/wise/i))inst="Wise";else if(inst.match(/okx/i))inst="OKX";else if(inst.match(/99pay/i))inst="99Pay";
             
             var yieldA=iYieldA>=0?(typeof r[iYieldA]==="number"?r[iYieldA]:pv(r[iYieldA])):0;
@@ -5285,6 +5727,34 @@ function CL({data:d,onSel:os,dispatch:dp}){
            interações, objetivos, sucessório, aposentadoria, contratos, particularidades, etc)
            e sobrescreve só o que vem da planilha do Gorila. Sem esse spread, o reducer "RC"
            remove o cliente antigo e coloca o novo no lugar, apagando dados manuais. */
+        /* === REMAPEIA VÍNCULOS DE OBJETIVOS (ativosVinculados) PRA OS NOVOS TICKERS ===
+           tk é gerado a partir do nome do ativo a cada importação — se o nome truncado colidir
+           entre dois ativos diferentes (corrigido acima) ou gerar um tk levemente diferente
+           entre extratos, o vínculo antigo (obj.ativosVinculados guarda o tk como string) deixa
+           de bater com nenhum ativo da lista nova, e o objetivo "perde" o ativo vinculado mesmo
+           sem o usuário ter feito nada — foi exatamente esse sintoma relatado ("já tinha
+           vinculado os investimentos e ao reimportar foi eliminado"). Aqui pareamos ativo
+           antigo x novo pelo NOME COMPLETO (nm, não truncado) pra achar o tk novo
+           correspondente ao tk antigo, e atualizamos ativosVinculados de todos os objetivos
+           existentes de acordo. Ativos que somem da carteira (vendidos) não são remapeados —
+           ficam órfãos no objetivo, sem contar no total, que é o comportamento correto. */
+        var objetivosPreservados=(existing&&existing.objetivos)||[];
+        if(existing&&existing._ativosImport&&existing._ativosImport.length>0&&objetivosPreservados.length>0){
+          var tkAntigoParaNovo={};
+          existing._ativosImport.forEach(function(aOld){
+            var nomeNorm=String(aOld.nm||"").trim().toLowerCase();
+            if(!nomeNorm)return;
+            var match=ativos.find(function(aNew){return String(aNew.nm||"").trim().toLowerCase()===nomeNorm});
+            if(match&&match.tk!==aOld.tk)tkAntigoParaNovo[aOld.tk]=match.tk;
+          });
+          if(Object.keys(tkAntigoParaNovo).length>0){
+            objetivosPreservados=objetivosPreservados.map(function(obj){
+              if(!obj.ativosVinculados||obj.ativosVinculados.length===0)return obj;
+              var novosVinc=obj.ativosVinculados.map(function(tkAntigo){return tkAntigoParaNovo[tkAntigo]||tkAntigo;});
+              return Object.assign({},obj,{ativosVinculados:novosVinc});
+            });
+          }
+        }
         var newC=Object.assign({},(existing||{}),{
           id:newId,
           nome:nomeCliente,
@@ -5318,7 +5788,7 @@ function CL({data:d,onSel:os,dispatch:dp}){
           /* === PRESERVAÇÃO EXPLÍCITA DE DADOS MANUAIS === nunca sobrescreve na reimportação */
           proventos:(existing&&existing.proventos&&existing.proventos.length>0)?existing.proventos:(existing&&existing.proventos||[]),
           notasFiscais:(existing&&existing.notasFiscais)||[],
-          objetivos:(existing&&existing.objetivos)||[],
+          objetivos:objetivosPreservados,
           _contratos:(existing&&existing._contratos)||[],
           movimentacoes:(existing&&existing.movimentacoes)||[],
           histMensal:(existing&&existing.histMensal)||[],
@@ -6450,88 +6920,197 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       try{
         var wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array",cellDates:true});
         var ws=wb.Sheets[wb.SheetNames[0]];
-        var jsonRows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:""});
-        
+        /* raw:true (igual ao import do titular em importGorilaCliente) — pega os NÚMEROS
+           brutos das células (ex: 0.0116 pra uma célula formatada como "1,16%", 1876.816573
+           pra uma célula de posição em R$), em vez de raw:false, que devolve o TEXTO já
+           formatado pelo Excel (ex: "1.02%", às vezes com vírgula como separador de milhar
+           em vez de decimal dependendo da coluna). Foi o raw:false que causava a confusão de
+           unidade (fração vs ponto percentual) que gerou o bug do "116%" nesta função — com
+           raw:true os dois imports (titular e cônjuge) usam exatamente a mesma convenção
+           numérica, então getRentAtivoPer() interpreta os dois da mesma forma sem precisar
+           adivinhar. IMPORTANTE: quem já importou o extrato do cônjuge ANTES desta correção
+           precisa reimportar pra os dados ficarem no formato novo. */
+        var jsonRows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:""});
+        var pv=function(v){if(typeof v==="number")return v;var s=String(v||"0").trim().replace(/R\$\s*/g,"").replace(/%/g,"").replace(/\s/g,"");if(s.match(/,\d{3}\./)){s=s.replace(/,/g,"")}else if(s.match(/\.\d{3},/)){s=s.replace(/\./g,"").replace(",",".")}else if(s.match(/,\d{1,2}$/)){s=s.replace(",",".")}return parseFloat(s)||0};
+        var toISO=function(v){if(v instanceof Date)return v.toISOString().split("T")[0];if(typeof v==="number"&&v>40000&&v<60000)return new Date(Math.round((v-25569)*86400000)).toISOString().split("T")[0];return String(v||"").substring(0,10);};
+
+        var patConj=0,resultadoConj=0,dI="",dF="",aportesConj=0,retiradasConj=0,captacaoConj=0;
+        for(var li=0;li<Math.min(jsonRows.length,30);li++){
+          var lbl=String((jsonRows[li]||[])[0]||"").toLowerCase().trim();
+          var rawVal=(jsonRows[li]||[])[1];
+          if(!lbl)continue;
+          if(lbl.indexOf("patrim")>=0 && patConj===0)patConj=typeof rawVal==="number"?rawVal:pv(rawVal);
+          else if(lbl.indexOf("resultado")>=0 && resultadoConj===0)resultadoConj=typeof rawVal==="number"?rawVal:pv(rawVal);
+          else if(lbl.indexOf("data inicial")>=0)dI=toISO(rawVal);
+          else if(lbl.indexOf("data final")>=0)dF=toISO(rawVal);
+          else if(lbl.indexOf("aporte")>=0||lbl.indexOf("aplica")>=0||lbl.indexOf("depos")>=0)aportesConj=typeof rawVal==="number"?rawVal:pv(rawVal);
+          else if(lbl.indexOf("resgate")>=0||lbl.indexOf("retirad")>=0||lbl.indexOf("saqu")>=0)retiradasConj=typeof rawVal==="number"?rawVal:pv(rawVal);
+          else if(lbl.indexOf("capta")>=0||lbl.indexOf("fluxo")>=0)captacaoConj=typeof rawVal==="number"?rawVal:pv(rawVal);
+        }
+        if(captacaoConj===0)captacaoConj=aportesConj-retiradasConj;
+
+        /* Tabela "Rentabilidade da Carteira" — mesma busca por rótulo usada no import do titular
+           (importGorilaCliente), em vez de procurar "%" em texto (que nunca batia com células
+           numéricas formatadas como %, deixando c.conjuge._gorilaRent.periods sempre vazio e
+           forçando o relatório a cair no fallback por ativo — menos preciso). */
+        var gRentConj={periods:[],atribuicao:[],aportes:aportesConj,retiradas:retiradasConj,captacao:captacaoConj};
+        var rentSectionRow=-1;
+        for(var i=0;i<Math.min(jsonRows.length,30);i++){
+          var c0=String((jsonRows[i]||[])[0]||"").toLowerCase();
+          if(c0.indexOf("rentabilidade da carteira")>=0){rentSectionRow=i;break}
+        }
+        if(rentSectionRow>=0){
+          for(var i=rentSectionRow+2;i<Math.min(rentSectionRow+10,jsonRows.length);i++){
+            var r=jsonRows[i];if(!r)continue;
+            var per=String(r[0]||"").trim();
+            if(!per||per.toLowerCase().indexOf("atribui")>=0||per.toLowerCase().indexOf("posição")>=0)break;
+            var rent=typeof r[3]==="number"?r[3]:pv(r[3]);
+            var ibov=typeof r[4]==="number"?r[4]:pv(r[4]);
+            var cdi=typeof r[5]==="number"?r[5]:pv(r[5]);
+            var ipca=typeof r[6]==="number"?r[6]:pv(r[6]);
+            gRentConj.periods.push({p:per,rent:rent,ibov:ibov,cdi:cdi,ipca:ipca});
+          }
+        }
+        var atribRow=-1;
+        for(var i=0;i<Math.min(jsonRows.length,35);i++){
+          var c0=String((jsonRows[i]||[])[0]||"").toLowerCase();
+          if(c0.indexOf("atribuição de performance")>=0||c0.indexOf("atribuicao de performance")>=0){atribRow=i;break}
+        }
+        if(atribRow>=0){
+          for(var i=atribRow+2;i<Math.min(atribRow+15,jsonRows.length);i++){
+            var r=jsonRows[i];if(!r)continue;
+            var classe=String(r[0]||"").trim();
+            if(!classe||classe.toLowerCase()==="posição"||classe.toLowerCase()==="total")break;
+            var pct=typeof r[1]==="number"?r[1]:pv(r[1]);
+            if(classe&&classe.toLowerCase()!=="classe")gRentConj.atribuicao.push({classe:classe,pct:pct});
+          }
+        }
+
+        /* Header da tabela de ativos — busca pela linha com "corretora"+"ativo"+"classe",
+           igual ao import do titular, em vez de assumir índices fixos de coluna. */
+        var headerRow=-1;
+        for(var i=0;i<Math.min(jsonRows.length,50);i++){
+          var joined=(jsonRows[i]||[]).join("|").toLowerCase();
+          if(joined.indexOf("corretora")>=0&&joined.indexOf("ativo")>=0&&joined.indexOf("classe")>=0){headerRow=i;break}
+        }
+
         var ativosConj=[];
-        var patConj=0;
-        var toISO=function(v){if(v instanceof Date)return v.toISOString().split("T")[0];if(typeof v==="number"&&v>40000)return new Date(Math.round((v-25569)*86400000)).toISOString().split("T")[0];return String(v||"").substring(0,10);};
-        var dI="",dF="";
-        var gRentConj={periods:[],atribuicao:[],aportes:0,retiradas:0};
-        jsonRows.forEach(function(row){
-          var lbl=String(row[0]||"").toLowerCase().trim();
-          if(lbl.indexOf("data inicial")>=0)dI=toISO(row[1]);
-          if(lbl.indexOf("data final")>=0)dF=toISO(row[1]);
-          if(lbl.indexOf("patrimônio")>=0||lbl.indexOf("patrimonio")>=0){var pv=parseFloat(String(row[1]||"").replace(/[^0-9.,-]/g,"").replace(",","."));if(!isNaN(pv)&&pv>0)patConj=pv;}
-          
-          if(row[0]&&row[1]){var s=String(row[1]||"");if(s.indexOf("%")>=0){var rv=parseFloat(s.replace("%","").replace(",","."));if(!isNaN(rv))gRentConj.periods.push({p:String(row[0]).trim(),rent:rv/100});}}
-          /* Ativos — formato Gorila completo:
-           col0=Corretora, col1=Ativo, col2=Sub-Classe, col3=Classe,
-           col4=Quantidade, col5=Posição(R$), col6=Preço(R$),
-           col7=Preço Médio(R$), col8=Vencimento, col9=Rentabilidade */
-          if(row.length>=6&&row[1]&&row[3]){
-            var inst2=String(row[0]||"").trim();
-            var nm2=String(row[1]||"").trim();
-            var subCl=String(row[2]||"").trim().toLowerCase();
-            var cl=String(row[3]||"").trim();
-            var qtd2=parseFloat(String(row[4]||"0").replace(",","."));
-            var pos2=parseFloat(String(row[5]||"0").replace(/[^0-9.,-]/g,"").replace(",","."));
-            var preco2=parseFloat(String(row[6]||"0").replace(",",".")); 
-            var pm2=parseFloat(String(row[7]||"0").replace(",",".")); 
-            var venc2=row[8]?String(row[8]).substring(0,10):""; 
-            var rentPer2=parseFloat(String(row[9]||"0").replace(",",".")); 
-            
+        if(headerRow>=0){
+          var hdr=(jsonRows[headerRow]||[]).map(function(h){return String(h).toLowerCase().trim()});
+          var ci=function(pats){for(var p=0;p<pats.length;p++){for(var j=0;j<hdr.length;j++){if(hdr[j].indexOf(pats[p])>=0)return j}}return-1};
+          var iC=ci(["corretora"]),iA=ci(["ativo"]),iSC=ci(["sub-classe","sub classe","subclasse"]);
+          var iCl=-1;for(var hi=0;hi<hdr.length;hi++){if(hdr[hi]==="classe"){iCl=hi;break}}
+          if(iCl<0)iCl=ci(["classe"]);
+          if(iCl===iSC){for(var hi=0;hi<hdr.length;hi++){if(hdr[hi]==="classe"&&hi!==iSC){iCl=hi;break}}}
+          var iQ=ci(["quantidade"]),iP=ci(["posição","posicao"]),iPr=ci(["preço (r","cotação"]),iPM=ci(["preço médio","preco medio"]),iV=ci(["vencimento"]);
+          /* Mesma lógica do titular: 5 cols de % seguidas de 5 cols de R$, ambas com os mesmos
+             rótulos (Periodo/Ano/12m/24m/Início da Carteira) — usa índice pra não confundir. */
+          var idxsPeriodo=[];
+          for(var hi=0;hi<hdr.length;hi++){if(hdr[hi]==="periodo"||hdr[hi]==="período")idxsPeriodo.push(hi);}
+          var pctStart=idxsPeriodo[0]>=0?idxsPeriodo[0]:-1;
+          var rsStart=idxsPeriodo.length>=2?idxsPeriodo[1]:-1;
+          var COL_LABELS=["periodo","ano","12m","24m","início da carteira"];
+
+          for(var i=headerRow+1;i<jsonRows.length;i++){
+            var row=jsonRows[i];if(!row||row.length<6)continue;
+            var nm2=iA>=0?String(row[iA]||"").trim():"";
+            var cl=iCl>=0?String(row[iCl]||"").trim():"";
+            if(!nm2||!cl)continue;
+            var inst2=iC>=0?String(row[iC]||"").trim():"";
+            var subCl=iSC>=0?String(row[iSC]||"").trim().toLowerCase():"";
+            var qtd2=iQ>=0?pv(row[iQ]):0;
+            var pos2=iP>=0?pv(row[iP]):0;
+            var preco2=iPr>=0?pv(row[iPr]):0;
+            var pm2=iPM>=0?pv(row[iPM]):0;
+            var venc2=iV>=0?row[iV]:"";
+
             var CLASSES_VALIDAS=["Renda Fixa","Renda Variável","Renda Variavel","Investimento No Exterior","Previdência","Previdencia","Criptomoeda","Caixa","Multimercado","Outros"];
             var isClasseValida=CLASSES_VALIDAS.some(function(cv){return cl.indexOf(cv)>=0||cv.indexOf(cl)>=0});
             var isHeader=cl==="Classe"||cl===""||nm2==="Ativo"||nm2===""||nm2.toLowerCase()==="total"||!isClasseValida;
-            if(!isHeader&&!isNaN(pos2)&&pos2>0.01&&nm2.length>1){
-              
-              var tp2="outros";
-              if(cl==="Renda Fixa"){
-                if(subCl.indexOf("prefixado")>=0||subCl.indexOf("inflação")>=0||subCl.indexOf("inflacao")>=0)tp2="tesouro";
-                else if(subCl.indexOf("fund")>=0)tp2="fundo_rf";
-                else if(subCl.indexOf("prev")>=0)tp2="prev";
-                else tp2="cdb";
-              }else if(cl.indexOf("Renda Variável")>=0||cl.indexOf("Renda Variavel")>=0){
-                if(subCl.indexOf("fii")>=0||(/^[A-Z]{4}11$/).test(nm2.replace(/\s/g,"")))tp2="fii";
-                else if(subCl.indexOf("etf")>=0)tp2="etf_br";
-                else if(subCl.indexOf("bdr")>=0)tp2="bdr";
-                else tp2="acao";
-              }else if(cl.indexOf("Exterior")>=0){
-                if(subCl.indexOf("reit")>=0)tp2="reit";
-                else if(subCl.indexOf("etf")>=0)tp2="etf_int";
-                else tp2="stock_us";
-              }else if(cl.indexOf("Previd")>=0||cl.indexOf("previd")>=0)tp2="prev";
-              else if(cl.indexOf("Cripto")>=0||cl.indexOf("cripto")>=0)tp2="cripto";
-              else if(cl==="Caixa")tp2="caixa";
-              else if(cl.indexOf("Multi")>=0)tp2="fundo_mm";
-              
-              var pmReal=(!isNaN(pm2)&&pm2>0)?pm2:(qtd2>0?pos2/qtd2:preco2||0);
-              var cTotal=pmReal*qtd2; 
-              var ganho2=pos2-cTotal; 
-              var gPct2=cTotal>0?(ganho2/cTotal*100):0;
-              
-              var rentGorila=(!isNaN(rentPer2)&&rentPer2!==0)?(rentPer2*100):null;
-              
-              var vencFmt="";
-              if(venc2&&venc2.length>=10){var vp=venc2.split("-");vencFmt=vp.length===3?vp[0]+"-"+vp[1]+"-"+vp[2]:"";}
-              
-              var tk2base=nm2.substring(0,15).replace(/[^A-Za-z0-9]/g,"").toUpperCase()||"AT";
-              var tk2=tk2base;var tkIdx=0;
-              while(ativosConj.some(function(a){return a.tk===tk2})){tkIdx++;tk2=tk2base+tkIdx;}
-              ativosConj.push({
-                tk:tk2,nm:nm2,posR:pos2,qtd:qtd2||0,
-                pa:preco2||pmReal, 
-                pm:pmReal, 
-                cT:cTotal,ganho:ganho2,gPct:gPct2,
-                _gRentPct:{periodo:(!isNaN(rentPer2)&&rentPer2!==0)?rentPer2:null},
-                tp:tp2,inst:inst2,cat:cl,
-                venc:vencFmt||undefined
-              });
+            if(isHeader||isNaN(pos2)||pos2<=0.01||nm2.length<=1)continue;
+
+            var tp2="outros";
+            if(cl==="Renda Fixa"){
+              if(subCl.indexOf("prefixado")>=0||subCl.indexOf("inflação")>=0||subCl.indexOf("inflacao")>=0)tp2="tesouro";
+              else if(subCl.indexOf("fund")>=0)tp2="fundo_rf";
+              else if(subCl.indexOf("prev")>=0)tp2="prev";
+              else tp2="cdb";
+            }else if(cl.indexOf("Renda Variável")>=0||cl.indexOf("Renda Variavel")>=0){
+              if(subCl.indexOf("fii")>=0||(/^[A-Z]{4}11$/).test(nm2.replace(/\s/g,"")))tp2="fii";
+              else if(subCl.indexOf("etf")>=0)tp2="etf_br";
+              else if(subCl.indexOf("bdr")>=0)tp2="bdr";
+              else tp2="acao";
+            }else if(cl.indexOf("Exterior")>=0){
+              if(subCl.indexOf("reit")>=0)tp2="reit";
+              else if(subCl.indexOf("etf")>=0)tp2="etf_int";
+              else tp2="stock_us";
+            }else if(cl.indexOf("Previd")>=0||cl.indexOf("previd")>=0)tp2="prev";
+            else if(cl.indexOf("Cripto")>=0||cl.indexOf("cripto")>=0)tp2="cripto";
+            else if(cl==="Caixa")tp2="caixa";
+            else if(cl.indexOf("Multi")>=0)tp2="fundo_mm";
+
+            var pmReal=(!isNaN(pm2)&&pm2>0)?pm2:(qtd2>0?pos2/qtd2:preco2||0);
+            var cTotal=pmReal*qtd2;
+            var ganho2=pos2-cTotal;
+            var gPct2=cTotal>0?(ganho2/cTotal*100):0;
+
+            /* Rentabilidade por posição — mesmas 5 cols % + 5 cols R$ do import do titular,
+               já como FRAÇÃO (raw:true), sem nenhuma conversão de unidade necessária. */
+            var rentAtivo={},rentAtivoRs={};
+            if(pctStart>=0){
+              for(var k=0;k<5;k++){var idxPct=pctStart+k;if(idxPct<row.length)rentAtivo[COL_LABELS[k]]=typeof row[idxPct]==="number"?row[idxPct]:pv(row[idxPct]);}
             }
+            if(rsStart>=0){
+              for(var k=0;k<5;k++){var idxRs=rsStart+k;if(idxRs<row.length)rentAtivoRs[COL_LABELS[k]]=typeof row[idxRs]==="number"?row[idxRs]:pv(row[idxRs]);}
+            }
+
+            var vencFmt="";
+            var vencISO=toISO(venc2);
+            if(vencISO&&vencISO.length>=10)vencFmt=vencISO;
+
+            var tk2base=nm2.substring(0,15).replace(/[^A-Za-z0-9]/g,"").toUpperCase()||"AT";
+            var tk2=tk2base;var tkIdx=0;
+            while(ativosConj.some(function(a){return a.tk===tk2})){tkIdx++;tk2=tk2base+tkIdx;}
+            ativosConj.push({
+              tk:tk2,nm:nm2,posR:pos2,qtd:qtd2||0,
+              pa:preco2||pmReal,
+              pm:pmReal,
+              cT:cTotal,ganho:ganho2,gPct:gPct2,
+              _gRentPct:rentAtivo,_gRentRs:rentAtivoRs,
+              tp:tp2,inst:inst2,cat:cl,
+              venc:vencFmt||undefined
+            });
           }
-        });
-        gRentConj.dataIni=dI;gRentConj.dataFim=dF;if(patConj>0)gRentConj.patTotal=patConj;
-        dp({t:"UC",p:{id:c.id,conjuge:Object.assign({},c.conjuge||{},{
+        }
+        gRentConj.dataIni=dI;gRentConj.dataFim=dF;
+        gRentConj.resultado=resultadoConj;
+        if(patConj>0)gRentConj.patTotal=patConj;
+        /* === REMAPEIA VÍNCULOS DE OBJETIVOS (ativosVinculados) PRA OS NOVOS TICKERS DO CÔNJUGE ===
+           Mesma lógica aplicada no import do titular: o tk do ativo do cônjuge é recalculado a
+           cada importação (nome truncado + índice de desempate), então pode mudar entre
+           extratos mesmo sem o ativo ter mudado de verdade. Objetivos que vincularam ativos do
+           cônjuge (via enr, a lista consolidada titular+cônjuge) perderiam esse vínculo na
+           reimportação. Pareamos ativo antigo x novo do cônjuge pelo nome completo e
+           atualizamos c.objetivos de acordo. */
+        var _objetivosConjPreservados=c.objetivos||[];
+        var _ativosConjAntigos=(c.conjuge&&c.conjuge._ativosImport)||[];
+        if(_ativosConjAntigos.length>0&&ativosConj.length>0&&_objetivosConjPreservados.length>0){
+          var _tkAntigoParaNovoConj={};
+          _ativosConjAntigos.forEach(function(aOld){
+            var nomeNorm=String(aOld.nm||"").trim().toLowerCase();
+            if(!nomeNorm)return;
+            var match=ativosConj.find(function(aNew){return String(aNew.nm||"").trim().toLowerCase()===nomeNorm});
+            if(match&&match.tk!==aOld.tk)_tkAntigoParaNovoConj[aOld.tk]=match.tk;
+          });
+          if(Object.keys(_tkAntigoParaNovoConj).length>0){
+            _objetivosConjPreservados=_objetivosConjPreservados.map(function(obj){
+              if(!obj.ativosVinculados||obj.ativosVinculados.length===0)return obj;
+              var novosVinc=obj.ativosVinculados.map(function(tkAntigo){return _tkAntigoParaNovoConj[tkAntigo]||tkAntigo;});
+              return Object.assign({},obj,{ativosVinculados:novosVinc});
+            });
+          }
+        }
+        dp({t:"UC",p:{id:c.id,objetivos:_objetivosConjPreservados,conjuge:Object.assign({},c.conjuge||{},{
           _ativosImport:ativosConj.length>0?ativosConj:(c.conjuge&&c.conjuge._ativosImport||[]),
           _gorilaRent:gRentConj,
           patGorila:patConj||0
@@ -7324,7 +7903,45 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
     return html;
   };
 
-  var gerarRelatorio=function(tipo, _dadosGlobais, _usdRateOverride){
+  /* === RENTABILIDADE REAL DOS ATIVOS DOLARIZADOS ===
+     Busca, pra cada ticker do cliente em dólar (stock_us/etf_int/reit — ex: VOO, AAPL), a
+     variação de fechamento do mês via brapi.dev (mesma API/endpoint já usada nesta tela pro
+     Ibovespa e S&P 500 no Overview de Mercado: /api/quote/{TICKER}?range=1mo&interval=1d,
+     lendo o array historicalDataPrice e comparando o primeiro fechamento do período com o
+     último). Retorna um mapa {TICKER: variação%} pra alimentar gerarRelatorio como a fonte
+     mais fiel de "Rentabilidade em USD" — em vez de estimar via proxy cambial. */
+  var buscarRentAtivosUSD=function(){
+    var TIPOS_EXT_USD_BUSCA={stock_us:1,etf_int:1,reit:1};
+    var tkSet={};
+    (c._ativosImport||[]).forEach(function(a){if(TIPOS_EXT_USD_BUSCA[a.tp]&&a.tk)tkSet[a.tk]=true;});
+    var tks=Object.keys(tkSet);
+    if(tks.length===0)return Promise.resolve(null);
+    return fetch("https://brapi.dev/api/quote/"+tks.join(",")+"?range=1mo&interval=1d")
+      .then(function(r){return r.json()})
+      .then(function(d){
+        if(!d||!d.results)return null;
+        var map={};
+        d.results.forEach(function(r){
+          var hist=r.historicalDataPrice||[];
+          if(hist.length>=2){
+            var prim=hist[0].close,ult=hist[hist.length-1].close;
+            if(prim>0)map[r.symbol]=((ult/prim-1)*100);
+          }
+        });
+        return Object.keys(map).length>0?map:null;
+      }).catch(function(){return null;});
+  };
+  /* Wrapper: busca a rentabilidade real dos ativos USD antes de gerar o relatório mensal —
+     usado pelos 3 botões/fluxos de geração (câmbio já fixado, câmbio buscado, fallback) pra
+     não duplicar essa lógica em cada um. */
+  var gerarRelMensal=function(taxaCambio){
+    buscarRentAtivosUSD().then(function(mapaRentUSD){
+      try{sReportHtml(gerarRelatorio("mensal",d,taxaCambio,mapaRentUSD))}
+      catch(e){alert("Erro ao gerar relatório:\n"+e.message)}
+    });
+  };
+
+  var gerarRelatorio=function(tipo, _dadosGlobais, _usdRateOverride, _usdAtivosRentMap){
     var d=_dadosGlobais; /* dados do estado React passado como parâmetro */
     var normI=function(n){if(!n)return"Sem instituição";if(n.match(/xp\b|xp investimentos/i))return"Rico";if(n.match(/rico/i))return"Rico";if(n.match(/sproutfi|passfolio|PASSFOLIO|passfólio/i))return"Vest";if(n.match(/j\.?\s*safra/i))return"Safra";return n;};
     /* Garante acesso ao estado global d — usa window._courinvestData como fallback */
@@ -7678,7 +8295,14 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         else if(tipo==="trimestral"){rentPeriodo=base*0.22;cdiPeriodo=3.18;ibovPeriodo=5.4;ipcaPeriodo=1.35;rentLabel="no trimestre"}
         else{rentPeriodo=base;cdiPeriodo=13.25;ibovPeriodo=15.3;ipcaPeriodo=4.87;rentLabel="no período"}
       }
-      var vsC=rentPeriodo-cdiPeriodo;
+      /* Benchmark principal do Resumo Executivo: IPCA (não CDI) — a pedido do usuário, porque a
+         carteira tem várias classes de ativos (renda fixa, FIIs, ações, exterior...) e o CDI é
+         uma referência específica de renda fixa pós-fixada; o IPCA (inflação) é mais aderente
+         pra mostrar ao cliente se o patrimônio está preservando/ganhando poder de compra numa
+         carteira diversificada. O quadro "Rentabilidade vs Benchmarks" mais abaixo continua
+         mostrando CDI, IBOVESPA, IFIX, IPCA e Poupança lado a lado — só o comparativo em
+         destaque (KPI "vs Benchmark" + narrativa) passou a usar o IPCA como referência. */
+      var vsC=rentPeriodo-ipcaPeriodo;
 
       /* ===== IMPACTO CAMBIAL ===== */
       var TP_EXT_CAMBIAL=["stock_us","etf_int","etf_eu","reit"];
@@ -7712,13 +8336,19 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
          Busca o mais recente disponível se não achar o mês exato. */
       if(tipo==="mensal" && secAtiva("overview")){
         /* DEBUG: log do overviewMercado */
-        /* Busca overview: mês anterior, mês atual, ou qualquer chave disponível */
+        /* Busca overview: mês atual (o que foi publicado agora, na aba Overview IA) primeiro,
+           mês anterior como fallback (caso o overview deste mês ainda não tenha sido publicado),
+           ou qualquer chave disponível como último recurso. A aba Overview IA salva a chave pelo
+           mês em que o texto é PUBLICADO (ex: publica em agosto, descrevendo julho) — por isso
+           "mês atual" tem que vir primeiro na busca, senão um overview antigo (do ciclo passado)
+           sempre "ganha" do que acabou de ser publicado, mesmo depois de clicar em "Salvar e
+           publicar nos relatórios". Isso causava o relatório mostrar o texto do mês errado. */
         var _ovRef=new Date();_ovRef.setDate(1);_ovRef.setMonth(_ovRef.getMonth()-1);
         var chaveOvRel=_ovRef.getFullYear()+"-"+String(_ovRef.getMonth()+1).padStart(2,"0");
         var chaveOvAtual=new Date().getFullYear()+"-"+String(new Date().getMonth()+1).padStart(2,"0");
         var ovDataRel=null;
         if(_d&&_d.overviewMercado){
-          ovDataRel=_d.overviewMercado[chaveOvRel]||_d.overviewMercado[chaveOvAtual]||null;
+          ovDataRel=_d.overviewMercado[chaveOvAtual]||_d.overviewMercado[chaveOvRel]||null;
           if(!ovDataRel){
             var todasChaves=Object.keys(_d.overviewMercado).sort().reverse();
             for(var _ki=0;_ki<todasChaves.length;_ki++){
@@ -7771,32 +8401,122 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         }
       }
 
+      /* A partir do momento que o cliente tem cônjuge cadastrado, a carteira é tratada como
+         do casal — a saudação e a rentabilidade em destaque (lead paragraph, narrativa, e
+         TODAS as seções depois do Resumo Executivo: Benchmarks, Atribuição, Instituição,
+         Composição Detalhada) passam a se referir ao "casal" e ao número CONSOLIDADO, em vez
+         do nome/rentabilidade individual do titular. Declarado AQUI (fora do
+         secAtiva("resumoExec")) porque essas seções seguintes usam essas variáveis mesmo se
+         o Resumo Executivo estiver desativado nas configurações do relatório. */
+      var _ehCasalRel=(c.tipoCli==="casal"||c.tipoCli==="familia")&&c.conjuge;
+      var _saudacao=_ehCasalRel?"casal":c.nome.split(" ")[0];
+      var _rentParaNarrativa=rentPeriodo,_vsCdiParaNarrativa=vsC;
+      /* _ganhoPeriodoAutoritativo: valor de "Ganho do Período" em R$ que deve ficar IGUAL em todo
+         o relatório. Antes o KPI "Ganho do Período" (Resumo Executivo) e a linha TOTAL CARTEIRA
+         (Composição Detalhada) calculavam esse número de dois jeitos diferentes — o KPI usava o
+         campo "Resultado" exato do extrato Gorila importado (ou patrimônio INICIAL × rent%), já a
+         linha TOTAL CARTEIRA multiplicava o patrimônio FINAL × rent%. Isso fazia o relatório
+         mostrar dois "ganho do mês" diferentes pro mesmo período. Agora calculamos uma única vez
+         aqui e reusamos nos dois lugares. */
+      var _ganhoPeriodoAutoritativo=null;
+      if(_ehCasalRel){
+        /* Patrimônio individual do titular (sem cônjuge) */
+        var _patTit=c.patGorila||c.pat||0;
+        if(_patTit===0&&c._ativosImport&&c._ativosImport.length>0){
+          _patTit=c._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
+        }
+        var _patConj=c.conjuge.patGorila||0;
+        if(_patConj===0&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
+          _patConj=c.conjuge._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
+        }
+        var _rentConj=0,_ganhoConj=0,_temDadoConj=false,_notaConj='';
+        var _ganhoPeriodoPreCalc;
+        if(tipo==="mensal" && c._gorilaRent && typeof c._gorilaRent.resultado==="number" && c._gorilaRent.resultado!==0){
+          _ganhoPeriodoPreCalc=c._gorilaRent.resultado;
+        }else{
+          var _patBaseGanhoPreCalc=tCV;
+          if(c._gorilaRent && typeof c._gorilaRent.captacao==="number" && c._gorilaRent.captacao!==0){
+            _patBaseGanhoPreCalc=tCV-c._gorilaRent.captacao;
+          }
+          _ganhoPeriodoPreCalc=_patBaseGanhoPreCalc*(rentPeriodo/100);
+        }
+        if(c.conjuge._gorilaRent&&c.conjuge._gorilaRent.periods&&c.conjuge._gorilaRent.periods.length>0){
+          var _findPConjPre=function(keys){
+            return c.conjuge._gorilaRent.periods.find(function(x){
+              var s=String(x.p||"").toLowerCase();
+              return keys.some(function(k){return s.indexOf(k)>=0});
+            });
+          };
+          var _alvoConjPre=null;
+          if(tipo==="mensal")_alvoConjPre=_findPConjPre(["último mês","ultimo mes","último mes","ultimo mês","mês atual","mes atual","1m"]);
+          else if(tipo==="anual")_alvoConjPre=_findPConjPre(["12 mês","12 meses","12m","no ano","ytd","ano"]);
+          else if(tipo==="trimestral")_alvoConjPre=_findPConjPre(["3 mês","3 meses","3m","trimestre"]);
+          else _alvoConjPre=_findPConjPre(["desde","início","inicio","total"])||_findPConjPre(["12"])||c.conjuge._gorilaRent.periods[c.conjuge._gorilaRent.periods.length-1];
+          if(_alvoConjPre&&typeof _alvoConjPre.rent==="number"){
+            _rentConj=_alvoConjPre.rent*100;
+            _ganhoConj=_patConj*(_rentConj/100);
+            _temDadoConj=true;
+          }
+        }
+        if(!_temDadoConj&&c.conjuge._gorilaRent){
+          if(typeof c.conjuge._gorilaRent.rentMes==="number"){_rentConj=c.conjuge._gorilaRent.rentMes*100;_temDadoConj=true;}
+          if(typeof c.conjuge._gorilaRent.resultado==="number")_ganhoConj=c.conjuge._gorilaRent.resultado;
+          else if(_temDadoConj)_ganhoConj=_patConj*(_rentConj/100);
+        }
+        if(!_temDadoConj&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
+          var _somaPondRentConjPre=0,_somaValComRentConjPre=0;
+          c.conjuge._ativosImport.forEach(function(a){
+            var v=+a.posR||(+a.qtd*+a.pa)||0;
+            /* _gRentPct.periodo DEVERIA vir como fração (0.0116=1,16%, formato gravado pelo
+               import corrigido), mas dados importados ANTES dessa correção ainda estão salvos
+               no Firestore em pontos percentuais (1.16). Mesma detecção por magnitude usada em
+               getRentAtivoPer: |valor|>1 é sempre pontos percentuais (nenhuma carteira real
+               rende >100%/-100% num mês), então não multiplica de novo — evita o "116%" voltar
+               pra quem importou o extrato do cônjuge antes desta correção. */
+            var _pRaw=(a._gRentPct&&typeof a._gRentPct.periodo==="number")?a._gRentPct.periodo:null;
+            var rp=_pRaw===null?null:(Math.abs(_pRaw)>1?_pRaw:_pRaw*100);
+            if(rp!==null&&v>0){_somaPondRentConjPre+=v*rp;_somaValComRentConjPre+=v;}
+          });
+          if(_somaValComRentConjPre>0){
+            _rentConj=_somaPondRentConjPre/_somaValComRentConjPre;
+            _ganhoConj=_patConj*(_rentConj/100);
+            _temDadoConj=true;
+            _notaConj='* rentabilidade estimada a partir da rentabilidade por ativo do extrato importado';
+          }
+        }
+        /* Benchmark principal = IPCA (ver comentário em "var vsC" acima). Não existe um campo
+           "ipcaMes" específico importado por cônjuge (só cdiMes existia), então usa direto o
+           ipcaPeriodo do período do relatório pra ambos titular e cônjuge. */
+        var _cdiMes=ipcaPeriodo;
+        var _vsCdiConj=_rentConj-_cdiMes;
+        var _patTotal=_patTit+_patConj;
+        var _baseRentTotal=_patTit+(_temDadoConj?_patConj:0);
+        var _ganhoTotal=_ganhoPeriodoPreCalc+(_temDadoConj?_ganhoConj:0);
+        _ganhoPeriodoAutoritativo=_ganhoTotal;
+        var _rentTotal=_baseRentTotal>0?(_ganhoTotal/_baseRentTotal*100):rentPeriodo;
+        var _vsCdiTotal=_rentTotal-_cdiMes;
+        var _nomeConj=c.conjuge.nome||c.conjuge.nomeConjuge||"Cônjuge";
+        _rentParaNarrativa=_rentTotal;
+        _vsCdiParaNarrativa=_vsCdiTotal;
+      }
+
       /* ===== KPIs — ajustados ao período ===== */
       if(secAtiva("resumoExec")){
       body+=secTitle('📊','Resumo Executivo');
 
       /* === FASE 4: LEAD PARAGRAPH antes dos KPIs === */
       var leadResumo='';
-      if(tipo==="mensal"||tipo==="trimestral"||tipo==="anual"){
-        if(rentPeriodo>=0){
-          leadResumo='Sua carteira encerrou o período com <span class="cv-lead-strong">rentabilidade de +'+rentPeriodo.toFixed(2)+'%</span>'+(vsC>=0?', superando o CDI':'')+' e mantendo o ritmo consistente de crescimento esperado para o seu perfil '+c.risco+'.';
-        }else{
-          leadResumo='Sua carteira apresentou <span class="cv-lead-strong">variação de '+rentPeriodo.toFixed(2)+'%</span> no período, refletindo movimentos do mercado que serão analisados em detalhe nas próximas seções.';
-        }
-      }else{
-        leadResumo='Visão consolidada da carteira <span class="cv-lead-strong">'+c.nome.split(" ")[0]+'</span>, com posição atual, custo de aquisição e ganho acumulado desde o início.';
-      }
-      body+='<p class="cv-lead">'+leadResumo+'</p>';
 
       if(tipo==="mensal"||tipo==="trimestral"||tipo==="anual"){
-        
+
         var fmRel=function(v){return fmF(v);};
-        /* Ganho do período: usa Resultado Período EXATO do Gorila quando importado (mais preciso),
-           senão estima como pat × rent% (aprox). Antes: tCV × rent% multiplicava o pat FINAL,
-           gerando valor R$ ligeiramente inflado vs o "Resultado Período" exato exportado pelo Gorila. */
+        /* Ganho do período: usa Resultado Período EXATO do extrato importado quando disponível
+           (mais preciso), senão estima como pat × rent% (aprox). Antes: tCV × rent% multiplicava
+           o pat FINAL, gerando valor R$ ligeiramente inflado vs o "Resultado Período" exato
+           exportado no extrato. */
         var ganhoPeriodo;
         if(tipo==="mensal" && c._gorilaRent && typeof c._gorilaRent.resultado==="number" && c._gorilaRent.resultado!==0){
-          /* Usa o valor exato do Gorila (já considera valorização + rendimentos − aportes/resgates) */
+          /* Usa o valor exato do extrato importado (já considera valorização + rendimentos − aportes/resgates) */
           ganhoPeriodo=c._gorilaRent.resultado;
         }else{
           /* Fallback: estima usando patrimônio. Usa pat inicial se conhecido (mais correto matematicamente). */
@@ -7807,106 +8527,85 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           }
           ganhoPeriodo=patBaseGanho*(rentPeriodo/100);
         }
+        if(!_ehCasalRel)_ganhoPeriodoAutoritativo=ganhoPeriodo;
         var labelPeriodo=tipo==="mensal"?"do mês":(tipo==="anual"?"em 12 meses":"do trimestre");
 
-        /* Helper para bloco de KPIs de uma carteira */
-        var _kpiBlock=function(titulo,pat,rent,ganho,vsCdi,label){
+        /* Helper para bloco de KPIs de uma carteira.
+           opts.semDado=true → mostra "—" em Rentabilidade/Ganho/vs IPCA em vez de 0,00%/R$0,00
+           (usado quando não há NENHUM dado de rentabilidade pro período, pra não parecer
+           que a carteira realmente rendeu zero). opts.nota = texto explicativo opcional. */
+        var _kpiBlock=function(titulo,pat,rent,ganho,vsCdi,label,opts){
+          opts=opts||{};
+          var semDado=!!opts.semDado;
           var txt=fmF(pat);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;
           var b='';
           if(titulo)b+='<div style="font-size:10px;font-weight:800;color:#D4A328;letter-spacing:.8px;margin:10px 0 6px;text-transform:uppercase;">'+titulo+'</div>';
           b+='<div class="kpi-grid">';
           b+='<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value gold" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">posição atual</div></div>';
-          b+='<div class="kpi"><div class="kpi-label">Rentabilidade</div><div class="kpi-value '+(rent>=0?"green":"red")+'">'+(rent>=0?"+":"")+rent.toFixed(2)+'%</div><div class="kpi-sub">'+label+'</div></div>';
-          var gtxt=(ganho>=0?"+":"")+fmF(ganho);var gsz=gtxt.length>=16?12:gtxt.length>=14?13:gtxt.length>=12?14:gtxt.length>=10?15:17;
-          b+='<div class="kpi"><div class="kpi-label">Ganho '+labelPeriodo+'</div><div class="kpi-value '+(ganho>=0?"green":"red")+'" style="font-size:'+gsz+'px">'+gtxt+'</div><div class="kpi-sub">variação estimada</div></div>';
-          b+='<div class="kpi"><div class="kpi-label">vs CDI</div><div class="kpi-value '+(vsCdi>=0?"green":"red")+'">'+(vsCdi>=0?"+":"")+vsCdi.toFixed(2)+'pp</div><div class="kpi-sub">'+(vsCdi>=0?"acima do":"abaixo do")+' benchmark</div></div>';
+          if(semDado){
+            b+='<div class="kpi"><div class="kpi-label">Rentabilidade</div><div class="kpi-value" style="color:#9AA0AE">—</div><div class="kpi-sub">sem dado no período</div></div>';
+            b+='<div class="kpi"><div class="kpi-label">Ganho '+labelPeriodo+'</div><div class="kpi-value" style="color:#9AA0AE">—</div><div class="kpi-sub">sem dado no período</div></div>';
+            b+='<div class="kpi"><div class="kpi-label">vs IPCA</div><div class="kpi-value" style="color:#9AA0AE">—</div><div class="kpi-sub">sem dado no período</div></div>';
+          }else{
+            b+='<div class="kpi"><div class="kpi-label">Rentabilidade</div><div class="kpi-value '+(rent>=0?"green":"red")+'">'+(rent>=0?"+":"")+rent.toFixed(2)+'%</div><div class="kpi-sub">'+label+'</div></div>';
+            var gtxt=(ganho>=0?"+":"")+fmF(ganho);var gsz=gtxt.length>=16?12:gtxt.length>=14?13:gtxt.length>=12?14:gtxt.length>=10?15:17;
+            b+='<div class="kpi"><div class="kpi-label">Ganho '+labelPeriodo+'</div><div class="kpi-value '+(ganho>=0?"green":"red")+'" style="font-size:'+gsz+'px">'+gtxt+'</div><div class="kpi-sub">variação estimada</div></div>';
+            b+='<div class="kpi"><div class="kpi-label">vs IPCA</div><div class="kpi-value '+(vsCdi>=0?"green":"red")+'">'+(vsCdi>=0?"+":"")+vsCdi.toFixed(2)+'pp</div><div class="kpi-sub">'+(vsCdi>=0?"acima do":"abaixo do")+' benchmark</div></div>';
+          }
           b+='</div>';
+          if(opts.nota)b+='<div style="font-size:9px;color:#9AA0AE;font-style:italic;margin-top:4px">'+opts.nota+'</div>';
           return b;
         };
 
-        var _ehCasalRel=(c.tipoCli==="casal"||c.tipoCli==="familia")&&c.conjuge;
+        /* _patTit/_patConj/_rentConj/_ganhoConj/_temDadoConj/_notaConj/_patTotal/_rentTotal/
+           _ganhoTotal/_vsCdiTotal/_nomeConj — e _rentParaNarrativa/_vsCdiParaNarrativa — já
+           foram calculados acima (antes do secAtiva("resumoExec")), pra ficarem disponíveis
+           pras seções seguintes mesmo se o Resumo Executivo estiver desativado. Só reusa aqui. */
+        if(_rentParaNarrativa>=0){
+          leadResumo='Sua carteira encerrou o período com <span class="cv-lead-strong">rentabilidade de +'+_rentParaNarrativa.toFixed(2)+'%</span>'+(_vsCdiParaNarrativa>=0?', superando o IPCA':'')+' e mantendo o ritmo consistente de crescimento esperado para o seu perfil '+c.risco+'.';
+        }else{
+          leadResumo='Sua carteira apresentou <span class="cv-lead-strong">variação de '+_rentParaNarrativa.toFixed(2)+'%</span> no período, refletindo movimentos do mercado que serão analisados em detalhe nas próximas seções.';
+        }
+        body+='<p class="cv-lead">'+leadResumo+'</p>';
+
         if(_ehCasalRel){
-          /* Patrimônio individual do titular (sem cônjuge) */
-          var _patTit=c.patGorila||c.pat||0;
-          if(_patTit===0&&c._ativosImport&&c._ativosImport.length>0){
-            _patTit=c._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
-          }
-          var _patConj=c.conjuge.patGorila||0;
-          if(_patConj===0&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
-            _patConj=c.conjuge._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
-          }
-          var _rentConj=0,_ganhoConj=0;
-          if(c.conjuge._gorilaRent){
-            if(typeof c.conjuge._gorilaRent.rentMes==="number")_rentConj=c.conjuge._gorilaRent.rentMes*100;
-            if(typeof c.conjuge._gorilaRent.resultado==="number")_ganhoConj=c.conjuge._gorilaRent.resultado;
-            else _ganhoConj=_patConj*(_rentConj/100);
-          }
-          var _cdiMes=(c._gorilaRent&&typeof c._gorilaRent.cdiMes==="number")?c._gorilaRent.cdiMes*100:cdiPeriodo;
-          var _vsCdiConj=_rentConj-_cdiMes;
-          /* Consolidado: usa patrimônios individuais, não tCV (que pode estar consolidado) */
-          var _patTotal=_patTit+_patConj;
-          var _ganhoTotal=ganhoPeriodo+_ganhoConj;
-          var _rentTotal=_patTotal>0?(_ganhoTotal/_patTotal*100):(rentPeriodo+_rentConj)/2;
-          var _vsCdiTotal=_rentTotal-_cdiMes;
-          var _nomeConj=c.conjuge.nome||c.conjuge.nomeConjuge||"Cônjuge";
           body+=_kpiBlock("👤 "+c.nome.split(" ")[0],_patTit,rentPeriodo,ganhoPeriodo,vsC,rentLabel);
           body+='<hr style="border:none;border-top:1px solid #E8E0C8;margin:14px 0;"/>';
-          body+=_kpiBlock("👤 "+_nomeConj.split(" ")[0],_patConj,_rentConj,_ganhoConj,_vsCdiConj,rentLabel);
+          body+=_kpiBlock("👤 "+_nomeConj.split(" ")[0],_patConj,_rentConj,_ganhoConj,_vsCdiConj,rentLabel,{semDado:!_temDadoConj,nota:_notaConj});
           body+='<hr style="border:none;border-top:2px solid #D4A328;margin:14px 0;"/>';
-          body+=_kpiBlock("👫 Consolidado do Casal",_patTotal,_rentTotal,_ganhoTotal,_vsCdiTotal,rentLabel);
+          body+=_kpiBlock("👫 Consolidado do Casal",_patTotal,_rentTotal,_ganhoTotal,_vsCdiTotal,rentLabel,{nota:_temDadoConj?'':'* considera apenas a rentabilidade do titular — sem dado de rentabilidade do cônjuge no período'});
         }else{
           body+='<div class="kpi-grid">';
           (function(){var txt=fmF(tCV);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value gold" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">posição atual</div></div>';})();
           body+='<div class="kpi"><div class="kpi-label">Rentabilidade</div><div class="kpi-value '+(rentPeriodo>=0?"green":"red")+'">'+(rentPeriodo>=0?"+":"")+rentPeriodo.toFixed(2)+'%</div><div class="kpi-sub">'+rentLabel+'</div></div>';
           (function(){var txt=(ganhoPeriodo>=0?"+":"")+fmRel(ganhoPeriodo);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Ganho '+labelPeriodo+'</div><div class="kpi-value '+(ganhoPeriodo>=0?"green":"red")+'" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">variação estimada</div></div>';})();
-          body+='<div class="kpi"><div class="kpi-label">vs CDI</div><div class="kpi-value '+(vsC>=0?"green":"red")+'">'+(vsC>=0?"+":"")+vsC.toFixed(2)+'pp</div><div class="kpi-sub">'+(vsC>=0?"acima do":"abaixo do")+' benchmark</div></div>';
+          body+='<div class="kpi"><div class="kpi-label">vs IPCA</div><div class="kpi-value '+(vsC>=0?"green":"red")+'">'+(vsC>=0?"+":"")+vsC.toFixed(2)+'pp</div><div class="kpi-sub">'+(vsC>=0?"acima do":"abaixo do")+' benchmark</div></div>';
           body+='</div>';
         }
 
-        /* ===== PATRIMÔNIO CONSOLIDADO DO CASAL ===== */
-        if((c.tipoCli==="casal"||c.tipoCli==="familia") && c.conjuge){
-          var _patTit=c.patGorila||c.pat||0;
-          var _patConj=(c.conjuge.patGorila||0);
-          if(_patConj===0&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0){
-            _patConj=c.conjuge._ativosImport.reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
-          }
-          if(_patTit>0&&_patConj>0){
-            var _patTotal=_patTit+_patConj;
-            var _nomeConj=(c.conjuge.nome||c.conjuge.nomeConjuge||"Cônjuge");
-            body+='<div style="margin:16px 0;padding:16px;background:#f8f6f0;border-radius:12px;border:1px solid #E8E0C8">';
-            body+='<div style="font-size:11px;font-weight:700;color:#D4A328;letter-spacing:1px;margin-bottom:10px">👫 PATRIMÔNIO CONSOLIDADO DO CASAL</div>';
-            body+='<table style="width:100%;border-collapse:collapse">';
-            body+='<tr><td style="padding:7px 10px;font-size:12px;color:#555">'+(tipo==="casal"?"Titular":"")+'</td><td style="padding:7px 10px;font-size:12px;font-weight:700;color:#1A1A2E">'+c.nome+'</td><td style="padding:7px 10px;text-align:right;font-size:14px;font-weight:800;color:#D4A328;font-family:Outfit,monospace">'+fmF(_patTit)+'</td></tr>';
-            body+='<tr><td style="padding:7px 10px;font-size:12px;color:#555">Cônjuge</td><td style="padding:7px 10px;font-size:12px;font-weight:700;color:#1A1A2E">'+_nomeConj+'</td><td style="padding:7px 10px;text-align:right;font-size:14px;font-weight:800;color:#D4A328;font-family:Outfit,monospace">'+fmF(_patConj)+'</td></tr>';
-            body+='<tr style="border-top:2px solid #D4A328"><td colspan="2" style="padding:10px 10px;font-size:13px;font-weight:800;color:#1A1A2E">Total do Casal</td><td style="padding:10px 10px;text-align:right;font-size:18px;font-weight:900;color:#D4A328;font-family:Outfit,monospace">'+fmF(_patTotal)+'</td></tr>';
-            body+='</table>';
-            var _pctTit=(_patTotal>0?(_patTit/_patTotal*100):0);
-            var _pctConj=(_patTotal>0?(_patConj/_patTotal*100):0);
-            body+='<div style="margin-top:10px;height:8px;background:#E8E0C8;border-radius:4px;overflow:hidden;display:flex">';
-            body+='<div style="width:'+_pctTit.toFixed(1)+'%;background:#D4A328;border-radius:4px 0 0 4px"></div>';
-            body+='<div style="width:'+_pctConj.toFixed(1)+'%;background:#F5C94B;border-radius:0 4px 4px 0"></div>';
-            body+='</div>';
-            body+='<div style="display:flex;justify-content:space-between;font-size:9px;color:#888;margin-top:4px"><span>'+c.nome.split(" ")[0]+': '+_pctTit.toFixed(1)+'%</span><span>'+_nomeConj.split(" ")[0]+': '+_pctConj.toFixed(1)+'%</span></div>';
-            body+='</div>';
-          }
-        }
-        
-        body+='<div class="kpi-grid">';
-        (function(){var txt=fmF(tCV);var sz=txt.length>=16?12:txt.length>=14?13:txt.length>=12?14:txt.length>=10?15:17;body+='<div class="kpi"><div class="kpi-label">Patrimônio</div><div class="kpi-value gold" style="font-size:'+sz+'px">'+txt+'</div><div class="kpi-sub">posição atual</div></div>';})();
-        body+='<div class="kpi"><div class="kpi-label">Investido</div><div class="kpi-value">'+fmF(tCT)+'</div><div class="kpi-sub">custo total</div></div>';
-        body+='<div class="kpi"><div class="kpi-label">Ganho / Perda</div><div class="kpi-value '+(ganhoV>=0?"green":"red")+'">'+(ganhoV>=0?"+":"")+fmF(ganhoV)+'</div><div class="kpi-sub">acumulado</div></div>';
-        body+='<div class="kpi"><div class="kpi-label">Rentabilidade</div><div class="kpi-value '+(ganhoV>=0?"green":"red")+'">'+(ganhoV>=0?"+":"")+rentPct+'%</div><div class="kpi-sub">desde o início</div></div>';
-        body+='</div>';
+        /* ===== PATRIMÔNIO CONSOLIDADO DO CASAL =====
+           Removido a pedido do usuário: essa tabela (titular / cônjuge / total + barra de %)
+           duplicava exatamente a mesma informação já mostrada nos 3 blocos de KPI logo acima
+           (👤 titular, 👤 cônjuge, 👫 Consolidado do Casal — cada um já traz o patrimônio
+           individual e o "👫 Consolidado do Casal" já traz o total). */
+
+        /* Bloco "desde o início" (Patrimônio/Investido/Ganho/Rentabilidade) — REMOVIDO a pedido
+           do usuário: duplicava o Patrimônio já mostrado na primeira linha de KPIs acima e
+           misturava rentabilidade "no mês" com rentabilidade "desde o início" na mesma seção,
+           confundindo o cliente. */
+      }else{
+        leadResumo='Visão consolidada da carteira '+(_ehCasalRel?'do <span class="cv-lead-strong">casal</span>':'<span class="cv-lead-strong">'+c.nome.split(" ")[0]+'</span>')+', com posição atual, custo de aquisição e ganho acumulado desde o início.';
+        body+='<p class="cv-lead">'+leadResumo+'</p>';
       }
 
       /* ===== NARRATIVA ===== */
       var narrativa='<div class="narrative">';
-      narrativa+='Olá <strong>'+c.nome.split(" ")[0]+'</strong>, segue a síntese da sua carteira em <strong>'+periodoLabel+'</strong>. ';
-      narrativa+='A carteira '+(rentPeriodo>=0?'rendeu <span class="highlight-green">+'+rentPeriodo.toFixed(2)+'%</span>':'variou <span class="highlight-red">'+rentPeriodo.toFixed(2)+'%</span>')+' '+rentLabel+', ';
-      if(vsC>=0){
-        narrativa+='<span class="highlight-green">superando o CDI em '+vsC.toFixed(2)+' pontos percentuais</span> — resultado consistente com o perfil <strong>'+c.risco+'</strong>. ';
+      narrativa+='Olá <strong>'+_saudacao+'</strong>, segue a síntese da sua carteira em <strong>'+periodoLabel+'</strong>. ';
+      narrativa+='A carteira '+(_rentParaNarrativa>=0?'rendeu <span class="highlight-green">+'+_rentParaNarrativa.toFixed(2)+'%</span>':'variou <span class="highlight-red">'+_rentParaNarrativa.toFixed(2)+'%</span>')+' '+rentLabel+', ';
+      if(_vsCdiParaNarrativa>=0){
+        narrativa+='<span class="highlight-green">superando o IPCA em '+_vsCdiParaNarrativa.toFixed(2)+' pontos percentuais</span> — resultado consistente com o perfil <strong>'+c.risco+'</strong>. ';
       }else{
-        narrativa+='ficando <span class="highlight-red">'+Math.abs(vsC).toFixed(2)+'pp abaixo do CDI</span> no período. ';
+        narrativa+='ficando <span class="highlight-red">'+Math.abs(_vsCdiParaNarrativa).toFixed(2)+'pp abaixo do IPCA</span> no período. ';
       }
       var totalClasses=(function(){var bt={};enr.forEach(function(a){var t=tipoAtivoLabel(a);bt[t]=true});return Object.keys(bt).length})();
       narrativa+='A composição é de <strong>'+enr.length+' ativos</strong> em '+totalClasses+' classes distintas.';
@@ -8083,9 +8782,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         /* Legenda explicativa */
         body+='<div style="display:flex;gap:18px;flex-wrap:wrap;font-size:9px;color:#9CA3AF;margin-bottom:14px;padding:8px 12px;background:#F8FAFC;border-radius:6px;border-left:2px solid #E5E7EB">';
         body+='<div><strong style="color:#6B7489">Ganho Líquido:</strong> patrimônio atual − custo de aquisição + proventos recebidos.</div>';
-        if(ganhoTWR!==null) body+='<div><strong style="color:#6B7489">Rentabilidade TWR:</strong> performance ajustada por tempo (Time-Weighted Return) calculada pelo Gorila.</div>';
+        if(ganhoTWR!==null) body+='<div><strong style="color:#6B7489">Rentabilidade TWR:</strong> performance ajustada por tempo (Time-Weighted Return).</div>';
         body+='</div>';
-        body+='<svg width="100%" viewBox="0 0 '+W+' '+H+'" style="overflow:visible">';
+        /* width fixo em px (não "100%") — o html2canvas (usado pra gerar o PDF do relatório) não
+           resolve width percentual de <svg> de forma confiável fora do fluxo normal de layout;
+           esse SVG especificamente ficava com bounding box 0x0 na hora da captura, e o canvas
+           interno que o html2canvas cria pra desenhar esse gradiente quebrava com "InvalidStateError:
+           ...canvas element with a width or height of 0" — a causa real do PDF do relatório falhar
+           sempre. viewBox continua garantindo que ele escale certinho dentro do container de 800px. */
+        body+='<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" style="overflow:visible;max-width:100%">';
         /* Grid horizontal */
         yLabels.forEach(function(yl){
           body+='<line x1="'+PL+'" y1="'+yl.y+'" x2="'+(W-PR)+'" y2="'+yl.y+'" stroke="rgba(10,22,40,0.06)" stroke-width="1" stroke-dasharray="4,4"/>';
@@ -8195,9 +8900,12 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       
       var poupPeriodo=tipo==="mensal"?0.55:(tipo==="trimestral"?1.7:8.5);
       var ifixVal=(d&&d.config&&d.config.ifixMes!=null)?d.config.ifixMes:(tipo==="mensal"?0.80:2.4);
-      var maxBench=Math.max(Math.abs(rentPeriodo),Math.abs(cdiPeriodo),Math.abs(ibovPeriodo),Math.abs(ipcaPeriodo),Math.abs(ifixVal),Math.abs(poupPeriodo),0.01);
+      /* "Carteira" é do CASAL quando aplicável (_rentParaNarrativa/_vsCdiParaNarrativa,
+         definidos no Resumo Executivo), não só do titular — mesma correção aplicada em
+         todo o resto do relatório a partir daqui. */
+      var maxBench=Math.max(Math.abs(_rentParaNarrativa),Math.abs(cdiPeriodo),Math.abs(ibovPeriodo),Math.abs(ipcaPeriodo),Math.abs(ifixVal),Math.abs(poupPeriodo),0.01);
       var benchData=[
-        {l:"Carteira",v:rentPeriodo,c:"#D4A328",own:true},
+        {l:"Carteira",v:_rentParaNarrativa,c:"#D4A328",own:true},
         {l:"CDI",v:cdiPeriodo,c:"#38BDF8"},
         {l:"IBOVESPA",v:ibovPeriodo,c:"#2DD4A0"},
         {l:"IFIX",v:ifixVal,c:"#A78BFA"},
@@ -8214,10 +8922,10 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           +'<div class="bench-value" style="color:'+corB+'">'+(b.v>=0?"+":"")+b.v.toFixed(2)+'%</div></div>'
           +'<div style="font-size:8.5px;color:#6B7489;margin:-2px 0 8px 88px;font-style:italic">'+(BENCH_DESC[b.l]||"")+'</div>';
       });
-      if(vsC>=0){
-        body+='<div class="nota-inline">✅ <strong>Sua carteira superou o CDI</strong> em '+vsC.toFixed(2)+' pontos percentuais. Capital crescendo acima da taxa básica de mercado.</div>';
+      if(_vsCdiParaNarrativa>=0){
+        body+='<div class="nota-inline">✅ <strong>Sua carteira superou o IPCA</strong> em '+_vsCdiParaNarrativa.toFixed(2)+' pontos percentuais. Patrimônio ganhando poder de compra acima da inflação.</div>';
       }else{
-        body+='<div class="nota-inline">⚠️ <strong>Sua carteira ficou '+Math.abs(vsC).toFixed(2)+'pp abaixo do CDI</strong> no período. Revisamos alocação e riscos conforme suas metas.</div>';
+        body+='<div class="nota-inline">⚠️ <strong>Sua carteira ficou '+Math.abs(_vsCdiParaNarrativa).toFixed(2)+'pp abaixo do IPCA</strong> no período. Revisamos alocação e riscos conforme suas metas.</div>';
       }
 
       /* === FUNÇÃO HELPER: getRentAtivoPer ===
@@ -8252,7 +8960,17 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
               return {pct:pctDerivado,rs:rsPeriodo,doPeriodo:true,fonte:"gorila_periodo_rs"};
             }
             if(pctPeriodo!==null){
-              return {pct:pctPeriodo*100,rs:a.vA*pctPeriodo/(1+pctPeriodo),doPeriodo:true,fonte:"gorila_periodo_pct"};
+              /* pctPeriodo deveria ser FRAÇÃO (ex: 0.0116 = 1,16%), mas dados importados antes
+                 da correção do import do cônjuge (importarGorilaConjuge) gravaram em PONTOS
+                 PERCENTUAIS (ex: 1.16). Um valor absoluto > 1 aqui é praticamente sempre esse
+                 caso — nenhuma carteira real rende >100%/-100% num único mês — então tratamos
+                 como já sendo % em vez de multiplicar por 100 de novo (o que gerava números
+                 como "116%" pra um ativo que na verdade rendeu 1,16%). Isso corrige tanto dados
+                 novos (fração) quanto antigos (pontos percentuais), sem precisar reimportar. */
+              var ehJaPct=Math.abs(pctPeriodo)>1;
+              var pctFrac=ehJaPct?pctPeriodo/100:pctPeriodo;
+              var pctFinal=ehJaPct?pctPeriodo:pctPeriodo*100;
+              return {pct:pctFinal,rs:a.vA*pctFrac/(1+pctFrac),doPeriodo:true,fonte:"gorila_periodo_pct"};
             }
             var vAno=pickKey(rp,["ano","Ano","ANO"]);
             if(vAno!==null){
@@ -8284,23 +9002,42 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         if(ativosUSD.length===0&&ativosEUR.length===0)return;
         var totalCart=enr.reduce(function(s,a){return s+(a.vA||0);},0);
         /* === Rentabilidade USD ===
+           PRIORIDADE 0: fechamento real de cada ativo no mês (buscado via brapi.dev, ex: VOO,
+           AAPL — mesmo dado usado pra Ibovespa/S&P500 no Overview). Vem de um pré-fetch feito
+           antes de chamar gerarRelatorio (ver buscarRentAtivosUSD/gerarRelMensal na aba
+           Relatório) — é o dado mais fiel à pergunta "quanto rendeu CADA ativo dolarizado".
            PRIORIDADE 1: extrato PDF Vest importado (mais preciso, vem direto do broker americano)
            PRIORIDADE 2: Gorila (período mensal, coluna "ext")
            PRIORIDADE 3: Calculado a partir dos ativos individuais (getRentAtivoPer) */
         var rentUSDpct=null,rentUSDvalor=null,fonteRentUSD="";
         var somaRsUSD_brl=null; /* ganho em BRL dos ativos USD — usado pra converter p/ USD depois */
-        if(c._vestRent && typeof c._vestRent.rentPct==="number"){
-          rentUSDpct=c._vestRent.rentPct*100;
-          rentUSDvalor=c._vestRent.rentUSD;
-          fonteRentUSD="Vest";
-        } else if(temGorila&&c._gorilaRent&&c._gorilaRent.periods){
-          var pUSD=findRentMesAtual(c._gorilaRent.periods);
-          if(pUSD&&pUSD.ext!=null){
-            rentUSDpct=parseFloat(pUSD.ext)*100;
-            fonteRentUSD="Gorila";
-            /* Gorila não dá ganho R$ direto por moeda — estima pelo pct sobre o patrimônio ext */
-            var totalUSD_brl_est=ativosUSD.reduce(function(s,a){return s+(a.vA||0);},0);
-            if(totalUSD_brl_est>0) somaRsUSD_brl=totalUSD_brl_est*(rentUSDpct/100)/(1+rentUSDpct/100);
+        if(_usdAtivosRentMap){
+          var somaPondRealUSD=0,somaValRealUSD=0,tksSemDado=[];
+          ativosUSD.forEach(function(a){
+            var rp=_usdAtivosRentMap[a.tk];
+            if(typeof rp==="number"&&a.vA>0){somaPondRealUSD+=a.vA*rp;somaValRealUSD+=a.vA;}
+            else if(a.vA>0)tksSemDado.push(a.tk);
+          });
+          if(somaValRealUSD>0){
+            rentUSDpct=somaPondRealUSD/somaValRealUSD;
+            fonteRentUSD="fechamento do mês por ativo"+(tksSemDado.length>0?" · "+tksSemDado.length+" ativo(s) sem cotação, fora da conta":"");
+            somaRsUSD_brl=(rentUSDpct/100)*somaValRealUSD;
+          }
+        }
+        if(rentUSDpct===null){
+          if(c._vestRent && typeof c._vestRent.rentPct==="number"){
+            rentUSDpct=c._vestRent.rentPct*100;
+            rentUSDvalor=c._vestRent.rentUSD;
+            fonteRentUSD="Vest";
+          } else if(temGorila&&c._gorilaRent&&c._gorilaRent.periods){
+            var pUSD=findRentMesAtual(c._gorilaRent.periods);
+            if(pUSD&&pUSD.ext!=null){
+              rentUSDpct=parseFloat(pUSD.ext)*100;
+              fonteRentUSD="extrato importado";
+              /* Gorila não dá ganho R$ direto por moeda — estima pelo pct sobre o patrimônio ext */
+              var totalUSD_brl_est=ativosUSD.reduce(function(s,a){return s+(a.vA||0);},0);
+              if(totalUSD_brl_est>0) somaRsUSD_brl=totalUSD_brl_est*(rentUSDpct/100)/(1+rentUSDpct/100);
+            }
           }
         }
         /* PRIORIDADE 3: calcular a partir dos ativos individuais USD quando não há fonte direta */
@@ -8332,15 +9069,19 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
             var retBRL_bruto=somaRsUSD/somaPosIniUSD;
             if(fxChangeMes!==null&&Math.abs(fxChangeMes)>0.0001){
               rentUSDpct=((1+retBRL_bruto)/(1+fxChangeMes)-1)*100;
-              fonteRentUSD="Gorila (estimado)";
+              fonteRentUSD="extrato importado (estimado)";
               /* Valor em USD: ganho BRL / taxa fim de mês */
               somaRsUSD_brl=somaRsUSD;
-            }else{
-              /* Sem dado cambial — reporta BRL e avisa que inclui câmbio */
-              rentUSDpct=retBRL_bruto*100;
-              somaRsUSD_brl=somaRsUSD;
-              fonteRentUSD="Gorila (estimado, inclui câmbio)";
             }
+            /* Se NÃO achamos um jeito de isolar o efeito cambial (nenhuma posição em dólar/caixa
+               pra usar como proxy), rentUSDpct FICA null — ou seja, a seção "Rentabilidade em
+               USD" simplesmente não aparece (ver `if(rentUSDpct!==null)` no render abaixo).
+               Antes, esse "else" reaproveitava o retorno em BRL (retBRL_bruto) como se fosse o
+               retorno em USD — mostrando o MESMO número duas vezes, com o rótulo "em USD" e "em
+               BRL" lado a lado (o que é exatamente o cálculo em BRL, incluindo câmbio, e não a
+               performance real dos ativos em dólar). Isso confundia porque as duas coisas são
+               conceitos diferentes por definição — só a seção "Rentabilidade em BRL" (calculada
+               separadamente logo abaixo, de forma correta) continua aparecendo nesse caso. */
           }
         }
         var labelC='color:#374151';
@@ -8445,21 +9186,30 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
               var efeitoFX=((1+rentUSD_brl_pct/100)/(1+rentUSDpct/100)-1)*100;
               if(Math.abs(efeitoFX)>0.05){
                 var corFX=efeitoFX>=0?'#0F9D58':'#D93025';
+                /* O rótulo tem que acompanhar o sinal: efeito cambial NEGATIVO significa que o
+                   dólar se DESVALORIZOU frente ao real no mês (o retorno em reais ficou pior que
+                   em dólar) — antes o texto dizia sempre "valorização do USD", mesmo quando o
+                   número dava negativo, o que parecia contraditório/errado (dólar "valorizando"
+                   com efeito negativo no retorno em reais não faz sentido). */
+                var labelFX=efeitoFX>=0?"valorização do USD no mês":"desvalorização do USD no mês";
                 body+='<div><div style="'+labelS+'">Efeito Cambial</div>';
-                body+='<div style="font-size:14px;font-weight:700;color:'+corFX+'">'+(efeitoFX>=0?'+':'')+efeitoFX.toFixed(2)+'% <span style="font-size:9px;color:#9CA3AF;font-weight:400">(valorização do USD no mês)</span></div></div>';
+                body+='<div style="font-size:14px;font-weight:700;color:'+corFX+'">'+(efeitoFX>=0?'+':'')+efeitoFX.toFixed(2)+'% <span style="font-size:9px;color:#9CA3AF;font-weight:400">('+labelFX+')</span></div></div>';
               }
             }
           }
           /* Rentabilidade em BRL (inclui variação cambial) */
           if(rentUSD_brl_pct!==null){
             var corBRL=rentUSD_brl_pct>=0?'#0F9D58':'#D93025';
-            body+='<div><div style="'+labelS+'">Rentabilidade em BRL <span style="color:#9CA3AF;font-weight:400;text-transform:none;letter-spacing:0">· Gorila (incl. câmbio)</span></div>';
+            body+='<div><div style="'+labelS+'">Rentabilidade em BRL <span style="color:#9CA3AF;font-weight:400;text-transform:none;letter-spacing:0">· inclui câmbio</span></div>';
             body+='<div style="font-size:17px;font-weight:800;color:'+corBRL+'">'+(rentUSD_brl_pct>=0?'+':'')+rentUSD_brl_pct.toFixed(2)+'%';
             body+=' <span style="font-size:12px;font-weight:700;color:'+corBRL+';opacity:.85">('+(rentUSD_brl_rs>=0?'+R$ ':'-R$ ')+Math.abs(rentUSD_brl_rs).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+')</span>';
             body+='</div></div>';
           }
           body+='<div><div style="'+labelS+'">Benchmark</div><div style="font-size:13px;font-weight:700;color:#2563EB">S&amp;P 500 · Nasdaq</div></div>';
           body+='</div>';
+          if(rentUSDpct===null&&rentUSD_brl_pct!==null){
+            body+='<div style="margin-top:10px;font-size:9px;color:#9CA3AF;font-style:italic">ℹ️ Não foi possível isolar o efeito cambial pra mostrar a rentabilidade em USD separadamente (nenhuma posição em dólar/caixa disponível como referência de câmbio no período). O valor acima em BRL já inclui a variação cambial.</div>';
+          }
           body+='<div style="margin-top:10px;font-size:9px;color:#9CA3AF;font-style:italic">Ativos: '+ativosUSD.map(function(a){return a.tk||(a.nm||"").split(" ")[0];}).slice(0,10).join(", ")+(ativosUSD.length>10?"...":"")+'</div>';
           body+='</div>';
         }
@@ -8502,11 +9252,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
             byClasse[cls].temRentReal=true;
           }
         });
-        if(totalV>0 && rentPeriodo!==null){
+        if(totalV>0 && _rentParaNarrativa!==null){
           body+='<!-- PAGE_BREAK -->';
           var classesOrdenadas=Object.keys(byClasse).sort(function(a,b){return byClasse[b].v-byClasse[a].v});
           body+=secTitle('🧩','Atribuição de Performance por Classe');
-          /* Decide se usa rent. real de cada classe (Gorila) ou aproximação peso × rentCarteira */
+          /* Decide se usa rent. real de cada classe (extrato importado) ou aproximação peso × rentCarteira.
+             byClasse já é consolidado (vem de enr, que mistura titular+cônjuge quando é casal), então
+             a comparação usa _rentParaNarrativa (a rentabilidade do CASAL) em vez de rentPeriodo (só do
+             titular) — senão a "diferença" reportada era artificial, comparando dado combinado com
+             rentabilidade individual. */
           var temDadosReais=classesOrdenadas.some(function(cls){return byClasse[cls].temRentReal});
           var maxContrib=0;
           var contributions=classesOrdenadas.map(function(cls){
@@ -8517,7 +9271,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
               contrib=totalV>0?(byClasse[cls].ganhoMes/totalV)*100:0;
             }else{
               /* Fallback: peso × rent. carteira (assume rent. uniforme entre classes) */
-              contrib=peso*rentPeriodo;
+              contrib=peso*_rentParaNarrativa;
             }
             if(Math.abs(contrib)>maxContrib)maxContrib=Math.abs(contrib);
             return {classe:cls,peso:peso,contrib:contrib};
@@ -8535,14 +9289,14 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           if(temDadosReais){
             /* Compara soma das contribuições com rent. carteira pra detectar discrepância (ex: ativos liquidados, eventos não-posicionais) */
             var somaContrib=contributions.reduce(function(s,it){return s+it.contrib},0);
-            var diff=rentPeriodo-somaContrib;
-            notaTexto='Contribuição real de cada classe — calculada como (ganho da classe ÷ patrimônio total). Usa rentabilidades exatas do Gorila por ativo.';
+            var diff=_rentParaNarrativa-somaContrib;
+            notaTexto='Contribuição real de cada classe — calculada como (ganho da classe ÷ patrimônio total). Usa rentabilidades exatas do extrato importado por ativo.';
             if(Math.abs(diff)>0.05){
               /* Diferença > 0,05pp: provavelmente proventos/eventos ou ativos liquidados no período */
-              notaTexto+=' A soma das contribuições ('+(somaContrib>=0?"+":"")+somaContrib.toFixed(2)+'%) difere da rent. da carteira ('+(rentPeriodo>=0?"+":"")+rentPeriodo.toFixed(2)+'%) em '+(diff>=0?"+":"")+diff.toFixed(2)+'pp por causa de eventos do período (proventos pagos, ativos liquidados, etc).';
+              notaTexto+=' A soma das contribuições ('+(somaContrib>=0?"+":"")+somaContrib.toFixed(2)+'%) difere da rent. da carteira ('+(_rentParaNarrativa>=0?"+":"")+_rentParaNarrativa.toFixed(2)+'%) em '+(diff>=0?"+":"")+diff.toFixed(2)+'pp por causa de eventos do período (proventos pagos, ativos liquidados, etc).';
             }
           }else{
-            notaTexto='Contribuição estimada de cada classe para a rentabilidade de '+(rentPeriodo>=0?"+":"")+rentPeriodo.toFixed(2)+'% '+rentLabel+'. Calculada pelo peso de cada classe na carteira atual.';
+            notaTexto='Contribuição estimada de cada classe para a rentabilidade de '+(_rentParaNarrativa>=0?"+":"")+_rentParaNarrativa.toFixed(2)+'% '+rentLabel+'. Calculada pelo peso de cada classe na carteira atual.';
           }
           body+='<div class="nota-inline" style="margin-top:14px">'+notaTexto+'</div>';
         } else if(temGorila && c._gorilaRent.atribuicao && c._gorilaRent.atribuicao.length>0){
@@ -8555,7 +9309,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
               +'<div class="attrib-bar-wrap"><div class="attrib-bar" style="width:'+Math.min(100,Math.abs(pct))+'%;background:linear-gradient(90deg,'+barColor+','+barColor+'AA)"></div></div>'
               +'<div class="attrib-value" style="color:'+barColor+'">'+(pct>=0?"+":"")+pct.toFixed(2)+'%</div></div>';
           });
-          body+='<div class="nota-inline" style="margin-top:14px">⚠️ Dados históricos acumulados do relatório Gorila (não do mês).</div>';
+          body+='<div class="nota-inline" style="margin-top:14px">⚠️ Dados históricos acumulados do extrato importado (não do mês).</div>';
         }
       })();
       } 
@@ -9118,8 +9872,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           
           if(!temMovGorila && movManuaisDoMes.length>0){
             movManuaisDoMes.forEach(function(m){
-              if(m.tipo==="aporte"||(m.valor||0)>0){apValor+=(m.valor||0);}
-              else if(m.tipo==="resgate"||(m.valor||0)<0){retValor+=Math.abs(m.valor||0);}
+              /* O campo "tipo" ("aporte"/"resgate") é sempre o dado confiável — o formulário de
+                 Nova Movimentação salva "valor" SEMPRE positivo (Math.max(0,...)), o sinal nunca
+                 vem embutido no valor. Por isso "tipo" tem que ser checado ANTES de olhar o sinal
+                 do valor: senão um resgate (valor positivo, tipo="resgate") caía no "OR" do
+                 aporte por causa de "(m.valor||0)>0", contando resgate como aporte no relatório. */
+              if(m.tipo==="aporte"){apValor+=Math.abs(m.valor||0);}
+              else if(m.tipo==="resgate"){retValor+=Math.abs(m.valor||0);}
+              else if((m.valor||0)>0){apValor+=(m.valor||0);}
+              else if((m.valor||0)<0){retValor+=Math.abs(m.valor||0);}
             });
             captLiq=apValor-retValor;
           }
@@ -9159,14 +9920,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         }else{
           narrMov='Movimentação neutra no período — aportes e retiradas se equilibraram.';
         }
-        body+='<div class="nota-inline" style="margin-top:4px">'+narrMov+(temMovGorila?' Valores extraídos diretamente do relatório Gorila.':' Valores baseados em movimentações cadastradas manualmente.')+'</div>';
+        body+='<div class="nota-inline" style="margin-top:4px">'+narrMov+(temMovGorila?' Valores extraídos diretamente do extrato importado.':' Valores baseados em movimentações cadastradas manualmente.')+'</div>';
         
         if(movManuaisDoMes.length>0){
           body+='<div style="margin-top:14px">';
           body+='<div style="font-size:10px;color:#6B7489;font-weight:700;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px">📋 Movimentações do mês</div>';
           body+='<table><tr><th>Data</th><th>Descrição</th><th>Tipo</th><th style="text-align:right">Valor</th></tr>';
           movManuaisDoMes.slice(0,15).forEach(function(m){
-            var isAporte=m.tipo==="aporte"||(m.valor||0)>0;
+            /* Mesma correção: "tipo" é a fonte confiável, valor é sempre positivo no dado salvo. */
+            var isAporte=m.tipo?(m.tipo==="aporte"):((m.valor||0)>=0);
             var cor=isAporte?"#0F9D58":"#EF6461";
             var sinal=isAporte?"+":"-";
             var dataFmt=m.data?m.data.split("-").reverse().join("/"):"—";
@@ -9300,15 +10062,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         if(!byInst[inst])byInst[inst]={ativos:0,valor:0,ganhoMes:0};
         byInst[inst].ativos++;
         byInst[inst].valor+=a.vA;
-        /* Tenta pegar ganho do mês do Gorila */
+        /* Tenta pegar ganho do mês do extrato importado */
         var rentAt=getRentAtivoPer(a);
-        byInst[inst].ganhoMes+=rentAt.doPeriodo?rentAt.rs:(a.vA*(rentPeriodo||0)/100);
+        byInst[inst].ganhoMes+=rentAt.doPeriodo?rentAt.rs:(a.vA*(_rentParaNarrativa||0)/100);
       });
       var totalValor=enr.reduce(function(s,a){return s+a.vA;},0);
       var instList=Object.entries(byInst).map(function(e){
         var d=e[1];var pctCart=tCV>0?(d.valor/tCV*100):0;
-        /* Se instituição = carteira toda, usa rentPeriodo direto */
-        var rentPctPer=pctCart>=99.9&&rentPeriodo!==null?rentPeriodo:(d.valor>0?(d.ganhoMes/(d.valor-d.ganhoMes)*100):0);
+        /* Se instituição = carteira toda, usa a rentabilidade consolidada (do casal, se aplicável) */
+        var rentPctPer=pctCart>=99.9&&_rentParaNarrativa!==null?_rentParaNarrativa:(d.valor>0?(d.ganhoMes/(d.valor-d.ganhoMes)*100):0);
         return {nome:e[0],ativos:d.ativos,valor:d.valor,ganho:d.ganhoMes,rentPct:rentPctPer,pctCarteira:pctCart};
       }).sort(function(a,b){return b.valor-a.valor});
       if(secAtiva("instituicao") && instList.length>0){
@@ -9461,8 +10223,13 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         });
       });
       var totalGanhoPer=enr.reduce(function(s,a){return s+getRentAtivoPer(a).rs},0);
-      var totalRentPer=rentPeriodo!==null?rentPeriodo:(tCV>0?(totalGanhoPer/tCV*100):0);
-      var totalGanhoExib=rentPeriodo!==null?(tCV*rentPeriodo/100):totalGanhoPer;
+      /* Usa a rentabilidade consolidada (do casal, se aplicável) como fonte preferida —
+         enr/tCV aqui já somam titular+cônjuge, então a linha TOTAL precisa da mesma base. */
+      var totalRentPer=_rentParaNarrativa!==null?_rentParaNarrativa:(tCV>0?(totalGanhoPer/tCV*100):0);
+      /* Usa o mesmo valor autoritativo do KPI "Ganho do Período" (ver _ganhoPeriodoAutoritativo
+         acima) em vez de recalcular tCV×rent% — evita a linha TOTAL CARTEIRA mostrar um "Ganho
+         Mês" diferente do KPI do Resumo Executivo pro mesmo período. */
+      var totalGanhoExib=_ganhoPeriodoAutoritativo!==null?_ganhoPeriodoAutoritativo:(_rentParaNarrativa!==null?(tCV*_rentParaNarrativa/100):totalGanhoPer);
       body+='<tr class="total-row"><td>TOTAL CARTEIRA</td>'
         +'<td style="text-align:right;font-family:\'JetBrains Mono\',monospace;color:#5a5a6e">'+fmF(tCV-totalGanhoExib)+'</td>'
         +'<td style="text-align:right;font-family:\'JetBrains Mono\',monospace;color:#D4A328">'+fmF(tCV)+'</td>'
@@ -9550,9 +10317,17 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           var _fmtD=function(d){if(!d)return"";return String(d.getDate()).padStart(2,"0")+"/"+(d.getMonth()+1).toString().padStart(2,"0")+"/"+d.getFullYear();};
           body+="<!-- PAGE_BREAK -->";
           body+=secTitle("📊","Performance Histórica da Carteira");
-          body+='<p class="cv-lead">Rentabilidade acumulada extraída do relatório Gorila'
+          body+='<p class="cv-lead">Rentabilidade acumulada extraída do extrato importado'
             +(_dataIni2&&_dataFim2?' (<span class="cv-lead-strong">'+_fmtD(_dataIni2)+' → '+_fmtD(_dataFim2)+'</span>)':"")
             +'. Comparativo com benchmarks CDI, Ibovespa e IPCA.</p>';
+          /* Diferente do Resumo Executivo e da Rentabilidade vs Benchmarks (que já usam a
+             rentabilidade CONSOLIDADA do casal), esta tabela histórica multi-período vem de
+             c._gorila12mPerf, que só existe pro extrato do TITULAR — não há uma série histórica
+             equivalente importada do cônjuge pra consolidar mês a mês. Deixamos isso explícito
+             pro cliente em vez de apresentar como se fosse do casal. */
+          if(_ehCasalRel){
+            body+='<div class="nota-inline" style="margin-top:-8px;margin-bottom:10px">ℹ️ Esta tabela histórica reflete apenas a carteira de '+c.nome.split(" ")[0]+' — o extrato do cônjuge não traz uma série histórica por período para consolidar.</div>';
+          }
           /* Tabela de períodos */
           body+='<div style="border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,0.06);margin-bottom:20px">';
           body+='<table style="width:100%;border-collapse:collapse;font-size:10px">';
@@ -10232,7 +11007,11 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       var MESES_TOC=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
       var _tocRef=new Date();_tocRef.setDate(1);_tocRef.setMonth(_tocRef.getMonth()-1);
       var chaveOvToc=_tocRef.getFullYear()+"-"+String(_tocRef.getMonth()+1).padStart(2,"0");
-      var temOvToc=secAtiva("overview") && d&&d.overviewMercado&&d.overviewMercado[chaveOvToc] && d.overviewMercado[chaveOvToc].texto;
+      var chaveOvTocAtual=new Date().getFullYear()+"-"+String(new Date().getMonth()+1).padStart(2,"0");
+      /* Mesma prioridade do corpo do relatório: mês atual (recém-publicado) primeiro, mês
+         anterior como fallback — pra o índice bater com o que de fato aparece no relatório. */
+      var _ovTocEfetivo=(d&&d.overviewMercado&&(d.overviewMercado[chaveOvTocAtual]||d.overviewMercado[chaveOvToc]))||null;
+      var temOvToc=secAtiva("overview") && _ovTocEfetivo && _ovTocEfetivo.texto;
       var subTpoToc=tipo==="anual"?"RELATÓRIO ANUAL":"RELATÓRIO MENSAL";
       var subPerToc=tipo==="anual"?(MESES_TOC[_tocRef.getMonth()]+"/"+_tocRef.getFullYear()):(mes+"/"+ano);
 
@@ -15930,10 +16709,22 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                     Aparece só quando há objetivos cadastrados. Ajuda a identificar:
                     1. Se há ativos não-vinculados (sobra)
                     2. Se há ativos vinculados em mais de um objetivo (overlap — soma > patrimônio)
-                    3. Lista os ativos não-vinculados pra facilitar correção. */}
+                    3. Lista os ativos não-vinculados pra facilitar correção.
+                    4. Se o "Patrimônio Total" (patGorila, vindo do total declarado no arquivo
+                       importado) é maior que a soma dos ativos individualmente importados —
+                       nesse caso a diferença é saldo/categoria que a Gorila totaliza mas não
+                       detalha linha-a-linha, então NÃO existe um "produto" pra vincular a um
+                       objetivo (só dá pra cobrir esse valor usando o modo "Valor Manual"). */}
                 {objetivos.length>0 && (function(){
-                  /* Calcula patrimônio total (só ativos brasileiros se cliente é BR — exterior fora) */
-                  var patTotal=enr.reduce(function(s,a){return s+(a.vA||0)},0);
+                  /* Patrimônio total = MESMO valor exibido no cabeçalho do cliente (patGorila/pat,
+                     com fallback pra soma dos ativos) — evita mostrar dois números diferentes na mesma tela */
+                  var patTotal=patDisplay;
+                  /* Soma dos ativos individualmente importados (o universo que PODE ser vinculado via "Vincular Ativos") */
+                  var somaItens=enr.reduce(function(s,a){return s+(a.vA||0)},0);
+                  /* Parte do patrimônio total que não corresponde a nenhum ativo importado linha-a-linha
+                     (ex: saldo agregado ou categoria que a Gorila não detalha no extrato) */
+                  var gapNaoImportado=patTotal-somaItens;
+                  var temGap=Math.abs(gapNaoImportado)>=10;
                   /* Soma todos os atingidos com modo "ativos" + manuais */
                   var somaVinc=0;
                   var manualSum=0;
@@ -15961,11 +16752,12 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                   var somaNaoVinc=naoVinculados.reduce(function(s,a){return s+(a.vA||0)},0);
                   /* Detecta overlaps (tickers vinculados em mais de 1 objetivo) */
                   var overlaps=Object.keys(tkUsages).filter(function(tk){return tkUsages[tk]>1});
-                  /* Diferença esperada: patTotal - (somaVinc - overlaps_extra) - manualSum_não_é_da_carteira */
-                  var diff=patTotal-somaVinc;
+                  /* Diferença calculada SÓ dentro do universo de ativos importados (não considera o
+                     gapNaoImportado, que por definição nunca vai poder ser vinculado a um ativo) */
+                  var diff=somaItens-somaVinc;
                   var corDiff=Math.abs(diff)<10?T.green:(diff>0?T.orange:T.red);
                   var statusTxt=Math.abs(diff)<10?"✅ Tudo vinculado":(diff>0?"⚠ Faltam ativos":"⚠ Há overlap (ativo em vários objetivos)");
-                  
+
                   return (
                     <Cd style={{padding:14,marginBottom:14,background:"rgba(43,90,255,0.04)",border:"1px solid rgba(139,157,195,0.15)"}} hov={false}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:14,flexWrap:"wrap"}}>
@@ -15974,6 +16766,12 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                             <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:1,marginBottom:3}}>PATRIMÔNIO TOTAL</div>
                             <div style={{fontSize:14,fontWeight:800,color:T.t1,fontFamily:"'JetBrains Mono'"}}>{fmF(patTotal)}</div>
                           </div>
+                          {temGap && (
+                            <div>
+                              <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:1,marginBottom:3}}>ATIVOS IMPORTADOS</div>
+                              <div style={{fontSize:14,fontWeight:800,color:T.t1,fontFamily:"'JetBrains Mono'"}}>{fmF(somaItens)}</div>
+                            </div>
+                          )}
                           <div>
                             <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:1,marginBottom:3}}>VINCULADO EM OBJETIVOS</div>
                             <div style={{fontSize:14,fontWeight:800,color:T.t2,fontFamily:"'JetBrains Mono'"}}>{fmF(somaVinc)}</div>
@@ -15988,6 +16786,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                           </div>
                         </div>
                       </div>
+                      {temGap && (function(){
+                        var ehSobra=gapNaoImportado>0;
+                        var valorGap=Math.abs(gapNaoImportado);
+                        return (
+                          <div style={{marginTop:12,padding:"8px 10px",background:"rgba(245,158,11,0.06)",border:"1px solid rgba(245,158,11,0.18)",borderRadius:8,fontSize:10,color:T.t2,lineHeight:1.5}}>
+                            ℹ️ {ehSobra?"Há ":"O total importado supera em "}<b style={{color:T.orange}}>{fmF(valorGap)}</b>{ehSobra?" no Patrimônio Total que não corresponde a nenhum ativo individual importado":" o valor declarado como Patrimônio Total"}. {ehSobra?"Isso costuma acontecer quando o extrato traz um saldo agregado (ex: previdência, imóvel, categoria não detalhada) que não vem como linha individual — por isso não aparece como \"produto\" pra selecionar em Vincular Ativos. Pra cobrir esse valor num objetivo, use o modo \"Valor Manual\".":"Reimporte o extrato mais recente pra atualizar o Patrimônio Total."}
+                          </div>
+                        );
+                      })()}
                       {naoVinculados.length>0 && (
                         <details style={{marginTop:12,fontSize:11}}>
                           <summary style={{cursor:"pointer",color:T.orange,fontWeight:700,padding:"6px 0"}}>📋 {naoVinculados.length} ativo{naoVinculados.length>1?"s":""} não vinculado{naoVinculados.length>1?"s":""} ({fmF(somaNaoVinc)}) — clique para ver</summary>
@@ -19034,7 +19841,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                     <Cd onClick={function(){
                       /* Se câmbio já foi informado manualmente, usa direto sem buscar API */
                       if(usdRelatorio&&usdRelatorio>1&&usdRelatorio<20){
-                        try{sReportHtml(gerarRelatorio("mensal",d,usdRelatorio))}catch(e){alert("Erro ao gerar relatório:\n"+e.message)}
+                        gerarRelMensal(usdRelatorio);
                         return;
                       }
                       /* Busca câmbio do último dia útil do mês do RELATÓRIO. */
@@ -19063,7 +19870,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                         if(idx>=tentativas.length){
                           var taxaFallback=usdRateGlobal||5.70;
                           sUsdRelatorio(taxaFallback);
-                          try{sReportHtml(gerarRelatorio("mensal",d,taxaFallback))}catch(e){alert("Erro ao gerar relatório:\n"+e.message)}
+                          gerarRelMensal(taxaFallback);
                           return;
                         }
                         var dataFmt=tentativas[idx++];
@@ -19082,7 +19889,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                               if(melhor&&melhor.bid){
                                 var taxaFechamento=parseFloat(melhor.bid);
                                 sUsdRelatorio(taxaFechamento);
-                                try{sReportHtml(gerarRelatorio("mensal",d,taxaFechamento))}catch(e){alert("Erro ao gerar relatório:\n"+e.message+"\n\nLinha: "+e.stack.split("\n")[1])}
+                                gerarRelMensal(taxaFechamento);
                                 return;
                               }
                             }
@@ -19128,7 +19935,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
               var SECOES=[
                 {k:"capa",            l:"Capa personalizada",       ic:"🎨", desc:"Página de abertura com logo Courinvest e nome do cliente"},
                 {k:"overview",        l:"Resumo de Mercado",         ic:"📰", desc:"Panorama macro do mês (Ibovespa, Selic, Copom, cenário) — só relatório mensal"},
-                {k:"resumoExec",      l:"Resumo executivo",          ic:"📋", desc:"KPIs principais (patrimônio, rentabilidade, vs CDI) + narrativa"},
+                {k:"resumoExec",      l:"Resumo executivo",          ic:"📋", desc:"KPIs principais (patrimônio, rentabilidade, vs IPCA) + narrativa"},
                 {k:"evolucao",        l:"Evolução Patrimonial",      ic:"📈", desc:"Gráfico de evolução do patrimônio ao longo do tempo"},
                 {k:"rentabilidade",   l:"Rentabilidade vs benchmarks",ic:"📈", desc:"Performance vs CDI, IBOV, IPCA, Poupança + Atribuição por Classe"},
                 {k:"carteira",        l:"Carteira (alocação)",       ic:"🎨", desc:"Alocação por classes + Top 5 melhores e piores + Composição detalhada"},
@@ -19372,8 +20179,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         };
         
         var calc=feeBaseDoCliente(c);
-        
-        var ativosReserva=(c._ativosImport||[]).filter(function(a){return a.reservaEmerg===true});
+
+        var objReserva=objetivoReservaEmerg(c);
+        var ativosReserva=objReserva?(c._ativosImport||[]).filter(function(a){return (objReserva.ativosVinculados||[]).indexOf(a.tk)>=0}):(c._ativosImport||[]).filter(function(a){return a.reservaEmerg===true});
         var ativosHolding=(c._ativosImport||[]).filter(function(a){return a.holding===true});
         
         var toggleAtivo=function(idx,campo){
@@ -19546,8 +20354,29 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
               </div>
             </Cd>
 
-            {/* === LISTA DE ATIVOS MARCADOS === */}
-            {fee.excluiReservaEmerg && (
+            {/* === LISTA DE ATIVOS MARCADOS ===
+                Se já existe um objetivo "Reserva de Emergência" com ativos vinculados (aba
+                Carteira → Objetivos), usamos ele como fonte única — só mostra um resumo com
+                atalho pra editar lá, sem pedir pra marcar os mesmos ativos de novo aqui. */}
+            {fee.excluiReservaEmerg && objReserva && (
+              <Cd style={{padding:18,marginBottom:14,border:"1px solid rgba(45,212,160,0.2)"}} hov={false}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontSize:16}}>🛟</span>
+                  <div style={{flex:1}}>
+                    <h4 style={{margin:0,fontSize:13,fontWeight:800,color:T.t1}}>Ativos da Reserva de Emergência</h4>
+                    <div style={{fontSize:10,color:T.t3,marginTop:2}}>
+                      ✓ Já vinculado ao objetivo <strong style={{color:T.green}}>"{objReserva.nome}"</strong> em Carteira → Objetivos ({(objReserva.ativosVinculados||[]).length} ativo{(objReserva.ativosVinculados||[]).length>1?"s":""}) — não precisa marcar de novo aqui.
+                    </div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:9,color:T.t3,fontWeight:700}}>TOTAL</div>
+                    <div style={{fontSize:13,fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fmF(calc.exclReserva)}</div>
+                  </div>
+                </div>
+                <button onClick={function(){sTab("carteira");sCTab("obj")}} style={{marginTop:12,padding:"8px 14px",borderRadius:8,border:"1px solid "+T.gold+"55",background:"transparent",color:T.gold,fontSize:11,fontWeight:700,cursor:"pointer"}}>🎯 Editar em Carteira → Objetivos</button>
+              </Cd>
+            )}
+            {fee.excluiReservaEmerg && !objReserva && (
               <Cd style={{padding:18,marginBottom:14}} hov={false}>
                 <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
                   <span style={{fontSize:16}}>🛡️</span>
@@ -19583,7 +20412,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                     })}
                   </div>
                 )}
-                <div style={{fontSize:10,color:T.t3,marginTop:10,fontStyle:"italic"}}>💡 Dica: ativos típicos pra reserva são CDB liquidez D+0, Tesouro Selic, fundos DI</div>
+                <div style={{fontSize:10,color:T.t3,marginTop:10,fontStyle:"italic"}}>💡 Dica: crie um objetivo "Reserva de Emergência" em Carteira → Objetivos e vincule os ativos lá — assim você marca só uma vez e ele já vale aqui também.</div>
               </Cd>
             )}
 
@@ -20304,6 +21133,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
 
 function FinanceiroView({data:d,dispatch:dp}){
   const[fTab,sFTab]=useState("importar");
+  /* === RESPONSIVE: detecção reativa de mobile === usado em vários pontos do layout abaixo
+     (grids, tamanhos de fonte, gráfico de barras) — faltava declarar nesse componente, causando
+     "ReferenceError: isMob is not defined" e travando a tela inteira com o Error Boundary. */
+  const[isMob,sIsMob]=useState(typeof window!=="undefined"&&window.innerWidth<768);
+  React.useEffect(function(){
+    var onResize=function(){sIsMob(window.innerWidth<768)};
+    window.addEventListener("resize",onResize);
+    return function(){window.removeEventListener("resize",onResize)};
+  },[]);
   const fileRef=useRef(null);
   const fileDespRef=useRef(null);
   
@@ -22870,7 +23708,12 @@ function NewsView({data,dispatch}){
   var s7=useState(""),aiText=s7[0],sAiText=s7[1];
   var s8=useState(false),aiLoad=s8[0],sAiLoad=s8[1];
   
-  var s9=useState({}),macroData=s9[0],sMacroData=s9[1];
+  /* Semeia o estado inicial com a última correção manual PERSISTIDA (data.config.macroManual) em
+     vez de sempre começar vazio — sem isso, "Confirmar dados" só atualizava o estado local do
+     componente (useState), então trocar de aba e voltar desmontava/remontava o NewsView, o
+     estado voltava a {} e o useEffect de baixo buscava tudo de novo nas APIs, jogando fora a
+     correção manual do usuário (ex: Selic ajustada pra 14,25 sumia e voltava o valor buscado). */
+  var s9=useState(function(){return (data&&data.config&&data.config.macroManual)||{};}),macroData=s9[0],sMacroData=s9[1];
   var s10=useState(false),macroLoad=s10[0],sMacroLoad=s10[1];
   var s11=useState(false),iaLoad=s11[0],sIaLoad=s11[1];
   var s12=useState(false),testSending=s12[0],sTestSending=s12[1];
@@ -23115,8 +23958,15 @@ function NewsView({data,dispatch}){
     if(ovChk&&ovChk.texto){sAiText(ovChk.texto);}
   },[data&&data.overviewMercado]);
 
+  /* Considera os dados macro (Selic, IPCA, dólar...) "frescos" só por 1h — antes disso era só
+     "!macroData.atualizadoEm" (nunca buscou nessa sessão), então se o usuário deixasse a aba
+     aberta de um mês pro outro, "Gerar via Template" reaproveitava a Selic/IPCA buscados semanas
+     atrás em vez de buscar de novo, publicando overview novo com indicador de mercado velho
+     (ex: Selic desatualizada) mesmo com o texto narrativo certo. */
+  var MACRO_TTL_MS=60*60*1000;
+  var macroDataFresca=function(){return macroData.atualizadoEm && (Date.now()-macroData.atualizadoEm)<MACRO_TTL_MS;};
   React.useEffect(function(){
-    if((ntab==="overview"||ntab==="mercado") && !macroData.atualizadoEm){
+    if((ntab==="overview"||ntab==="mercado") && !macroDataFresca()){
       carregarMacro();
     }
   },[ntab]);
@@ -23126,8 +23976,8 @@ function NewsView({data,dispatch}){
      Se algum dado não estiver disponível, usa fallback genérico. */
   var gerarOverview=function(){
     sAiLoad(true);
-    
-    if(!macroData.atualizadoEm){
+
+    if(!macroDataFresca()){
       carregarMacro();
       setTimeout(gerarOverview,1500);
       return;
@@ -23717,15 +24567,35 @@ function NewsView({data,dispatch}){
                   var sel=getV("selicEdit"),selAnt=getV("selicAntEdit");
                   var fed=getV("fedEdit"),fedAnt=getV("fedAntEdit");
                   var ipca=getV("ipcaEdit"),fSel=getV("focusSelicEdit"),fIpc=getV("focusIpcaEdit");
-                  sMacroData(function(prev){return Object.assign({},prev,{
-                    selic:sel!=null?sel:prev.selic,
-                    selicAnterior:selAnt!=null?selAnt:prev.selicAnterior,
-                    fed:fed!=null?{atual:fed,anterior:fedAnt!=null?fedAnt:prev.fed&&prev.fed.anterior}:prev.fed,
-                    ipca:ipca!=null?ipca:prev.ipca,
-                    focusSelic:fSel!=null?fSel:prev.focusSelic,
-                    focusIpca:fIpc!=null?fIpc:prev.focusIpca
-                  });});
-                  alert("✅ Dados atualizados! Agora clique em Gerar via Template.");
+                  var macroCorrigido=Object.assign({},macroData,{
+                    selic:sel!=null?sel:macroData.selic,
+                    selicAnterior:selAnt!=null?selAnt:macroData.selicAnterior,
+                    fed:fed!=null?{atual:fed,anterior:fedAnt!=null?fedAnt:macroData.fed&&macroData.fed.anterior}:macroData.fed,
+                    ipca:ipca!=null?ipca:macroData.ipca,
+                    focusSelic:fSel!=null?fSel:macroData.focusSelic,
+                    focusIpca:fIpc!=null?fIpc:macroData.focusIpca,
+                    atualizadoEm:Date.now()
+                  });
+                  sMacroData(macroCorrigido);
+                  /* Persiste em data.config (Firestore) — sem isso a correção só vivia no estado
+                     local do componente e sumia ao trocar de aba e voltar (useState reseta ao
+                     desmontar/remontar). */
+                  dispatch({t:"CONFIG_SET",p:{key:"macroManual",value:macroCorrigido}});
+                  /* Se já existe um overview PUBLICADO pro mês corrente, corrige o "dados" dele
+                     também, na hora — sem isso "Confirmar dados" só preparava o número certo pro
+                     PRÓXIMO "Gerar via Template", mas o overview já publicado (o que o relatório e
+                     o e-mail realmente usam) continuava com o "dados" antigo/errado até alguém
+                     gerar e publicar o texto de novo. O texto em si (narrativa) não muda aqui —
+                     só os indicadores estruturados (Selic/IPCA/Fed) usados no card do e-mail. */
+                  var hojeConf=new Date();
+                  var chaveConf=hojeConf.getFullYear()+"-"+String(hojeConf.getMonth()+1).padStart(2,"0");
+                  var ovAtualConf=data&&data.overviewMercado&&data.overviewMercado[chaveConf];
+                  if(ovAtualConf){
+                    dispatch({t:"OV_SAVE",p:{chave:chaveConf,texto:ovAtualConf.texto||"",dados:macroCorrigido}});
+                    alert("✅ Dados atualizados! Também corrigi o overview já publicado de "+chaveConf+" (o texto não mudou, só os indicadores).");
+                  }else{
+                    alert("✅ Dados atualizados e salvos! Agora clique em Gerar via Template.");
+                  }
                 }} style={{padding:"4px 12px",borderRadius:6,border:"1px solid "+T.gold+"55",background:T.goldD,color:T.gold,fontSize:10,cursor:"pointer",fontWeight:700}}>
                   ✅ Confirmar dados
                 </button>
@@ -28531,11 +29401,53 @@ function App({authUser}){
   const[syncError,sSyncError]=useState(""); /* guarda a mensagem de erro do Firestore para diagnóstico */
   const isInitialLoadRef=useRef(true);
   const skipNextSaveRef=useRef(false);
+  /* pendingLocalRef: true entre uma mudança local genuína (ex: vincular ativo a um objetivo,
+     importar extrato do cliente ou do cônjuge) e a confirmação de que ela foi salva no Firestore.
+     Protege contra dois cenários de perda de dado:
+     1) Fechar/recarregar o navegador antes do debounce de 800ms disparar — sem isso, a
+        comparação de "quem tem mais dados" no carregamento seguinte comparava só o TAMANHO
+        das listas, então uma edição dentro de um cliente já existente (que não muda o tamanho
+        da lista) podia ser silenciosamente descartada em favor do que já estava salvo.
+     2) Uma atualização em tempo real de outro dispositivo (onSnapshot, ex: sócio trabalhando
+        em paralelo) chegar enquanto ainda há uma mudança local não salva — sem essa proteção,
+        o REPLACE_ALL do listener sobrescrevia o estado local (perdendo a mudança) e ainda
+        cancelava o salvamento pendente (por causa do cleanup do useEffect[d]). */
+  const pendingLocalRef=useRef(false);
   const finRef=useRef(d.fin); /* Sempre aponta para o fin atual — evita closures stale no sync */
   useEffect(function(){finRef.current=d.fin;},[d.fin]);
   const ovRef=useRef(d.overviewMercado||{}); /* FIX: ref para overviewMercado — evita closure stale no merge */
   useEffect(function(){ovRef.current=d.overviewMercado||{};},[d.overviewMercado]);
-  
+  const clRef=useRef(d.cl); /* ref pro array de clientes atual — evita closure stale no merge do onSnapshot */
+  useEffect(function(){clRef.current=d.cl;},[d.cl]);
+
+  /* MERGE POR CLIENTE (em vez de substituir a lista inteira): antes, tanto o carregamento
+     inicial quanto o listener em tempo real (onSnapshot) trocavam a lista de clientes local pela
+     que veio do Firestore por INTEIRO sempre que o local não "parecia" ter mais dados (heurística
+     baseada só em tamanho de lista). Isso tinha um buraco real: se dois dispositivos estivessem
+     abertos ao mesmo tempo (ex: celular fazendo uma importação nova do Gorila, desktop aberto de
+     antes) e o desktop salvasse por QUALQUER outro motivo (confirmar um indicador, aprovar um
+     envio de relatório — qualquer dp() que mude d) logo depois da importação do celular, o
+     desktop reenviava sua própria cópia desatualizada de TODOS os clientes, apagando em silêncio
+     a importação/movimentação recém-feita no celular. Agora cada cliente é comparado individual-
+     mente pelo carimbo _updatedAt (gravado pelo reducer em todo AC/UC/RC) — o mais recente vence,
+     cliente por cliente, então uma mudança nova em QUALQUER dispositivo sobrevive mesmo que o
+     outro dispositivo salve algo não relacionado logo depois. */
+  var mergeClientes=function(localCl,remoteCl){
+    var localById={},remoteById={};
+    (localCl||[]).forEach(function(c){localById[c.id]=c;});
+    (remoteCl||[]).forEach(function(c){remoteById[c.id]=c;});
+    var ids=[],seen={};
+    (localCl||[]).forEach(function(c){if(!seen[c.id]){seen[c.id]=true;ids.push(c.id);}});
+    (remoteCl||[]).forEach(function(c){if(!seen[c.id]){seen[c.id]=true;ids.push(c.id);}});
+    return ids.map(function(id){
+      var lc=localById[id],rc=remoteById[id];
+      if(lc&&!rc)return lc; /* só existe local — criado/editado aqui, ainda não sincronizado */
+      if(rc&&!lc)return rc; /* só existe remoto — criado em outro dispositivo */
+      var lTs=lc._updatedAt||0,rTs=rc._updatedAt||0;
+      return (lTs>=rTs)?lc:rc; /* empate ou local mais novo fica com local; senão remoto vence */
+    });
+  };
+
   /* helper: strip campos pesados antes de salvar no Firestore */
   var _clParaFirestore=function(clientes){
     var ativosMap={};
@@ -28584,14 +29496,34 @@ function App({authUser}){
         if(data&&Array.isArray(data.cl)&&Array.isArray(data.it)){
           var localEntradas=((finRef.current&&finRef.current.entradas)||[]).length;
           var remoteEntradas=(data.fin&&data.fin.entradas&&data.fin.entradas.length)||0;
+          /* pendingFlagLocal: gravado no localStorage sempre que houve uma mudança local ainda
+             não confirmada como salva no Firestore (ver pendingLocalRef). Se a sessão anterior
+             foi fechada/recarregada antes do debounce de 800ms concluir, esse flag continua "1"
+             — nesse caso o local PRECISA ser tratado como mais atualizado, mesmo que o tamanho
+             das listas seja igual (ex: edição dentro de um cliente já existente, como vincular
+             um ativo a um objetivo ou importar o extrato do cônjuge). */
+          var pendingFlagLocal=false;
+          try{pendingFlagLocal=localStorage.getItem("courinvest_pending_v1")==="1"}catch(e){}
           var localTemMaisDados=
+            pendingFlagLocal ||
             (d.cl.length>data.cl.length) ||
             (d.it.length>data.it.length) ||
             ((d.lds||[]).length>(data.lds||[]).length) ||
             (localEntradas>remoteEntradas);
+          /* Em ambos os ramos abaixo, a lista de clientes é combinada cliente por cliente (ver
+             mergeClientes acima) em vez de "local inteiro" ou "remoto inteiro" — protege contra
+             perder uma importação/edição feita em OUTRO dispositivo mesmo quando a heurística de
+             "quem tem mais dados" (baseada no total de it/lds/fin) aponta pro lado errado. */
+          var clMesclados=mergeClientes(d.cl,data.cl);
           if(localTemMaisDados){
-            console.log("[Sync] Local tem mais dados. Fazendo UPLOAD.");
-            _salvarFirestore(d.cl,{it:d.it,lds:d.lds||[],fin:finRef.current||{entradas:[],despesas:[]},overviewMercado:ovRef.current||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[]}).catch(function(e){console.warn("Upload migration failed:",e)});
+            console.log("[Sync] Local tem mais dados"+(pendingFlagLocal?" (havia mudança pendente de sessão anterior)":"")+". Fazendo UPLOAD.");
+            pendingLocalRef.current=true;
+            _salvarFirestore(clMesclados,{it:d.it,lds:d.lds||[],fin:finRef.current||{entradas:[],despesas:[]},overviewMercado:ovRef.current||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[]}).then(function(){
+              pendingLocalRef.current=false;
+              try{localStorage.removeItem("courinvest_pending_v1")}catch(e){}
+            }).catch(function(e){console.warn("Upload migration failed:",e)});
+            skipNextSaveRef.current=true;
+            dp({t:"REPLACE_ALL",p:{cl:clMesclados,it:d.it,lds:d.lds||[],fin:finRef.current||{entradas:[],despesas:[]},overviewMercado:ovRef.current||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[]}});
             sSyncState("synced");
             isInitialLoadRef.current=false;
             return;
@@ -28600,8 +29532,8 @@ function App({authUser}){
           var _localOv=ovRef.current||{};
           var _mergedOv=Object.assign({},data.overviewMercado||{},_localOv);
           var _mergedCfg=Object.assign({},data.config||{},d.config||{});
-          dp({t:"REPLACE_ALL",p:{cl:data.cl,it:data.it,lds:data.lds||[],fin:data.fin||{entradas:[],despesas:[]},overviewMercado:_mergedOv,config:_mergedCfg,ag:data.ag||[],tpAg:data.tpAg||[]}});
-          console.log("[Sync] Carregado do Firestore: "+data.cl.length+" clientes");
+          dp({t:"REPLACE_ALL",p:{cl:clMesclados,it:data.it,lds:data.lds||[],fin:data.fin||{entradas:[],despesas:[]},overviewMercado:_mergedOv,config:_mergedCfg,ag:data.ag||[],tpAg:data.tpAg||[]}});
+          console.log("[Sync] Carregado do Firestore: "+data.cl.length+" clientes, mesclados: "+clMesclados.length);
         }
       }else{
         console.log("[Sync] Workspace vazio. Upload inicial.");
@@ -28626,6 +29558,11 @@ function App({authUser}){
       return;
     }
     
+    /* Marca que existe uma mudança local ainda não confirmada no Firestore — em memória (protege
+       o listener em tempo real, ver onSnapshot abaixo) e no localStorage (protege contra fechar
+       o navegador antes do debounce concluir — ver comparação no carregamento inicial acima). */
+    pendingLocalRef.current=true;
+    try{localStorage.setItem("courinvest_pending_v1","1")}catch(e){}
     var nEntradas=((finRef.current&&finRef.current.entradas)||[]).length;
     console.log("[Sync] Agendando save. Entradas fin:",nEntradas,"clientes:",d.cl.length);
     var timeoutId=setTimeout(function(){
@@ -28633,7 +29570,11 @@ function App({authUser}){
       var finToSave=finRef.current||{entradas:[],despesas:[]};
       console.log("[Sync] Salvando no Firestore. clientes:",d.cl.length);
       _salvarFirestore(d.cl,{it:d.it,lds:d.lds||[],fin:finToSave,overviewMercado:ovRef.current||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[]})
-      .then(function(){sSyncState("synced");sSyncError("");console.log("[Sync] ✅ Salvo com sucesso");}).catch(function(e){
+      .then(function(){
+        pendingLocalRef.current=false;
+        try{localStorage.removeItem("courinvest_pending_v1")}catch(e){}
+        sSyncState("synced");sSyncError("");console.log("[Sync] ✅ Salvo com sucesso");
+      }).catch(function(e){
         console.warn("Firestore save failed:",e);
         sSyncError((e&&(e.message||e.code))||"Erro ao gravar no Firestore");
         sSyncState("offline");
@@ -28670,13 +29611,50 @@ function App({authUser}){
   useEffect(function(){
     if(!window._fbDB)return;
     var docRef=window._fbDB.collection("workspaces").doc("main");
+    var ativosRefSnap=window._fbDB.collection("workspaces").doc("main_ativos");
     var unsub=docRef.onSnapshot(function(snap){
       if(!snap.exists)return;
-      if(isInitialLoadRef.current)return; 
-      if(snap.metadata.hasPendingWrites)return; 
+      if(isInitialLoadRef.current)return;
+      if(snap.metadata.hasPendingWrites)return;
+      if(pendingLocalRef.current){
+        /* Há uma mudança local (ex: ativo vinculado a objetivo, extrato importado) ainda não
+           confirmada como salva. Aplicar a atualização remota agora sobrescreveria essa mudança
+           E cancelaria o salvamento pendente (o useEffect[d] de baixo cancela o timer anterior
+           a cada novo d). Ignora esta atualização — assim que o salvamento local terminar, o
+           próprio save já reflete o estado mais novo; a próxima atualização remota (se houver)
+           chega depois, sem risco de perder o que acabou de ser feito aqui. */
+        console.log("[Sync] Atualização remota ignorada — há mudança local ainda não salva.");
+        return;
+      }
       var data=snap.data();
       if(!data||!Array.isArray(data.cl)||!Array.isArray(data.it))return;
-      
+      /* CORREÇÃO DE PERDA DE DADOS (2ª parte): o doc "main" NUNCA guarda _ativosImport — ele é
+         salvo à parte em "main_ativos" (ver _clParaFirestore) justamente pra não deixar o doc
+         principal gigante. Só que essa atualização em tempo real escutava SÓ o doc "main" — ou
+         seja, TODA atualização vinda de outro dispositivo apagava _ativosImport da memória local
+         de TODOS os clientes (não só do que mudou), porque data.cl simplesmente não tem esse
+         campo. Se o app salvasse qualquer coisa localmente depois disso (ex: confirmar um
+         indicador), _clParaFirestore ia reconstruir "main_ativos" a partir dessa memória já sem
+         os ativos — apagando os ativos importados de TODOS os clientes no Firestore, não só do
+         cliente que mudou. Busca "main_ativos" aqui também e mescla de volta antes de aplicar. */
+      ativosRefSnap.get().then(function(ativosSnap){
+        var ativosData=(ativosSnap&&ativosSnap.exists)?(ativosSnap.data()||{}):{};
+        data.cl=(data.cl||[]).map(function(c){
+          var at=ativosData[c.id];
+          if(at&&at.ativos&&at.ativos.length>0){
+            return Object.assign({},c,{_ativosImport:at.ativos,_ativosTs:at.ts||c._ativosTs});
+          }
+          return c;
+        });
+        aplicarAtualizacaoRemota(data);
+      }).catch(function(e){
+        console.warn("[Sync] Falha ao buscar main_ativos no listener, aplicando sem merge de ativos:",e);
+        aplicarAtualizacaoRemota(data);
+      });
+    },function(err){
+      console.warn("[Sync] Listener error:",err);
+    });
+    function aplicarAtualizacaoRemota(data){
       console.log("[Sync] Atualização recebida do Firestore: "+data.cl.length+" clientes");
       /* Não sobrescreve dados financeiros locais se o local tem mais entradas
          (evita apagar importações recentes que ainda não foram salvas no Firestore) */
@@ -28685,11 +29663,19 @@ function App({authUser}){
       var finParaUsar=(localEnt>remoteEnt)?(finRef.current||{entradas:[],despesas:[]}):(data.fin||{entradas:[],despesas:[]});
       if(localEnt>remoteEnt) console.log("[Sync] onSnapshot: mantendo fin local ("+localEnt+" > "+remoteEnt+" do Firestore)");
       else console.log("[Sync] onSnapshot: usando fin do Firestore ("+remoteEnt+" entradas)");
-      skipNextSaveRef.current=true; 
-      dp({t:"REPLACE_ALL",p:{cl:data.cl,it:data.it,lds:data.lds||[],fin:finParaUsar,overviewMercado:data.overviewMercado||{},config:data.config||{},ag:data.ag||[],tpAg:data.tpAg||[]}});
-    },function(err){
-      console.warn("[Sync] Listener error:",err);
-    });
+      /* CORREÇÃO DE PERDA DE DADOS: antes essa atualização em tempo real substituía a lista de
+         clientes local pela do Firestore por INTEIRO. Cenário real que isso quebrava: celular faz
+         uma importação nova do Gorila pro cliente X (grava no Firestore) enquanto o desktop está
+         aberto de antes; se o desktop salvar por QUALQUER outro motivo (ex: confirmar um
+         indicador, aprovar envio de relatório) antes de receber essa atualização, ele reenviava
+         sua própria cópia desatualizada de TODOS os clientes — apagando em silêncio a importação
+         recém-feita no celular. Agora mescla cliente por cliente (ver mergeClientes acima),
+         usando o carimbo _updatedAt de cada um: o mais recente vence, então a importação do
+         celular sobrevive mesmo que o desktop salve algo não relacionado logo depois. */
+      var clMescladosSnap=mergeClientes(clRef.current,data.cl);
+      skipNextSaveRef.current=true;
+      dp({t:"REPLACE_ALL",p:{cl:clMescladosSnap,it:data.it,lds:data.lds||[],fin:finParaUsar,overviewMercado:data.overviewMercado||{},config:data.config||{},ag:data.ag||[],tpAg:data.tpAg||[]}});
+    }
     return function(){if(unsub)unsub()};
   },[]);
   /* === PRESENCE TRACKING ===
@@ -29208,7 +30194,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '354';
+  var SW_VERSION = '363';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
