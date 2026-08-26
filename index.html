@@ -25494,7 +25494,7 @@ function ApresentacaoView(){
                 <div key={i} style={{background:"rgba(255,255,255,0.05)",borderRadius:12,padding:"14px 12px",border:"1px solid rgba(255,255,255,0.08)"}}>
                   <div style={{fontSize:16,marginBottom:6}}>{c.ic}</div>
                   <div style={{color:C.gold,fontWeight:700,letterSpacing:2,marginBottom:6}}>{c.lbl}</div>
-                  {c.val.map(function(v,j){return <div key={j} style={{color:"rgba(255,255,255,0.7)",fontSize:10}}>{v}</div>;})}
+                  {c.val.map(function(v,j){return <a key={j} href={c.ic==="\u2709"?("mailto:"+v):c.ic==="\ud83c\udf10"?("https://"+v):("https://wa.me/"+v.replace(/\D/g,""))} target="_blank" rel="noopener noreferrer" style={{color:"rgba(255,255,255,0.7)",fontSize:10,textDecoration:"none",display:"block"}}>{v}</a>;})}
                 </div>
               );})}
             </div>
@@ -25818,7 +25818,7 @@ var ApresentacaoGP=function(){
                 <div key={i} style={{padding:"18px 14px",background:"rgba(212,163,40,0.05)",border:"1px solid rgba(212,163,40,0.15)",borderRadius:12}}>
                   <div style={{fontSize:18,marginBottom:8,color:"#D4A328"}}>{c.ic}</div>
                   <div style={{color:"#D4A328",fontWeight:800,marginBottom:6,letterSpacing:2,fontSize:9}}>{c.lbl}</div>
-                  {c.val.map(function(v,j){return (<div key={j} style={{color:"#E8ECF4",fontSize:11,marginBottom:2}}>{v}</div>)})}
+                  {c.val.map(function(v,j){return (<a key={j} href={c.ic==="\u2709"?("mailto:"+v):c.ic==="\ud83c\udf10"?("https://"+v):("https://wa.me/"+v.replace(/\D/g,""))} target="_blank" rel="noopener noreferrer" style={{color:"#E8ECF4",fontSize:11,marginBottom:2,textDecoration:"none",display:"block"}}>{v}</a>)})}
                 </div>
               )})}
             </div>
@@ -26179,7 +26179,7 @@ var ApresentacaoGP=function(){
                 <div key={i} style={{padding:"18px 14px",background:"rgba(212,163,40,0.05)",border:"1px solid rgba(212,163,40,0.15)",borderRadius:12}}>
                   <div style={{fontSize:18,marginBottom:8,color:"#D4A328"}}>{c.ic}</div>
                   <div style={{color:"#D4A328",fontWeight:800,marginBottom:6,letterSpacing:2,fontSize:9}}>{c.lbl}</div>
-                  {c.val.map(function(v,j){return (<div key={j} style={{color:"#E8ECF4",fontSize:11,marginBottom:2}}>{v}</div>)})}
+                  {c.val.map(function(v,j){return (<a key={j} href={c.ic==="\u2709"?("mailto:"+v):c.ic==="\ud83c\udf10"?("https://"+v):("https://wa.me/"+v.replace(/\D/g,""))} target="_blank" rel="noopener noreferrer" style={{color:"#E8ECF4",fontSize:11,marginBottom:2,textDecoration:"none",display:"block"}}>{v}</a>)})}
                 </div>
               )})}
             </div>
@@ -27113,7 +27113,7 @@ function PropostasView({data,dispatch}){
                 <div key={i} style={{padding:"18px 14px",background:"rgba(212,163,40,0.05)",border:"1px solid rgba(212,163,40,0.15)",borderRadius:12}}>
                   <div style={{fontSize:18,marginBottom:8,color:"#D4A328"}}>{c.ic}</div>
                   <div style={{color:"#D4A328",fontWeight:800,marginBottom:6,letterSpacing:2,fontSize:9}}>{c.lbl}</div>
-                  {c.val.map(function(v,j){return (<div key={j} style={{color:"#E8ECF4",fontSize:11,marginBottom:2}}>{v}</div>)})}
+                  {c.val.map(function(v,j){return (<a key={j} href={c.ic==="\u2709"?("mailto:"+v):c.ic==="\ud83c\udf10"?("https://"+v):("https://wa.me/"+v.replace(/\D/g,""))} target="_blank" rel="noopener noreferrer" style={{color:"#E8ECF4",fontSize:11,marginBottom:2,textDecoration:"none",display:"block"}}>{v}</a>)})}
                 </div>
               )})}
             </div>
@@ -30195,7 +30195,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '368';
+  var SW_VERSION = '369';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
