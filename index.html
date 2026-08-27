@@ -25847,27 +25847,26 @@ var ApresentacaoGP=function(){
   if(!el){alert("Apresentação não encontrada");return;}
   var clone=el.cloneNode(true);
   var children=Array.from(clone.children);
-  // CAPA: full page, break after. Others: remove minHeight to avoid whitespace
+  // Cada página encolhe para caber no próprio conteúdo — sem sobra em branco no PDF (importante na leitura pelo celular)
   children.forEach(function(child,i){
+    child.style.minHeight="";
+    child.style.height="auto";
     if(i===0){
-      child.style.minHeight="100vh";
       child.style.pageBreakAfter="always";
       child.style.breakAfter="page";
-    } else {
-      child.style.minHeight="";
-      child.style.height="auto";
-      Array.from(child.querySelectorAll("*")).forEach(function(n){
-        n.style.minHeight="";
-        if(n.style.height&&n.style.height.indexOf("vh")>-1)n.style.height="auto";
-      });
     }
+    Array.from(child.querySelectorAll("*")).forEach(function(n){
+      n.style.minHeight="";
+      if(n.style.height&&n.style.height.indexOf("vh")>-1)n.style.height="auto";
+    });
   });
   var printCSS=[
     "@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap');",
     "*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important;box-sizing:border-box!important;font-family:'Outfit',sans-serif!important}",
     "body{margin:0!important;padding:0!important;background:#fff}",
-    "@page{margin:0;size:A4 portrait}",
-    "html,body{height:auto!important;overflow:visible!important}"
+    "@page{margin:0;size:820px auto}",
+    "html,body{height:auto!important;overflow:visible!important}",
+    ".pp-page{break-inside:avoid;page-break-inside:avoid}"
   ].join("");
   var fullHtml=[
     "<!DOCTYPE html><html><head><meta charset=\"utf-8\">",
@@ -26400,7 +26399,7 @@ function PropostasView({data,dispatch}){
   var el=document.getElementById("proposta-print");
   if(!el){alert("Apresentação não encontrada");return;}
   var w=window.open("","_blank");
-  w.document.write("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}body{margin:0;padding:0}@page{margin:0;size:A4}</style></head><body>"+el.outerHTML+"</body></html>");
+  w.document.write("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}body{margin:0;padding:0}@page{margin:0;size:820px auto}</style></head><body>"+el.outerHTML+"</body></html>");
   w.document.close();
   setTimeout(function(){w.print();},1200);
 }}>🖨 Imprimir / Salvar PDF</Bt>
@@ -30195,7 +30194,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '369';
+  var SW_VERSION = '370';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
