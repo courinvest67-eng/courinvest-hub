@@ -414,8 +414,17 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent){
              297mm — usa uma página do PDF do TAMANHO REAL do conteúdo (doc.addPage([w,h])) em
              vez de sempre criar uma folha A4 inteira e deixar sobra em branco embaixo. A
              primeira página (capa, pagesOk===0) mantém o tamanho A4 padrão do construtor —
-             ela já preenche a folha inteira por design, não precisa de ajuste. */
-          if(pagesOk>0)doc.addPage([pageW,imgH]);
+             ela já preenche a folha inteira por design, não precisa de ajuste.
+             CUIDADO (bug corrigido): o jsPDF, com orientation:"portrait", REORDENA sozinho um
+             tamanho custom [w,h] pra largura<=altura sempre que a largura passada é maior que a
+             altura (nosso caso comum, já que a página fica mais larga do que alta quando o
+             conteúdo é curto) — sem isso, a página saía trocada (estreita e alta) em vez de
+             larga e curta. Passar a orientação explícita, batendo com o formato real de CADA
+             página (curta="l", mais alta que larga="p"), evita essa troca automática. Também
+             NUNCA usar doc.addPage() sem argumentos depois de uma página com tamanho custom — o
+             jsPDF reaproveita o tamanho da página anterior como padrão em vez de voltar pro A4
+             original, contaminando as páginas seguintes. */
+          if(pagesOk>0)doc.addPage([pageW,imgH],imgH>=pageW?"p":"l");
           doc.addImage(canvas.toDataURL("image/jpeg",0.95),"JPEG",0,0,pageW,imgH);
           pagesOk++;
         }else{
@@ -687,7 +696,11 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent){
               }
               fctx.drawImage(canvas,0,offsetConteudo,canvas.width,alturaConteudoFatia,0,yDestino,canvas.width,alturaConteudoFatia);
               var fatiaImgH=pageW*(alturaTotalCanvas/canvas.width);
-              if(pagesOk>0)doc.addPage();
+              /* Tamanho explícito aqui também (mesmo motivo do outro addPage acima): um
+                 addPage() sem argumento herdaria o tamanho customizado da última página
+                 gerada (curta ou não) em vez do A4 padrão, e sem a orientação explícita o
+                 jsPDF poderia reordenar largura/altura numa fatia final mais curta que larga. */
+              if(pagesOk>0)doc.addPage([pageW,fatiaImgH],fatiaImgH>=pageW?"p":"l");
               doc.addImage(fatiaCanvas.toDataURL("image/jpeg",0.95),"JPEG",0,0,pageW,fatiaImgH);
               pagesOk++;
               offsetConteudo+=alturaConteudoFatia;
@@ -30247,7 +30260,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '374';
+  var SW_VERSION = '375';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
