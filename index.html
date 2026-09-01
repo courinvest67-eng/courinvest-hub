@@ -331,9 +331,20 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent){
        é o único tipo de fundo do relatório que passa pelo createPattern interno do html2canvas
        (os outros gradientes pintam a caixa toda de uma vez, sem repetição). Não muda nada visível
        no PDF. */
+    /* COMPACTAÇÃO (v406): .cv-page vem com min-height:297mm no HTML original — pensado pra
+       impressão via navegador (page-break-after cuida da quebra real ali). Só que esse
+       min-height força CADA página de conteúdo a virar um canvas de altura A4 inteira mesmo
+       quando o conteúdo real é bem mais curto (ex: "Métricas Estratégicas" só tem 1 card) — daí
+       o PDF saía com metade da folha em branco, muito diferente do visual compacto que o cliente
+       vê na tela (onde não existe esse min-height nenhum, é só um card atrás do outro). Removendo
+       o min-height só NESTA cópia usada pra gerar o PDF (o footer da página, que já fica em fluxo
+       normal — margin-top, não position:absolute — passa a ficar logo depois do conteúdo real, em
+       vez de "grudado" no fim de uma folha A4 imaginária). NÃO mexe em .cv-cover/.cv-toc — a capa e
+       o sumário são pra ocupar a página inteira mesmo, isso é visual intencional. */
     var htmlSemPadroes=htmlContent.replace(
       "<\/head>",
-      '<style>.bg-pattern,.bg-dots,.cv-cover-pattern,.cv-toc-pattern{background-image:none!important}<\/style><\/head>'
+      '<style>.bg-pattern,.bg-dots,.cv-cover-pattern,.cv-toc-pattern{background-image:none!important}'
+      +'.cv-page{min-height:unset!important;height:auto!important}<\/style><\/head>'
     );
     container.innerHTML=htmlSemPadroes;
     wrapper=document.createElement("div");
@@ -398,8 +409,13 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent){
         }
         var imgH=pageW*(canvas.height/canvas.width);
         if(imgH<=pageH+1){
-          /* Cabe numa folha A4 normal — caso mais comum. */
-          if(pagesOk>0)doc.addPage();
+          /* Cabe numa folha A4 normal — caso mais comum. Com o min-height removido (ver
+             htmlSemPadroes acima), a maioria das páginas de conteúdo sai bem mais curta que
+             297mm — usa uma página do PDF do TAMANHO REAL do conteúdo (doc.addPage([w,h])) em
+             vez de sempre criar uma folha A4 inteira e deixar sobra em branco embaixo. A
+             primeira página (capa, pagesOk===0) mantém o tamanho A4 padrão do construtor —
+             ela já preenche a folha inteira por design, não precisa de ajuste. */
+          if(pagesOk>0)doc.addPage([pageW,imgH]);
           doc.addImage(canvas.toDataURL("image/jpeg",0.95),"JPEG",0,0,pageW,imgH);
           pagesOk++;
         }else{
@@ -489,7 +505,18 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent){
                 var ultimoDaLista=lista[lista.length-1];
                 var ultimoR=ultimoDaLista.getBoundingClientRect();
                 var finalListaFimPx=(ultimoR.bottom-elRect.top)*scaleFactor;
-                for(var ci=0;ci<candidatos.length;ci++){
+                /* BUG (v406): como "candidatos" cresce em ordem crescente e a condição
+                   "(finalListaFimPx-cand)<=pxPorPagina" fica MAIS fácil de satisfazer quanto
+                   MAIOR o candidato (sobra menos conteúdo depois dele), percorrer do primeiro
+                   pro último e parar no primeiro que bate (`break`) pega o recuo MÁXIMO — o
+                   candidato mais ANTIGO que ainda satisfaz — em vez do mínimo necessário. Na
+                   prática isso podia recuar até logo depois do título da seção, deixando esse
+                   bloco sozinho numa página quase em branco (ex: "Proventos & Renda Passiva")
+                   enquanto TODO o resto ia pra página seguinte. Percorrendo de trás pra frente
+                   e parando no primeiro que bate, pega o candidato mais RECENTE que ainda
+                   satisfaz — o recuo mínimo necessário pra próxima página sair cheia, sem
+                   esvaziar a atual. */
+                for(var ci=candidatos.length-1;ci>=0;ci--){
                   var cand=candidatos[ci];
                   if(cand<=estado.pos)continue; /* não recua além do início desta página aberta (senão trava em loop) */
                   if((finalListaFimPx-cand)<=pxPorPagina){corte=cand;break;}
@@ -30220,7 +30247,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '373';
+  var SW_VERSION = '374';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
