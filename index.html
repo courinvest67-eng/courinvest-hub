@@ -9102,10 +9102,22 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           var somaRsUSD=0,somaPosIniUSD=0,algumValido=false;
           ativosUSD.forEach(function(a){
             var r=getRentAtivoPer(a);
-            if(r&&r.doPeriodo&&r.rs!=null&&a.vA>0){
-              somaRsUSD+=r.rs;
-              somaPosIniUSD+=(a.vA-r.rs);
-              algumValido=true;
+            if(r&&r.doPeriodo&&r.rs!=null){
+              /* Ativo com posição atual (a.vA>0): posição inicial = fim − ganho, como sempre.
+                 Ativo ZERADO no período (vendido/liquidado — a.vA=0, ex: AVB): não dá pra usar
+                 "fim − ganho" (fim é 0, resultado ficaria negativo/sem sentido). Reconstrói a
+                 posição inicial a partir do próprio percentual do período já reportado pelo
+                 Gorila (posIni = ganho ÷ percentual) — evita simplesmente DESCARTAR o ganho
+                 realizado desse ativo, o que já causou o percentual da classe inteira sair com
+                 o SINAL TROCADO quando esse ganho descartado era grande o bastante (caso real:
+                 ativo com +430% no período, +R$6.393 de ganho, sumia da conta inteiro por ter
+                 saído da carteira, virando -6,00% em vez do +3,45% real da classe). */
+              var posIniAtivo=a.vA>0?(a.vA-r.rs):(r.pct?(r.rs/(r.pct/100)):null);
+              if(posIniAtivo!=null&&isFinite(posIniAtivo)&&posIniAtivo>0){
+                somaRsUSD+=r.rs;
+                somaPosIniUSD+=posIniAtivo;
+                algumValido=true;
+              }
             }
           });
           if(algumValido&&somaPosIniUSD>0){
@@ -9225,10 +9237,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           var somaIniUSD_brl=0,somaGanhoUSD_brl=0,algumBRL=false;
           ativosUSD.forEach(function(a){
             var r=getRentAtivoPer(a);
-            if(r&&r.doPeriodo&&r.rs!=null&&a.vA>0){
-              somaGanhoUSD_brl+=r.rs;
-              somaIniUSD_brl+=(a.vA-r.rs);
-              algumBRL=true;
+            if(r&&r.doPeriodo&&r.rs!=null){
+              /* Mesma reconstrução da posição inicial pra ativos zerados no período — ver
+                 comentário detalhado na conta em USD, logo acima nesta mesma função. */
+              var posIniAtivoBRL=a.vA>0?(a.vA-r.rs):(r.pct?(r.rs/(r.pct/100)):null);
+              if(posIniAtivoBRL!=null&&isFinite(posIniAtivoBRL)&&posIniAtivoBRL>0){
+                somaGanhoUSD_brl+=r.rs;
+                somaIniUSD_brl+=posIniAtivoBRL;
+                algumBRL=true;
+              }
             }
           });
           if(algumBRL&&somaIniUSD_brl>0){
@@ -30272,7 +30289,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '376';
+  var SW_VERSION = '377';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
