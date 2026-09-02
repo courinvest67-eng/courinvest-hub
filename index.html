@@ -8559,6 +8559,16 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
 
       /* ===== KPIs — ajustados ao período ===== */
       if(secAtiva("resumoExec")){
+      /* Quebra de página antes do Resumo Executivo: sem isso, essa seção fica "colada" logo
+         depois do Resumo do Mercado Financeiro (que não tem tamanho fixo — varia mês a mês
+         conforme o texto do overview) no MESMO cv-page. Quando as duas juntas não cabem numa
+         página só, o algoritmo de corte de página alta partia o Resumo Executivo ao MEIO
+         (título+texto de introdução numa página, os cards de KPI + o box "Olá Nome" + a citação
+         na página seguinte, essa segunda com bastante espaço em branco sobrando) — cliente
+         reportou com print real (Marcus Goyata) essa seção saindo cortada em duas páginas.
+         Forçando a quebra aqui, o Resumo Executivo sempre nasce no topo de uma página nova e
+         sai inteiro de uma vez (título + KPIs + citação cabem folgado numa página A4 só). */
+      body+='<!-- PAGE_BREAK -->';
       body+=secTitle('📊','Resumo Executivo');
 
       /* === FASE 4: LEAD PARAGRAPH antes dos KPIs === */
@@ -11095,8 +11105,25 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       var chaveOvToc=_tocRef.getFullYear()+"-"+String(_tocRef.getMonth()+1).padStart(2,"0");
       var chaveOvTocAtual=new Date().getFullYear()+"-"+String(new Date().getMonth()+1).padStart(2,"0");
       /* Mesma prioridade do corpo do relatório: mês atual (recém-publicado) primeiro, mês
-         anterior como fallback — pra o índice bater com o que de fato aparece no relatório. */
-      var _ovTocEfetivo=(d&&d.overviewMercado&&(d.overviewMercado[chaveOvTocAtual]||d.overviewMercado[chaveOvToc]))||null;
+         anterior como fallback, e por fim a chave mais recente disponível — pra o índice bater
+         com o que de fato aparece no relatório (ver a mesma busca em "RESUMO DE MERCADO" acima).
+         BUG CORRIGIDO: usava a variável "d" (o parâmetro bruto _dadosGlobais, que pode vir
+         undefined) em vez de "_d" (que cai pra window._courinvestData quando "d" está vazio —
+         a mesma variável que o corpo do relatório usa). Quando "d" vinha vazio, o Sumário
+         simplesmente não listava "Resumo do Mercado Financeiro" mesmo quando ele aparecia
+         normalmente no corpo do PDF — e como a numeração de página do sumário é sequencial,
+         isso empurrava a estimativa de página de TODAS as seções seguintes (a começar por
+         "Resumo Executivo") pra trás em relação à página real. */
+      var _ovTocEfetivo=(_d&&_d.overviewMercado&&(_d.overviewMercado[chaveOvTocAtual]||_d.overviewMercado[chaveOvToc]))||null;
+      if(!_ovTocEfetivo&&_d&&_d.overviewMercado){
+        var _todasChavesToc=Object.keys(_d.overviewMercado).sort().reverse();
+        for(var _kti=0;_kti<_todasChavesToc.length;_kti++){
+          if(_d.overviewMercado[_todasChavesToc[_kti]]&&_d.overviewMercado[_todasChavesToc[_kti]].texto){
+            _ovTocEfetivo=_d.overviewMercado[_todasChavesToc[_kti]];
+            break;
+          }
+        }
+      }
       var temOvToc=secAtiva("overview") && _ovTocEfetivo && _ovTocEfetivo.texto;
       var subTpoToc=tipo==="anual"?"RELATÓRIO ANUAL":"RELATÓRIO MENSAL";
       var subPerToc=tipo==="anual"?(MESES_TOC[_tocRef.getMonth()]+"/"+_tocRef.getFullYear()):(mes+"/"+ano);
@@ -30289,7 +30316,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '377';
+  var SW_VERSION = '378';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
