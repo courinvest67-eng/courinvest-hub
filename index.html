@@ -398,7 +398,15 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent){
       for(var pi=0;pi<pageEls.length;pi++){
         var canvas=null;
         try{
-          canvas=await window.html2canvas(pageEls[pi],{scale:2,useCORS:true,backgroundColor:"#ffffff"});
+          /* scale 1.5 (era 2) — reduz em ~44% o total de pixels que o html2canvas precisa
+             desenhar/codificar em cada página (e o jsPDF depois grava em JPEG e sobe pro
+             Storage), cortando o tempo real de geração — não só empurrando o timeout de
+             segurança pra frente de novo (ver comentário em gerarPdfLinkCourinvest). Ainda fica
+             bem acima de 1x (nítido o bastante pra impressão/leitura em tela); só não é mais o
+             nível "retina" que 2x dava. Todo o resto do código (fatiamento de páginas altas,
+             recorte de linha de tabela etc.) usa canvas.width/height medidos na hora, não um "2"
+             fixo, então se ajusta sozinho a essa mudança. */
+          canvas=await window.html2canvas(pageEls[pi],{scale:1.5,useCORS:true,backgroundColor:"#ffffff"});
         }catch(_pageErr){
           console.warn("[PDF] Página "+pi+" falhou ao renderizar, pulando:",_pageErr);
           continue;
@@ -444,7 +452,7 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent){
              recurso, só pra esse trecho específico. */
           var pxPorPagina=canvas.width*(pageH/pageW);
           var elRect=pageEls[pi].getBoundingClientRect();
-          var scaleFactor=elRect.width>0?(canvas.width/elRect.width):2;
+          var scaleFactor=elRect.width>0?(canvas.width/elRect.width):1.5;
           var blocos=Array.prototype.filter.call(pageEls[pi].children,function(el){
             var r=el.getBoundingClientRect&&el.getBoundingClientRect();
             return r&&r.height>0;
@@ -729,15 +737,20 @@ const gerarPdfLinkCourinvest=function(pathStorage,htmlContent){
   return new Promise(function(resolve){
     var settled=false;
     var finish=function(v){if(settled)return;settled=true;resolve(v);};
-    /* 75s (era 45s) — desde a v395 a geração roda página por página (uma chamada ao html2canvas
-       por página do relatório, sequencial), o que é mais lento no total que a captura única de
-       antes, mas muito mais confiável. Carteiras casal/família com muitos ativos podem gerar
-       15-20+ páginas. Timeout curto demais fazia o e-mail sair sem o link do PDF mesmo quando a
-       geração estava OK, só lenta. */
+    /* 130s (era 75s, e antes disso 45s) — desde a v395 a geração roda página por página (uma
+       chamada ao html2canvas por página do relatório, sequencial), o que é mais lento no total
+       que a captura única de antes, mas muito mais confiável. Carteiras casal/família com muitos
+       ativos podem gerar 15-20+ páginas, e o tamanho médio das carteiras só tende a crescer com o
+       tempo. Timeout curto demais fazia o e-mail sair sem o link do PDF mesmo quando a geração
+       estava OK, só lenta — já bumped uma vez (45s→75s) por causa exatamente desse mesmo sintoma,
+       e voltou a acontecer (relato de vários clientes seguidos com o botão de PDF sumindo, print
+       do console confirmando "[PDF] Timeout de 75s atingido"). Além de alongar o prazo aqui,
+       reduzido o scale do html2canvas (ver mais abaixo) pra também diminuir o tempo real de
+       geração, não só empurrar o teto pra frente de novo. */
     var timeoutId=setTimeout(function(){
-      console.warn("[PDF] Timeout de 75s atingido — seguindo sem o link do PDF.");
+      console.warn("[PDF] Timeout de 130s atingido — seguindo sem o link do PDF.");
       finish(null);
-    },75000);
+    },130000);
     _gerarPdfLinkCourinvestInner(pathStorage,htmlContent).then(function(url){
       clearTimeout(timeoutId);
       finish(url);
@@ -782,13 +795,16 @@ const gerarRelatorioHtmlHeadless=function(cliente,dadosApp,tipoRelatorio){
       try{if(container&&container.parentNode)document.body.removeChild(container);}catch(_e){}
       resolve(v);
     };
-    /* 60s (era 40s) — a montagem oculta da ficha faz chamadas reais a APIs externas (ex: preço de
-       fechamento por ativo dolarizado, via brapi.dev) antes de disparar onReportReady; carteiras
-       com muitos ativos no exterior podem legitimamente levar mais que 40s pra terminar. */
+    /* 90s (era 60s, e antes disso 40s) — a montagem oculta da ficha faz chamadas reais a APIs
+       externas (ex: preço de fechamento por ativo dolarizado, via brapi.dev) antes de disparar
+       onReportReady; carteiras com muitos ativos no exterior podem legitimamente levar mais que
+       60s pra terminar. Alongado junto com o timeout de gerarPdfLinkCourinvest (ver mais acima)
+       depois de voltar a acontecer relato de vários clientes com o botão de PDF sumindo do e-mail
+       por timeout. */
     var timeoutId=setTimeout(function(){
-      console.warn("[Relatório] Timeout de 60s ao gerar o relatório completo em segundo plano — usando o resumo como PDF.");
+      console.warn("[Relatório] Timeout de 90s ao gerar o relatório completo em segundo plano — usando o resumo como PDF.");
       finish(null);
-    },60000);
+    },90000);
     try{
       if(typeof CD==="undefined"||typeof ReactDOM==="undefined"||typeof React==="undefined"){
         clearTimeout(timeoutId);finish(null);return;
@@ -7988,6 +8004,68 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         return Object.keys(map).length>0?map:null;
       }).catch(function(){return null;});
   };
+  /* === CÂMBIO DE FECHAMENTO DO MÊS DO RELATÓRIO ===
+     Busca o câmbio USD/BRL do último dia útil do mês de referência do relatório via AwesomeAPI
+     (tenta o dia exato e mais 6 dias antes, pra cobrir fim de semana/feriado). NUNCA rejeita —
+     resolve sempre, caindo pro câmbio ao vivo (usdRateGlobal) ou 5.70 fixo como último recurso,
+     pra nunca travar quem chama.
+     BUG (v380): essa busca só existia dentro do onClick do botão "Buscar câmbio do mês" na aba
+     Relatório (visão INTERATIVA) — o fluxo de e-mail automático (gerarRelatorioHtmlHeadless, que
+     monta uma instância oculta do CD e chama gerarRelatorio direto, sem passar por nenhum botão)
+     nunca buscava esse câmbio. Como a instância oculta é descartada rápido, na prática o câmbio
+     "ao vivo" (usdRateGlobal, que também depende de um fetch feito ao montar o componente) muitas
+     vezes ainda nem tinha carregado a tempo — caindo no fallback fixo de 5,50 dentro do próprio
+     usdRateGlobal. O relatório saía com "R$ 5,50/US$" rotulado como "· fechamento do mês" (rótulo
+     fica em gerarRelatorio, que não sabe a diferença — só usa o que recebeu), quando o fechamento
+     real de agosto era R$ 5,18. Extraída aqui pra virar reutilizável tanto pelo botão quanto pelo
+     fluxo automático (ver o efeito autoRelatorio mais abaixo). */
+  var buscarCambioFechamentoMes=function(){
+    return new Promise(function(resolve){
+      var dataRefStr=null;
+      if(c._vestRent && c._vestRent.dataFim) dataRefStr=c._vestRent.dataFim;
+      else if(c._gorilaRent && c._gorilaRent.dataFim) dataRefStr=c._gorilaRent.dataFim;
+      var refDateObj;
+      if(dataRefStr){
+        refDateObj=new Date(dataRefStr+"T12:00:00");
+      } else {
+        refDateObj=new Date();refDateObj.setDate(1);refDateObj.setMonth(refDateObj.getMonth()-1);
+        refDateObj=new Date(refDateObj.getFullYear(),refDateObj.getMonth()+1,0);
+      }
+      var tentativas=[];
+      for(var di=0;di<7;di++){
+        var t=new Date(refDateObj);t.setDate(t.getDate()-di);
+        var anoT=t.getFullYear();var mesT=String(t.getMonth()+1).padStart(2,"0");var diaT=String(t.getDate()).padStart(2,"0");
+        tentativas.push(anoT+""+mesT+""+diaT);
+      }
+      var idx=0;
+      var tryNext=function(){
+        if(idx>=tentativas.length){
+          resolve(usdRateGlobal||5.70);
+          return;
+        }
+        var dataFmt=tentativas[idx++];
+        var dataFmtHifen=dataFmt.slice(0,4)+"-"+dataFmt.slice(4,6)+"-"+dataFmt.slice(6,8);
+        var dtRef=new Date(dataFmtHifen+"T12:00:00");
+        var dtIni=new Date(dtRef);dtIni.setDate(dtRef.getDate()-5);
+        var fmtD=function(dt){return dt.getFullYear()+""+String(dt.getMonth()+1).padStart(2,"0")+String(dt.getDate()).padStart(2,"0");};
+        fetch("https://economia.awesomeapi.com.br/json/daily/USD-BRL/5?start_date="+fmtD(dtIni)+"&end_date="+dataFmt)
+          .then(function(r){return r.json()})
+          .then(function(data){
+            if(Array.isArray(data)&&data.length>0){
+              var sorted=data.slice().sort(function(a,b){return parseInt(b.timestamp)-parseInt(a.timestamp)});
+              var melhor=sorted[0];
+              if(melhor&&melhor.bid){
+                resolve(parseFloat(melhor.bid));
+                return;
+              }
+            }
+            tryNext();
+          })
+          .catch(function(){tryNext();});
+      };
+      tryNext();
+    });
+  };
   /* Wrapper: busca a rentabilidade real dos ativos USD antes de gerar o relatório mensal —
      usado pelos 3 botões/fluxos de geração (câmbio já fixado, câmbio buscado, fallback) pra
      não duplicar essa lógica em cada um. */
@@ -10254,7 +10332,17 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           body+="<div style=\"flex:1;min-width:200px\">";
           body+="<div style=\"font-size:9px;color:#6B7489;font-weight:700;letter-spacing:1px;margin-bottom:6px\">VIA PIX</div>";
           body+="<div style=\"display:flex;align-items:center;gap:10px;background:#fff;border:1px solid rgba(212,163,40,0.25);border-radius:8px;padding:12px 16px;margin-bottom:14px\"><span style=\"font-size:22px\">⚡</span><div><div style=\"font-size:12px;color:#0A1628;font-weight:700;font-family:JetBrains Mono,monospace\">"+(_pk.length>35?_pk.substring(0,35)+"…":_pk)+"</div><div style=\"font-size:9px;color:#6B7489;margin-top:3px\">Chave PIX · COURINVEST</div></div></div>";
-          body+="<div style=\"background:#fff;border:2px solid rgba(15,157,88,0.3);border-radius:10px;padding:16px 20px;display:inline-block\"><div style=\"font-size:9px;color:#6B7489;font-weight:700;letter-spacing:1px;margin-bottom:4px\">Valor a transferir</div><div style=\"font-size:30px;font-weight:900;color:#0F9D58;font-family:JetBrains Mono,monospace\">"+fmF(_taxa2)+"</div></div>";
+          /* BUG (v380): essa caixa saía em branco — sem o rótulo "Valor a transferir" nem o
+             valor — em pelo menos um PDF real (cliente Arthur Werneck, R$ 479,76 sumindo mesmo
+             aparecendo certinho, com o mesmo _taxa2/fmF(), no card de KPI "Valor a Pagar" e na
+             "Memória de Cálculo" logo ao lado, na MESMA página). É a ÚNICA caixa desta seção
+             (das 3 que mostram o mesmo valor) que usava display:inline-block com largura
+             automática — as outras duas usam grid/flex normais. html2canvas tem problema
+             conhecido de medir errado (às vezes largura 0) blocos inline-block cujo tamanho
+             depende do conteúdo interno, deixando o conteúdo invisível na captura mesmo
+             existindo no HTML. Trocado pra display:table, que "abraça" o conteúdo do mesmo jeito
+             (visual idêntico) mas sem essa armadilha de medição do html2canvas. */
+          body+="<div style=\"background:#fff;border:2px solid rgba(15,157,88,0.3);border-radius:10px;padding:16px 20px;display:table\"><div style=\"font-size:9px;color:#6B7489;font-weight:700;letter-spacing:1px;margin-bottom:4px\">Valor a transferir</div><div style=\"font-size:30px;font-weight:900;color:#0F9D58;font-family:JetBrains Mono,monospace\">"+fmF(_taxa2)+"</div></div>";
           body+="</div>";
           var _excLines=[];
           if(_feeCalc.exclReserva>0)_excLines.push("🛡️ Reserva de Emergência: −"+fmF(_feeCalc.exclReserva));
@@ -19471,33 +19559,48 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           {autoRelatorio && !reportHtml && (function(){
             var tipoRel=typeof autoRelatorio==="string"&&autoRelatorio!=="true"?autoRelatorio:"mensal";
             sAutoRelatorio(false);
-            try{
-              var html=gerarRelatorio(tipoRel,d);
-              if(html){
-                /* Modo headless (envio automático de e-mail): devolve o HTML pra quem montou
-                   essa instância oculta do CD e não mexe em UI (print/tela) — a instância é
-                   descartada logo em seguida por quem chamou. */
-                if(onReportReady){
-                  try{onReportReady(html,tipoRel);}catch(_e){}
-                }else if(autoPrint){
-                  sAutoPrint(false);
-                  var w=window.open("","_blank","width=900,height=700");
-                  if(w){
-                    w.document.write(html);
-                    w.document.close();
-                    w.focus();
-                    setTimeout(function(){try{w.print();}catch(e){}},800);
-                  }
-                }else{
-                  sReportHtml(html);
+            /* BUG (v380): essa geração automática (abertura via evento courinvest:abrirRelatorio
+               — botão "PDF GP" — e a instância oculta usada pelo envio automático de e-mail,
+               gerarRelatorioHtmlHeadless) chamava gerarRelatorio(tipoRel,d) SEM buscar antes o
+               câmbio de fechamento do mês nem a rentabilidade real dos ativos USD — os dois só
+               eram buscados no botão "Buscar câmbio do mês" da aba Relatório, que esse fluxo
+               automático nunca passa por. Sem isso, gerarRelatorio caía no câmbio "ao vivo"
+               (usdRateGlobal — que numa instância oculta recém-criada muitas vezes ainda nem
+               tinha carregado, caindo no fallback fixo de 5,50) só que rotulado incorretamente
+               como "fechamento do mês" no relatório — reportado por cliente: PDF automático
+               mostrando R$5,50 quando o fechamento real de agosto foi R$5,18. Corrigido buscando
+               os dois (câmbio real do mês + rentabilidade real dos ativos USD) ANTES de gerar,
+               igual ao botão manual — usando as mesmas buscarCambioFechamentoMes/
+               buscarRentAtivosUSD, então os dois fluxos nunca mais podem divergir nisso. */
+            var _finalizarAuto=function(html){
+              if(onReportReady){
+                try{onReportReady(html,tipoRel);}catch(_e){}
+              }else if(html&&autoPrint){
+                sAutoPrint(false);
+                var w=window.open("","_blank","width=900,height=700");
+                if(w){
+                  w.document.write(html);
+                  w.document.close();
+                  w.focus();
+                  setTimeout(function(){try{w.print();}catch(e){}},800);
                 }
-              }else if(onReportReady){
-                try{onReportReady(null,tipoRel);}catch(_e){}
+              }else if(html){
+                sReportHtml(html);
               }
-            }catch(e){
-              console.error("Auto relatório:",e);
-              if(onReportReady){try{onReportReady(null,tipoRel);}catch(_e){}}
-            }
+            };
+            var _ehMensal=tipoRel==="mensal";
+            Promise.all([
+              _ehMensal?buscarCambioFechamentoMes():Promise.resolve(null),
+              _ehMensal?buscarRentAtivosUSD():Promise.resolve(null)
+            ]).catch(function(){return [null,null];}).then(function(res){
+              try{
+                var html=gerarRelatorio(tipoRel,d,res&&res[0],res&&res[1]);
+                _finalizarAuto(html||null);
+              }catch(e){
+                console.error("Auto relatório:",e);
+                _finalizarAuto(null);
+              }
+            });
             return null;
           })()}
           {irpfMode ? (
@@ -19952,65 +20055,17 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                   </div>
                   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:12,marginBottom:20}}>
                     <Cd onClick={function(){
-                      /* Se câmbio já foi informado manualmente, usa direto sem buscar API */
+                      /* Se câmbio já foi informado manualmente, usa direto sem buscar API.
+                         Senão, busca via buscarCambioFechamentoMes (mesma função reutilizada
+                         pelo fluxo de e-mail automático — ver comentário na definição dela). */
                       if(usdRelatorio&&usdRelatorio>1&&usdRelatorio<20){
                         gerarRelMensal(usdRelatorio);
                         return;
                       }
-                      /* Busca câmbio do último dia útil do mês do RELATÓRIO. */
-                      var dataRefStr=null;
-                      if(c._vestRent && c._vestRent.dataFim) dataRefStr=c._vestRent.dataFim; /* formato YYYY-MM-DD */
-                      else if(c._gorilaRent && c._gorilaRent.dataFim) dataRefStr=c._gorilaRent.dataFim;
-                      /* Calcula a data de referência (último dia do mês de fechamento) */
-                      var refDateObj;
-                      if(dataRefStr){
-                        refDateObj=new Date(dataRefStr+"T12:00:00");
-                      } else {
-                        /* Fallback: último dia do mês anterior à data atual */
-                        refDateObj=new Date();refDateObj.setDate(1);refDateObj.setMonth(refDateObj.getMonth()-1);
-                        refDateObj=new Date(refDateObj.getFullYear(),refDateObj.getMonth()+1,0);
-                      }
-                      /* Busca câmbio: tenta o dia exato e até 5 dias anteriores (para cobrir fins de semana/feriados) */
-                      var tentativas=[];
-                      for(var di=0;di<7;di++){
-                        var t=new Date(refDateObj);t.setDate(t.getDate()-di);
-                        var anoT=t.getFullYear();var mesT=String(t.getMonth()+1).padStart(2,"0");var diaT=String(t.getDate()).padStart(2,"0");
-                        tentativas.push(anoT+""+mesT+""+diaT);
-                      }
-                      /* Busca câmbio: usa endpoint de histórico dos últimos 5 dias a partir da data de referência */
-                      var idx=0;
-                      var tryNext=function(){
-                        if(idx>=tentativas.length){
-                          var taxaFallback=usdRateGlobal||5.70;
-                          sUsdRelatorio(taxaFallback);
-                          gerarRelMensal(taxaFallback);
-                          return;
-                        }
-                        var dataFmt=tentativas[idx++];
-                        /* Usa endpoint daily com janela de 5 dias antes da data — pega o mais recente disponível */
-                        var dataFmtHifen=dataFmt.slice(0,4)+"-"+dataFmt.slice(4,6)+"-"+dataFmt.slice(6,8);
-                        var dtRef=new Date(dataFmtHifen+"T12:00:00");
-                        var dtIni=new Date(dtRef);dtIni.setDate(dtRef.getDate()-5);
-                        var fmtD=function(dt){return dt.getFullYear()+""+String(dt.getMonth()+1).padStart(2,"0")+String(dt.getDate()).padStart(2,"0");};
-                        fetch("https://economia.awesomeapi.com.br/json/daily/USD-BRL/5?start_date="+fmtD(dtIni)+"&end_date="+dataFmt)
-                          .then(function(r){return r.json()})
-                          .then(function(data){
-                            if(Array.isArray(data)&&data.length>0){
-                              /* Ordena por timestamp decrescente e pega o mais recente */
-                              var sorted=data.slice().sort(function(a,b){return parseInt(b.timestamp)-parseInt(a.timestamp)});
-                              var melhor=sorted[0];
-                              if(melhor&&melhor.bid){
-                                var taxaFechamento=parseFloat(melhor.bid);
-                                sUsdRelatorio(taxaFechamento);
-                                gerarRelMensal(taxaFechamento);
-                                return;
-                              }
-                            }
-                            tryNext();
-                          })
-                          .catch(function(){tryNext();});
-                      };
-                      tryNext();
+                      buscarCambioFechamentoMes().then(function(taxa){
+                        sUsdRelatorio(taxa);
+                        gerarRelMensal(taxa);
+                      });
                     }} style={{padding:20,cursor:"pointer",background:"linear-gradient(145deg,"+T.goldD+",rgba(212,163,40,0.04))",border:"1px solid "+T.gold+"33"}}>
                       <div style={{display:"flex",alignItems:"center",gap:12}}>
                         <div style={{fontSize:32}}>📊</div>
@@ -30316,7 +30371,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '378';
+  var SW_VERSION = '380';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
