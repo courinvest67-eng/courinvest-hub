@@ -9203,9 +9203,21 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
             fonteUsdRate="câmbio atual";
           }
           var totalUSD_usd=usdRate>0?totalUSD_brl/usdRate:totalUSD_brl/5.70;
-          /* Calcula rentUSDvalor em USD se ainda não veio do Vest */
-          if(rentUSDvalor===null && somaRsUSD_brl!==null && usdRate>0){
-            rentUSDvalor=somaRsUSD_brl/usdRate;
+          /* Calcula rentUSDvalor em USD se ainda não veio de uma fonte direta (Vest).
+             BUG CORRIGIDO: a fórmula antiga convertia somaRsUSD_brl (o ganho em BRL "bruto",
+             que — pelo menos na fonte "extrato importado (estimado)", ver linha ~9131 acima —
+             ainda carrega o efeito cambial misturado) dividindo por UMA ÚNICA taxa de câmbio
+             (a de fechamento do mês). Isso fazia o valor em US$ mostrado ao lado do percentual
+             em USD (que esse mesmo percentual JÁ tem o câmbio removido, isolado logo acima) não
+             bater matematicamente com ele — ex: apareceu "-6,00%" ao lado de "US$ 654,61",
+             quando -6% do patrimônio em USD do cliente correspondia a quase US$ 1.000, não a
+             US$ 654. Agora o valor em US$ é derivado SEMPRE a partir do percentual já decidido
+             (rentUSDpct) e do patrimônio atual em USD (totalUSD_usd): ganho = fim − fim/(1+pct).
+             Isso garante que o percentual e o valor em dólar mostrados nunca mais divirjam,
+             não importa qual das fontes (fechamento por ativo, Vest, Gorila, extrato estimado)
+             tenha originado o percentual. */
+          if(rentUSDvalor===null && rentUSDpct!==null && totalUSD_usd>0){
+            rentUSDvalor=totalUSD_usd-(totalUSD_usd/(1+rentUSDpct/100));
           }
           /* === Rentabilidade em BRL dos ativos USD (inclui efeito câmbio) — calculada pelo Gorila ===
              É a variação patrimonial real em reais. Diferente do rentUSDpct que é em dólar. */
@@ -30260,7 +30272,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '375';
+  var SW_VERSION = '376';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
