@@ -21722,22 +21722,34 @@ function FinanceiroView({data:d,dispatch:dp}){
                   var isMob=typeof window!=="undefined"&&window.innerWidth<640;
                   var minBarW=isMob?44:0;
                   var totalMinW=isMob?(mesesOrdenados.length*(minBarW+6)):0;
+                  // Quando há muitos meses no gráfico (visão "todos os anos"), o valor em R$ escrito
+                  // na horizontal em cima de cada barra colava no valor da barra vizinha, ficando
+                  // ilegível. Nesse caso o valor passa a ser escrito na vertical (ocupa só a largura
+                  // de um caractere em vez da largura do texto inteiro) e a pílula de variação %
+                  // só aparece na barra selecionada — igual já acontecia no celular.
+                  var manyBars=!isMob && mesesOrdenados.length>12;
+                  var chartH=manyBars?260:(isMob?180:220);
+                  var maxBarH=manyBars?120:(isMob?130:175);
                   return (
                     <div style={{overflowX:isMob?"auto":"visible",paddingBottom:isMob?4:0}}>
-                      <div style={{display:"flex",alignItems:"flex-end",gap:isMob?6:(mesesOrdenados.length>8?4:8),height:isMob?180:220,padding:"0 2px",minWidth:totalMinW||"auto"}}>
+                      <div style={{display:"flex",alignItems:"flex-end",gap:isMob?6:(mesesOrdenados.length>8?4:8),height:chartH,padding:"0 2px",minWidth:totalMinW||"auto"}}>
                         {mesesOrdenados.map(function(m,i){
                           var prevRec=i>0?byMonth[mesesOrdenados[i-1]].rec:0;
                           var curRec=byMonth[m].rec;
                           var evolPct=prevRec>0?(((curRec/prevRec)-1)*100):0;
                           var isSel=selMonth===m;
-                          var barH=Math.max(12,(curRec/mxRec)*(isMob?130:175));
+                          var barH=Math.max(12,(curRec/mxRec)*maxBarH);
                           return (
                             <div key={i} onClick={function(){sSelMonth(isSel?null:m)}} style={{flex:isMob?"0 0 "+minBarW+"px":1,display:"flex",flexDirection:"column",alignItems:"center",cursor:"pointer",minWidth:isMob?minBarW:0}}>
-                              {i>0 && (!isMob||isSel) && <div style={{padding:"2px 6px",borderRadius:6,background:evolPct>=0?"rgba(45,212,160,0.12)":"rgba(239,100,97,0.12)",marginBottom:4,whiteSpace:"nowrap"}}>
+                              {i>0 && ((!isMob&&!manyBars)||isSel) && <div style={{padding:"2px 6px",borderRadius:6,background:evolPct>=0?"rgba(45,212,160,0.12)":"rgba(239,100,97,0.12)",marginBottom:4,whiteSpace:"nowrap"}}>
                                 <span style={{fontSize:9,fontWeight:700,color:evolPct>=0?T.green:T.red}}>{evolPct>=0?"▲":"▼"}{Math.abs(evolPct).toFixed(1)}%</span>
                               </div>}
-                              {i===0 && !isMob && <div style={{height:22}}/>}
-                              {(!isMob||isSel) && <div style={{fontSize:isMob?11:(mesesOrdenados.length>8?8:11),fontWeight:700,color:isSel?T.gold:T.t1,fontFamily:"'JetBrains Mono'",marginBottom:4,whiteSpace:"nowrap"}}>{fm(curRec).replace("R$ ","")}</div>}
+                              {i===0 && !isMob && !manyBars && <div style={{height:22}}/>}
+                              {(!isMob||isSel) && (manyBars&&!isSel ? (
+                                <div style={{writingMode:"vertical-rl",transform:"rotate(180deg)",fontSize:8,fontWeight:700,color:T.t1,fontFamily:"'JetBrains Mono'",marginBottom:4,whiteSpace:"nowrap",letterSpacing:0.5}}>{fm(curRec).replace("R$ ","")}</div>
+                              ) : (
+                                <div style={{fontSize:isMob?11:(mesesOrdenados.length>8?8:11),fontWeight:700,color:isSel?T.gold:T.t1,fontFamily:"'JetBrains Mono'",marginBottom:4,whiteSpace:"nowrap"}}>{fm(curRec).replace("R$ ","")}</div>
+                              ))}
                               <div style={{width:"100%",maxWidth:isMob?44:56,height:barH,background:isSel?"linear-gradient(180deg,#F0D060,#D4A328,rgba(212,163,40,0.4))":"linear-gradient(180deg,rgba(45,212,160,0.8),rgba(45,212,160,0.4),rgba(45,212,160,0.1))",borderRadius:"8px 8px 3px 3px",border:isSel?"1.5px solid "+T.gold:"1px solid rgba(45,212,160,0.15)",boxShadow:isSel?"0 0 16px rgba(212,163,40,0.3)":"0 2px 8px rgba(45,212,160,0.08)",transition:"all 0.3s ease",position:"relative",overflow:"hidden"}}>
                                 <div style={{position:"absolute",top:0,left:"20%",right:"20%",height:2,background:isSel?"rgba(255,255,255,0.5)":"rgba(255,255,255,0.15)",borderRadius:1}}/>
                               </div>
@@ -30371,7 +30383,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '380';
+  var SW_VERSION = '381';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
