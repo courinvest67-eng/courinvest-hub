@@ -21341,6 +21341,9 @@ function FinanceiroView({data:d,dispatch:dp}){
   const[selCliFin,sSelCliFin]=useState(null);
   const[selYear,sSelYear]=useState("todos");
   const[catSel,sCatSel]=useState(null);
+  /* Ano selecionado nos seletores de "excluir por ano" da aba Importar (entradas/despesas) */
+  const[delAnoEntradas,sDelAnoEntradas]=useState("");
+  const[delAnoDespesas,sDelAnoDespesas]=useState("");
 
   
   var importPlanilha=function(file){
@@ -21579,14 +21582,58 @@ function FinanceiroView({data:d,dispatch:dp}){
               <div style={{fontSize:15,fontWeight:700,color:T.gold,marginBottom:6}}>Planilha de Entradas</div>
               <div style={{fontSize:11,color:T.t3,marginBottom:18,lineHeight:1.7}}>Selecione uma ou <strong style={{color:T.t2}}>várias planilhas</strong>.<br/><span style={{color:T.t2,fontSize:10}}>Data · Serviço · Meio · Cliente · Valor · NF · % Fat.</span></div>
               <Bt onClick={function(){fileRef.current&&fileRef.current.click()}} style={{fontSize:13,padding:"12px 24px",width:"100%"}}>📥 Selecionar Planilha</Bt>
-              {entradas.length>0&&(<div style={{marginTop:14}}><div style={{padding:"8px 12px",background:T.greenD,borderRadius:8,fontSize:12,color:T.green,fontWeight:600,marginBottom:8}}>✅ {entradas.length} entradas · {fm(totalEntradas)}</div><Bt v="secondary" onClick={function(){if(window.confirm("Limpar todas as entradas?"))sEntradas([]);}} style={{fontSize:10,padding:"5px 12px",width:"100%",color:T.red,borderColor:"rgba(212,132,126,0.3)"}}>🗑 Limpar entradas</Bt></div>)}
+              {entradas.length>0&&(<div style={{marginTop:14}}>
+                <div style={{padding:"8px 12px",background:T.greenD,borderRadius:8,fontSize:12,color:T.green,fontWeight:600,marginBottom:8}}>✅ {entradas.length} entradas · {fm(totalEntradas)}</div>
+                {(function(){
+                  var anosEnt=Array.from(new Set(entradas.filter(function(e){return e.data}).map(function(e){return e.data.substring(0,4)}))).sort().reverse();
+                  if(anosEnt.length===0)return null;
+                  return (
+                    <div style={{display:"flex",gap:6,marginBottom:8}}>
+                      <select value={delAnoEntradas} onChange={function(e){sDelAnoEntradas(e.target.value)}} style={{flex:1,minWidth:0,padding:"5px 8px",borderRadius:8,fontSize:10,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",color:T.t1}}>
+                        <option value="">Excluir um ano...</option>
+                        {anosEnt.map(function(a){return <option key={a} value={a}>{a}</option>})}
+                      </select>
+                      <Bt v="secondary" disabled={!delAnoEntradas} onClick={function(){
+                        if(!delAnoEntradas)return;
+                        var qtd=entradas.filter(function(e){return e.data&&e.data.substring(0,4)===delAnoEntradas}).length;
+                        if(!window.confirm("Excluir "+qtd+" entradas de "+delAnoEntradas+"?"))return;
+                        sEntradas(function(prev){return prev.filter(function(e){return !(e.data&&e.data.substring(0,4)===delAnoEntradas)});});
+                        sDelAnoEntradas("");
+                      }} style={{fontSize:10,padding:"5px 12px",color:T.red,borderColor:"rgba(212,132,126,0.3)",opacity:delAnoEntradas?1:0.5,cursor:delAnoEntradas?"pointer":"default",whiteSpace:"nowrap"}}>🗑 Excluir ano</Bt>
+                    </div>
+                  );
+                })()}
+                <Bt v="secondary" onClick={function(){if(window.confirm("Limpar todas as entradas?"))sEntradas([]);}} style={{fontSize:10,padding:"5px 12px",width:"100%",color:T.red,borderColor:"rgba(212,132,126,0.3)"}}>🗑 Limpar todas as entradas</Bt>
+              </div>)}
             </Cd>
             <Cd style={{padding:28,textAlign:"center"}} hov={false}>
               <div style={{fontSize:36,marginBottom:10}}>💸</div>
               <div style={{fontSize:15,fontWeight:700,color:"#EF6461",marginBottom:6}}>Planilha de Despesas</div>
               <div style={{fontSize:11,color:T.t3,marginBottom:18,lineHeight:1.7}}>Valores negativos aceitos.<br/><span style={{color:T.t2,fontSize:10}}>Data · Tipo Despesa · Meio Pagamento · Recebimento · Valor</span></div>
               <Bt onClick={function(){fileDespRef.current&&fileDespRef.current.click()}} style={{fontSize:13,padding:"12px 24px",width:"100%",background:"rgba(239,100,97,0.12)",border:"1px solid rgba(239,100,97,0.3)",color:"#EF6461"}}>📂 Selecionar Planilha</Bt>
-              {despesas.length>0&&(<div style={{marginTop:14}}><div style={{padding:"8px 12px",background:"rgba(239,100,97,0.08)",borderRadius:8,fontSize:12,color:"#EF6461",fontWeight:600,marginBottom:8}}>✅ {despesas.length} despesas · {fm(despesas.reduce(function(s,d){return s+d.valor},0))}</div><Bt v="secondary" onClick={function(){if(window.confirm("Limpar todas as despesas?"))sDespesas([]);}} style={{fontSize:10,padding:"5px 12px",width:"100%",color:T.red,borderColor:"rgba(212,132,126,0.3)"}}>🗑 Limpar despesas</Bt></div>)}
+              {despesas.length>0&&(<div style={{marginTop:14}}>
+                <div style={{padding:"8px 12px",background:"rgba(239,100,97,0.08)",borderRadius:8,fontSize:12,color:"#EF6461",fontWeight:600,marginBottom:8}}>✅ {despesas.length} despesas · {fm(despesas.reduce(function(s,d){return s+d.valor},0))}</div>
+                {(function(){
+                  var anosDesp=Array.from(new Set(despesas.filter(function(d){return d.data}).map(function(d){return d.data.substring(0,4)}))).sort().reverse();
+                  if(anosDesp.length===0)return null;
+                  return (
+                    <div style={{display:"flex",gap:6,marginBottom:8}}>
+                      <select value={delAnoDespesas} onChange={function(e){sDelAnoDespesas(e.target.value)}} style={{flex:1,minWidth:0,padding:"5px 8px",borderRadius:8,fontSize:10,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",color:T.t1}}>
+                        <option value="">Excluir um ano...</option>
+                        {anosDesp.map(function(a){return <option key={a} value={a}>{a}</option>})}
+                      </select>
+                      <Bt v="secondary" disabled={!delAnoDespesas} onClick={function(){
+                        if(!delAnoDespesas)return;
+                        var qtd=despesas.filter(function(d){return d.data&&d.data.substring(0,4)===delAnoDespesas}).length;
+                        if(!window.confirm("Excluir "+qtd+" despesas de "+delAnoDespesas+"?"))return;
+                        sDespesas(function(prev){return prev.filter(function(d){return !(d.data&&d.data.substring(0,4)===delAnoDespesas)});});
+                        sDelAnoDespesas("");
+                      }} style={{fontSize:10,padding:"5px 12px",color:T.red,borderColor:"rgba(212,132,126,0.3)",opacity:delAnoDespesas?1:0.5,cursor:delAnoDespesas?"pointer":"default",whiteSpace:"nowrap"}}>🗑 Excluir ano</Bt>
+                    </div>
+                  );
+                })()}
+                <Bt v="secondary" onClick={function(){if(window.confirm("Limpar todas as despesas?"))sDespesas([]);}} style={{fontSize:10,padding:"5px 12px",width:"100%",color:T.red,borderColor:"rgba(212,132,126,0.3)"}}>🗑 Limpar todas as despesas</Bt>
+              </div>)}
             </Cd>
           </div>
           {entradas.length>0&&(<Cd style={{padding:18,marginBottom:14}} hov={false}><div style={{fontSize:12,fontWeight:700,color:T.gold,marginBottom:12}}>Preview entradas ({Math.min(entradas.length,20)} de {entradas.length})</div><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:600}}><thead><tr style={{background:"rgba(255,255,255,0.02)"}}>{["Data","Serviço","Meio","Cliente","Valor","NF","%"].map(function(h,i){return <th key={i} style={{padding:"8px 10px",textAlign:i>=4?"right":"left",fontWeight:700,color:T.gold,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)"}}>{h}</th>})}</tr></thead><tbody>{entradas.slice(0,20).map(function(e,i){return (<tr key={e.id} style={{background:i%2===0?"transparent":"rgba(255,255,255,0.015)"}}><td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",whiteSpace:"nowrap"}}>{e.data?e.data.split("-").reverse().join("/"):""}</td><td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)"}}><Bg c={e.servico&&e.servico.indexOf("Patrimônio")>=0?"gold":e.servico&&e.servico.indexOf("Financeira")>=0?"cyan":"purple"}>{e.servico}</Bg></td><td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",color:T.t2}}>{e.meio}</td><td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",fontWeight:600}}>{e.cliente}</td><td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",textAlign:"right",fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(e.valor)}</td><td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",textAlign:"right",color:e.nf==="OK"?T.green:T.t3}}>{e.nf}</td><td style={{padding:"6px 10px",borderBottom:"1px solid rgba(255,255,255,0.02)",textAlign:"right",color:T.t3,fontFamily:"'JetBrains Mono'"}}>{e.pctFat?e.pctFat.toFixed(2)+"%":""}</td></tr>)})}</tbody></table></div></Cd>)}
@@ -30383,7 +30430,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '381';
+  var SW_VERSION = '382';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
