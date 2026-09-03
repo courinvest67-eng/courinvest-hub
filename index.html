@@ -22439,23 +22439,29 @@ function ParceirosView({data:d,dispatch:dp}){
 
   const TIPOS_COMISSAO={recorrente:"Recorrente sobre a taxa",unico:"Bônus único na conversão",hibrido:"Híbrido (bônus + recorrente)"};
   const STATUS_IND={aberta:{l:"Aberta",c:"cyan"},em_negociacao:{l:"Em negociação",c:"orange"},convertido:{l:"Convertida",c:"green"},perdido:{l:"Perdida",c:"red"}};
+  /* direcao: "pagamos" = parceiro nos indica clientes, a Courinvest paga comissão a ele.
+     "recebemos" = a Courinvest indica clientes/leads pra esse parceiro (ex: contador, seguradora,
+     outra empresa parceira) e recebe comissão dele em troca. Registros antigos sem esse campo
+     (criados antes dessa mudança) são tratados como "pagamos", que era o único sentido que existia. */
+  const DIRECAO_LABEL={pagamos:{l:"Pagamos comissão a ele",c:"red",tit:"💸 Parceiros que pagamos"},recebemos:{l:"Recebemos comissão dele",c:"green",tit:"💰 Parceiros que nos pagam"}};
 
   /* === Form: novo/editar parceiro === */
   const[showFormParc,sShowFormParc]=useState(false);
   const[editParcId,sEditParcId]=useState(null);
   const[fpNome,sFpNome]=useState("");
   const[fpContato,sFpContato]=useState("");
+  const[fpDirecao,sFpDirecao]=useState("pagamos");
   const[fpTipo,sFpTipo]=useState("recorrente");
   const[fpPct,sFpPct]=useState("");
   const[fpBonus,sFpBonus]=useState("");
   const[fpObs,sFpObs]=useState("");
 
   const resetFormParc=function(){
-    sFpNome("");sFpContato("");sFpTipo("recorrente");sFpPct("");sFpBonus("");sFpObs("");sEditParcId(null);sShowFormParc(false);
+    sFpNome("");sFpContato("");sFpDirecao("pagamos");sFpTipo("recorrente");sFpPct("");sFpBonus("");sFpObs("");sEditParcId(null);sShowFormParc(false);
   };
   const abrirNovoParc=function(){resetFormParc();sShowFormParc(true);};
   const abrirEdicaoParc=function(p){
-    sEditParcId(p.id);sFpNome(p.nome||"");sFpContato(p.contato||"");sFpTipo(p.tipoComissao||"recorrente");
+    sEditParcId(p.id);sFpNome(p.nome||"");sFpContato(p.contato||"");sFpDirecao(p.direcao||"pagamos");sFpTipo(p.tipoComissao||"recorrente");
     sFpPct(p.percentual?String(p.percentual):"");sFpBonus(p.bonus?String(p.bonus):"");sFpObs(p.obs||"");sShowFormParc(true);
   };
   const salvarParceiro=function(){
@@ -22463,6 +22469,7 @@ function ParceirosView({data:d,dispatch:dp}){
     var payload={
       nome:fpNome.trim(),
       contato:fpContato.trim(),
+      direcao:fpDirecao,
       tipoComissao:fpTipo,
       percentual:fpPct?parseFloat(String(fpPct).replace(",",".")):0,
       bonus:fpBonus?parseFloat(String(fpBonus).replace(",",".")):0,
@@ -22558,10 +22565,16 @@ function ParceirosView({data:d,dispatch:dp}){
     return {parceiro:p,totalIndicacoes:minhas.length,abertas:abertas,convertidas:convertidas.length,perdidas:perdidas,recMensal:recMensal,bonusPendente:bonusPendente,bonusPago:bonusPago};
   }).sort(function(a,b){return (b.recMensal+b.bonusPendente)-(a.recMensal+a.bonusPendente)});
 
-  const totalRecMensal=resumo.reduce(function(s,r){return s+r.recMensal},0);
-  const totalBonusPendente=resumo.reduce(function(s,r){return s+r.bonusPendente},0);
+  const resumoPagar=resumo.filter(function(r){return (r.parceiro.direcao||"pagamos")==="pagamos"});
+  const resumoReceber=resumo.filter(function(r){return (r.parceiro.direcao||"pagamos")==="recebemos"});
+  const totalRecMensalPagar=resumoPagar.reduce(function(s,r){return s+r.recMensal},0);
+  const totalBonusPendentePagar=resumoPagar.reduce(function(s,r){return s+r.bonusPendente},0);
+  const totalRecMensalReceber=resumoReceber.reduce(function(s,r){return s+r.recMensal},0);
+  const totalBonusPendenteReceber=resumoReceber.reduce(function(s,r){return s+r.bonusPendente},0);
   const totalIndAbertas=indicacoes.filter(function(i){return i.status==="aberta"||i.status==="em_negociacao"}).length;
   const totalIndConvertidas=indicacoes.filter(function(i){return i.status==="convertido"}).length;
+  const parceirosPagamos=parceiros.filter(function(p){return (p.direcao||"pagamos")==="pagamos"});
+  const parceirosRecebemos=parceiros.filter(function(p){return (p.direcao||"pagamos")==="recebemos"});
 
   return (
     <div>
@@ -22576,8 +22589,10 @@ function ParceirosView({data:d,dispatch:dp}){
         <KCard label="PARCEIROS ATIVOS" valor={String(parceiros.length)} cor={T.gold}/>
         <KCard label="INDICAÇÕES EM ABERTO" valor={String(totalIndAbertas)} cor={T.cyan}/>
         <KCard label="CONVERTIDAS" valor={String(totalIndConvertidas)} cor={T.green}/>
-        <KCard label="COMISSÃO RECORRENTE/MÊS" valor={fm(totalRecMensal)} cor={T.gold}/>
-        <KCard label="BÔNUS PENDENTES" valor={fm(totalBonusPendente)} cor={T.red}/>
+        <KCard label="💸 A PAGAR/MÊS" valor={fm(totalRecMensalPagar)} cor={T.red}/>
+        <KCard label="💰 A RECEBER/MÊS" valor={fm(totalRecMensalReceber)} cor={T.green}/>
+        <KCard label="BÔNUS A PAGAR" valor={fm(totalBonusPendentePagar)} cor={T.red}/>
+        <KCard label="BÔNUS A RECEBER" valor={fm(totalBonusPendenteReceber)} cor={T.green}/>
       </div>
 
       <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
@@ -22586,45 +22601,57 @@ function ParceirosView({data:d,dispatch:dp}){
         )})}
       </div>
 
-      {pTab==="parceiros" && (
-        <div>
-          <Bt onClick={abrirNovoParc} style={{marginBottom:14}}>➕ Novo parceiro</Bt>
-          {parceiros.length===0 && <Cd style={{padding:28,textAlign:"center"}} hov={false}><div style={{fontSize:32,marginBottom:8}}>🤝</div><div style={{fontSize:13,color:T.t3}}>Nenhum parceiro cadastrado ainda. Cadastre o primeiro parceiro pra começar a registrar indicações.</div></Cd>}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12}}>
-            {parceiros.map(function(p){
-              var minhas=indicacoes.filter(function(i){return i.parceiroId===p.id});
-              return (
-                <Cd key={p.id} style={{padding:18}} hov={false}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
-                    <div style={{display:"flex",alignItems:"center",gap:10}}>
-                      <Av name={p.nome} sz={36}/>
-                      <div>
-                        <div style={{fontSize:14,fontWeight:700,color:T.t1}}>{p.nome}</div>
-                        {p.contato && <div style={{fontSize:11,color:T.t3}}>{p.contato}</div>}
-                      </div>
-                    </div>
-                    <div style={{display:"flex",gap:4}}>
-                      <button onClick={function(){abrirEdicaoParc(p)}} style={{background:"transparent",border:"none",color:T.t3,cursor:"pointer",fontSize:13}}>✏️</button>
-                      <button onClick={function(){excluirParceiro(p)}} style={{background:"transparent",border:"none",color:T.red,cursor:"pointer",fontSize:13}}>🗑️</button>
-                    </div>
+      {pTab==="parceiros" && (function(){
+        var renderCard=function(p){
+          var minhas=indicacoes.filter(function(i){return i.parceiroId===p.id});
+          var dirInfo=DIRECAO_LABEL[p.direcao||"pagamos"];
+          return (
+            <Cd key={p.id} style={{padding:18}} hov={false}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <Av name={p.nome} sz={36}/>
+                  <div>
+                    <div style={{fontSize:14,fontWeight:700,color:T.t1}}>{p.nome}</div>
+                    {p.contato && <div style={{fontSize:11,color:T.t3}}>{p.contato}</div>}
                   </div>
-                  <Bg c={p.tipoComissao==="recorrente"?"cyan":p.tipoComissao==="unico"?"purple":"gold"}>{TIPOS_COMISSAO[p.tipoComissao]||p.tipoComissao}</Bg>
-                  <div style={{fontSize:11,color:T.t2,marginTop:8}}>
-                    {(p.tipoComissao==="recorrente"||p.tipoComissao==="hibrido") && <span>{p.percentual||0}% recorrente da taxa mensal</span>}
-                    {p.tipoComissao==="hibrido" && <span> · </span>}
-                    {(p.tipoComissao==="unico"||p.tipoComissao==="hibrido") && <span>{fm(p.bonus||0)} bônus na conversão</span>}
-                  </div>
-                  {p.obs && <div style={{fontSize:10,color:T.t3,marginTop:6,fontStyle:"italic"}}>{p.obs}</div>}
-                  <div style={{display:"flex",gap:10,marginTop:12,paddingTop:10,borderTop:"1px solid rgba(255,255,255,0.04)"}}>
-                    <div style={{fontSize:10,color:T.t3}}>{minhas.length} indicação(ões)</div>
-                    <button onClick={function(){abrirNovaInd(p.id)}} style={{marginLeft:"auto",background:"transparent",border:"none",color:T.gold,cursor:"pointer",fontSize:10,fontWeight:700}}>+ indicação</button>
-                  </div>
-                </Cd>
-              );
-            })}
+                </div>
+                <div style={{display:"flex",gap:4}}>
+                  <button onClick={function(){abrirEdicaoParc(p)}} style={{background:"transparent",border:"none",color:T.t3,cursor:"pointer",fontSize:13}}>✏️</button>
+                  <button onClick={function(){excluirParceiro(p)}} style={{background:"transparent",border:"none",color:T.red,cursor:"pointer",fontSize:13}}>🗑️</button>
+                </div>
+              </div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                <Bg c={dirInfo.c}>{dirInfo.l}</Bg>
+                <Bg c={p.tipoComissao==="recorrente"?"cyan":p.tipoComissao==="unico"?"purple":"gold"}>{TIPOS_COMISSAO[p.tipoComissao]||p.tipoComissao}</Bg>
+              </div>
+              <div style={{fontSize:11,color:T.t2,marginTop:8}}>
+                {(p.tipoComissao==="recorrente"||p.tipoComissao==="hibrido") && <span>{p.percentual||0}% recorrente {p.direcao==="recebemos"?"do que o parceiro fatura":"da taxa mensal do cliente"}</span>}
+                {p.tipoComissao==="hibrido" && <span> · </span>}
+                {(p.tipoComissao==="unico"||p.tipoComissao==="hibrido") && <span>{fm(p.bonus||0)} bônus na conversão</span>}
+              </div>
+              {p.obs && <div style={{fontSize:10,color:T.t3,marginTop:6,fontStyle:"italic"}}>{p.obs}</div>}
+              <div style={{display:"flex",gap:10,marginTop:12,paddingTop:10,borderTop:"1px solid rgba(255,255,255,0.04)"}}>
+                <div style={{fontSize:10,color:T.t3}}>{minhas.length} indicação(ões)</div>
+                <button onClick={function(){abrirNovaInd(p.id)}} style={{marginLeft:"auto",background:"transparent",border:"none",color:T.gold,cursor:"pointer",fontSize:10,fontWeight:700}}>+ indicação</button>
+              </div>
+            </Cd>
+          );
+        };
+        return (
+          <div>
+            <Bt onClick={abrirNovoParc} style={{marginBottom:14}}>➕ Novo parceiro</Bt>
+            {parceiros.length===0 && <Cd style={{padding:28,textAlign:"center"}} hov={false}><div style={{fontSize:32,marginBottom:8}}>🤝</div><div style={{fontSize:13,color:T.t3}}>Nenhum parceiro cadastrado ainda. Cadastre o primeiro parceiro pra começar a registrar indicações.</div></Cd>}
+            {parceirosPagamos.length>0 && (<div style={{marginBottom:20}}>
+              <div style={{fontSize:11,fontWeight:800,color:T.red,letterSpacing:1,textTransform:"uppercase",marginBottom:10,paddingBottom:6,borderBottom:"1px solid rgba(239,100,97,0.15)"}}>{DIRECAO_LABEL.pagamos.tit}</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12}}>{parceirosPagamos.map(renderCard)}</div>
+            </div>)}
+            {parceirosRecebemos.length>0 && (<div>
+              <div style={{fontSize:11,fontWeight:800,color:T.green,letterSpacing:1,textTransform:"uppercase",marginBottom:10,paddingBottom:6,borderBottom:"1px solid rgba(52,211,153,0.15)"}}>{DIRECAO_LABEL.recebemos.tit}</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12}}>{parceirosRecebemos.map(renderCard)}</div>
+            </div>)}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {pTab==="indicacoes" && (
         <div>
@@ -22637,15 +22664,17 @@ function ParceirosView({data:d,dispatch:dp}){
               <div style={{overflowX:"auto"}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:680}}>
                   <thead><tr style={{background:"rgba(255,255,255,0.02)"}}>
-                    {["Parceiro","Lead/Indicado","Data","Status","Cliente","Taxa mensal","Ações"].map(function(h,i){return <th key={i} style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:T.gold,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)"}}>{h}</th>})}
+                    {["Parceiro","Sentido","Lead/Indicado","Data","Status","Cliente","Valor mensal","Ações"].map(function(h,i){return <th key={i} style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:T.gold,fontSize:9,borderBottom:"1px solid rgba(212,163,40,0.1)"}}>{h}</th>})}
                   </tr></thead>
                   <tbody>
                     {indicacoes.slice().sort(function(a,b){return (b.data||"").localeCompare(a.data||"")}).map(function(i,idx){
                       var p=parcById(i.parceiroId);
                       var st=STATUS_IND[i.status]||STATUS_IND.aberta;
+                      var dirInfo=DIRECAO_LABEL[(p&&p.direcao)||"pagamos"];
                       return (
                         <tr key={i.id} style={{background:idx%2===0?"transparent":"rgba(255,255,255,0.015)"}}>
                           <td style={{padding:"8px 12px",borderBottom:"1px solid rgba(255,255,255,0.02)",fontWeight:600}}>{p?p.nome:"—"}</td>
+                          <td style={{padding:"8px 12px",borderBottom:"1px solid rgba(255,255,255,0.02)"}}><Bg c={dirInfo.c}>{dirInfo.c==="red"?"Pagamos":"Recebemos"}</Bg></td>
                           <td style={{padding:"8px 12px",borderBottom:"1px solid rgba(255,255,255,0.02)"}}>{i.leadNome}</td>
                           <td style={{padding:"8px 12px",borderBottom:"1px solid rgba(255,255,255,0.02)",whiteSpace:"nowrap"}}>{i.data?i.data.split("-").reverse().join("/"):""}</td>
                           <td style={{padding:"8px 12px",borderBottom:"1px solid rgba(255,255,255,0.02)"}}><Bg c={st.c}>{st.l}</Bg></td>
@@ -22666,55 +22695,66 @@ function ParceirosView({data:d,dispatch:dp}){
         </div>
       )}
 
-      {pTab==="resumo" && (
-        <div>
-          {resumo.length===0 ? (
-            <Cd style={{padding:28,textAlign:"center"}} hov={false}><div style={{fontSize:32,marginBottom:8}}>💰</div><div style={{fontSize:13,color:T.t3}}>Cadastre parceiros e indicações pra ver o resumo de comissões aqui.</div></Cd>
-          ):(
-            <div style={{display:"flex",flexDirection:"column",gap:10}}>
-              {resumo.map(function(r){
-                var minhas=indicacoes.filter(function(i){return i.parceiroId===r.parceiro.id && i.status==="convertido"});
-                return (
-                  <Cd key={r.parceiro.id} style={{padding:18}} hov={false}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
-                      <div style={{display:"flex",alignItems:"center",gap:10}}>
-                        <Av name={r.parceiro.nome} sz={32}/>
-                        <div>
-                          <div style={{fontSize:13,fontWeight:700,color:T.t1}}>{r.parceiro.nome}</div>
-                          <div style={{fontSize:10,color:T.t3}}>{r.totalIndicacoes} indicação(ões) · {r.convertidas} convertida(s) · {r.abertas} em aberto</div>
-                        </div>
-                      </div>
-                      <div style={{display:"flex",gap:16}}>
-                        {r.recMensal>0 && <div style={{textAlign:"right"}}><div style={{fontSize:8,color:T.t3,fontWeight:600}}>RECORRENTE/MÊS</div><div style={{fontSize:14,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(r.recMensal)}</div></div>}
-                        {r.bonusPendente>0 && <div style={{textAlign:"right"}}><div style={{fontSize:8,color:T.t3,fontWeight:600}}>BÔNUS A PAGAR</div><div style={{fontSize:14,fontWeight:800,color:T.red,fontFamily:"'JetBrains Mono'"}}>{fm(r.bonusPendente)}</div></div>}
-                      </div>
+      {pTab==="resumo" && (function(){
+        var renderResumoCard=function(r){
+          var minhas=indicacoes.filter(function(i){return i.parceiroId===r.parceiro.id && i.status==="convertido"});
+          var ehReceber=(r.parceiro.direcao||"pagamos")==="recebemos";
+          return (
+            <Cd key={r.parceiro.id} style={{padding:18}} hov={false}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <Av name={r.parceiro.nome} sz={32}/>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:700,color:T.t1}}>{r.parceiro.nome}</div>
+                    <div style={{fontSize:10,color:T.t3}}>{r.totalIndicacoes} indicação(ões) · {r.convertidas} convertida(s) · {r.abertas} em aberto</div>
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:16}}>
+                  {r.recMensal>0 && <div style={{textAlign:"right"}}><div style={{fontSize:8,color:T.t3,fontWeight:600}}>{ehReceber?"A RECEBER/MÊS":"A PAGAR/MÊS"}</div><div style={{fontSize:14,fontWeight:800,color:ehReceber?T.green:T.red,fontFamily:"'JetBrains Mono'"}}>{fm(r.recMensal)}</div></div>}
+                  {r.bonusPendente>0 && <div style={{textAlign:"right"}}><div style={{fontSize:8,color:T.t3,fontWeight:600}}>{ehReceber?"BÔNUS A RECEBER":"BÔNUS A PAGAR"}</div><div style={{fontSize:14,fontWeight:800,color:ehReceber?T.green:T.red,fontFamily:"'JetBrains Mono'"}}>{fm(r.bonusPendente)}</div></div>}
+                </div>
+              </div>
+              {minhas.length>0 && (
+                <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid rgba(255,255,255,0.04)"}}>
+                  {minhas.map(function(i){return(
+                    <div key={i.id} style={{display:"flex",alignItems:"center",gap:10,padding:"5px 0",fontSize:11,flexWrap:"wrap"}}>
+                      <span style={{flex:1,fontWeight:600}}>{i.clienteNome||i.leadNome}</span>
+                      {(r.parceiro.tipoComissao==="recorrente"||r.parceiro.tipoComissao==="hibrido") && (
+                        <label style={{display:"flex",alignItems:"center",gap:4,color:T.t3,fontSize:10,cursor:"pointer"}}>
+                          <input type="checkbox" checked={i.recorrenteAtiva!==false} onChange={function(){toggleRecorrenteAtiva(i)}}/> comissão recorrente ativa
+                        </label>
+                      )}
+                      {(r.parceiro.tipoComissao==="unico"||r.parceiro.tipoComissao==="hibrido") && (
+                        <label style={{display:"flex",alignItems:"center",gap:4,color:T.t3,fontSize:10,cursor:"pointer"}}>
+                          <input type="checkbox" checked={!!i.comissaoUnicaPaga} onChange={function(){toggleBonusPago(i)}}/> {ehReceber?"bônus recebido":"bônus pago"}
+                        </label>
+                      )}
                     </div>
-                    {minhas.length>0 && (
-                      <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid rgba(255,255,255,0.04)"}}>
-                        {minhas.map(function(i){return(
-                          <div key={i.id} style={{display:"flex",alignItems:"center",gap:10,padding:"5px 0",fontSize:11,flexWrap:"wrap"}}>
-                            <span style={{flex:1,fontWeight:600}}>{i.clienteNome||i.leadNome}</span>
-                            {(r.parceiro.tipoComissao==="recorrente"||r.parceiro.tipoComissao==="hibrido") && (
-                              <label style={{display:"flex",alignItems:"center",gap:4,color:T.t3,fontSize:10,cursor:"pointer"}}>
-                                <input type="checkbox" checked={i.recorrenteAtiva!==false} onChange={function(){toggleRecorrenteAtiva(i)}}/> comissão recorrente ativa
-                              </label>
-                            )}
-                            {(r.parceiro.tipoComissao==="unico"||r.parceiro.tipoComissao==="hibrido") && (
-                              <label style={{display:"flex",alignItems:"center",gap:4,color:T.t3,fontSize:10,cursor:"pointer"}}>
-                                <input type="checkbox" checked={!!i.comissaoUnicaPaga} onChange={function(){toggleBonusPago(i)}}/> bônus pago
-                              </label>
-                            )}
-                          </div>
-                        )})}
-                      </div>
-                    )}
-                  </Cd>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
+                  )})}
+                </div>
+              )}
+            </Cd>
+          );
+        };
+        return (
+          <div>
+            {resumo.length===0 ? (
+              <Cd style={{padding:28,textAlign:"center"}} hov={false}><div style={{fontSize:32,marginBottom:8}}>💰</div><div style={{fontSize:13,color:T.t3}}>Cadastre parceiros e indicações pra ver o resumo de comissões aqui.</div></Cd>
+            ):(
+              <div>
+                {resumoPagar.length>0 && (<div style={{marginBottom:20}}>
+                  <div style={{fontSize:11,fontWeight:800,color:T.red,letterSpacing:1,textTransform:"uppercase",marginBottom:10,paddingBottom:6,borderBottom:"1px solid rgba(239,100,97,0.15)"}}>💸 Comissões que pagamos</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:10}}>{resumoPagar.map(renderResumoCard)}</div>
+                </div>)}
+                {resumoReceber.length>0 && (<div>
+                  <div style={{fontSize:11,fontWeight:800,color:T.green,letterSpacing:1,textTransform:"uppercase",marginBottom:10,paddingBottom:6,borderBottom:"1px solid rgba(52,211,153,0.15)"}}>💰 Comissões que recebemos</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:10}}>{resumoReceber.map(renderResumoCard)}</div>
+                </div>)}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       <Mo open={showFormParc} onClose={resetFormParc} title={editParcId?"Editar parceiro":"Novo parceiro"}>
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -22727,6 +22767,18 @@ function ParceirosView({data:d,dispatch:dp}){
             <input value={fpContato} onChange={function(e){sFpContato(e.target.value)}} style={{width:"100%",padding:"8px 10px",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.03)",color:T.t1,fontSize:12,marginTop:4}}/>
           </div>
           <div>
+            <label style={{fontSize:10,color:T.t3,fontWeight:600}}>SENTIDO DA COMISSÃO</label>
+            <div style={{display:"flex",gap:8,marginTop:4}}>
+              <label style={{flex:1,display:"flex",alignItems:"center",gap:6,padding:"8px 10px",borderRadius:8,border:"1px solid "+(fpDirecao==="pagamos"?"rgba(239,100,97,0.4)":"rgba(255,255,255,0.08)"),background:fpDirecao==="pagamos"?"rgba(239,100,97,0.08)":"rgba(255,255,255,0.03)",cursor:"pointer",fontSize:11,color:fpDirecao==="pagamos"?T.red:T.t2}}>
+                <input type="radio" name="fpDirecao" checked={fpDirecao==="pagamos"} onChange={function(){sFpDirecao("pagamos")}}/> 💸 Pagamos a ele
+              </label>
+              <label style={{flex:1,display:"flex",alignItems:"center",gap:6,padding:"8px 10px",borderRadius:8,border:"1px solid "+(fpDirecao==="recebemos"?"rgba(52,211,153,0.4)":"rgba(255,255,255,0.08)"),background:fpDirecao==="recebemos"?"rgba(52,211,153,0.08)":"rgba(255,255,255,0.03)",cursor:"pointer",fontSize:11,color:fpDirecao==="recebemos"?T.green:T.t2}}>
+                <input type="radio" name="fpDirecao" checked={fpDirecao==="recebemos"} onChange={function(){sFpDirecao("recebemos")}}/> 💰 Recebemos dele
+              </label>
+            </div>
+            <div style={{fontSize:9,color:T.t3,marginTop:4}}>{fpDirecao==="pagamos"?"Esse parceiro nos indica clientes/leads e a Courinvest paga a comissão a ele.":"A Courinvest indica clientes/leads pra esse parceiro (ex: contador, seguradora) e recebe comissão dele."}</div>
+          </div>
+          <div>
             <label style={{fontSize:10,color:T.t3,fontWeight:600}}>MODELO DE COMISSÃO</label>
             <select value={fpTipo} onChange={function(e){sFpTipo(e.target.value)}} style={{width:"100%",padding:"8px 10px",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.03)",color:T.t1,fontSize:12,marginTop:4}}>
               <option value="recorrente">Recorrente sobre a taxa</option>
@@ -22736,7 +22788,7 @@ function ParceirosView({data:d,dispatch:dp}){
           </div>
           {(fpTipo==="recorrente"||fpTipo==="hibrido") && (
             <div>
-              <label style={{fontSize:10,color:T.t3,fontWeight:600}}>% RECORRENTE SOBRE A TAXA MENSAL DO CLIENTE</label>
+              <label style={{fontSize:10,color:T.t3,fontWeight:600}}>% RECORRENTE {fpDirecao==="recebemos"?"SOBRE O QUE O PARCEIRO FATURA COM O CLIENTE INDICADO":"SOBRE A TAXA MENSAL DO CLIENTE"}</label>
               <input value={fpPct} onChange={function(e){sFpPct(e.target.value)}} placeholder="ex: 15" style={{width:"100%",padding:"8px 10px",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.03)",color:T.t1,fontSize:12,marginTop:4}}/>
             </div>
           )}
@@ -22763,7 +22815,8 @@ function ParceirosView({data:d,dispatch:dp}){
             <label style={{fontSize:10,color:T.t3,fontWeight:600}}>PARCEIRO</label>
             <select value={fiParceiroId} onChange={function(e){sFiParceiroId(e.target.value)}} style={{width:"100%",padding:"8px 10px",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.03)",color:T.t1,fontSize:12,marginTop:4}}>
               <option value="">Selecione...</option>
-              {parceiros.map(function(p){return <option key={p.id} value={p.id}>{p.nome}</option>})}
+              {parceirosPagamos.length>0 && <optgroup label="💸 Pagamos comissão">{parceirosPagamos.map(function(p){return <option key={p.id} value={p.id}>{p.nome}</option>})}</optgroup>}
+              {parceirosRecebemos.length>0 && <optgroup label="💰 Recebemos comissão">{parceirosRecebemos.map(function(p){return <option key={p.id} value={p.id}>{p.nome}</option>})}</optgroup>}
             </select>
           </div>
           <div>
@@ -22790,7 +22843,7 @@ function ParceirosView({data:d,dispatch:dp}){
             <input value={fiCliente} onChange={function(e){sFiCliente(e.target.value)}} style={{width:"100%",padding:"8px 10px",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.03)",color:T.t1,fontSize:12,marginTop:4}}/>
           </div>
           <div>
-            <label style={{fontSize:10,color:T.t3,fontWeight:600}}>TAXA MENSAL DO CLIENTE (R$, pra calcular a comissão recorrente)</label>
+            <label style={{fontSize:10,color:T.t3,fontWeight:600}}>{(parcById(fiParceiroId)&&parcById(fiParceiroId).direcao)==="recebemos"?"RECEITA MENSAL GERADA PRO PARCEIRO (R$, pra calcular a comissão recorrente)":"TAXA MENSAL DO CLIENTE (R$, pra calcular a comissão recorrente)"}</label>
             <input value={fiValorTaxa} onChange={function(e){sFiValorTaxa(e.target.value)}} placeholder="ex: 800" style={{width:"100%",padding:"8px 10px",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.03)",color:T.t1,fontSize:12,marginTop:4}}/>
           </div>
           <div>
@@ -30829,7 +30882,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '383';
+  var SW_VERSION = '384';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
