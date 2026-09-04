@@ -21413,7 +21413,7 @@ function FinanceiroView({data:d,dispatch:dp}){
         var colData=findCol(["data","date"]);
         var colServico=findCol(["servic","serviç"]);
         var colMeio=findCol(["meio","recebimento","pagamento"]);
-        var colCliente=rawKeys.find(function(k){return k.trim().toLowerCase()==="cliente"}) || findCol(["cliente"]);
+        var colCliente=rawKeys.find(function(k){var kl=k.trim().toLowerCase();return kl==="cliente"||kl==="clientes"}) || rawKeys.find(function(k){var kl=k.trim().toLowerCase();return kl.indexOf("cliente")>=0 && kl.indexOf("nº")<0 && kl.indexOf("n°")<0 && kl.indexOf("num")<0 && kl.indexOf("qtd")<0}) || findCol(["cliente"]);
         var colValor=findCol(["valor","value"]);
         var colNF=findCol(["nf","nota"]);
         var colPct=findCol(["fat","percent","%"]);
@@ -22444,10 +22444,12 @@ function ParceirosView({data:d,dispatch:dp}){
      outra empresa parceira) e recebe comissão dele em troca. Registros antigos sem esse campo
      (criados antes dessa mudança) são tratados como "pagamos", que era o único sentido que existia. */
   const DIRECAO_LABEL={pagamos:{l:"Pagamos comissão a ele",c:"red",tit:"💸 Parceiros que pagamos"},recebemos:{l:"Recebemos comissão dele",c:"green",tit:"💰 Parceiros que nos pagam"}};
+  const TIPOS_PARCEIRO_PENDENTE={pf:"Pessoa física",contador:"Contador(a) / Contabilidade",corretora:"Corretora / Seguradora",outro:"Outro parceiro comercial"};
 
   /* === Form: novo/editar parceiro === */
   const[showFormParc,sShowFormParc]=useState(false);
   const[editParcId,sEditParcId]=useState(null);
+  const[aprovandoPendId,sAprovandoPendId]=useState(null);
   const[fpNome,sFpNome]=useState("");
   const[fpContato,sFpContato]=useState("");
   const[fpDirecao,sFpDirecao]=useState("pagamos");
@@ -22457,13 +22459,59 @@ function ParceirosView({data:d,dispatch:dp}){
   const[fpBonus,sFpBonus]=useState("");
   const[fpObs,sFpObs]=useState("");
 
+  /* === Pendentes automáticos (Fase 1 do programa de indicação automatizado) — leem direto do
+     Firestore (coleções leads_publicos/parceiros_pendentes, alimentadas pela página pública
+     indicar.html) e não passam pelo estado sincronizado normal (d.parceiros). Ver
+     claude/parceiros-automacao.md (salvo no projeto) pra contexto completo. */
+  const[pendLeads,sPendLeads]=useState([]);
+  const[pendParceiros,sPendParceiros]=useState([]);
+  const[loadingPend,sLoadingPend]=useState(true);
+  const carregarPendentes=function(){
+    if(!window._fbDB){sLoadingPend(false);return;}
+    sLoadingPend(true);
+    Promise.all([
+      window._fbDB.collection("leads_publicos").where("status","==","novo").get().catch(function(e){console.error("[Parceiros] Erro ao ler leads_publicos:",e);return{docs:[]}}),
+      window._fbDB.collection("parceiros_pendentes").where("status","==","pendente").get().catch(function(e){console.error("[Parceiros] Erro ao ler parceiros_pendentes:",e);return{docs:[]}})
+    ]).then(function(res){
+      var sortByCriado=function(a,b){var ta=(a.criadoEm&&a.criadoEm.toMillis)?a.criadoEm.toMillis():0;var tb=(b.criadoEm&&b.criadoEm.toMillis)?b.criadoEm.toMillis():0;return tb-ta;};
+      sPendLeads(res[0].docs.map(function(doc){return Object.assign({_id:doc.id},doc.data())}).sort(sortByCriado));
+      sPendParceiros(res[1].docs.map(function(doc){return Object.assign({_id:doc.id},doc.data())}).sort(sortByCriado));
+      sLoadingPend(false);
+    });
+  };
+  useEffect(function(){carregarPendentes();},[]);
+  const parceiroPorCodigo=function(codigo){
+    if(!codigo)return null;
+    return parceiros.find(function(p){return (p.codigo||"").toLowerCase()===String(codigo).trim().toLowerCase();});
+  };
+  const gerarCodigoParceiro=function(nome){
+    var base=(nome||"parceiro").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"").slice(0,10)||"parceiro";
+    var codigo=base,tentativa=0;
+    while(parceiros.some(function(p){return (p.codigo||"").toLowerCase()===codigo;})){tentativa++;codigo=base+tentativa;}
+    return codigo;
+  };
+
   const resetFormParc=function(){
-    sFpNome("");sFpContato("");sFpDirecao("pagamos");sFpTipo("recorrente");sFpPct("");sFpBonusTipo("fixo");sFpBonus("");sFpObs("");sEditParcId(null);sShowFormParc(false);
+    sFpNome("");sFpContato("");sFpDirecao("pagamos");sFpTipo("recorrente");sFpPct("");sFpBonusTipo("fixo");sFpBonus("");sFpObs("");sEditParcId(null);sAprovandoPendId(null);sShowFormParc(false);
   };
   const abrirNovoParc=function(){resetFormParc();sShowFormParc(true);};
   const abrirEdicaoParc=function(p){
     sEditParcId(p.id);sFpNome(p.nome||"");sFpContato(p.contato||"");sFpDirecao(p.direcao||"pagamos");sFpTipo(p.tipoComissao||"recorrente");
     sFpPct(p.percentual?String(p.percentual):"");sFpBonusTipo(p.bonusTipo||"fixo");sFpBonus(p.bonus?String(p.bonus):"");sFpObs(p.obs||"");sShowFormParc(true);
+  };
+  /* Pré-preenche o form de novo parceiro com os dados de um cadastro pendente (vindo da página
+     pública) — o admin só confere/completa o modelo de comissão e salva normalmente. */
+  const abrirAprovacaoParc=function(pend){
+    resetFormParc();
+    sFpNome(pend.nome||"");
+    sFpContato((pend.telefone||"")+(pend.email?(" · "+pend.email):""));
+    var obsAuto=[];
+    if(pend.tipo)obsAuto.push("Tipo: "+(TIPOS_PARCEIRO_PENDENTE[pend.tipo]||pend.tipo));
+    if(pend.cidade)obsAuto.push("Cidade: "+pend.cidade);
+    if(pend.comoIndica)obsAuto.push(pend.comoIndica);
+    sFpObs(obsAuto.join(". "));
+    sAprovandoPendId(pend._id);
+    sShowFormParc(true);
   };
   const salvarParceiro=function(){
     if(!fpNome.trim()){alert("Informe o nome do parceiro.");return;}
@@ -22481,7 +22529,13 @@ function ParceirosView({data:d,dispatch:dp}){
     if(editParcId){
       dp({t:"PARC_UPD_PARCEIRO",p:Object.assign({id:editParcId},payload)});
     }else{
+      payload.codigo=gerarCodigoParceiro(fpNome);
       dp({t:"PARC_ADD_PARCEIRO",p:Object.assign({criadoEm:Date.now()},payload)});
+      if(aprovandoPendId){
+        var pendId=aprovandoPendId;
+        if(window._fbDB){window._fbDB.collection("parceiros_pendentes").doc(pendId).update({status:"aprovado"}).catch(function(e){console.error(e);});}
+        sPendParceiros(function(prev){return prev.filter(function(x){return x._id!==pendId;});});
+      }
     }
     resetFormParc();
   };
@@ -22490,6 +22544,27 @@ function ParceirosView({data:d,dispatch:dp}){
     var msg='Excluir o parceiro "'+p.nome+'"?'+(qtd>0?(" Isso também vai excluir "+qtd+" indicação(ões) ligada(s) a ele."):"");
     if(!window.confirm(msg))return;
     dp({t:"PARC_DEL_PARCEIRO",p:p.id});
+  };
+  /* === Ações sobre pendentes (leads/parceiros vindos da página pública) === */
+  const aprovarLead=function(lead){
+    var p=parceiroPorCodigo(lead.refCode);
+    if(p){
+      dp({t:"PARC_ADD_INDIC",p:{parceiroId:p.id,leadNome:lead.nome,data:hojeISO(),status:"aberta",clienteNome:"",valorTaxaMensal:0,obs:"Lead automático (indicar.html) · "+(lead.telefone||"")+(lead.email?(" · "+lead.email):""),criadoEm:Date.now()}});
+    }
+    if(window._fbDB){
+      window._fbDB.collection("leads_publicos").doc(lead._id).update({status:p?"convertido_indicacao":"contatado"}).catch(function(e){console.error(e);});
+    }
+    sPendLeads(function(prev){return prev.filter(function(x){return x._id!==lead._id;});});
+  };
+  const descartarLead=function(lead){
+    if(!window.confirm('Descartar o lead "'+lead.nome+'"? Ele só some da lista de pendentes, o registro original continua salvo.'))return;
+    if(window._fbDB){window._fbDB.collection("leads_publicos").doc(lead._id).update({status:"descartado"}).catch(function(e){console.error(e);});}
+    sPendLeads(function(prev){return prev.filter(function(x){return x._id!==lead._id;});});
+  };
+  const descartarParceiroPendente=function(pend){
+    if(!window.confirm('Descartar o cadastro de "'+pend.nome+'"? Ele só some da lista de pendentes, o registro original continua salvo.'))return;
+    if(window._fbDB){window._fbDB.collection("parceiros_pendentes").doc(pend._id).update({status:"descartado"}).catch(function(e){console.error(e);});}
+    sPendParceiros(function(prev){return prev.filter(function(x){return x._id!==pend._id;});});
   };
 
   /* === Form: nova/editar indicação === */
@@ -22602,7 +22677,7 @@ function ParceirosView({data:d,dispatch:dp}){
       </div>
 
       <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
-        {[{id:"parceiros",l:"👥 Parceiros"},{id:"indicacoes",l:"📋 Indicações"},{id:"resumo",l:"💰 Resumo de Comissões"}].map(function(t){return(
+        {[{id:"parceiros",l:"👥 Parceiros"},{id:"pendentes",l:"📥 Pendentes"+((pendLeads.length+pendParceiros.length)>0?(" ("+(pendLeads.length+pendParceiros.length)+")"):"")},{id:"indicacoes",l:"📋 Indicações"},{id:"resumo",l:"💰 Resumo de Comissões"}].map(function(t){return(
           <button key={t.id} onClick={function(){sPTab(t.id)}} style={{padding:"8px 16px",borderRadius:12,fontSize:11,fontWeight:600,cursor:"pointer",border:pTab===t.id?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.04)",background:pTab===t.id?T.goldD:"transparent",color:pTab===t.id?T.gold:T.t3}}>{t.l}</button>
         )})}
       </div>
@@ -22636,7 +22711,18 @@ function ParceirosView({data:d,dispatch:dp}){
                 {(p.tipoComissao==="unico"||p.tipoComissao==="hibrido") && <span>{p.bonusTipo==="percentual"?((p.bonus||0)+"% da taxa mensal"):fm(p.bonus||0)} bônus na conversão</span>}
               </div>
               {p.obs && <div style={{fontSize:10,color:T.t3,marginTop:6,fontStyle:"italic"}}>{p.obs}</div>}
-              <div style={{display:"flex",gap:10,marginTop:12,paddingTop:10,borderTop:"1px solid rgba(255,255,255,0.04)"}}>
+              <div style={{marginTop:10}}>
+                {p.codigo ? (
+                  <button onClick={function(){
+                    var link=window.location.origin+"/indicar.html?ref="+p.codigo;
+                    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(link).then(function(){alert("🔗 Link copiado:\n"+link)}).catch(function(){window.prompt("Copie o link de indicação:",link)})}
+                    else{window.prompt("Copie o link de indicação:",link)}
+                  }} style={{background:"transparent",border:"1px solid "+T.bdrL,borderRadius:7,padding:"5px 10px",color:T.gold,cursor:"pointer",fontSize:10,fontWeight:700,width:"100%"}}>🔗 Copiar link de indicação</button>
+                ):(
+                  <button onClick={function(){dp({t:"PARC_UPD_PARCEIRO",p:{id:p.id,codigo:gerarCodigoParceiro(p.nome)}})}} style={{background:"transparent",border:"1px dashed "+T.bdrL,borderRadius:7,padding:"5px 10px",color:T.t3,cursor:"pointer",fontSize:10,fontWeight:700,width:"100%"}}>Gerar link de indicação</button>
+                )}
+              </div>
+              <div style={{display:"flex",gap:10,marginTop:10,paddingTop:10,borderTop:"1px solid rgba(255,255,255,0.04)"}}>
                 <div style={{fontSize:10,color:T.t3}}>{minhas.length} indicação(ões)</div>
                 <button onClick={function(){abrirNovaInd(p.id)}} style={{marginLeft:"auto",background:"transparent",border:"none",color:T.gold,cursor:"pointer",fontSize:10,fontWeight:700}}>+ indicação</button>
               </div>
@@ -22658,6 +22744,61 @@ function ParceirosView({data:d,dispatch:dp}){
           </div>
         );
       })()}
+
+      {pTab==="pendentes" && (
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:10,flexWrap:"wrap"}}>
+            <div style={{fontSize:11,color:T.t3,maxWidth:520}}>Cadastros que chegaram sozinhos pela página pública de indicação (<code>indicar.html</code>), sem ninguém digitar nada. Aprove com 1 clique pra virar parceiro/indicação de verdade — ver <code>claude/parceiros-automacao.md</code> pra contexto completo.</div>
+            <button onClick={carregarPendentes} style={{background:"transparent",border:"1px solid "+T.bdrL,borderRadius:8,padding:"6px 14px",color:T.t2,cursor:"pointer",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>🔄 Atualizar</button>
+          </div>
+          {loadingPend ? (
+            <Cd style={{padding:28,textAlign:"center"}} hov={false}><div style={{fontSize:13,color:T.t3}}>Carregando...</div></Cd>
+          ) : (pendParceiros.length===0 && pendLeads.length===0) ? (
+            <Cd style={{padding:28,textAlign:"center"}} hov={false}><div style={{fontSize:32,marginBottom:8}}>📭</div><div style={{fontSize:13,color:T.t3}}>Nenhum cadastro pendente no momento.</div></Cd>
+          ) : (
+            <div>
+              {pendParceiros.length>0 && (<div style={{marginBottom:20}}>
+                <div style={{fontSize:11,fontWeight:800,color:T.gold,letterSpacing:1,textTransform:"uppercase",marginBottom:10,paddingBottom:6,borderBottom:"1px solid rgba(212,163,40,0.15)"}}>🤝 Parceiros pendentes ({pendParceiros.length})</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12}}>
+                  {pendParceiros.map(function(pend){return(
+                    <Cd key={pend._id} style={{padding:16}} hov={false}>
+                      <div style={{fontSize:14,fontWeight:700,color:T.t1}}>{pend.nome}</div>
+                      <div style={{fontSize:11,color:T.t3,marginTop:2}}>{TIPOS_PARCEIRO_PENDENTE[pend.tipo]||pend.tipo||"—"}{pend.cidade?(" · "+pend.cidade):""}</div>
+                      <div style={{fontSize:11,color:T.t2,marginTop:4}}>{pend.telefone}{pend.email?(" · "+pend.email):""}</div>
+                      {pend.comoIndica && <div style={{fontSize:10,color:T.t3,marginTop:6,fontStyle:"italic"}}>"{pend.comoIndica}"</div>}
+                      <div style={{display:"flex",gap:8,marginTop:12}}>
+                        <button onClick={function(){abrirAprovacaoParc(pend)}} style={{flex:1,background:T.goldD,border:"1px solid "+T.gold,borderRadius:8,padding:"7px 10px",color:T.gold,cursor:"pointer",fontSize:11,fontWeight:700}}>✅ Aprovar</button>
+                        <button onClick={function(){descartarParceiroPendente(pend)}} style={{background:"transparent",border:"1px solid "+T.bdrL,borderRadius:8,padding:"7px 10px",color:T.t3,cursor:"pointer",fontSize:11}}>Descartar</button>
+                      </div>
+                    </Cd>
+                  )})}
+                </div>
+              </div>)}
+              {pendLeads.length>0 && (<div>
+                <div style={{fontSize:11,fontWeight:800,color:T.cyan,letterSpacing:1,textTransform:"uppercase",marginBottom:10,paddingBottom:6,borderBottom:"1px solid rgba(103,196,255,0.15)"}}>📋 Leads pendentes ({pendLeads.length})</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12}}>
+                  {pendLeads.map(function(lead){
+                    var pMatch=parceiroPorCodigo(lead.refCode);
+                    return(
+                      <Cd key={lead._id} style={{padding:16}} hov={false}>
+                        <div style={{fontSize:14,fontWeight:700,color:T.t1}}>{lead.nome}</div>
+                        <div style={{fontSize:11,color:T.t2,marginTop:4}}>{lead.telefone}{lead.email?(" · "+lead.email):""}</div>
+                        <div style={{fontSize:10,color:T.t3,marginTop:6}}>
+                          {lead.refCode ? (pMatch?("Indicado por: "+pMatch.nome):('Código de indicação não reconhecido: "'+lead.refCode+'"')) : (lead.quemIndicou?("Indicado por (texto livre): "+lead.quemIndicou):"Sem indicação — contato direto")}
+                        </div>
+                        <div style={{display:"flex",gap:8,marginTop:12}}>
+                          <button onClick={function(){aprovarLead(lead)}} style={{flex:1,background:T.goldD,border:"1px solid "+T.gold,borderRadius:8,padding:"7px 10px",color:T.gold,cursor:"pointer",fontSize:11,fontWeight:700}}>{pMatch?"✅ Criar indicação":"✅ Marcar como contatado"}</button>
+                          <button onClick={function(){descartarLead(lead)}} style={{background:"transparent",border:"1px solid "+T.bdrL,borderRadius:8,padding:"7px 10px",color:T.t3,cursor:"pointer",fontSize:11}}>Descartar</button>
+                        </div>
+                      </Cd>
+                    );
+                  })}
+                </div>
+              </div>)}
+            </div>
+          )}
+        </div>
+      )}
 
       {pTab==="indicacoes" && (
         <div>
@@ -30893,7 +31034,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '385';
+  var SW_VERSION = '387';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
