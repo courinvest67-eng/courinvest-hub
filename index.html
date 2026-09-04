@@ -22714,7 +22714,8 @@ function ParceirosView({data:d,dispatch:dp}){
               <div style={{marginTop:10}}>
                 {p.codigo ? (
                   <button onClick={function(){
-                    var link=window.location.origin+"/indicar.html?ref="+p.codigo;
+                    var basePath=window.location.pathname.replace(/[^/]*$/,"");
+                    var link=window.location.origin+basePath+"indicar.html?ref="+p.codigo;
                     if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(link).then(function(){alert("🔗 Link copiado:\n"+link)}).catch(function(){window.prompt("Copie o link de indicação:",link)})}
                     else{window.prompt("Copie o link de indicação:",link)}
                   }} style={{background:"transparent",border:"1px solid "+T.bdrL,borderRadius:7,padding:"5px 10px",color:T.gold,cursor:"pointer",fontSize:10,fontWeight:700,width:"100%"}}>🔗 Copiar link de indicação</button>
@@ -31034,7 +31035,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '387';
+  var SW_VERSION = '388';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
