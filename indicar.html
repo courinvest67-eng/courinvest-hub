@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Courinvest — Programa de Indicação</title>
+<meta name="robots" content="noindex">
+<style>
+  :root{
+    --navy:#0A1628; --navy2:#0F2038; --gold:#D4A328; --lightgold:#FBEFD0;
+    --green:#2DD4A0; --red:#F87171; --t1:#F5F1E8; --t2:#B8C2D4; --t3:#7A8699;
+    --bdr:rgba(212,163,40,0.22); --card:#111E33;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:linear-gradient(160deg,var(--navy) 0%,#08111f 100%);color:var(--t1);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:28px 16px 60px;}
+  .wrap{width:100%;max-width:480px;}
+  .logo{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:22px;}
+  .logo .mark{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--gold),#a97e1a);
+    display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--navy);font-size:18px;}
+  .logo .name{font-size:19px;font-weight:800;letter-spacing:0.3px;}
+  .logo .name span{color:var(--gold);}
+  .card{background:var(--card);border:1px solid var(--bdr);border-radius:16px;padding:22px 20px;
+    box-shadow:0 20px 50px rgba(0,0,0,0.35);}
+  h1{font-size:20px;margin:0 0 6px;font-weight:800;}
+  .sub{color:var(--t2);font-size:13.5px;line-height:1.5;margin:0 0 20px;}
+  .tabs{display:flex;background:rgba(255,255,255,0.04);border-radius:11px;padding:4px;margin-bottom:20px;}
+  .tab{flex:1;text-align:center;padding:10px 8px;border-radius:8px;font-size:13px;font-weight:700;
+    color:var(--t3);cursor:pointer;transition:all .15s;border:none;background:none;}
+  .tab.active{background:var(--gold);color:var(--navy);}
+  .refbadge{display:flex;align-items:center;gap:8px;background:rgba(45,212,160,0.1);
+    border:1px solid rgba(45,212,160,0.3);color:var(--green);border-radius:9px;padding:9px 12px;
+    font-size:12.5px;font-weight:600;margin-bottom:16px;}
+  label{display:block;font-size:12px;font-weight:700;color:var(--t2);margin:0 0 6px;text-transform:uppercase;
+    letter-spacing:0.4px;}
+  .field{margin-bottom:14px;}
+  input[type=text],input[type=tel],input[type=email],select,textarea{
+    width:100%;background:#0C1830;border:1px solid var(--bdr);border-radius:9px;padding:12px 13px;
+    color:var(--t1);font-size:14.5px;font-family:inherit;outline:none;transition:border .15s;}
+  input:focus,select:focus,textarea:focus{border-color:var(--gold);}
+  textarea{resize:vertical;min-height:70px;}
+  .hint{font-size:11.5px;color:var(--t3);margin-top:5px;}
+  .btn{width:100%;background:linear-gradient(135deg,var(--gold),#b98f1f);color:var(--navy);border:none;
+    border-radius:10px;padding:14px;font-size:14.5px;font-weight:800;cursor:pointer;margin-top:6px;
+    letter-spacing:0.2px;transition:opacity .15s;}
+  .btn:disabled{opacity:0.55;cursor:default;}
+  .btn:active:not(:disabled){opacity:0.85;}
+  .err{background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:var(--red);
+    border-radius:9px;padding:10px 12px;font-size:12.5px;margin-top:12px;display:none;}
+  .legal{font-size:11px;color:var(--t3);line-height:1.5;margin-top:16px;text-align:center;}
+  .success{display:none;text-align:center;padding:16px 4px 4px;}
+  .success .ico{font-size:40px;margin-bottom:10px;}
+  .success h2{font-size:18px;margin:0 0 8px;}
+  .success p{color:var(--t2);font-size:13.5px;line-height:1.55;margin:0;}
+  .footer{text-align:center;color:var(--t3);font-size:11.5px;margin-top:22px;}
+  .formbox.hidden{display:none;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="logo">
+    <div class="mark">C</div>
+    <div class="name">COUR<span>INVEST</span></div>
+  </div>
+
+  <div class="card">
+    <div id="stage-form">
+      <div class="tabs">
+        <button class="tab" id="tabCliente" onclick="setTab('cliente')">Quero ser cliente</button>
+        <button class="tab" id="tabParceiro" onclick="setTab('parceiro')">Quero ser parceiro</button>
+      </div>
+
+      <!-- ===== FORM: LEAD (quero ser cliente) ===== -->
+      <div class="formbox" id="boxCliente">
+        <h1>Fale com a Courinvest</h1>
+        <p class="sub">Deixe seus dados que a nossa equipe entra em contato. Se alguém te indicou, isso já fica registrado automaticamente.</p>
+        <div id="refBadge" class="refbadge" style="display:none;">
+          ✅ Indicado por um parceiro Courinvest
+        </div>
+        <div class="field">
+          <label>Nome completo *</label>
+          <input type="text" id="cNome" placeholder="Seu nome">
+        </div>
+        <div class="field">
+          <label>WhatsApp *</label>
+          <input type="tel" id="cTelefone" placeholder="(00) 00000-0000">
+        </div>
+        <div class="field">
+          <label>E-mail</label>
+          <input type="email" id="cEmail" placeholder="seuemail@exemplo.com">
+        </div>
+        <div class="field" id="fieldQuemIndicou">
+          <label>Quem te indicou? (opcional)</label>
+          <input type="text" id="cQuemIndicou" placeholder="Nome de quem te indicou, se houver">
+        </div>
+        <button class="btn" id="btnCliente" onclick="enviarLead()">Quero ser contatado</button>
+        <div class="err" id="errCliente"></div>
+        <p class="legal">Seus dados são usados só para a Courinvest entrar em contato com você — não são compartilhados com terceiros.</p>
+      </div>
+
+      <!-- ===== FORM: PARCEIRO (quero indicar / ser parceiro) ===== -->
+      <div class="formbox hidden" id="boxParceiro">
+        <h1>Seja um parceiro Courinvest</h1>
+        <p class="sub">Cadastre-se para indicar clientes à Courinvest. Seu cadastro passa por uma aprovação rápida da nossa equipe antes de virar um parceiro ativo.</p>
+        <div class="field">
+          <label>Nome / Empresa *</label>
+          <input type="text" id="pNome" placeholder="Seu nome ou razão social">
+        </div>
+        <div class="field">
+          <label>Tipo de parceiro *</label>
+          <select id="pTipo">
+            <option value="">Selecione...</option>
+            <option value="pf">Pessoa física</option>
+            <option value="contador">Contador(a) / Contabilidade</option>
+            <option value="corretora">Corretora / Seguradora</option>
+            <option value="outro">Outro parceiro comercial</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>WhatsApp *</label>
+          <input type="tel" id="pTelefone" placeholder="(00) 00000-0000">
+        </div>
+        <div class="field">
+          <label>E-mail</label>
+          <input type="email" id="pEmail" placeholder="seuemail@exemplo.com">
+        </div>
+        <div class="field">
+          <label>Cidade</label>
+          <input type="text" id="pCidade" placeholder="Sua cidade">
+        </div>
+        <div class="field">
+          <label>Como pretende indicar? (opcional)</label>
+          <textarea id="pComoIndica" placeholder="Ex: clientes da minha carteira de contabilidade, rede de relacionamento pessoal..."></textarea>
+        </div>
+        <button class="btn" id="btnParceiro" onclick="enviarParceiro()">Quero ser parceiro</button>
+        <div class="err" id="errParceiro"></div>
+        <p class="legal">Comissão a combinar após aprovação, conforme o modelo de parceria da Courinvest. Seu cadastro é analisado antes de qualquer indicação ser remunerada.</p>
+      </div>
+    </div>
+
+    <!-- ===== SUCCESS STATE ===== -->
+    <div class="success" id="stage-success">
+      <div class="ico">✅</div>
+      <h2 id="successTitle">Recebemos seus dados!</h2>
+      <p id="successMsg">A equipe da Courinvest vai entrar em contato em breve.</p>
+    </div>
+  </div>
+
+  <div class="footer">Courinvest — Gestão de Investimentos</div>
+</div>
+
+<!-- Firebase (mesmo projeto do Courinvest Hub) -->
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+<script>
+(function(){
+  var firebaseConfig = {
+    apiKey: "AIzaSyC4RLs-5QY3Kzf6Lauqbmj3Qj3C1RnuGtA",
+    authDomain: "dashboard-courinvest.firebaseapp.com",
+    projectId: "dashboard-courinvest",
+    storageBucket: "dashboard-courinvest.firebasestorage.app",
+    messagingSenderId: "688544704461",
+    appId: "1:688544704461:web:9e15d2b8ed4040a7830684"
+  };
+  try{
+    firebase.initializeApp(firebaseConfig);
+    window._db = firebase.firestore();
+  }catch(e){
+    console.error("[Firebase] Falha ao iniciar:", e);
+  }
+
+  // Detecta código de indicação na URL (?ref=CODIGO)
+  var params = new URLSearchParams(window.location.search);
+  window._refCode = (params.get("ref")||"").trim();
+
+  window._initialTab = window._refCode ? "cliente" : "cliente";
+})();
+
+function setTab(tab){
+  document.getElementById("tabCliente").className = "tab"+(tab==="cliente"?" active":"");
+  document.getElementById("tabParceiro").className = "tab"+(tab==="parceiro"?" active":"");
+  document.getElementById("boxCliente").className = "formbox"+(tab==="cliente"?"":" hidden");
+  document.getElementById("boxParceiro").className = "formbox"+(tab==="parceiro"?"":" hidden");
+}
+
+function showError(id, msg){
+  var el = document.getElementById(id);
+  el.textContent = msg;
+  el.style.display = "block";
+}
+function hideError(id){
+  document.getElementById(id).style.display = "none";
+}
+function showSuccess(title, msg){
+  document.getElementById("stage-form").style.display = "none";
+  document.getElementById("stage-success").style.display = "block";
+  document.getElementById("successTitle").textContent = title;
+  document.getElementById("successMsg").textContent = msg;
+}
+function validaTelefone(v){
+  var digits = (v||"").replace(/\D/g,"");
+  return digits.length >= 10;
+}
+
+function enviarLead(){
+  hideError("errCliente");
+  var nome = document.getElementById("cNome").value.trim();
+  var telefone = document.getElementById("cTelefone").value.trim();
+  var email = document.getElementById("cEmail").value.trim();
+  var quemIndicou = document.getElementById("cQuemIndicou").value.trim();
+  if(!nome){ showError("errCliente","Informe seu nome."); return; }
+  if(!validaTelefone(telefone)){ showError("errCliente","Informe um WhatsApp válido, com DDD."); return; }
+  if(!window._db){ showError("errCliente","Não foi possível conectar. Tente novamente em instantes."); return; }
+
+  var btn = document.getElementById("btnCliente");
+  btn.disabled = true; btn.textContent = "Enviando...";
+
+  var payload = {
+    nome: nome,
+    telefone: telefone,
+    email: email || "",
+    refCode: window._refCode || "",
+    quemIndicou: quemIndicou || "",
+    origem: "landing_indicacao",
+    referrer: (document.referrer || "").slice(0,300),
+    criadoEm: firebase.firestore.FieldValue.serverTimestamp(),
+    status: "novo"
+  };
+
+  window._db.collection("leads_publicos").add(payload).then(function(){
+    showSuccess("Recebemos seus dados!", "A equipe da Courinvest vai entrar em contato pelo WhatsApp em breve.");
+  }).catch(function(e){
+    console.error(e);
+    btn.disabled = false; btn.textContent = "Quero ser contatado";
+    showError("errCliente","Não foi possível enviar agora. Tente novamente em instantes.");
+  });
+}
+
+function enviarParceiro(){
+  hideError("errParceiro");
+  var nome = document.getElementById("pNome").value.trim();
+  var tipo = document.getElementById("pTipo").value;
+  var telefone = document.getElementById("pTelefone").value.trim();
+  var email = document.getElementById("pEmail").value.trim();
+  var cidade = document.getElementById("pCidade").value.trim();
+  var comoIndica = document.getElementById("pComoIndica").value.trim();
+  if(!nome){ showError("errParceiro","Informe seu nome ou empresa."); return; }
+  if(!tipo){ showError("errParceiro","Selecione o tipo de parceiro."); return; }
+  if(!validaTelefone(telefone)){ showError("errParceiro","Informe um WhatsApp válido, com DDD."); return; }
+  if(!window._db){ showError("errParceiro","Não foi possível conectar. Tente novamente em instantes."); return; }
+
+  var btn = document.getElementById("btnParceiro");
+  btn.disabled = true; btn.textContent = "Enviando...";
+
+  var payload = {
+    nome: nome,
+    tipo: tipo,
+    telefone: telefone,
+    email: email || "",
+    cidade: cidade || "",
+    comoIndica: comoIndica || "",
+    criadoEm: firebase.firestore.FieldValue.serverTimestamp(),
+    status: "pendente"
+  };
+
+  window._db.collection("parceiros_pendentes").add(payload).then(function(){
+    showSuccess("Cadastro recebido!", "Nossa equipe vai analisar seu cadastro e entrar em contato em breve para confirmar sua parceria.");
+  }).catch(function(e){
+    console.error(e);
+    btn.disabled = false; btn.textContent = "Quero ser parceiro";
+    showError("errParceiro","Não foi possível enviar agora. Tente novamente em instantes.");
+  });
+}
+
+// Inicialização
+(function(){
+  setTab(window._initialTab);
+  if(window._refCode){
+    document.getElementById("refBadge").style.display = "flex";
+    document.getElementById("fieldQuemIndicou").style.display = "none";
+  }
+})();
+</script>
+</body>
+</html>
