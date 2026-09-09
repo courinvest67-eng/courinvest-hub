@@ -100,6 +100,10 @@ table{border-spacing:0}
      evita canvases enormes que alguns navegadores/placas de vídeo não conseguem alocar. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<!-- PptxGenJS: gera os arquivos .pptx (PowerPoint) das apresentações comerciais e propostas,
+     direto no navegador (mesmo princípio do html2canvas+jsPDF acima, sem precisar de backend).
+     Bundle inclui JSZip embutido (é a lib que monta o .pptx, que no fundo é um .zip). -->
+<script src="https://cdn.jsdelivr.net/npm/pptxgenjs@4.0.1/dist/pptxgen.bundle.js"></script>
 
 <!-- Firebase SDK (compat for Babel standalone) -->
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
@@ -761,6 +765,107 @@ const gerarPdfLinkCourinvest=function(pathStorage,htmlContent){
   });
 };
 
+/* === GERA POWERPOINT (.pptx) A PARTIR DE UM CONTAINER COM SEÇÕES ".pp-page" ===
+   Usado pelos botões "Gerar PowerPoint" da Apresentação Comercial e das Propostas Comerciais.
+   Cada ".pp-page" (já usada hoje pra montar o PDF via impressão do navegador) vira UM SLIDE:
+   a seção é capturada como imagem (html2canvas, mesma lib já usada no PDF do relatório) e essa
+   imagem entra inteira dentro do slide — não recriamos o layout em formas nativas do PowerPoint,
+   porque cada seção tem gradientes/padrões decorativos elaborados que só existem de verdade em
+   HTML/CSS. Isso garante fidelidade visual 100% igual à tela, ao custo de o slide não ser
+   editável (só a imagem pode ser redimensionada/movida no PowerPoint depois).
+   Tamanho do slide: como cada seção tem largura fixa (~820px) mas ALTURA variável (depende do
+   quanto de texto/cards tem cada uma), não existe um único "16:9 padrão" que sirva perfeitamente
+   pra todas — um slide de capa e um slide de tabela de preços não têm a mesma proporção. Em vez
+   de forçar 16:9 (cortaria ou deixaria barras enormes), calculamos um tamanho de slide "sob
+   medida" a partir da MEDIANA das proporções reais capturadas, e cada slide individual entra
+   centralizado dentro desse tamanho (nunca cortado, na pior das hipóteses sobra uma margem fina
+   dos dois lados). Essa margem, quando existe, é preenchida com a cor do canto da própria imagem
+   (amostrada do canvas) em vez de branco puro, pra não destoar do fundo escuro da maioria das
+   seções. */
+const gerarPPTXDeSlides=async function(containerEl,nomeArquivo){
+  if(!containerEl){alert("Conteúdo não encontrado pra gerar o PowerPoint.");return false;}
+  if(typeof window.html2canvas==="undefined"){alert("Biblioteca de captura (html2canvas) não carregou. Verifique sua conexão e tente novamente.");return false;}
+  if(typeof window.PptxGenJS==="undefined"){alert("Biblioteca de PowerPoint (PptxGenJS) não carregou. Verifique sua conexão e tente novamente.");return false;}
+  var pageEls=Array.prototype.slice.call(containerEl.querySelectorAll(".pp-page"));
+  if(pageEls.length===0)pageEls=[containerEl];
+  /* Mesma rede de segurança usada na geração do PDF: em algumas máquinas o html2canvas quebra
+     com "InvalidStateError: createPattern... width or height of 0" ao desenhar certos fundos em
+     gradiente. Intercepta e devolve um padrão 1x1 transparente nesse caso específico, sem deixar
+     isso derrubar a geração inteira do PowerPoint. */
+  var _origCreatePattern=CanvasRenderingContext2D.prototype.createPattern;
+  CanvasRenderingContext2D.prototype.createPattern=function(image,repetition){
+    try{
+      if(!image||!image.width||!image.height){
+        var _fb=document.createElement("canvas");_fb.width=1;_fb.height=1;
+        return _origCreatePattern.call(this,_fb,repetition||"repeat");
+      }
+      return _origCreatePattern.apply(this,arguments);
+    }catch(_patErr){
+      var _fb2=document.createElement("canvas");_fb2.width=1;_fb2.height=1;
+      return _origCreatePattern.call(this,_fb2,"repeat");
+    }
+  };
+  var capturas=[];
+  try{
+    for(var pi=0;pi<pageEls.length;pi++){
+      var canvas=null;
+      try{
+        canvas=await window.html2canvas(pageEls[pi],{scale:2,useCORS:true,backgroundColor:"#ffffff"});
+      }catch(_pageErr){
+        console.warn("[PPTX] Slide "+pi+" falhou ao renderizar, pulando:",_pageErr);
+        continue;
+      }
+      if(!canvas||canvas.width===0||canvas.height===0){
+        console.warn("[PPTX] Slide "+pi+" gerou canvas vazio, pulando.");
+        continue;
+      }
+      var corCanto="#0A1628";
+      try{
+        var px=canvas.getContext("2d").getImageData(0,0,1,1).data;
+        corCanto="#"+[px[0],px[1],px[2]].map(function(v){return v.toString(16).padStart(2,"0")}).join("");
+      }catch(_corErr){}
+      capturas.push({dataUrl:canvas.toDataURL("image/jpeg",0.92),w:canvas.width,h:canvas.height,cor:corCanto});
+    }
+  }finally{
+    CanvasRenderingContext2D.prototype.createPattern=_origCreatePattern;
+  }
+  if(capturas.length===0){
+    alert("Não foi possível gerar nenhum slide. Tente novamente.");
+    return false;
+  }
+  /* Proporção "sob medida": mediana de (largura/altura) entre todos os slides capturados. */
+  var proporcoes=capturas.map(function(c){return c.w/c.h}).sort(function(a,b){return a-b});
+  var propMediana=proporcoes[Math.floor(proporcoes.length/2)];
+  /* Layout final em polegadas — largura fixa de 10" (tamanho comum, seguro dentro dos limites do
+     PptxGenJS), altura derivada da proporção mediana. Limita a altura entre 5,63" (equivalente a
+     16:9) e 14" (evita slide absurdamente alto num caso extremo de proporção). */
+  var LARGURA_IN=10;
+  var alturaIn=LARGURA_IN/propMediana;
+  if(alturaIn<5.63)alturaIn=5.63;
+  if(alturaIn>14)alturaIn=14;
+  var pptx=new window.PptxGenJS();
+  pptx.defineLayout({name:"COURINVEST_AUTO",width:LARGURA_IN,height:alturaIn});
+  pptx.layout="COURINVEST_AUTO";
+  capturas.forEach(function(c){
+    var slide=pptx.addSlide();
+    slide.background={color:c.cor.replace("#","")};
+    /* "Contain": encaixa a imagem inteira dentro do slide sem cortar, centralizada. */
+    var propImg=c.w/c.h;
+    var wIn=LARGURA_IN,hIn=LARGURA_IN/propImg;
+    if(hIn>alturaIn){hIn=alturaIn;wIn=alturaIn*propImg;}
+    var xIn=(LARGURA_IN-wIn)/2,yIn=(alturaIn-hIn)/2;
+    slide.addImage({data:c.dataUrl,x:xIn,y:yIn,w:wIn,h:hIn});
+  });
+  try{
+    await pptx.writeFile({fileName:nomeArquivo||"apresentacao-courinvest.pptx"});
+    return true;
+  }catch(e){
+    console.warn("[PPTX] Falha ao gerar arquivo:",e);
+    alert("Não foi possível gerar o arquivo PowerPoint. Tente novamente.");
+    return false;
+  }
+};
+
 /* === GERA O RELATÓRIO MENSAL COMPLETO (a mesma ficha detalhada multi-página da aba "Relatório"
    dentro do cadastro do cliente) EM SEGUNDO PLANO, SEM abrir a ficha na tela ===
    Usado no envio automático de e-mail: em vez de um resumo curto, o PDF anexado passa a ser o
@@ -1418,6 +1523,197 @@ const MACRO_CATS={
   dividas:{l:"Dívidas & Cartão",ic:"💳",cor:"#F87171",tipo:"d",kw:"fatura.*cart[ãa]o|fatura cc|cart[ãa]o.*cr[ée]dito|pagamento cart[ãa]o|cc visa|cc master|cc elo|cc amex|cc hiper|amex|american express|nubank|nu pagamentos|inter\\.|c6 bank|c6.bank|will bank|will.bank|original\\.|next\\.|neon\\.|pan\\.|pic pay|picpay|mercadopago|mercado pago|pagseguro|pagbank|cred[áa]rio|cr[ée]dito direto|cdc\\.|empr[ée]stim|consignad|consigna|financiamento|cheque especial|juros cheque|juros rotativ|rotativo cart|antecipa[çc][ãa]o sal[áa]rio|peer.*to.*peer|p2p"},
   pets:{l:"Pets",ic:"🐾",cor:"#6EE7B7",tipo:"d",kw:"pet shop|petshop|petz|petlove|cobasi|veterin[áa]rio|veterinari[ao]|vet\\.|ra[çc][ãa]o|biscoito.*c[ãa]o|biscoito.*gato|antipulgas|vermifugo|vacin.*pet|banho.*tosa|tosa\\.|hotelzinho.*pet|creche.*pet"},
   outros:{l:"Outros",ic:"📦",cor:"#8B9DC3",tipo:"d",kw:""}
+};
+
+/* ===== ANÁLISE FINANCEIRA INTELIGENTE — função pura, reaproveitável fora da ficha do cliente =====
+   Extraída de dentro do componente CD (era "gerarAnaliseFinanceira", fechada sobre c.histMensal/
+   receitas/despesas/fmF) pra virar uma função de verdade, sem closures — usada tanto pelo wrapper
+   fino dentro de CD (gerarAnaliseFinanceira, mais abaixo no arquivo) quanto pelo produto público
+   autoatendido "Diagnóstico de Orçamento Familiar" (ver claude/diagnostico-orcamento-autoatendido.md),
+   que não tem ficha de cliente nem histórico — só o mês que a pessoa acabou de digitar.
+
+   Parâmetros:
+   - histMensal: array de snapshots mensais salvos ({mes,receitas,despesas,tRec,tDesp}), mais recente
+     primeiro ou em qualquer ordem (a função ordena). Passe [] quando não há histórico nenhum (caso do
+     produto público) — a função cai automaticamente no "mês atual" construído a partir de
+     receitasAtual/despesasAtual, sem quebrar (é o mesmo fallback que já existia pro cliente que
+     importou pela primeira vez, sem mês anterior salvo).
+   - receitasAtual, despesasAtual: arrays do mês "vivo" (o que está na tela/formulário agora),
+     usados só quando não existe snapshot salvo pra esse mês em histMensal.
+   - fmtFn: função de formatação de moeda, opcional (default: fm, que é sempre BRL). A ficha do
+     cliente passa fmF (que sabe formatar em outras moedas pra clientes internacionais) — o produto
+     público, sem esse conceito, usa o default BRL. */
+const calcularAnaliseFinanceira=function(histMensal,receitasAtual,despesasAtual,fmtFn){
+  var fmF=fmtFn||fm;
+  var receitas=receitasAtual||[];
+  var despesas=despesasAtual||[];
+  var hist=(histMensal||[]).slice().sort(function(a,b){return b.mes.localeCompare(a.mes)});
+    /* Usa mês anterior como referência (relatório de fechamento) */
+    var refDate=new Date();refDate.setDate(1);refDate.setMonth(refDate.getMonth()-1);
+    var mesAtualKey=refDate.getFullYear()+"-"+String(refDate.getMonth()+1).padStart(2,"0");
+
+    /* Helper: separa investimentos das despesas puras de consumo. Retorna {tDespPuro,tInv} */
+    var separar=function(despArr){
+      var tD=0,tI=0;
+      (despArr||[]).forEach(function(d){
+        if((d.macro||"outros")==="investimentos") tI+=d.valor;
+        else tD+=d.valor;
+      });
+      return {tDespPuro:tD,tInv:tI};
+    };
+
+    var snapAtual=hist.find(function(h){return h.mes===mesAtualKey})||{
+      mes:mesAtualKey,receitas:receitas,despesas:despesas,
+      tRec:receitas.reduce(function(s,x){return s+x.valor},0),
+      tDesp:despesas.reduce(function(s,x){return s+x.valor},0)
+    };
+
+    var sepAtual=separar(snapAtual.despesas);
+    snapAtual.tDespPuro=sepAtual.tDespPuro;
+    snapAtual.tInv=sepAtual.tInv;
+
+    var snapAnterior=hist.find(function(h){return h.mes!==mesAtualKey})||null;
+    if(snapAnterior){
+      var sepAnt=separar(snapAnterior.despesas);
+      snapAnterior.tDespPuro=sepAnt.tDespPuro;
+      snapAnterior.tInv=sepAnt.tInv;
+    }
+
+
+    var ultimos3=hist.filter(function(h){return h.mes!==mesAtualKey}).slice(0,3);
+    var media3m=null;
+    if(ultimos3.length>0){
+      var sumR=0,sumD=0,sumI=0,porMacro={};
+      ultimos3.forEach(function(h){
+        var s=separar(h.despesas);
+        sumR+=h.tRec||0;sumD+=s.tDespPuro;sumI+=s.tInv;
+        (h.despesas||[]).forEach(function(d){
+          var k=d.macro||"outros";
+          if(k==="investimentos")return;
+          if(!porMacro[k])porMacro[k]=0;
+          porMacro[k]+=d.valor;
+        });
+      });
+      var porMacroMedia={};
+      for(var k in porMacro)porMacroMedia[k]=porMacro[k]/ultimos3.length;
+      media3m={tRec:sumR/ultimos3.length,tDesp:sumD/ultimos3.length,tInv:sumI/ultimos3.length,porMacro:porMacroMedia,n:ultimos3.length};
+    }
+
+    /* Distribuição por macro do snapshot atual — EXCLUI investimentos das barras de despesa */
+    var atualPorMacro={};
+    snapAtual.despesas.forEach(function(d){
+      var k=d.macro||"outros";
+      if(k==="investimentos")return;
+      if(!atualPorMacro[k])atualPorMacro[k]={tot:0,n:0,itens:[]};
+      atualPorMacro[k].tot+=d.valor;atualPorMacro[k].n++;
+      atualPorMacro[k].itens.push(d);
+    });
+    var antPorMacro={};
+    if(snapAnterior){
+      snapAnterior.despesas.forEach(function(d){
+        var k=d.macro||"outros";
+        if(k==="investimentos")return;
+        if(!antPorMacro[k])antPorMacro[k]=0;
+        antPorMacro[k]+=d.valor;
+      });
+    }
+
+
+    var atualInv=snapAtual.despesas.filter(function(d){return(d.macro||"")==="investimentos"});
+    var antInv=snapAnterior?snapAnterior.despesas.filter(function(d){return(d.macro||"")==="investimentos"}):[];
+
+    /* KPIs — agora SALDO = Receita - DespPuro - Investimentos (sobra real); TxPoup considera só o investido como poupança proativa */
+    var saldoAtual=snapAtual.tRec-snapAtual.tDespPuro-snapAtual.tInv;
+    /* Tx poupança = (sobra livre + investido)/receita — % da receita que NÃO virou consumo */
+    var txPoupAtual=snapAtual.tRec>0?((saldoAtual+snapAtual.tInv)/snapAtual.tRec*100):0;
+    var saldoAnt=snapAnterior?(snapAnterior.tRec-snapAnterior.tDespPuro-snapAnterior.tInv):null;
+    var txPoupAnt=snapAnterior&&snapAnterior.tRec>0?((saldoAnt+snapAnterior.tInv)/snapAnterior.tRec*100):null;
+    var varDesp=snapAnterior?((snapAtual.tDespPuro-snapAnterior.tDespPuro)/(snapAnterior.tDespPuro||1)*100):null;
+    var varRec=snapAnterior?((snapAtual.tRec-snapAnterior.tRec)/(snapAnterior.tRec||1)*100):null;
+    var varInv=snapAnterior&&snapAnterior.tInv>0?((snapAtual.tInv-snapAnterior.tInv)/snapAnterior.tInv*100):null;
+
+    /* === INSIGHTS / DIAGNÓSTICO === */
+    var pontos={fortes:[],alertas:[],recomendacoes:[]};
+
+
+    if(txPoupAtual>=20)pontos.fortes.push("Excelente disciplina financeira: taxa de poupança de "+txPoupAtual.toFixed(0)+"% supera a meta clássica de 20%.");
+    else if(txPoupAtual>=10)pontos.fortes.push("Taxa de poupança saudável de "+txPoupAtual.toFixed(0)+"% — dentro do recomendado para construção de patrimônio.");
+    if(saldoAtual>0)pontos.fortes.push("Mês fechou com saldo positivo de "+fmF(saldoAtual)+", reforçando a capacidade de aportes.");
+    var invMacro=atualPorMacro["investimentos"];
+    if(invMacro && snapAtual.tRec>0 && (invMacro.tot/snapAtual.tRec)>=0.15)pontos.fortes.push("Aportes em investimentos representam "+((invMacro.tot/snapAtual.tRec)*100).toFixed(0)+"% da receita — acima da média do mercado brasileiro (~6%).");
+    if(snapAnterior && varDesp!==null && varDesp<=-5)pontos.fortes.push("Despesas reduziram "+Math.abs(varDesp).toFixed(0)+"% vs. mês anterior — excelente controle.");
+    if(snapAnterior && varRec!==null && varRec>=10)pontos.fortes.push("Receita cresceu "+varRec.toFixed(0)+"% vs. mês anterior — momento favorável para acelerar aportes.");
+
+
+    if(saldoAtual<0)pontos.alertas.push("Mês fechou com déficit de "+fmF(Math.abs(saldoAtual))+". Atenção ao consumo da reserva.");
+    if(txPoupAtual<10 && txPoupAtual>=0)pontos.alertas.push("Taxa de poupança baixa ("+txPoupAtual.toFixed(0)+"%) — abaixo do mínimo de 10% recomendado.");
+    if(snapAnterior && varDesp!==null && varDesp>=10)pontos.alertas.push("Despesas subiram "+varDesp.toFixed(0)+"% vs. mês anterior. Identifique a categoria responsável.");
+    /* Categoria com aumento expressivo — investimentos crescendo é POSITIVO (vai pra fortes); demais é alerta */
+    if(snapAnterior){
+      Object.keys(atualPorMacro).forEach(function(k){
+        var ant=antPorMacro[k]||0;
+        var atu=atualPorMacro[k].tot;
+        if(ant>0 && atu>=ant*1.3 && (atu-ant)>=300){
+          var m=MACRO_CATS[k]||{l:k,ic:"📦"};
+          if(k==="investimentos"){
+            pontos.fortes.push(m.ic+" Aportes em "+m.l+" cresceram "+((atu-ant)/ant*100).toFixed(0)+"% ("+fmF(atu-ant)+" a mais) — disciplina exemplar de acumulação.");
+          }else{
+            pontos.alertas.push(m.ic+" "+m.l+" cresceu "+((atu-ant)/ant*100).toFixed(0)+"% ("+fmF(atu-ant)+" a mais).");
+          }
+        }
+      });
+
+      var antInv=antPorMacro["investimentos"]||0;
+      var atuInv=(atualPorMacro["investimentos"]||{tot:0}).tot;
+      if(antInv>0 && atuInv<antInv*0.7 && (antInv-atuInv)>=300){
+        pontos.alertas.push("📈 Aportes em Investimentos caíram "+((antInv-atuInv)/antInv*100).toFixed(0)+"% ("+fmF(antInv-atuInv)+" a menos). Avalie se foi pontual.");
+      }
+    }
+
+    var dividasMacro=atualPorMacro["dividas"];
+    if(dividasMacro && snapAtual.tRec>0){
+      var pctDiv=(dividasMacro.tot/snapAtual.tRec)*100;
+      if(pctDiv>30)pontos.alertas.push("Cartão/dívidas consomem "+pctDiv.toFixed(0)+"% da receita — limite saudável é até 30%.");
+    }
+
+    var totDespAtual=snapAtual.tDesp||1;
+    Object.keys(atualPorMacro).forEach(function(k){
+      var pct=(atualPorMacro[k].tot/totDespAtual)*100;
+      if(pct>=40 && k!=="investimentos" && k!=="moradia"){
+        var m=MACRO_CATS[k]||{l:k,ic:"📦"};
+        pontos.alertas.push(m.ic+" "+m.l+" representa "+pct.toFixed(0)+"% das despesas — concentração elevada.");
+      }
+    });
+
+
+    if(saldoAtual>0 && (!invMacro || (invMacro.tot/saldoAtual)<0.5))pontos.recomendacoes.push("Direcionar pelo menos 50% do saldo positivo de "+fmF(saldoAtual)+" para investimentos — sugestão de aporte mensal: "+fmF(saldoAtual*0.5)+".");
+    if(txPoupAtual<10)pontos.recomendacoes.push("Estabelecer meta gradual: aumentar a poupança em 2 pontos percentuais por mês até atingir 15-20%.");
+    if(dividasMacro && (dividasMacro.tot/snapAtual.tRec)>0.30)pontos.recomendacoes.push("Priorizar quitação de dívidas com juros altos (cartão rotativo, cheque especial) antes de novos investimentos.");
+    var alimMacro=atualPorMacro["alimentacao"];
+    if(alimMacro && (alimMacro.tot/totDespAtual)>0.25)pontos.recomendacoes.push("Alimentação acima de 25% das despesas — reavaliar frequência de delivery e refeições fora.");
+    var lazerMacro=atualPorMacro["lazer"];
+    if(lazerMacro && (lazerMacro.tot/totDespAtual)>0.15)pontos.recomendacoes.push("Lazer & Viagem em "+((lazerMacro.tot/totDespAtual)*100).toFixed(0)+"% — definir orçamento mensal específico evita surpresas.");
+    var assinMacro=atualPorMacro["assinaturas"];
+    if(assinMacro && assinMacro.n>=4)pontos.recomendacoes.push("Você tem "+assinMacro.n+" assinaturas ativas ("+fmF(assinMacro.tot)+"/mês = "+fmF(assinMacro.tot*12)+"/ano). Vale uma auditoria.");
+    if(!atualPorMacro["investimentos"] && saldoAtual>1000)pontos.recomendacoes.push("Iniciar aportes mensais em renda fixa (Tesouro Selic) ou previdência — mesmo R$500/mês fazem diferença em 10 anos.");
+
+    if(pontos.fortes.length===0)pontos.fortes.push("Continue importando dados mensais para que o sistema identifique padrões positivos ao longo do tempo.");
+    if(pontos.alertas.length===0)pontos.alertas.push("Nenhum alerta crítico identificado neste período. Bom trabalho!");
+    if(pontos.recomendacoes.length===0)pontos.recomendacoes.push("Cenário equilibrado. Manter o ritmo atual e revisar metas a cada trimestre.");
+
+    /* Top 5 despesas detalhadas (excluindo investimentos — eles têm seção própria) */
+    var topDesp=snapAtual.despesas.filter(function(d){return(d.macro||"")!=="investimentos"}).sort(function(a,b){return b.valor-a.valor}).slice(0,5);
+
+    return {
+      mesRef:snapAtual.mes,
+      snapAtual:snapAtual,snapAnterior:snapAnterior,media3m:media3m,
+      atualPorMacro:atualPorMacro,
+      atualInv:atualInv,antInv:antInv,
+      kpis:{saldoAtual:saldoAtual,txPoupAtual:txPoupAtual,saldoAnt:saldoAnt,txPoupAnt:txPoupAnt,varDesp:varDesp,varRec:varRec,varInv:varInv},
+      pontos:pontos,
+      topDesp:topDesp,
+      historico:hist.slice(0,12)
+    };
 };
 
 const normVista=function(s){return String(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim()};
@@ -11931,179 +12227,14 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
     });
   };
 
-  /* ===== ANÁLISE FINANCEIRA INTELIGENTE ===== */
-  
+  /* ===== ANÁLISE FINANCEIRA INTELIGENTE =====
+     A partir da v389, a lógica de verdade mora em calcularAnaliseFinanceira (função pura, top-level,
+     perto de MACRO_CATS) — extraída pra poder ser reaproveitada fora da ficha do cliente (produto
+     público autoatendido "Diagnóstico de Orçamento Familiar", ver claude/diagnostico-orcamento-autoatendido.md).
+     Esta função aqui virou um wrapper fino que só repassa o estado local do componente. */
   const gerarAnaliseFinanceira=function(){
-    var hist=(c.histMensal||[]).slice().sort(function(a,b){return b.mes.localeCompare(a.mes)});
-    /* Usa mês anterior como referência (relatório de fechamento) */
-    var refDate=new Date();refDate.setDate(1);refDate.setMonth(refDate.getMonth()-1);
-    var mesAtualKey=refDate.getFullYear()+"-"+String(refDate.getMonth()+1).padStart(2,"0");
-
-    /* Helper: separa investimentos das despesas puras de consumo. Retorna {tDespPuro,tInv} */
-    var separar=function(despArr){
-      var tD=0,tI=0;
-      (despArr||[]).forEach(function(d){
-        if((d.macro||"outros")==="investimentos") tI+=d.valor;
-        else tD+=d.valor;
-      });
-      return {tDespPuro:tD,tInv:tI};
-    };
-
-    var snapAtual=hist.find(function(h){return h.mes===mesAtualKey})||{
-      mes:mesAtualKey,receitas:receitas,despesas:despesas,
-      tRec:receitas.reduce(function(s,x){return s+x.valor},0),
-      tDesp:despesas.reduce(function(s,x){return s+x.valor},0)
-    };
-    
-    var sepAtual=separar(snapAtual.despesas);
-    snapAtual.tDespPuro=sepAtual.tDespPuro;
-    snapAtual.tInv=sepAtual.tInv;
-
-    var snapAnterior=hist.find(function(h){return h.mes!==mesAtualKey})||null;
-    if(snapAnterior){
-      var sepAnt=separar(snapAnterior.despesas);
-      snapAnterior.tDespPuro=sepAnt.tDespPuro;
-      snapAnterior.tInv=sepAnt.tInv;
-    }
-
-    
-    var ultimos3=hist.filter(function(h){return h.mes!==mesAtualKey}).slice(0,3);
-    var media3m=null;
-    if(ultimos3.length>0){
-      var sumR=0,sumD=0,sumI=0,porMacro={};
-      ultimos3.forEach(function(h){
-        var s=separar(h.despesas);
-        sumR+=h.tRec||0;sumD+=s.tDespPuro;sumI+=s.tInv;
-        (h.despesas||[]).forEach(function(d){
-          var k=d.macro||"outros";
-          if(k==="investimentos")return; 
-          if(!porMacro[k])porMacro[k]=0;
-          porMacro[k]+=d.valor;
-        });
-      });
-      var porMacroMedia={};
-      for(var k in porMacro)porMacroMedia[k]=porMacro[k]/ultimos3.length;
-      media3m={tRec:sumR/ultimos3.length,tDesp:sumD/ultimos3.length,tInv:sumI/ultimos3.length,porMacro:porMacroMedia,n:ultimos3.length};
-    }
-
-    /* Distribuição por macro do snapshot atual — EXCLUI investimentos das barras de despesa */
-    var atualPorMacro={};
-    snapAtual.despesas.forEach(function(d){
-      var k=d.macro||"outros";
-      if(k==="investimentos")return; 
-      if(!atualPorMacro[k])atualPorMacro[k]={tot:0,n:0,itens:[]};
-      atualPorMacro[k].tot+=d.valor;atualPorMacro[k].n++;
-      atualPorMacro[k].itens.push(d);
-    });
-    var antPorMacro={};
-    if(snapAnterior){
-      snapAnterior.despesas.forEach(function(d){
-        var k=d.macro||"outros";
-        if(k==="investimentos")return;
-        if(!antPorMacro[k])antPorMacro[k]=0;
-        antPorMacro[k]+=d.valor;
-      });
-    }
-
-    
-    var atualInv=snapAtual.despesas.filter(function(d){return(d.macro||"")==="investimentos"});
-    var antInv=snapAnterior?snapAnterior.despesas.filter(function(d){return(d.macro||"")==="investimentos"}):[];
-
-    /* KPIs — agora SALDO = Receita - DespPuro - Investimentos (sobra real); TxPoup considera só o investido como poupança proativa */
-    var saldoAtual=snapAtual.tRec-snapAtual.tDespPuro-snapAtual.tInv;
-    /* Tx poupança = (sobra livre + investido)/receita — % da receita que NÃO virou consumo */
-    var txPoupAtual=snapAtual.tRec>0?((saldoAtual+snapAtual.tInv)/snapAtual.tRec*100):0;
-    var saldoAnt=snapAnterior?(snapAnterior.tRec-snapAnterior.tDespPuro-snapAnterior.tInv):null;
-    var txPoupAnt=snapAnterior&&snapAnterior.tRec>0?((saldoAnt+snapAnterior.tInv)/snapAnterior.tRec*100):null;
-    var varDesp=snapAnterior?((snapAtual.tDespPuro-snapAnterior.tDespPuro)/(snapAnterior.tDespPuro||1)*100):null;
-    var varRec=snapAnterior?((snapAtual.tRec-snapAnterior.tRec)/(snapAnterior.tRec||1)*100):null;
-    var varInv=snapAnterior&&snapAnterior.tInv>0?((snapAtual.tInv-snapAnterior.tInv)/snapAnterior.tInv*100):null;
-
-    /* === INSIGHTS / DIAGNÓSTICO === */
-    var pontos={fortes:[],alertas:[],recomendacoes:[]};
-
-    
-    if(txPoupAtual>=20)pontos.fortes.push("Excelente disciplina financeira: taxa de poupança de "+txPoupAtual.toFixed(0)+"% supera a meta clássica de 20%.");
-    else if(txPoupAtual>=10)pontos.fortes.push("Taxa de poupança saudável de "+txPoupAtual.toFixed(0)+"% — dentro do recomendado para construção de patrimônio.");
-    if(saldoAtual>0)pontos.fortes.push("Mês fechou com saldo positivo de "+fmF(saldoAtual)+", reforçando a capacidade de aportes.");
-    var invMacro=atualPorMacro["investimentos"];
-    if(invMacro && snapAtual.tRec>0 && (invMacro.tot/snapAtual.tRec)>=0.15)pontos.fortes.push("Aportes em investimentos representam "+((invMacro.tot/snapAtual.tRec)*100).toFixed(0)+"% da receita — acima da média do mercado brasileiro (~6%).");
-    if(snapAnterior && varDesp!==null && varDesp<=-5)pontos.fortes.push("Despesas reduziram "+Math.abs(varDesp).toFixed(0)+"% vs. mês anterior — excelente controle.");
-    if(snapAnterior && varRec!==null && varRec>=10)pontos.fortes.push("Receita cresceu "+varRec.toFixed(0)+"% vs. mês anterior — momento favorável para acelerar aportes.");
-
-    
-    if(saldoAtual<0)pontos.alertas.push("Mês fechou com déficit de "+fmF(Math.abs(saldoAtual))+". Atenção ao consumo da reserva.");
-    if(txPoupAtual<10 && txPoupAtual>=0)pontos.alertas.push("Taxa de poupança baixa ("+txPoupAtual.toFixed(0)+"%) — abaixo do mínimo de 10% recomendado.");
-    if(snapAnterior && varDesp!==null && varDesp>=10)pontos.alertas.push("Despesas subiram "+varDesp.toFixed(0)+"% vs. mês anterior. Identifique a categoria responsável.");
-    /* Categoria com aumento expressivo — investimentos crescendo é POSITIVO (vai pra fortes); demais é alerta */
-    if(snapAnterior){
-      Object.keys(atualPorMacro).forEach(function(k){
-        var ant=antPorMacro[k]||0;
-        var atu=atualPorMacro[k].tot;
-        if(ant>0 && atu>=ant*1.3 && (atu-ant)>=300){
-          var m=MACRO_CATS[k]||{l:k,ic:"📦"};
-          if(k==="investimentos"){
-            pontos.fortes.push(m.ic+" Aportes em "+m.l+" cresceram "+((atu-ant)/ant*100).toFixed(0)+"% ("+fmF(atu-ant)+" a mais) — disciplina exemplar de acumulação.");
-          }else{
-            pontos.alertas.push(m.ic+" "+m.l+" cresceu "+((atu-ant)/ant*100).toFixed(0)+"% ("+fmF(atu-ant)+" a mais).");
-          }
-        }
-      });
-      
-      var antInv=antPorMacro["investimentos"]||0;
-      var atuInv=(atualPorMacro["investimentos"]||{tot:0}).tot;
-      if(antInv>0 && atuInv<antInv*0.7 && (antInv-atuInv)>=300){
-        pontos.alertas.push("📈 Aportes em Investimentos caíram "+((antInv-atuInv)/antInv*100).toFixed(0)+"% ("+fmF(antInv-atuInv)+" a menos). Avalie se foi pontual.");
-      }
-    }
-    
-    var dividasMacro=atualPorMacro["dividas"];
-    if(dividasMacro && snapAtual.tRec>0){
-      var pctDiv=(dividasMacro.tot/snapAtual.tRec)*100;
-      if(pctDiv>30)pontos.alertas.push("Cartão/dívidas consomem "+pctDiv.toFixed(0)+"% da receita — limite saudável é até 30%.");
-    }
-    
-    var totDespAtual=snapAtual.tDesp||1;
-    Object.keys(atualPorMacro).forEach(function(k){
-      var pct=(atualPorMacro[k].tot/totDespAtual)*100;
-      if(pct>=40 && k!=="investimentos" && k!=="moradia"){
-        var m=MACRO_CATS[k]||{l:k,ic:"📦"};
-        pontos.alertas.push(m.ic+" "+m.l+" representa "+pct.toFixed(0)+"% das despesas — concentração elevada.");
-      }
-    });
-
-    
-    if(saldoAtual>0 && (!invMacro || (invMacro.tot/saldoAtual)<0.5))pontos.recomendacoes.push("Direcionar pelo menos 50% do saldo positivo de "+fmF(saldoAtual)+" para investimentos — sugestão de aporte mensal: "+fmF(saldoAtual*0.5)+".");
-    if(txPoupAtual<10)pontos.recomendacoes.push("Estabelecer meta gradual: aumentar a poupança em 2 pontos percentuais por mês até atingir 15-20%.");
-    if(dividasMacro && (dividasMacro.tot/snapAtual.tRec)>0.30)pontos.recomendacoes.push("Priorizar quitação de dívidas com juros altos (cartão rotativo, cheque especial) antes de novos investimentos.");
-    var alimMacro=atualPorMacro["alimentacao"];
-    if(alimMacro && (alimMacro.tot/totDespAtual)>0.25)pontos.recomendacoes.push("Alimentação acima de 25% das despesas — reavaliar frequência de delivery e refeições fora.");
-    var lazerMacro=atualPorMacro["lazer"];
-    if(lazerMacro && (lazerMacro.tot/totDespAtual)>0.15)pontos.recomendacoes.push("Lazer & Viagem em "+((lazerMacro.tot/totDespAtual)*100).toFixed(0)+"% — definir orçamento mensal específico evita surpresas.");
-    var assinMacro=atualPorMacro["assinaturas"];
-    if(assinMacro && assinMacro.n>=4)pontos.recomendacoes.push("Você tem "+assinMacro.n+" assinaturas ativas ("+fmF(assinMacro.tot)+"/mês = "+fmF(assinMacro.tot*12)+"/ano). Vale uma auditoria.");
-    if(!atualPorMacro["investimentos"] && saldoAtual>1000)pontos.recomendacoes.push("Iniciar aportes mensais em renda fixa (Tesouro Selic) ou previdência — mesmo R$500/mês fazem diferença em 10 anos.");
-
-    if(pontos.fortes.length===0)pontos.fortes.push("Continue importando dados mensais para que o sistema identifique padrões positivos ao longo do tempo.");
-    if(pontos.alertas.length===0)pontos.alertas.push("Nenhum alerta crítico identificado neste período. Bom trabalho!");
-    if(pontos.recomendacoes.length===0)pontos.recomendacoes.push("Cenário equilibrado. Manter o ritmo atual e revisar metas a cada trimestre.");
-
-    /* Top 5 despesas detalhadas (excluindo investimentos — eles têm seção própria) */
-    var topDesp=snapAtual.despesas.filter(function(d){return(d.macro||"")!=="investimentos"}).sort(function(a,b){return b.valor-a.valor}).slice(0,5);
-
-    return {
-      mesRef:snapAtual.mes,
-      snapAtual:snapAtual,snapAnterior:snapAnterior,media3m:media3m,
-      atualPorMacro:atualPorMacro,
-      atualInv:atualInv,antInv:antInv,
-      kpis:{saldoAtual:saldoAtual,txPoupAtual:txPoupAtual,saldoAnt:saldoAnt,txPoupAnt:txPoupAnt,varDesp:varDesp,varRec:varRec,varInv:varInv},
-      pontos:pontos,
-      topDesp:topDesp,
-      historico:hist.slice(0,12) 
-    };
+    return calcularAnaliseFinanceira(c.histMensal,receitas,despesas,fmF);
   };
-
-  
   const gerarRelatorioTrimestral=function(meses,cli){
     var MN=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
     var fmt=function(v){return "R$ "+(v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})};
@@ -26035,6 +26166,7 @@ return (
 function ApresentacaoView(){
   var hoje=new Date();
   const[apres,sApres]=React.useState("institucional");
+  const[gerandoPPTX,setGerandoPPTX]=React.useState(false);
 
   var tabs=[
     {id:"institucional",l:"📊 Apresentação Institucional",d:"Pitch genérico da CourInvest"},
@@ -26672,6 +26804,18 @@ var ApresentacaoGP=function(){
           <h2 style={{margin:0,fontSize:24,fontWeight:800,color:T.t1}}>📊 Apresentação Comercial</h2>
           <div style={{fontSize:12,color:T.t3,marginTop:4}}>Material institucional para prospecção e primeiros contatos</div>
         </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <Bt v="secondary" disabled={gerandoPPTX} onClick={async function(){
+  var el=document.getElementById("gf-apresentacao")||document.getElementById("proposta-print");
+  if(!el){alert("Apresentação não encontrada");return;}
+  setGerandoPPTX(true);
+  try{
+    var nomeTab={institucional:"institucional",gp:"gestao-patrimonio",gf:"gestao-financeira"}[apres]||"comercial";
+    await gerarPPTXDeSlides(el,"courinvest-apresentacao-"+nomeTab+".pptx");
+  }finally{
+    setGerandoPPTX(false);
+  }
+}}>{gerandoPPTX?"⏳ Gerando...":"📊 Gerar PowerPoint"}</Bt>
         <Bt onClick={function(){
   var el=document.getElementById("gf-apresentacao")||document.getElementById("proposta-print");
   if(!el){alert("Apresentação não encontrada");return;}
@@ -26719,6 +26863,7 @@ var ApresentacaoGP=function(){
   var url=URL.createObjectURL(blob);
   window.open(url,"_blank");
 }}>🖨 Imprimir / Salvar PDF</Bt>
+        </div>
       </div>
 
       {/* ── Aviso ── */}
@@ -27050,10 +27195,11 @@ var ApresentacaoGP=function(){
 
 
 function PropostasView({data,dispatch}){
-  const[view,sView]=useState("list"); 
+  const[view,sView]=useState("list");
   const[editingId,sEditingId]=useState(null);
-  const[wizard,sWizard]=useState(1); 
+  const[wizard,sWizard]=useState(1);
   const[form,sForm]=useState(null);
+  const[gerandoPPTX,setGerandoPPTX]=useState(false);
   const propostas=data.propostas||[];
   
   
@@ -27234,6 +27380,17 @@ function PropostasView({data,dispatch}){
           <Bt v="secondary" onClick={function(){sView("list")}}>← Voltar</Bt>
           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
             <Bt v="secondary" onClick={function(){editarProposta(form)}}>✏ Editar</Bt>
+            <Bt v="secondary" disabled={gerandoPPTX} onClick={async function(){
+  var el=document.getElementById("proposta-print");
+  if(!el){alert("Apresentação não encontrada");return;}
+  setGerandoPPTX(true);
+  try{
+    var nomeCliente=(form.clienteNome||"proposta").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
+    await gerarPPTXDeSlides(el,"courinvest-proposta-"+(nomeCliente||"cliente")+".pptx");
+  }finally{
+    setGerandoPPTX(false);
+  }
+}}>{gerandoPPTX?"⏳ Gerando...":"📊 Gerar PowerPoint"}</Bt>
             <Bt onClick={function(){
   var el=document.getElementById("proposta-print");
   if(!el){alert("Apresentação não encontrada");return;}
@@ -31035,7 +31192,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '388';
+  var SW_VERSION = '390';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
