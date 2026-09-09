@@ -21692,6 +21692,43 @@ function FinanceiroView({data:d,dispatch:dp}){
   var entradasFilt=selYear==="todos"?entradas:entradas.filter(function(e){return e.data&&e.data.substring(0,4)===selYear});
   var despesasFilt=selYear==="todos"?despesas:despesas.filter(function(d){return!d.data||d.data.substring(0,4)===selYear});
 
+  /* ── Normalização de nomes de clientes (evita duplicidade quando o mesmo cliente foi
+     lançado nas planilhas de NF com grafias diferentes — ex.: "Marcus Condé Goyatá Lopes"
+     e "Marcus Goyatá" apareciam como 2 clientes distintos em "Por Cliente", "Recorrentes"
+     e "Ticket Médio"). Regra automática: se TODAS as palavras do nome mais curto aparecem,
+     por inteiro, entre as palavras do nome mais longo (sem diferenciar acento/maiúsculas) —
+     e o nome mais curto tem 2 ou mais palavras, pra não juntar clientes diferentes que só
+     compartilham um primeiro nome comum — os dois são tratados como o mesmo cliente, usando
+     o nome mais completo como "oficial". Casos que a regra não conseguir resolver sozinha
+     (apelidos totalmente diferentes do nome de cadastro, por exemplo) podem ser adicionados
+     manualmente em CLIENTE_ALIAS_MANUAL (chave = como está lançado na planilha, valor = nome
+     oficial a usar). */
+  var CLIENTE_ALIAS_MANUAL={
+    "Marcus Goyatá":"Marcus Condé Goyatá Lopes"
+  };
+  var _normTok=function(s){return(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").trim().toUpperCase().split(/\s+/).filter(Boolean)};
+  var clienteCanonMap=(function(){
+    var uniq=Array.from(new Set(entradas.map(function(e){return(e.cliente||"").trim()}).filter(Boolean)));
+    var toks=uniq.map(function(n){return{nome:n,tk:_normTok(n)}});
+    toks.sort(function(a,b){return b.tk.length-a.tk.length||b.nome.length-a.nome.length});
+    var map={};
+    toks.forEach(function(t){map[t.nome]=t.nome});
+    for(var i=0;i<toks.length;i++){
+      var maior=toks[i];
+      if(map[maior.nome]!==maior.nome)continue;
+      for(var j=i+1;j<toks.length;j++){
+        var menor=toks[j];
+        if(map[menor.nome]!==menor.nome)continue;
+        if(menor.tk.length<2||menor.tk.length>=maior.tk.length)continue;
+        var contido=menor.tk.every(function(w){return maior.tk.indexOf(w)>=0});
+        if(contido)map[menor.nome]=maior.nome;
+      }
+    }
+    Object.keys(CLIENTE_ALIAS_MANUAL).forEach(function(k){map[k]=CLIENTE_ALIAS_MANUAL[k]});
+    return map;
+  })();
+  var canonCliente=function(nome){var n=(nome||"").trim();if(!n)return"Desconhecido";return clienteCanonMap[n]||n};
+
   /* ── Classificação de remuneração dos sócios ── */
   var CAT_REMUNERACAO=["Pró-Labore","Pró Labore","Pro-Labore","Pro Labore","Prolabore","Pró labore",
     "Distr. Lucro","Distr.Lucro","Distribuição de Lucro","Distribuicao de Lucro",
@@ -21777,7 +21814,7 @@ function FinanceiroView({data:d,dispatch:dp}){
 
   
   var byCliente={};
-  entradasFilt.forEach(function(e){var c=e.cliente||"Desconhecido";if(!byCliente[c])byCliente[c]={total:0,count:0,servico:"",meio:"",meses:{},entries:[]};byCliente[c].total+=e.valor;byCliente[c].count++;byCliente[c].servico=e.servico;byCliente[c].meio=e.meio;byCliente[c].entries.push(e);var mm=e.data?e.data.substring(0,7):"";if(mm){byCliente[c].meses[mm]=(byCliente[c].meses[mm]||0)+e.valor}});
+  entradasFilt.forEach(function(e){var c=canonCliente(e.cliente);if(!byCliente[c])byCliente[c]={total:0,count:0,servico:"",meio:"",meses:{},entries:[]};byCliente[c].total+=e.valor;byCliente[c].count++;byCliente[c].servico=e.servico;byCliente[c].meio=e.meio;byCliente[c].entries.push(e);var mm=e.data?e.data.substring(0,7):"";if(mm){byCliente[c].meses[mm]=(byCliente[c].meses[mm]||0)+e.valor}});
 
   
   var byDespCat={};
@@ -22121,10 +22158,11 @@ function FinanceiroView({data:d,dispatch:dp}){
                     {(function(){
                       var cliMonth={};
                       byMonth[selMonth].entries.forEach(function(e){
-                        if(!cliMonth[e.cliente])cliMonth[e.cliente]={total:0,servico:"",meio:""};
-                        cliMonth[e.cliente].total+=e.valor;
-                        cliMonth[e.cliente].servico=e.servico;
-                        cliMonth[e.cliente].meio=e.meio;
+                        var cNome=canonCliente(e.cliente);
+                        if(!cliMonth[cNome])cliMonth[cNome]={total:0,servico:"",meio:""};
+                        cliMonth[cNome].total+=e.valor;
+                        cliMonth[cNome].servico=e.servico;
+                        cliMonth[cNome].meio=e.meio;
                       });
                       var mxCli=Math.max.apply(null,Object.values(cliMonth).map(function(c){return c.total}).concat([1]));
                       return Object.entries(cliMonth).sort(function(a,b){return b[1].total-a[1].total}).map(function(e,i){
@@ -22683,7 +22721,7 @@ function FinanceiroView({data:d,dispatch:dp}){
           if(!e.data)return;
           var ehGP=e.servico==="Gestão de Patrimônio",ehGF=e.servico==="Gestão Financeira";
           if(!ehGP&&!ehGF)return;
-          var nomeOriginal=(e.cliente||"Desconhecido").trim();
+          var nomeOriginal=canonCliente(e.cliente);
           var chave=nomeOriginal.toLowerCase();
           var ym=e.data.substring(0,7);
           if(!histCliente[chave])histCliente[chave]={nome:nomeOriginal,meses:{},servicos:{},datas:[]};
@@ -22797,7 +22835,7 @@ function FinanceiroView({data:d,dispatch:dp}){
           if(!ehGP&&!ehGF)return;
           var m=e.data.substring(0,7);
           if(!byMonthTicket[m])byMonthTicket[m]={totalGeral:0,totalGP:0,totalGF:0,cliGeral:{},cliGP:{},cliGF:{}};
-          var nomeCli=e.cliente||"Desconhecido";
+          var nomeCli=canonCliente(e.cliente);
           byMonthTicket[m].totalGeral+=e.valor;
           byMonthTicket[m].cliGeral[nomeCli]=true;
           if(ehGP){byMonthTicket[m].totalGP+=e.valor;byMonthTicket[m].cliGP[nomeCli]=true;}
@@ -31658,7 +31696,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '398';
+  var SW_VERSION = '399';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
