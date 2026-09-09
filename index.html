@@ -27472,6 +27472,7 @@ function PropostasView({data,dispatch}){
     var validade=new Date(hoje.getTime()+(form.validadeDias||30)*86400*1000);
     var recMes;
     var ehConsultoria=form.servico==="consultoria";
+    var temDiagnostico=form.servico!=="financeira";
     if(form.servico==="patrimonio"){recMes=(form.valorPatrimonio||0)*(form.taxaMensal||0)/100;}
     else if(ehConsultoria){recMes=precoConsultoria(form.valorPatrimonio).valor;}
     else{recMes=form.feeFixo||0;}
@@ -27676,7 +27677,7 @@ function PropostasView({data,dispatch}){
             </div>
           </div>
 
-          {}
+          {temDiagnostico && (
           <div className="pp-page" style={{padding:"60px 50px",background:"linear-gradient(180deg,#FAFBFD 0%,#F1F3F8 100%)",pageBreakBefore:"always",position:"relative",overflow:"hidden"}}>
             <div style={{position:"absolute",top:-60,right:-100,opacity:0.04,pointerEvents:"none"}}>
               <CourinvestPattern opacity={0.6} size={340} color="#D4A328"/>
@@ -27870,6 +27871,7 @@ function PropostasView({data,dispatch}){
               </div>
             )}
           </div>
+          )}
 
           {/* PÁGINA 4: METODOLOGIA - DARK PREMIUM */}
           <div className="pp-page" style={{background:"linear-gradient(180deg,#FAFBFD 0%,#F1F3F8 100%)",padding:"60px 50px",pageBreakBefore:"always",position:"relative",overflow:"hidden"}}>
@@ -27878,7 +27880,7 @@ function PropostasView({data,dispatch}){
             </div>
             <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:10,position:"relative"}}>
               <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,#D4A328)"}}/>
-              <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>03 · METODOLOGIA</span>
+              <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>{temDiagnostico?"03 · METODOLOGIA":"02 · METODOLOGIA"}</span>
             </div>
             <div style={{fontSize:42,fontWeight:900,color:"#0A1628",marginBottom:14,lineHeight:1.05,letterSpacing:-1.2,position:"relative"}}>Como vamos trabalhar juntos</div>
             <div style={{fontSize:15,color:"#5a5a6e",marginBottom:36,lineHeight:1.7,maxWidth:640,position:"relative"}}>{serv.descricao}</div>
@@ -28051,7 +28053,7 @@ function PropostasView({data,dispatch}){
             </div>
             <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:10,position:"relative"}}>
               <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,#D4A328)"}}/>
-              <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>{ehConsultoria?"05 · PROPOSTA":"04 · PROPOSTA"}</span>
+              <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>{ehConsultoria?"05 · PROPOSTA":(temDiagnostico?"04 · PROPOSTA":"03 · PROPOSTA")}</span>
             </div>
             <div style={{fontSize:42,fontWeight:900,color:"#0A1628",marginBottom:10,lineHeight:1.05,letterSpacing:-1.2,position:"relative"}}>Investimento e Precificação</div>
             <div style={{fontSize:14,color:"#5a5a6e",marginBottom:32,maxWidth:600,lineHeight:1.6,position:"relative"}}>Modelo de remuneração transparente, sem conflitos de interesse e cobrança direta ao cliente.</div>
@@ -28175,7 +28177,7 @@ function PropostasView({data,dispatch}){
                 <div style={{fontSize:12,color:"#0F9960",fontWeight:800,letterSpacing:2.5}}>PRÓXIMOS PASSOS</div>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:18,position:"relative"}}>
-                {[{n:"1",t:"Revisão",d:"Análise detalhada desta proposta"},{n:"2",t:"Alinhamento",d:"Reunião para esclarecimentos e ajustes"},{n:"3",t:"Assinatura",d:"Formalização do contrato de prestação"},{n:"4",t:"Início",d:"Começo dos trabalhos na data acordada"}].map(function(p,i){return (
+                {(form.servico==="financeira"?[{n:"1",t:"Grupo de Trabalho",d:"Criação do grupo no WhatsApp para alinhamento contínuo"},{n:"2",t:"Contrato",d:"Formalização do contrato de prestação de serviço"},{n:"3",t:"Reunião Inicial",d:"Reunião inicial do serviço"},{n:"4",t:"Integração Bancária",d:"Integração bancária de todas as contas"}]:[{n:"1",t:"Revisão",d:"Análise detalhada desta proposta"},{n:"2",t:"Alinhamento",d:"Reunião para esclarecimentos e ajustes"},{n:"3",t:"Assinatura",d:"Formalização do contrato de prestação"},{n:"4",t:"Início",d:"Começo dos trabalhos na data acordada"}]).map(function(p,i){return (
                   <div key={i} style={{display:"flex",gap:12,alignItems:"flex-start",padding:"10px 12px",background:"#F7F8FB",borderRadius:10}}>
                     <div style={{width:32,height:32,flexShrink:0,background:"linear-gradient(135deg,#2DD4A0,#0F9960)",color:"#fff",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:900,boxShadow:"0 4px 12px rgba(45,212,160,0.3)"}}>{p.n}</div>
                     <div>
@@ -31294,7 +31296,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '393';
+  var SW_VERSION = '394';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
