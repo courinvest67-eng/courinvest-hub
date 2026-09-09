@@ -21786,7 +21786,7 @@ function FinanceiroView({data:d,dispatch:dp}){
   return (
     <div>
       <div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap"}}>
-        {[{id:"importar",l:"📥 Importar"},{id:"resumo",l:"📊 Resumo"},{id:"entradas",l:"💰 Entradas"},{id:"despesas",l:"💸 Despesas"},{id:"dre",l:"📋 DRE"},{id:"clientes",l:"👥 Por Cliente"}].map(function(t){return (
+        {[{id:"importar",l:"📥 Importar"},{id:"resumo",l:"📊 Resumo"},{id:"entradas",l:"💰 Entradas"},{id:"despesas",l:"💸 Despesas"},{id:"dre",l:"📋 DRE"},{id:"clientes",l:"👥 Por Cliente"},{id:"recorrentes",l:"🔄 Recorrentes"}].map(function(t){return (
           <button key={t.id} onClick={function(){sFTab(t.id)}} style={{padding:"8px 16px",borderRadius:12,fontSize:11,fontWeight:600,cursor:"pointer",border:fTab===t.id?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.04)",background:fTab===t.id?T.goldD:"transparent",color:fTab===t.id?T.gold:T.t3}}>{t.l}</button>
         )})}
       </div>
@@ -22652,6 +22652,280 @@ function FinanceiroView({data:d,dispatch:dp}){
           )}
         </div>
       )}
+
+      {}
+      {fTab==="recorrentes" && (function(){
+        /* ===== CLIENTES RECORRENTES: entradas e perdas ao longo dos meses =====
+           "Recorrente" aqui = cliente com sv incluindo "patrimonio" (Gestão de Patrimônio) e/ou
+           "planejamento" (Gestão Financeira) — os dois únicos serviços com mensalidade/taxa
+           contínua. Trabalhos avulsos/pontuais (consultoria pontual etc.) não têm status/dtCaptacao
+           de cliente recorrente e ficam de fora dessa análise, conforme pedido.
+           Usa os mesmos campos já mantidos no cadastro (status/dtCaptacao/dtStatusChange) que a
+           aba Comercial → Pipeline já usa pra "Evolução da Base" — aqui é a mesma lógica, mas
+           filtrada só pros recorrentes e com o impacto em R$ (MRR) de cada entrada/saída. */
+        var clientesRec=(d.cl||[]).map(function(c){
+          var sv=Array.isArray(c.sv)?c.sv:(c.sv?[c.sv]:[]);
+          return Object.assign({},c,{_sv:sv});
+        }).filter(function(c){return c._sv.indexOf("patrimonio")>=0||c._sv.indexOf("planejamento")>=0});
+
+        var norm=clientesRec.map(function(c){
+          var status=c.status||"ativo";
+          var dtCap=c.dtCaptacao||"2024-01-01";
+          var dtStatus=c.dtStatusChange||dtCap;
+          var temGP=c._sv.indexOf("patrimonio")>=0,temGF=c._sv.indexOf("planejamento")>=0;
+          var servicoLabel=temGP&&temGF?"GP + GF":temGP?"Gestão de Patrimônio":"Gestão Financeira";
+          var mrr=receitaTotalBRL(c);
+          return Object.assign({},c,{status:status,dtCaptacao:dtCap,dtStatusChange:dtStatus,_servicoLabel:servicoLabel,_mrr:mrr});
+        });
+
+        var ativosRec=norm.filter(function(c){return c.status==="ativo"});
+        var perdidosRecTodos=norm.filter(function(c){return c.status!=="ativo"});
+        var ativosGP=ativosRec.filter(function(c){return c._sv.indexOf("patrimonio")>=0}).length;
+        var ativosGF=ativosRec.filter(function(c){return c._sv.indexOf("planejamento")>=0}).length;
+        var mrrAtivoRec=ativosRec.reduce(function(a,c){return a+c._mrr},0);
+
+
+        var hojeRec=new Date();
+        var curYm=hojeRec.getFullYear()+"-"+String(hojeRec.getMonth()+1).padStart(2,"0");
+        var todasDatas=[];
+        norm.forEach(function(c){
+          if(c.dtCaptacao)todasDatas.push(c.dtCaptacao);
+          if(c.status!=="ativo"&&c.dtStatusChange)todasDatas.push(c.dtStatusChange);
+        });
+        var minYm=todasDatas.length?todasDatas.reduce(function(a,b){return a<b?a:b}).substring(0,7):curYm;
+        if(minYm>curYm)minYm=curYm;
+
+        var MN_CURTO_REC=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+        var monthsList=[];
+        var partsIni=minYm.split("-").map(Number);
+        var cursorMes=new Date(partsIni[0],partsIni[1]-1,1);
+        var endMes=new Date(hojeRec.getFullYear(),hojeRec.getMonth(),1);
+        var guardMes=0;
+        while(cursorMes<=endMes&&guardMes<600){
+          monthsList.push(cursorMes.getFullYear()+"-"+String(cursorMes.getMonth()+1).padStart(2,"0"));
+          cursorMes.setMonth(cursorMes.getMonth()+1);
+          guardMes++;
+        }
+
+        var acumuladoRec=0;
+        var historicoRec=monthsList.map(function(ym){
+          var novos=norm.filter(function(c){return c.dtCaptacao&&c.dtCaptacao.substring(0,7)===ym});
+          var perdidos=norm.filter(function(c){return c.status!=="ativo"&&c.dtStatusChange&&c.dtStatusChange.substring(0,7)===ym});
+          acumuladoRec+=novos.length-perdidos.length;
+          var mrrGanho=novos.reduce(function(a,c){return a+c._mrr},0);
+          var mrrPerdido=perdidos.reduce(function(a,c){return a+c._mrr},0);
+          return{ym:ym,label:MN_CURTO_REC[+ym.substring(5,7)-1]+"/"+ym.substring(2,4),novos:novos,perdidos:perdidos,saldo:novos.length-perdidos.length,acumulado:acumuladoRec,mrrGanho:mrrGanho,mrrPerdido:mrrPerdido};
+        });
+        var maxEvolRec=Math.max.apply(null,historicoRec.map(function(h){return Math.max(h.novos.length,h.perdidos.length)}).concat([1]));
+
+        var churnGeral=(ativosRec.length+perdidosRecTodos.length)>0?(perdidosRecTodos.length/(ativosRec.length+perdidosRecTodos.length)*100):0;
+
+        var last12=historicoRec.slice(-12);
+        var novos12=last12.reduce(function(a,h){return a+h.novos.length},0);
+        var perdidos12=last12.reduce(function(a,h){return a+h.perdidos.length},0);
+        var mrrGanho12=last12.reduce(function(a,h){return a+h.mrrGanho},0);
+        var mrrPerdido12=last12.reduce(function(a,h){return a+h.mrrPerdido},0);
+
+        var fDRec=function(s){if(!s)return"—";var p=s.split("-");return p[2]+"/"+p[1]+"/"+p[0]};
+        var isMobRec=isMob;
+
+        /* ===== TICKET MÉDIO POR CLIENTE RECORRENTE — EVOLUÇÃO MENSAL =====
+           Diferente do MRR acima (que é uma ESTIMATIVA a partir do cadastro), aqui uso o
+           faturamento REAL importado na aba "Importar" (entradas) — pra cada mês, ticket médio
+           = soma do que entrou de Gestão de Patrimônio + Gestão Financeira dividido pelo nº de
+           clientes distintos que efetivamente pagaram naquele mês. Calculado separado por
+           serviço também, porque GP (% sobre patrimônios grandes) e GF (fee fixo menor) têm
+           tickets em escalas bem diferentes — misturar os dois numa média só iludiria a leitura. */
+        var byMonthTicket={};
+        entradas.forEach(function(e){
+          if(!e.data)return;
+          var ehGP=e.servico==="Gestão de Patrimônio",ehGF=e.servico==="Gestão Financeira";
+          if(!ehGP&&!ehGF)return;
+          var m=e.data.substring(0,7);
+          if(!byMonthTicket[m])byMonthTicket[m]={totalGeral:0,totalGP:0,totalGF:0,cliGeral:{},cliGP:{},cliGF:{}};
+          var nomeCli=e.cliente||"Desconhecido";
+          byMonthTicket[m].totalGeral+=e.valor;
+          byMonthTicket[m].cliGeral[nomeCli]=true;
+          if(ehGP){byMonthTicket[m].totalGP+=e.valor;byMonthTicket[m].cliGP[nomeCli]=true;}
+          else{byMonthTicket[m].totalGF+=e.valor;byMonthTicket[m].cliGF[nomeCli]=true;}
+        });
+        var mesesTicket=Object.keys(byMonthTicket).sort();
+        var ticketEvol=mesesTicket.map(function(m){
+          var info=byMonthTicket[m];
+          var nGeral=Object.keys(info.cliGeral).length,nGP=Object.keys(info.cliGP).length,nGF=Object.keys(info.cliGF).length;
+          return{
+            ym:m,label:MN_CURTO_REC[+m.substring(5,7)-1]+"/"+m.substring(2,4),
+            ticketGeral:nGeral>0?info.totalGeral/nGeral:0,
+            ticketGP:nGP>0?info.totalGP/nGP:0,
+            ticketGF:nGF>0?info.totalGF/nGF:0,
+            nGeral:nGeral,nGP:nGP,nGF:nGF
+          };
+        });
+        /* Ticket "atual" = média dos últimos 3 meses com dados (evita que um único mês
+           incompleto ou atípico distorça o número mostrado como "atual"). */
+        var mediaUltimosN=function(arr,key,n){
+          var vals=arr.filter(function(h){return h[key]>0}).slice(-n).map(function(h){return h[key]});
+          return vals.length?vals.reduce(function(a,b){return a+b},0)/vals.length:0;
+        };
+        var ticketAtualGeral=mediaUltimosN(ticketEvol,"ticketGeral",3);
+        var ticketAtualGP=mediaUltimosN(ticketEvol,"ticketGP",3);
+        var ticketAtualGF=mediaUltimosN(ticketEvol,"ticketGF",3);
+        /* Variação vs. mesmo ponto 12 meses atrás (média dos 3 meses ao redor de -12) */
+        var janela12MesesAtras=ticketEvol.slice(Math.max(0,ticketEvol.length-15),Math.max(0,ticketEvol.length-12));
+        var mediaJanela=function(arr,key){
+          var vals=arr.filter(function(h){return h[key]>0}).map(function(h){return h[key]});
+          return vals.length?vals.reduce(function(a,b){return a+b},0)/vals.length:0;
+        };
+        var ticketAnoAnteriorGeral=mediaJanela(janela12MesesAtras,"ticketGeral");
+        var varTicketGeral=ticketAnoAnteriorGeral>0?((ticketAtualGeral/ticketAnoAnteriorGeral)-1)*100:null;
+        var maxTicketGeral=Math.max.apply(null,ticketEvol.map(function(h){return h.ticketGeral}).concat([1]));
+
+        return (
+          <div>
+            <div style={{padding:"10px 14px",background:"rgba(212,163,40,0.06)",border:"1px solid rgba(212,163,40,0.15)",borderRadius:10,marginBottom:16,fontSize:11,color:T.t3,lineHeight:1.6}}>
+              ℹ️ Considera só clientes <strong style={{color:T.gold}}>recorrentes</strong> — Gestão Financeira e Gestão de Patrimônio. Trabalhos avulsos/pontuais não entram aqui. O valor em R$ é uma estimativa da mensalidade/taxa <strong>atual</strong> de cada cliente (fee fixo ou % sobre patrimônio) — pra quem já saiu, usa o último valor que ficou registrado no cadastro, então pode não bater 100% com o que era cobrado na época da saída.
+            </div>
+
+            {}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:16}}>
+              <Cd style={{padding:"12px 16px"}} hov={false} glow>
+                <div style={{fontSize:8,color:T.t3,fontWeight:600,letterSpacing:1}}>✅ RECORRENTES ATIVOS</div>
+                <div style={{fontSize:22,fontWeight:800,color:T.green,marginTop:2,fontFamily:"'JetBrains Mono'"}}>{ativosRec.length}</div>
+                <div style={{fontSize:9,color:T.t3,marginTop:2}}>{ativosGP} GP · {ativosGF} GF</div>
+              </Cd>
+              <Cd style={{padding:"12px 16px"}} hov={false}>
+                <div style={{fontSize:8,color:T.t3,fontWeight:600,letterSpacing:1}}>💰 MRR RECORRENTE ATIVO</div>
+                <div style={{fontSize:18,fontWeight:800,color:T.gold,marginTop:2,fontFamily:"'JetBrains Mono'"}}>{fm(mrrAtivoRec)}</div>
+                <div style={{fontSize:9,color:T.t3,marginTop:2}}>Estimado/mês, base hoje</div>
+              </Cd>
+              <Cd style={{padding:"12px 16px"}} hov={false}>
+                <div style={{fontSize:8,color:T.t3,fontWeight:600,letterSpacing:1}}>🆕 NOVOS (12 MESES)</div>
+                <div style={{fontSize:22,fontWeight:800,color:T.green,marginTop:2,fontFamily:"'JetBrains Mono'"}}>+{novos12}</div>
+                <div style={{fontSize:9,color:T.green,marginTop:2}}>{fm(mrrGanho12)}/mês ganho</div>
+              </Cd>
+              <Cd style={{padding:"12px 16px"}} hov={false}>
+                <div style={{fontSize:8,color:T.t3,fontWeight:600,letterSpacing:1}}>🚪 PERDIDOS (12 MESES)</div>
+                <div style={{fontSize:22,fontWeight:800,color:T.red,marginTop:2,fontFamily:"'JetBrains Mono'"}}>−{perdidos12}</div>
+                <div style={{fontSize:9,color:T.red,marginTop:2}}>{fm(mrrPerdido12)}/mês perdido</div>
+              </Cd>
+              <Cd style={{padding:"12px 16px"}} hov={false}>
+                <div style={{fontSize:8,color:T.t3,fontWeight:600,letterSpacing:1}}>📊 NET (12 MESES)</div>
+                <div style={{fontSize:22,fontWeight:800,color:(novos12-perdidos12)>=0?T.green:T.red,marginTop:2,fontFamily:"'JetBrains Mono'"}}>{(novos12-perdidos12)>=0?"+":""}{novos12-perdidos12}</div>
+                <div style={{fontSize:9,color:(mrrGanho12-mrrPerdido12)>=0?T.green:T.red,marginTop:2}}>{(mrrGanho12-mrrPerdido12)>=0?"+":""}{fm(mrrGanho12-mrrPerdido12)}/mês</div>
+              </Cd>
+              <Cd style={{padding:"12px 16px"}} hov={false}>
+                <div style={{fontSize:8,color:T.t3,fontWeight:600,letterSpacing:1}}>🎯 CHURN HISTÓRICO</div>
+                <div style={{fontSize:22,fontWeight:800,color:churnGeral<=10?T.green:churnGeral<=25?T.gold:T.red,marginTop:2,fontFamily:"'JetBrains Mono'"}}>{churnGeral.toFixed(1)}%</div>
+                <div style={{fontSize:9,color:T.t3,marginTop:2}}>Perdidos / (Ativos+Perdidos)</div>
+              </Cd>
+            </div>
+
+            {}
+            <Cd style={{padding:16,marginBottom:16}} hov={false}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
+                <h4 style={{margin:0,fontSize:13,fontWeight:700,color:T.gold}}>📈 Entradas e Perdas de Recorrentes — por mês</h4>
+                <div style={{display:"flex",gap:12,fontSize:10}}>
+                  <span style={{color:T.t3}}><span style={{display:"inline-block",width:10,height:10,background:T.green,borderRadius:2,marginRight:4,verticalAlign:"middle"}}/>Novos</span>
+                  <span style={{color:T.t3}}><span style={{display:"inline-block",width:10,height:10,background:T.red,borderRadius:2,marginRight:4,verticalAlign:"middle"}}/>Perdidos</span>
+                </div>
+              </div>
+              {historicoRec.length===0 ? <div style={{color:T.t3,fontSize:12,textAlign:"center",padding:20}}>Sem clientes recorrentes cadastrados ainda</div> : (
+                <>
+                <div style={{display:"flex",alignItems:"flex-end",gap:6,height:150,padding:"0 4px",overflowX:"auto"}}>
+                  {historicoRec.map(function(h,i){
+                    var hNovos=Math.max(3,(h.novos.length/maxEvolRec)*100);
+                    var hPerdidos=Math.max(3,(h.perdidos.length/maxEvolRec)*100);
+                    return (
+                      <div key={i} title={h.label+": +"+h.novos.length+" novo(s) / -"+h.perdidos.length+" perdido(s) · base acumulada "+h.acumulado} style={{flex:"0 0 auto",width:28,display:"flex",flexDirection:"column",alignItems:"center",minWidth:0}}>
+                        <div style={{fontSize:8,fontWeight:700,color:h.saldo>=0?T.green:T.red,fontFamily:"'JetBrains Mono'",marginBottom:3}}>{h.saldo>=0?"+":""}{h.saldo}</div>
+                        <div style={{display:"flex",gap:2,alignItems:"flex-end",width:"100%",justifyContent:"center",height:110}}>
+                          <div style={{width:10,height:h.novos.length>0?hNovos+"%":"3px",background:"linear-gradient(180deg,"+T.green+",rgba(45,212,160,0.3))",borderRadius:"3px 3px 0 0",opacity:h.novos.length>0?.9:.15}}/>
+                          <div style={{width:10,height:h.perdidos.length>0?hPerdidos+"%":"3px",background:"linear-gradient(180deg,"+T.red+",rgba(248,113,113,0.3))",borderRadius:"3px 3px 0 0",opacity:h.perdidos.length>0?.9:.15}}/>
+                        </div>
+                        <div style={{fontSize:8,color:T.t3,marginTop:5,whiteSpace:"nowrap"}}>{h.label}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{fontSize:9,color:T.t3,marginTop:10,fontStyle:"italic"}}>Passe o mouse sobre cada mês pra ver o detalhe (novos, perdidos e base acumulada). Base de recorrentes ativos hoje: {ativosRec.length}.</div>
+                </>
+              )}
+            </Cd>
+
+            {}
+            <div style={{padding:"10px 14px",background:"rgba(56,189,248,0.06)",border:"1px solid rgba(56,189,248,0.15)",borderRadius:10,marginBottom:12,fontSize:11,color:T.t3,lineHeight:1.6}}>
+              ℹ️ O <strong style={{color:T.cyan}}>ticket médio</strong> abaixo vem do faturamento <strong>real</strong> importado em Financeiro → Importar (não é estimativa do cadastro): pra cada mês, é a soma recebida de Gestão de Patrimônio + Gestão Financeira dividida pelo número de clientes distintos que pagaram naquele mês. GP e GF são mostrados também separados porque têm escalas de valor bem diferentes.
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10,marginBottom:16}}>
+              <KCard label="🎫 Ticket Médio Geral" valor={fm(ticketAtualGeral)} cor={T.gold} sub={"Média 3 últimos meses"+(varTicketGeral!==null?" · "+(varTicketGeral>=0?"▲ +":"▼ ")+Math.abs(varTicketGeral).toFixed(1)+"% vs 12m atrás":"")} spark={ticketEvol.filter(function(h){return h.ticketGeral>0}).map(function(h){return h.ticketGeral})} sparkCor={T.gold}/>
+              <KCard label="💎 Ticket Médio GP" valor={fm(ticketAtualGP)} cor={T.gold} sub={"Gestão de Patrimônio · média 3m"} spark={ticketEvol.filter(function(h){return h.ticketGP>0}).map(function(h){return h.ticketGP})} sparkCor={T.gold}/>
+              <KCard label="📊 Ticket Médio GF" valor={fm(ticketAtualGF)} cor={T.cyan} sub={"Gestão Financeira · média 3m"} spark={ticketEvol.filter(function(h){return h.ticketGF>0}).map(function(h){return h.ticketGF})} sparkCor={T.cyan}/>
+            </div>
+
+            {}
+            <Cd style={{padding:16,marginBottom:16}} hov={false}>
+              <h4 style={{margin:"0 0 4px",fontSize:13,fontWeight:700,color:T.gold}}>🎫 Ticket Médio Geral (recorrentes) — Evolução Mensal</h4>
+              <div style={{fontSize:9,color:T.t3,marginBottom:10}}>Receita real de GP+GF ÷ nº de clientes pagantes no mês</div>
+              {ticketEvol.length===0 ? <div style={{color:T.t3,fontSize:12,textAlign:"center",padding:20}}>Sem dados de faturamento importados ainda pra Gestão de Patrimônio/Financeira</div> : (
+                <div style={{display:"flex",alignItems:"flex-end",gap:6,height:140,padding:"0 4px",overflowX:"auto"}}>
+                  {ticketEvol.map(function(h,i){
+                    var hBar=h.ticketGeral>0?Math.max(4,(h.ticketGeral/maxTicketGeral)*100):0;
+                    return (
+                      <div key={i} title={h.label+": ticket médio "+fm(h.ticketGeral)+" ("+h.nGeral+" cliente(s) pagante(s))"} style={{flex:"0 0 auto",width:30,display:"flex",flexDirection:"column",alignItems:"center",minWidth:0}}>
+                        <div style={{fontSize:7,fontWeight:700,color:T.t3,fontFamily:"'JetBrains Mono'",marginBottom:3,whiteSpace:"nowrap"}}>{h.ticketGeral>0?(h.ticketGeral>=1000?(h.ticketGeral/1000).toFixed(1)+"k":h.ticketGeral.toFixed(0)):""}</div>
+                        <div style={{width:14,height:hBar>0?hBar+"%":"3px",background:"linear-gradient(180deg,"+T.gold+","+T.goldD+")",borderRadius:"3px 3px 0 0",opacity:h.ticketGeral>0?.9:.15}}/>
+                        <div style={{fontSize:8,color:T.t3,marginTop:5,whiteSpace:"nowrap"}}>{h.label}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </Cd>
+
+            {}
+            <div style={{display:"grid",gridTemplateColumns:isMobRec?"1fr":"1fr 1fr",gap:14}}>
+              <Cd style={{padding:16}} hov={false}>
+                <h4 style={{margin:"0 0 10px",fontSize:13,fontWeight:700,color:T.green}}>🆕 Últimos recorrentes captados</h4>
+                {norm.filter(function(c){return c.dtCaptacao}).sort(function(a,b){return b.dtCaptacao.localeCompare(a.dtCaptacao)}).slice(0,15).map(function(c,i,arr){return (
+                  <div key={c.id||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<arr.length-1?"1px solid rgba(255,255,255,0.03)":"none",gap:8}}>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontSize:12,fontWeight:600,color:T.t1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nome}</div>
+                      <div style={{fontSize:9,color:T.t3,marginTop:3,display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}><Bg c={c._sv.indexOf("patrimonio")>=0?"gold":"cyan"}>{c._servicoLabel}</Bg><span>{fDRec(c.dtCaptacao)}</span></div>
+                    </div>
+                    <div style={{fontSize:11,fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'",flexShrink:0}}>{fm(c._mrr)}</div>
+                  </div>
+                )})}
+                {norm.filter(function(c){return c.dtCaptacao}).length===0 && <div style={{fontSize:11,color:T.t3,textAlign:"center",padding:12}}>Nenhum registro</div>}
+              </Cd>
+              <Cd style={{padding:16}} hov={false}>
+                <h4 style={{margin:"0 0 10px",fontSize:13,fontWeight:700,color:T.red}}>🚪 Últimos recorrentes perdidos</h4>
+                {perdidosRecTodos.slice().sort(function(a,b){return b.dtStatusChange.localeCompare(a.dtStatusChange)}).slice(0,15).map(function(c,i,arr){
+                  var mesesCasa=(function(){
+                    if(!c.dtCaptacao||!c.dtStatusChange)return null;
+                    var d1=new Date(c.dtCaptacao),d2=new Date(c.dtStatusChange);
+                    return Math.max(0,Math.round((d2-d1)/(30*86400000)));
+                  })();
+                  return (
+                    <div key={c.id||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<arr.length-1?"1px solid rgba(255,255,255,0.03)":"none",gap:8}}>
+                      <div style={{minWidth:0}}>
+                        <div style={{fontSize:12,fontWeight:600,color:T.t1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nome}</div>
+                        <div style={{fontSize:9,color:T.t3,marginTop:3,display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                          <Bg c={c._sv.indexOf("patrimonio")>=0?"gold":"cyan"}>{c._servicoLabel}</Bg>
+                          <Bg c={c.status==="encerrado"?"red":"orange"}>{c.status==="encerrado"?"CANCELOU":"INATIVO"}</Bg>
+                          <span>{fDRec(c.dtStatusChange)}</span>
+                          {mesesCasa!==null && <span>· {mesesCasa} {mesesCasa===1?"mês":"meses"} de casa</span>}
+                        </div>
+                      </div>
+                      <div style={{fontSize:11,fontWeight:700,color:T.red,fontFamily:"'JetBrains Mono'",flexShrink:0}}>−{fm(c._mrr)}</div>
+                    </div>
+                  );
+                })}
+                {perdidosRecTodos.length===0 && <div style={{fontSize:11,color:T.t3,textAlign:"center",padding:12}}>Nenhuma perda registrada 🎉</div>}
+              </Cd>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -31296,7 +31570,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '394';
+  var SW_VERSION = '396';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
