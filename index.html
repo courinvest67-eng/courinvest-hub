@@ -811,6 +811,44 @@ const _prepararGradienteTextoParaCaptura=function(raiz){
     el.style.backgroundClip="border-box";
   });
 };
+/* CORREÇÃO (v393): a Apresentação "Gestão Financeira" tem fotos da equipe (<img crossOrigin=
+   "anonymous">) — quando uma dessas fotos está fora do ar/bloqueada por CORS, ela já aparece
+   quebrada na tela normal, mas o html2canvas trata isso de um jeito bem pior: ele tenta buscar a
+   imagem de novo por conta própria e, se essa busca travar (nunca resolver, nunca dar erro),
+   TODA a captura daquele slide fica pendurada — e o pior: as capturas dos slides SEGUINTES, que
+   nem usam essa imagem, também travavam juntas (foi o que causou o bug relatado: só o slide da
+   capa saía, o resto sumia). Duas camadas de proteção: (1) aqui, na captura, troca qualquer
+   imagem que JÁ esteja quebrada na tela (naturalWidth 0) por um pixel transparente antes do
+   html2canvas nem tentar buscá-la de novo; (2) mais abaixo, um limite de tempo por slide garante
+   que mesmo uma imagem nova que trave não derruba os slides seguintes. */
+const _prepararImagensQuebradasParaCaptura=function(raiz){
+  var imgs=raiz.querySelectorAll?raiz.querySelectorAll("img"):[];
+  Array.prototype.forEach.call(imgs,function(img){
+    if(!img.getAttribute("src")||img.naturalWidth===0){
+      img.removeAttribute("crossorigin");
+      img.src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+    }
+  });
+};
+/* Corre uma promise com um prazo máximo — se estourar, rejeita (o chamador trata igual a
+   qualquer outra falha desse slide: loga aviso e pula pro próximo, sem travar o resto). */
+const _comLimiteDeTempo=function(promessa,ms){
+  return new Promise(function(resolve,reject){
+    var jaResolveu=false;
+    var t=setTimeout(function(){
+      if(jaResolveu)return;
+      jaResolveu=true;
+      reject(new Error("Tempo limite de "+ms+"ms excedido"));
+    },ms);
+    promessa.then(function(v){
+      if(jaResolveu)return;
+      jaResolveu=true;clearTimeout(t);resolve(v);
+    },function(e){
+      if(jaResolveu)return;
+      jaResolveu=true;clearTimeout(t);reject(e);
+    });
+  });
+};
 const gerarPPTXDeSlides=async function(containerEl,nomeArquivo){
   if(!containerEl){alert("Conteúdo não encontrado pra gerar o PowerPoint.");return false;}
   if(typeof window.html2canvas==="undefined"){alert("Biblioteca de captura (html2canvas) não carregou. Verifique sua conexão e tente novamente.");return false;}
@@ -848,9 +886,19 @@ const gerarPPTXDeSlides=async function(containerEl,nomeArquivo){
   var capturas=[];
   try{
     for(var pi=0;pi<pageEls.length;pi++){
+      /* CORREÇÃO (v393): o html2canvas cria por baixo dos panos um iframe temporário pra
+         desenhar cada captura e só remove esse iframe DEPOIS de terminar — chamar a função de
+         novo, sem esperar nada, pro PRÓXIMO slide, imediatamente em seguida (como o código fazia
+         antes) é um cenário conhecido de trava/corrupção dessa biblioteca (o iframe da captura
+         anterior ainda não tinha sido totalmente limpo). Um respiro de dois quadros de animação
+         antes de CADA captura (igual ao próprio gerador de PDF do relatório mensal já faz depois
+         de montar o conteúdo, só que aqui entre uma captura e outra) dá tempo desse cleanup
+         terminar antes da próxima chamada — foi o suspeito mais provável do bug relatado (só o
+         primeiro slide saía, os demais somem sem erro nenhum). */
+      await new Promise(function(r){requestAnimationFrame(function(){requestAnimationFrame(r);});});
       var canvas=null;
       try{
-        canvas=await window.html2canvas(pageEls[pi],{scale:2,useCORS:true,backgroundColor:"#ffffff",onclone:function(_clonedDoc,clonedEl){_prepararGradienteTextoParaCaptura(clonedEl);}});
+        canvas=await _comLimiteDeTempo(window.html2canvas(pageEls[pi],{scale:2,useCORS:true,backgroundColor:"#ffffff",onclone:function(_clonedDoc,clonedEl){_prepararGradienteTextoParaCaptura(clonedEl);_prepararImagensQuebradasParaCaptura(clonedEl);}}),20000);
       }catch(_pageErr){
         console.warn("[PPTX] Slide "+pi+" falhou ao renderizar, pulando:",_pageErr);
         continue;
@@ -864,10 +912,21 @@ const gerarPPTXDeSlides=async function(containerEl,nomeArquivo){
         var px=canvas.getContext("2d").getImageData(0,0,1,1).data;
         corCanto="#"+[px[0],px[1],px[2]].map(function(v){return v.toString(16).padStart(2,"0")}).join("");
       }catch(_corErr){}
-      capturas.push({dataUrl:canvas.toDataURL("image/jpeg",0.92),w:canvas.width,h:canvas.height,cor:corCanto});
+      /* toDataURL pode lançar (ex: "tainted canvas") se alguma imagem externa sem CORS liberado
+         acabou desenhada no canvas mesmo assim — protegido aqui também pra nunca derrubar os
+         slides seguintes por causa de UM slide com imagem problemática. */
+      try{
+        capturas.push({dataUrl:canvas.toDataURL("image/jpeg",0.92),w:canvas.width,h:canvas.height,cor:corCanto});
+      }catch(_urlErr){
+        console.warn("[PPTX] Slide "+pi+" não pôde ser exportado como imagem (provavelmente uma foto externa sem CORS liberado), pulando:",_urlErr);
+      }
     }
   }finally{
     CanvasRenderingContext2D.prototype.createPattern=_origCreatePattern;
+  }
+  var _faltantes=pageEls.length-capturas.length;
+  if(capturas.length>0&&_faltantes>0){
+    console.warn("[PPTX] "+_faltantes+" de "+pageEls.length+" slide(s) não puderam ser capturados — o PowerPoint sairá só com os que deram certo.");
   }
   if(capturas.length===0){
     alert("Não foi possível gerar nenhum slide. Tente novamente.");
@@ -898,6 +957,9 @@ const gerarPPTXDeSlides=async function(containerEl,nomeArquivo){
   });
   try{
     await pptx.writeFile({fileName:nomeArquivo||"apresentacao-courinvest.pptx"});
+    if(_faltantes>0){
+      alert("PowerPoint gerado, mas "+_faltantes+" de "+pageEls.length+" slide(s) não puderam ser incluídos (provavelmente uma foto/imagem que não carregou). Os demais saíram normalmente.");
+    }
     return true;
   }catch(e){
     console.warn("[PPTX] Falha ao gerar arquivo:",e);
@@ -31232,7 +31294,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '392';
+  var SW_VERSION = '393';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
