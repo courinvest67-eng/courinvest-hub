@@ -816,6 +816,17 @@ const gerarPPTXDeSlides=async function(containerEl,nomeArquivo){
   if(typeof window.html2canvas==="undefined"){alert("Biblioteca de captura (html2canvas) não carregou. Verifique sua conexão e tente novamente.");return false;}
   if(typeof window.PptxGenJS==="undefined"){alert("Biblioteca de PowerPoint (PptxGenJS) não carregou. Verifique sua conexão e tente novamente.");return false;}
   var pageEls=Array.prototype.slice.call(containerEl.querySelectorAll(".pp-page"));
+  if(pageEls.length===0){
+    /* CORREÇÃO (v392): a Apresentação "Gestão Financeira" (mais antiga que as outras) nunca usou
+       a classe ".pp-page" nas suas seções — cada seção é só um <div> filho direto do container
+       (mesmo padrão, aliás, que o gerador de PDF do relatório mensal já usa pra achar "páginas"
+       quando não há uma classe dedicada). Sem esse fallback, a busca acima não achava nenhuma
+       ".pp-page" e caía direto no ÚLTIMO fallback (linha abaixo — o container inteiro vira UM
+       slide só), gerando um PowerPoint de 1 slide só com uma imagem gigante e esticadíssima (a
+       apresentação inteira espremida verticalmente numa imagem só) em vez de vários slides, um
+       por seção — foi exatamente o bug relatado na Apresentação de Gestão Financeira. */
+    pageEls=Array.prototype.filter.call(containerEl.children,function(el){return el.tagName==="DIV";});
+  }
   if(pageEls.length===0)pageEls=[containerEl];
   /* Mesma rede de segurança usada na geração do PDF: em algumas máquinas o html2canvas quebra
      com "InvalidStateError: createPattern... width or height of 0" ao desenhar certos fundos em
@@ -31221,7 +31232,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '391';
+  var SW_VERSION = '392';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
