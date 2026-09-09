@@ -782,6 +782,35 @@ const gerarPdfLinkCourinvest=function(pathStorage,htmlContent){
    dos dois lados). Essa margem, quando existe, é preenchida com a cor do canto da própria imagem
    (amostrada do canvas) em vez de branco puro, pra não destoar do fundo escuro da maioria das
    seções. */
+/* CORREÇÃO (v391): os títulos das apresentações usam um efeito de "texto em degradê"
+   (background:"linear-gradient(...)" + WebkitBackgroundClip:"text" + WebkitTextFillColor:
+   "transparent" — o texto em si fica transparente e só deixa o gradiente aparecer através das
+   letras). O navegador renderiza isso perfeitamente no "Imprimir/Salvar PDF" (é a própria tela
+   real, pintada pelo motor do navegador) — mas o html2canvas, usado só pra gerar o PowerPoint,
+   NÃO sabe recortar um fundo pelo formato do texto: ele pinta o retângulo do degradê inteiro,
+   sólido, por trás do texto (em vez de só nas letras) — por isso os títulos saíam com uma caixa
+   clara/dourada cobrindo o texto em vez do efeito de gradiente sutil. Corrige só na cópia
+   temporária que o html2canvas usa pra desenhar (via onclone, sem tocar na tela real): troca
+   esses títulos por uma cor sólida (a primeira cor do degradê) e desliga o recorte — vira texto
+   normal, sem gradiente, mas 100% legível — só nessa captura específica. */
+const _prepararGradienteTextoParaCaptura=function(raiz){
+  var todos=raiz.querySelectorAll?raiz.querySelectorAll("*"):[];
+  var lista=[raiz].concat(Array.prototype.slice.call(todos));
+  lista.forEach(function(el){
+    if(!el||!el.style)return;
+    var clip=el.style.webkitBackgroundClip||el.style.backgroundClip;
+    if(clip!=="text")return;
+    var grad=el.style.backgroundImage||el.style.background||"";
+    var m=grad.match(/#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)/);
+    var cor=m?m[0]:"#ffffff";
+    el.style.color=cor;
+    el.style.webkitTextFillColor=cor;
+    el.style.background="none";
+    el.style.backgroundImage="none";
+    el.style.webkitBackgroundClip="border-box";
+    el.style.backgroundClip="border-box";
+  });
+};
 const gerarPPTXDeSlides=async function(containerEl,nomeArquivo){
   if(!containerEl){alert("Conteúdo não encontrado pra gerar o PowerPoint.");return false;}
   if(typeof window.html2canvas==="undefined"){alert("Biblioteca de captura (html2canvas) não carregou. Verifique sua conexão e tente novamente.");return false;}
@@ -810,7 +839,7 @@ const gerarPPTXDeSlides=async function(containerEl,nomeArquivo){
     for(var pi=0;pi<pageEls.length;pi++){
       var canvas=null;
       try{
-        canvas=await window.html2canvas(pageEls[pi],{scale:2,useCORS:true,backgroundColor:"#ffffff"});
+        canvas=await window.html2canvas(pageEls[pi],{scale:2,useCORS:true,backgroundColor:"#ffffff",onclone:function(_clonedDoc,clonedEl){_prepararGradienteTextoParaCaptura(clonedEl);}});
       }catch(_pageErr){
         console.warn("[PPTX] Slide "+pi+" falhou ao renderizar, pulando:",_pageErr);
         continue;
@@ -31192,7 +31221,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '390';
+  var SW_VERSION = '391';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
