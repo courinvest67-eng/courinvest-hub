@@ -21697,8 +21697,9 @@ function FinanceiroView({data:d,dispatch:dp}){
   const[delAnoDespesas,sDelAnoDespesas]=useState("");
   /* Toggle Mensal/Anual dos gráficos de barras da aba Recorrentes (Entradas/Perdas e Ticket Médio) */
   const[visaoRec,sVisaoRec]=useState("mensal");
-  /* Aba 💳 Cartão: mês selecionado, estado do import de PDF e mensagem de feedback */
+  /* Aba 💳 Cartão: mês selecionado, ano selecionado (pra separar as faturas por ano no seletor), estado do import de PDF e mensagem de feedback */
   const[selMesCartao,sSelMesCartao]=useState(null);
+  const[selAnoCartao,sSelAnoCartao]=useState(null);
   const[importandoFatura,sImportandoFatura]=useState(false);
   const[msgImportFatura,sMsgImportFatura]=useState("");
   const[catCartaoExpandida,sCatCartaoExpandida]=useState(null);
@@ -23223,9 +23224,15 @@ function FinanceiroView({data:d,dispatch:dp}){
       {}
       {fTab==="cartao" && (function(){
         var faturasCartao=((d&&d.fin&&d.fin.faturasCartao)||[]).slice().sort(function(a,b){return a.mesFatura.localeCompare(b.mesFatura)});
-        var mesAtualSel=selMesCartao&&faturasCartao.some(function(f){return f.mesFatura===selMesCartao})?selMesCartao:(faturasCartao.length?faturasCartao[faturasCartao.length-1].mesFatura:null);
-        var faturaSel=faturasCartao.find(function(f){return f.mesFatura===mesAtualSel});
         var fmtMesLabel=function(m){var meses=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];var p=m.split("-");return meses[(+p[1])-1]+"/"+p[0].substring(2)};
+
+        /* Faturas separadas por ano: lista de anos disponíveis (mais recente primeiro) e ano atualmente selecionado */
+        var anosCartaoDisponiveis=Array.from(new Set(faturasCartao.map(function(f){return f.mesFatura.split("-")[0]}))).sort().reverse();
+        var anoAtualSel=selAnoCartao&&anosCartaoDisponiveis.indexOf(selAnoCartao)>=0?selAnoCartao:(anosCartaoDisponiveis.length?anosCartaoDisponiveis[0]:null);
+        var faturasCartaoAno=faturasCartao.filter(function(f){return f.mesFatura.split("-")[0]===anoAtualSel});
+
+        var mesAtualSel=selMesCartao&&faturasCartaoAno.some(function(f){return f.mesFatura===selMesCartao})?selMesCartao:(faturasCartaoAno.length?faturasCartaoAno[faturasCartaoAno.length-1].mesFatura:null);
+        var faturaSel=faturasCartaoAno.find(function(f){return f.mesFatura===mesAtualSel});
 
         var catBreakdown={},itensPorCategoria={},totalGastoMes=0,totalCreditoMes=0;
         if(faturaSel){
@@ -23245,7 +23252,7 @@ function FinanceiroView({data:d,dispatch:dp}){
         var catsSorted=Object.entries(catBreakdown).sort(function(a,b){return b[1]-a[1]});
         var maxCat=catsSorted.length?catsSorted[0][1]:1;
 
-        var evolMeses=faturasCartao.map(function(f){
+        var evolMeses=faturasCartaoAno.map(function(f){
           var tot=0;
           f.cartoes.forEach(function(c){c.itens.forEach(function(it){if(it.tipo==="debito")tot+=it.valor})});
           return {mes:f.mesFatura,total:tot};
@@ -23272,8 +23279,15 @@ function FinanceiroView({data:d,dispatch:dp}){
               <Cd style={{padding:20,textAlign:"center"}} hov={false}><div style={{color:T.t3}}>Nenhuma fatura importada ainda. Clique em "Importar Fatura(s) PDF" acima e selecione um ou mais PDFs de fatura.</div></Cd>
             ) : (
               <div>
+                {anosCartaoDisponiveis.length>1 && (
+                  <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+                    {anosCartaoDisponiveis.map(function(ano){return (
+                      <button key={ano} onClick={function(){sSelAnoCartao(ano);sSelMesCartao(null);sCatCartaoExpandida(null)}} style={{padding:"5px 16px",borderRadius:8,fontSize:11.5,fontWeight:700,cursor:"pointer",border:anoAtualSel===ano?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.06)",background:anoAtualSel===ano?T.gold:"transparent",color:anoAtualSel===ano?T.bg:T.t2}}>{ano}</button>
+                    )})}
+                  </div>
+                )}
                 <div style={{display:"flex",gap:4,marginBottom:14,flexWrap:"wrap"}}>
-                  {faturasCartao.map(function(f){return (
+                  {faturasCartaoAno.map(function(f){return (
                     <button key={f.mesFatura} onClick={function(){sSelMesCartao(f.mesFatura);sCatCartaoExpandida(null)}} style={{padding:"6px 14px",borderRadius:10,fontSize:11,fontWeight:600,cursor:"pointer",border:mesAtualSel===f.mesFatura?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.04)",background:mesAtualSel===f.mesFatura?T.goldD:"transparent",color:mesAtualSel===f.mesFatura?T.gold:T.t3}}>{fmtMesLabel(f.mesFatura)}</button>
                   )})}
                 </div>
@@ -32005,7 +32019,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '400';
+  var SW_VERSION = '401';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
