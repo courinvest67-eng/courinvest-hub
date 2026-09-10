@@ -21650,6 +21650,32 @@ var categorizaGastoCartao=function(nome){
   return "Outros";
 };
 
+/* Detecta lançamentos totalmente cancelados/estornados dentro da MESMA fatura: quando a soma dos
+   débitos de um beneficiário bate (com tolerância de centavos) com a soma dos créditos daquele
+   mesmo beneficiário na fatura, é porque a cobrança foi feita e integralmente revertida antes de
+   fechar a fatura (ex.: assinatura cobrada parcelada e cancelada, com o cartão estornando tudo de
+   uma vez) — não é gasto real nem sobra de crédito, e por isso não deve contar em nenhum dos dois.
+   Retorna um objeto {NOME_NORMALIZADO: true} com os beneficiários nessa situação. Só zera quando o
+   cancelamento é total (débito ≈ crédito); estornos parciais continuam aparecendo normalmente, pra
+   não esconder por engano uma despesa real. */
+var beneficiariosEstornadosNaFatura=function(cartoes){
+  var norm=function(s){return(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().trim()};
+  var porBenef={};
+  (cartoes||[]).forEach(function(c){
+    (c.itens||[]).forEach(function(it){
+      var k=norm(it.beneficiario);
+      if(!porBenef[k])porBenef[k]={debito:0,credito:0};
+      if(it.tipo==="debito")porBenef[k].debito+=it.valor;else porBenef[k].credito+=it.valor;
+    });
+  });
+  var estornados={};
+  Object.keys(porBenef).forEach(function(k){
+    var g=porBenef[k];
+    if(g.debito>0&&g.credito>0&&Math.abs(g.debito-g.credito)<0.05)estornados[k]=true;
+  });
+  return estornados;
+};
+
 function FinanceiroView({data:d,dispatch:dp}){
   const[fTab,sFTab]=useState("importar");
   /* === RESPONSIVE: detecção reativa de mobile === usado em vários pontos do layout abaixo
@@ -23243,10 +23269,17 @@ function FinanceiroView({data:d,dispatch:dp}){
         var mesAtualSel=selMesCartao&&faturasCartaoAno.some(function(f){return f.mesFatura===selMesCartao})?selMesCartao:(faturasCartaoAno.length?faturasCartaoAno[faturasCartaoAno.length-1].mesFatura:null);
         var faturaSel=faturasCartaoAno.find(function(f){return f.mesFatura===mesAtualSel});
 
-        var catBreakdown={},itensPorCategoria={},totalGastoMes=0,totalCreditoMes=0;
+        var catBreakdown={},itensPorCategoria={},totalGastoMes=0,totalCreditoMes=0,totalEstornadoMes=0;
         if(faturaSel){
+          var estornadosMes=beneficiariosEstornadosNaFatura(faturaSel.cartoes);
+          var norm_=function(s){return(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().trim()};
           faturaSel.cartoes.forEach(function(c){
             c.itens.forEach(function(it){
+              var estornado=estornadosMes[norm_(it.beneficiario)];
+              if(estornado){
+                if(it.tipo==="debito")totalEstornadoMes+=it.valor;
+                return; /* cobrança e estorno se cancelam — não conta como gasto nem como crédito */
+              }
               if(it.tipo==="debito"){
                 catBreakdown[it.categoria]=(catBreakdown[it.categoria]||0)+it.valor;
                 totalGastoMes+=it.valor;
@@ -23263,7 +23296,9 @@ function FinanceiroView({data:d,dispatch:dp}){
 
         var evolMeses=faturasCartaoAno.map(function(f){
           var tot=0;
-          f.cartoes.forEach(function(c){c.itens.forEach(function(it){if(it.tipo==="debito")tot+=it.valor})});
+          var norm2_=function(s){return(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().trim()};
+          var estornadosF=beneficiariosEstornadosNaFatura(f.cartoes);
+          f.cartoes.forEach(function(c){c.itens.forEach(function(it){if(it.tipo==="debito"&&!estornadosF[norm2_(it.beneficiario)])tot+=it.valor})});
           return {mes:f.mesFatura,total:tot};
         });
         var maxEvol=Math.max.apply(null,evolMeses.map(function(e){return e.total}).concat([1]));
@@ -23356,7 +23391,10 @@ function FinanceiroView({data:d,dispatch:dp}){
                     </Cd>
 
                     {totalCreditoMes>0 && (
-                      <div style={{fontSize:10,color:T.t3,marginBottom:14}}>+ {fm(totalCreditoMes)} em créditos/estornos nesse período (pagamento da fatura anterior e reembolsos) — não contam como gasto.</div>
+                      <div style={{fontSize:10,color:T.t3,marginBottom:6}}>+ {fm(totalCreditoMes)} em créditos/estornos nesse período (pagamento da fatura anterior e reembolsos) — não contam como gasto.</div>
+                    )}
+                    {totalEstornadoMes>0 && (
+                      <div style={{fontSize:10,color:T.t3,marginBottom:14}}>🔄 {fm(totalEstornadoMes)} em cobranças feitas e totalmente estornadas/canceladas dentro dessa mesma fatura — não entram nem como gasto nem como crédito.</div>
                     )}
 
                     {evolMeses.length>1 && (
@@ -32028,7 +32066,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '402';
+  var SW_VERSION = '403';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
