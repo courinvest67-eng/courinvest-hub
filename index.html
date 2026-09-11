@@ -23435,17 +23435,17 @@ function FinanceiroView({data:d,dispatch:dp}){
                     )}
 
                     {evolMeses.length>1 && (
-                      <Cd style={{padding:16}} hov={false}>
-                        <div style={{fontSize:11,fontWeight:700,color:T.t2,marginBottom:10}}>EVOLUÇÃO DO GASTO TOTAL NO CARTÃO</div>
-                        <div style={{display:"flex",alignItems:"flex-end",gap:6,height:110,padding:"4px 2px",overflowX:evolMeses.length>10?"auto":"visible"}}>
+                      <Cd style={{padding:20}} hov={false}>
+                        <div style={{fontSize:11,fontWeight:700,color:T.t2,marginBottom:16}}>EVOLUÇÃO DO GASTO TOTAL NO CARTÃO</div>
+                        <div style={{display:"flex",alignItems:"flex-end",gap:14,height:170,padding:"4px 6px",overflowX:evolMeses.length>15?"auto":"visible"}}>
                           {evolMeses.map(function(e,i){
                             var hBar=maxEvol>0?Math.max(6,(e.total/maxEvol)*100):6;
                             var isSel=e.mes===mesAtualSel;
                             return (
-                              <div key={i} onClick={function(){sSelMesCartao(e.mes);sCatCartaoExpandida(null)}} style={{flex:evolMeses.length>10?"0 0 auto":1,width:evolMeses.length>10?36:"auto",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center"}}>
-                                <div style={{fontSize:8,color:isSel?T.gold:T.t3,fontWeight:isSel?700:500,marginBottom:3,fontFamily:"'JetBrains Mono'",whiteSpace:"nowrap"}}>{e.total>=1000?(e.total/1000).toFixed(1)+"k":e.total.toFixed(0)}</div>
-                                <div style={{width:"100%",maxWidth:32,height:hBar+"px",background:isSel?"linear-gradient(180deg,"+T.gold+","+T.goldD+")":"linear-gradient(180deg,rgba(212,163,40,0.5),rgba(212,163,40,0.15))",borderRadius:"4px 4px 2px 2px"}}/>
-                                <div style={{fontSize:8,color:isSel?T.gold:T.t3,marginTop:4,fontWeight:isSel?700:500,whiteSpace:"nowrap"}}>{fmtMesLabel(e.mes)}</div>
+                              <div key={i} onClick={function(){sSelMesCartao(e.mes);sCatCartaoExpandida(null)}} style={{flex:evolMeses.length>15?"0 0 auto":1,width:evolMeses.length>15?48:"auto",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center"}}>
+                                <div style={{fontSize:10,color:isSel?T.gold:T.t3,fontWeight:isSel?700:500,marginBottom:6,fontFamily:"'JetBrains Mono'",whiteSpace:"nowrap"}}>{e.total>=1000?(e.total/1000).toFixed(1)+"k":e.total.toFixed(0)}</div>
+                                <div style={{width:"100%",maxWidth:56,height:hBar+"px",background:isSel?"linear-gradient(180deg,"+T.gold+","+T.goldD+")":"linear-gradient(180deg,rgba(212,163,40,0.5),rgba(212,163,40,0.15))",borderRadius:"6px 6px 2px 2px"}}/>
+                                <div style={{fontSize:10,color:isSel?T.gold:T.t3,marginTop:8,fontWeight:isSel?700:500,whiteSpace:"nowrap"}}>{fmtMesLabel(e.mes)}</div>
                               </div>
                             );
                           })}
@@ -32103,7 +32103,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '405';
+  var SW_VERSION = '406';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
