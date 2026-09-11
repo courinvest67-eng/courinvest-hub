@@ -22441,7 +22441,6 @@ function FinanceiroView({data:d,dispatch:dp}){
                 if(mesesOrdenados.length < 3) return null;
                 var isMob = typeof window !== "undefined" && window.innerWidth < 640;
                 var anoAtual = new Date().getFullYear();
-                var mesAtual = new Date().getMonth() + 1; // 1-12
 
                 // Filtrar só o ano atual ou selecionado
                 var anoRef = selYear === "todos" ? String(anoAtual) : String(selYear);
@@ -22463,8 +22462,13 @@ function FinanceiroView({data:d,dispatch:dp}){
                 // Usar média ponderada (60% móvel + 40% ano) para projeção mais precisa
                 var mediaProjeto = (mediaMovel * 0.6) + (mediaAno * 0.4);
 
-                // Meses restantes no ano
-                var mesesRestantes = anoRef === String(anoAtual) ? (12 - mesAtual) : 0;
+                // Meses restantes no ano. Usa a contagem de meses já REALIZADOS (mesesRealizados,
+                // o mesmo número mostrado no card "Realizado" logo acima) em vez do mês corrente do
+                // calendário — o mês corrente ainda está em andamento (não fechado) e não deve
+                // contar como "realizado", senão sobra 1 mês faltando na conta (ex.: 11/set com 8
+                // meses já lançados mostrava só 3 meses restantes — Out/Nov/Dez — quando Set também
+                // ainda falta fechar, totalizando 4).
+                var mesesRestantes = anoRef === String(anoAtual) ? (12 - mesesRealizados) : 0;
                 var projecaoRestante = mediaProjeto * mesesRestantes;
                 var totalProjetado = totalRealizado + projecaoRestante;
 
@@ -32099,7 +32103,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '404';
+  var SW_VERSION = '405';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
