@@ -21574,9 +21574,17 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
 var MESES_ABREV_PT={jan:1,fev:2,mar:3,abr:4,mai:5,jun:6,jul:7,ago:8,set:9,out:10,nov:11,dez:12};
 var parseFaturaCartaoTexto=function(linhas){
   var parseNumBRL=function(s){return parseFloat(String(s||"0").replace(/\./g,"").replace(",","."))||0};
+  /* Duas variações de layout já vistas nas faturas da Courinvest:
+     Layout A — Nubank (faturas 2025/2026): "12 de março. 2026 Loja - R$ 50,00"
+     Layout B — Banco Inter (faturas 2022/2023/2024): "11 dez 2023 Pagto Debito Automatico + R$ 716,65"
+       (sem " de " entre dia e mês, sem traço "-" antes do R$, mês já abreviado em 3 letras) */
   var txRe=/^(\d{1,2}) de ([a-zçA-ZÇ]+)\.? (\d{4})\s+(.+?)\s-\s(\+\s)?R\$\s*([\d.,]+)$/i;
-  var cartaoRe=/^CART[ÃA]O\s+([\d*]+)$/i;
-  var totalCartaoRe=/^Total CART[ÃA]O\s+([\d*]+)\s+R\$\s*([\d.,]+)$/i;
+  var txReInter=/^(\d{1,2}) ([a-zç]{3})\.? (\d{4})\s+(.+?)\s+(\+\s)?R\$\s*([\d.,]+)$/i;
+  /* Nubank numera o cartão mascarado inteiro ("CARTÃO ****1234"); o Inter mostra os 2 grupos de
+     dígitos separados por espaço ("CARTÃO 5497 6634", às vezes sem espaço antes do 1º grupo por
+     causa de como o texto foi extraído do PDF) — por isso aceita 1 ou 2 grupos. */
+  var cartaoRe=/^CART[ÃA]O\s*([\d*]+(?:\s+[\d*]+)?)$/i;
+  var totalCartaoRe=/^(?:Total\s+CART[ÃA]O|VALOR\s+TOTAL\s+CART[ÃA]O)\s*([\d*]+(?:\s+[\d*]+)?)\s+R\$\s*([\d.,]+)$/i;
   /* A data de vencimento é buscada no texto inteiro (não linha a linha) porque o rótulo "Data de
      Vencimento" e o valor da data nem sempre caem na mesma linha depois do agrupamento por
      posição Y (colunas lado a lado no PDF às vezes embaralham a ordem). O rodapé repetido em
@@ -21586,26 +21594,44 @@ var parseFaturaCartaoTexto=function(linhas){
   var vencMatch=textoCompleto.match(/\d{4}\*+\d{4}\s+(\d{2})\/(\d{2})\/(\d{4})\s+R\$/) ||
                  textoCompleto.match(/Data de Vencimento\D{0,40}?(\d{2})\/(\d{2})\/(\d{4})/i);
   var vencGrupos=vencMatch?[vencMatch[1],vencMatch[2],vencMatch[3]]:null;
+  /* Layout do Inter: o cabeçalho repetido em toda página separa o rótulo "VENCIMENTO" e a data em
+     duas linhas Y diferentes (colunas lado a lado no PDF), então não tem como pegar isso com uma
+     regex no texto corrido — procura uma linha igual a "VENCIMENTO" e lê a data na linha seguinte. */
+  if(!vencGrupos){
+    for(var vi=0;vi<linhas.length-1;vi++){
+      if((linhas[vi]||"").trim().toUpperCase()==="VENCIMENTO"){
+        var vm=(linhas[vi+1]||"").trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if(vm){vencGrupos=[vm[1],vm[2],vm[3]];break}
+      }
+    }
+  }
   var ordem=[],cartoesMap={},emSecao=false;
   linhas.forEach(function(lRaw){
     var l=(lRaw||"").trim();
     if(!l)return;
-    if(l.indexOf("Despesas da fatura")===0){emSecao=true;return}
-    if(l.indexOf("Limite de crédito total")>=0||l.indexOf("Próxima fatura")===0){emSecao=false;return}
+    /* Compara ignorando espaços: em algumas faturas (Banco Inter) o PDF.js às vezes separa
+       letras de uma mesma palavra em itens de texto distintos por causa da fonte usada, e o
+       agrupamento de linha junta tudo com espaço — "Despesas da fatura" pode sair como
+       "Despesas da fat u ra". Sem essa tolerância a seção inteira nunca era detectada. */
+    var lSemEspaco=l.replace(/\s+/g,"").toLowerCase();
+    if(lSemEspaco.indexOf("despesasdafatura")===0){emSecao=true;return}
+    if(l.indexOf("Limite de crédito total")>=0||l.indexOf("Próxima fatura")===0||l.indexOf("Limites")===0||l.indexOf("LIMITE DE CRÉDITO")>=0){emSecao=false;return}
     if(!emSecao)return;
-    if(l==="Data Movimentação Beneficiário Valor")return;
+    if(l==="Data Movimentação Beneficiário Valor"||l==="DATA MOVIMENTAÇÃO VALOR")return;
     var mc=l.match(cartaoRe);
-    if(mc){var num=mc[1];if(!cartoesMap[num]){cartoesMap[num]={numero:num,total:0,itens:[]};ordem.push(num)}return}
+    if(mc){var num=mc[1].replace(/\s+/g," ").trim();if(!cartoesMap[num]){cartoesMap[num]={numero:num,total:0,itens:[]};ordem.push(num)}return}
     var mt=l.match(totalCartaoRe);
-    if(mt){var num2=mt[1];if(!cartoesMap[num2]){cartoesMap[num2]={numero:num2,total:0,itens:[]};ordem.push(num2)}cartoesMap[num2].total=parseNumBRL(mt[2]);return}
-    var mtx=l.match(txRe);
+    if(mt){var num2=mt[1].replace(/\s+/g," ").trim();if(!cartoesMap[num2]){cartoesMap[num2]={numero:num2,total:0,itens:[]};ordem.push(num2)}cartoesMap[num2].total=parseNumBRL(mt[2]);return}
+    var mtx=l.match(txRe)||l.match(txReInter);
     if(mtx&&ordem.length){
       var dia=mtx[1],mesAbr=mtx[2].toLowerCase().substring(0,3),ano=mtx[3],resto=mtx[4],sinal=mtx[5],valStr=mtx[6];
       var mNum=MESES_ABREV_PT[mesAbr];
       if(!mNum)return;
       var dataTx=ano+"-"+String(mNum).padStart(2,"0")+"-"+String(+dia).padStart(2,"0");
       var beneficiario=resto,parcela=null;
-      var mp=resto.match(/^(.*?)\s*\(Parcela\s*(\d+)\s*de\s*(\d+)\)\s*$/i);
+      /* Nubank usa "(Parcela N de M)" entre parênteses; o Inter escreve "Parcela N De M" solto no
+         fim da descrição, sem parênteses e com "De" maiúsculo — tenta os dois formatos. */
+      var mp=resto.match(/^(.*?)\s*\(Parcela\s*(\d+)\s*de\s*(\d+)\)\s*$/i)||resto.match(/^(.*?)\s+Parcela\s*(\d+)\s*[Dd]e\s*(\d+)\s*$/i);
       if(mp){beneficiario=mp[1].trim();parcela={n:+mp[2],de:+mp[3]}}
       var valor=parseNumBRL(valStr);
       var tipo=sinal?"credito":"debito";
@@ -21842,10 +21868,17 @@ function FinanceiroView({data:d,dispatch:dp}){
                 return page.getTextContent().then(function(tc){
                   var items=tc.items;
                   var lines=[];var curLine=[];var lastY=null;
+                  /* Algumas faturas (ex.: layout do Banco Inter) têm glifos de espaço duplo que o
+                     PDF.js decodifica como caractere de controle (ex.: NUL) em vez de espaço normal
+                     — sem isso "Parcela 02 De 06" e o "R$" seguinte grudavam num token só e
+                     quebravam o regex de transação. Normaliza qualquer caractere de controle pra
+                     espaço antes de juntar a linha. */
+                  var limpaTxt=function(s){return(s||"").replace(/[\u0000-\u001f\u007f]/g," ")};
                   items.forEach(function(it){
                     var y=Math.round(it.transform[5]);
                     if(lastY!==null && Math.abs(y-lastY)>4){lines.push(curLine.join(" ").trim());curLine=[];}
-                    if(it.str.trim())curLine.push(it.str.trim());
+                    var txt=limpaTxt(it.str).trim();
+                    if(txt)curLine.push(txt);
                     lastY=y;
                   });
                   if(curLine.length)lines.push(curLine.join(" ").trim());
@@ -32066,7 +32099,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '403';
+  var SW_VERSION = '404';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
