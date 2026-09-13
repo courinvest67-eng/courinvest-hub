@@ -31455,6 +31455,117 @@ function AppWithAuth(){
    em sub-abas dentro de uma única página.
    Ordem do funil: Pipeline → Apresentação → Propostas
    ============================================================ */
+/* ═══════════════════════════════════════
+   DIAGNÓSTICOS (leads vindos das páginas públicas diagnostico.html / diagnostico-pj.html)
+   Lê direto do Firestore (coleções diagnosticos_publicos/diagnosticos_pj_publicos), mesmo padrão
+   read-only + update pontual já usado em ParceirosView pros "Pendentes" de indicar.html. Cada
+   diagnóstico já chega com uma sugestão de valor de proposta mensal (valorSugeridoMin/Max +
+   justificativaPreco), calculada nas próprias páginas públicas a partir das respostas do cliente —
+   ver claude/diagnostico-orcamento-autoatendido.md (salvo no projeto) pra contexto completo. Essa
+   sugestão é só um ponto de partida pra negociação, nunca aparece pro cliente, e no caso de PJ ainda
+   é uma estimativa (sem tabela real de preços validada).
+═══════════════════════════════════════ */
+function DiagnosticosView(){
+  const[tipo,sTipo]=useState("pf");
+  const[itensPF,sItensPF]=useState([]);
+  const[itensPJ,sItensPJ]=useState([]);
+  const[loading,sLoading]=useState(true);
+
+  const carregar=function(){
+    if(!window._fbDB){sLoading(false);return;}
+    sLoading(true);
+    Promise.all([
+      window._fbDB.collection("diagnosticos_publicos").orderBy("criadoEm","desc").limit(100).get().catch(function(e){console.error("[Diagnósticos] Erro ao ler diagnosticos_publicos:",e);return{docs:[]}}),
+      window._fbDB.collection("diagnosticos_pj_publicos").orderBy("criadoEm","desc").limit(100).get().catch(function(e){console.error("[Diagnósticos] Erro ao ler diagnosticos_pj_publicos:",e);return{docs:[]}})
+    ]).then(function(res){
+      sItensPF(res[0].docs.map(function(doc){return Object.assign({_id:doc.id},doc.data())}));
+      sItensPJ(res[1].docs.map(function(doc){return Object.assign({_id:doc.id},doc.data())}));
+      sLoading(false);
+    });
+  };
+  useEffect(function(){carregar();},[]);
+
+  const marcarStatus=function(colecao,item,status){
+    if(window._fbDB){
+      window._fbDB.collection(colecao).doc(item._id).update({statusInterno:status}).catch(function(e){console.error(e);});
+    }
+    var upd=function(prev){return prev.map(function(x){return x._id===item._id?Object.assign({},x,{statusInterno:status}):x;});};
+    if(colecao==="diagnosticos_publicos") sItensPF(upd); else sItensPJ(upd);
+  };
+
+  const fmtData=function(ts){
+    if(!ts||!ts.toDate) return "—";
+    return ts.toDate().toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  };
+
+  const listaAtual = tipo==="pf" ? itensPF : itensPJ;
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:10,flexWrap:"wrap"}}>
+        <div style={{fontSize:11,color:T.t3,maxWidth:560}}>Diagnósticos financeiros gratuitos preenchidos pelos próprios clientes/leads (<code>diagnostico.html</code> pessoal e <code>diagnostico-pj.html</code> empresarial) — pensados como o próximo passo depois da apresentação comercial. Cada um já vem com uma sugestão de valor de proposta mensal calculada a partir do diagnóstico — é só um ponto de partida pra negociação.</div>
+        <button onClick={carregar} style={{background:"transparent",border:"1px solid "+T.bdrL,borderRadius:8,padding:"6px 14px",color:T.t2,cursor:"pointer",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>🔄 Atualizar</button>
+      </div>
+
+      <div style={{display:"flex",gap:8,marginBottom:16}}>
+        <button onClick={function(){sTipo("pf")}} style={{padding:"8px 16px",borderRadius:12,fontSize:11,fontWeight:600,cursor:"pointer",border:tipo==="pf"?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.04)",background:tipo==="pf"?T.goldD:"transparent",color:tipo==="pf"?T.gold:T.t3}}>👤 Pessoa Física ({itensPF.length})</button>
+        <button onClick={function(){sTipo("pj")}} style={{padding:"8px 16px",borderRadius:12,fontSize:11,fontWeight:600,cursor:"pointer",border:tipo==="pj"?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.04)",background:tipo==="pj"?T.goldD:"transparent",color:tipo==="pj"?T.gold:T.t3}}>🏢 Empresas / PJ ({itensPJ.length})</button>
+      </div>
+
+      {loading ? (
+        <Cd style={{padding:28,textAlign:"center"}} hov={false}><div style={{fontSize:13,color:T.t3}}>Carregando...</div></Cd>
+      ) : listaAtual.length===0 ? (
+        <Cd style={{padding:28,textAlign:"center"}} hov={false}><div style={{fontSize:32,marginBottom:8}}>🩺</div><div style={{fontSize:13,color:T.t3}}>Nenhum diagnóstico recebido ainda.</div></Cd>
+      ) : (
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:14}}>
+          {listaAtual.map(function(item){
+            var status = item.statusInterno||"novo";
+            var nomeExibicao = tipo==="pj" ? (item.empresa||item.nome||"Empresa sem nome") : (item.nome||"Sem nome");
+            var valorRef = tipo==="pj" ? item.faturamento : item.renda;
+            var labelValorRef = tipo==="pj" ? "Faturamento/mês" : "Renda/mês";
+            var resultado = tipo==="pj" ? item.resultadoMes : item.saldoMes;
+            var pctLabel = tipo==="pj" ? "Margem" : "Poupança";
+            var pct = tipo==="pj" ? item.margem : item.taxaPoupanca;
+            return (
+              <Cd key={item._id} style={{padding:16,opacity:status==="descartado"?0.5:1}} hov={false}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                  <div>
+                    <div style={{fontSize:14,fontWeight:700,color:T.t1}}>{nomeExibicao}</div>
+                    {tipo==="pj" && item.nome && <div style={{fontSize:10,color:T.t3}}>{item.nome}</div>}
+                  </div>
+                  <span style={{fontSize:9,fontWeight:800,padding:"3px 8px",borderRadius:20,background:status==="novo"?T.cyanD:status==="contatado"?T.greenD:T.w3,color:status==="novo"?T.cyan:status==="contatado"?T.green:T.t3,whiteSpace:"nowrap"}}>{status==="novo"?"● NOVO":status==="contatado"?"✓ CONTATADO":"ARQUIVADO"}</span>
+                </div>
+                <div style={{fontSize:11,color:T.t2,marginTop:6}}>{item.email||"sem e-mail"}</div>
+                <div style={{display:"flex",gap:14,marginTop:10,fontSize:11}}>
+                  <div><div style={{color:T.t3,fontSize:9,textTransform:"uppercase"}}>{labelValorRef}</div><div style={{fontWeight:700,color:T.t1}}>{fm(valorRef||0)}</div></div>
+                  <div><div style={{color:T.t3,fontSize:9,textTransform:"uppercase"}}>Resultado</div><div style={{fontWeight:700,color:(resultado||0)>=0?T.green:T.red}}>{fm(resultado||0)}</div></div>
+                  <div><div style={{color:T.t3,fontSize:9,textTransform:"uppercase"}}>{pctLabel}</div><div style={{fontWeight:700,color:T.t1}}>{(pct||0).toFixed(0)}%</div></div>
+                </div>
+
+                {(item.valorSugeridoMin!=null) && (
+                  <div style={{marginTop:12,padding:"10px 12px",background:T.goldD,border:"1px solid "+T.bdr,borderRadius:10}}>
+                    <div style={{fontSize:9,fontWeight:800,color:T.gold,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>💡 Sugestão de proposta mensal{item.precoEstimativa?" (estimativa)":""}</div>
+                    <div style={{fontSize:15,fontWeight:800,color:T.t1}}>{fm(item.valorSugeridoMin)} – {fm(item.valorSugeridoMax)}</div>
+                    {(item.justificativaPreco||[]).map(function(m,i){return <div key={i} style={{fontSize:10,color:T.t3,marginTop:4,lineHeight:1.4}}>• {m}</div>;})}
+                  </div>
+                )}
+
+                <div style={{fontSize:10,color:T.t3,marginTop:10}}>{fmtData(item.criadoEm)}</div>
+
+                <div style={{display:"flex",gap:8,marginTop:12}}>
+                  {item.email && <a href={"mailto:"+item.email} style={{flex:1,textDecoration:"none"}}><button style={{width:"100%",background:"transparent",border:"1px solid "+T.bdrL,borderRadius:8,padding:"7px 10px",color:T.t2,cursor:"pointer",fontSize:11}}>✉️ E-mail</button></a>}
+                  {status!=="contatado" && <button onClick={function(){marcarStatus(tipo==="pj"?"diagnosticos_pj_publicos":"diagnosticos_publicos",item,"contatado")}} style={{flex:1,background:T.goldD,border:"1px solid "+T.gold,borderRadius:8,padding:"7px 10px",color:T.gold,cursor:"pointer",fontSize:11,fontWeight:700}}>✅ Contatado</button>}
+                  {status!=="descartado" && <button onClick={function(){marcarStatus(tipo==="pj"?"diagnosticos_pj_publicos":"diagnosticos_publicos",item,"descartado")}} style={{background:"transparent",border:"1px solid "+T.bdrL,borderRadius:8,padding:"7px 10px",color:T.t3,cursor:"pointer",fontSize:11}}>Arquivar</button>}
+                </div>
+              </Cd>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ComercialView({data,dispatch}){
   const[subTab,sSubTab]=useState("pipeline");
   
@@ -31464,6 +31575,7 @@ function ComercialView({data,dispatch}){
   const subs=[
     {id:"pipeline",l:"🎯 Pipeline",d:"Captura e qualificação de leads",badge:leadsAtivos>0?leadsAtivos:null,badgeColor:T.cyan},
     {id:"apresentacao",l:"📊 Apresentação",d:"Pitch institucional Courinvest",badge:null},
+    {id:"diagnosticos",l:"🩺 Diagnósticos",d:"Diagnósticos gratuitos recebidos, com sugestão de valor de proposta",badge:null},
     {id:"propostas",l:"📋 Propostas",d:"Documentos formais para clientes",badge:propostasAbertas>0?propostasAbertas:null,badgeColor:T.gold}
   ];
   return (
@@ -31490,6 +31602,7 @@ function ComercialView({data,dispatch}){
       {}
       {subTab==="pipeline" && <PipelineView data={data} dispatch={dispatch}/>}
       {subTab==="apresentacao" && <ApresentacaoView/>}
+      {subTab==="diagnosticos" && <DiagnosticosView/>}
       {subTab==="propostas" && <PropostasView data={data} dispatch={dispatch}/>}
     </div>
   );
@@ -32442,7 +32555,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '409';
+  var SW_VERSION = '410';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
