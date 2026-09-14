@@ -28221,18 +28221,18 @@ var ApresentacaoGP=function(){
             <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>O DIAGNÓSTICO DO MERCADO</span>
           </div>
           <div style={{fontSize:48,fontWeight:900,lineHeight:1.05,letterSpacing:-1.5,marginBottom:20,maxWidth:700,position:"relative",background:"linear-gradient(135deg,#fff 0%,#C8D4E8 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
-            Por que tanta gente investe mal?
+            Por que tanta gente perde dinheiro sem perceber?
           </div>
           <div style={{fontSize:16,color:"#8B9DC3",lineHeight:1.7,maxWidth:620,marginBottom:40,position:"relative"}}>
-            O mercado financeiro brasileiro evoluiu rapidamente nos últimos anos, mas <strong style={{color:"#fff"}}>a orientação de qualidade ainda é rara</strong>. Veja alguns dos problemas que encontramos quando analisamos carteiras:
+            O mercado financeiro brasileiro evoluiu rapidamente nos últimos anos, mas <strong style={{color:"#fff"}}>a orientação de qualidade ainda é rara</strong>. Seja organizando o orçamento, investindo um patrimônio ou administrando uma empresa, vemos os mesmos padrões se repetirem quando falta uma gestão financeira estruturada:
           </div>
 
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,position:"relative"}}>
             {[
-              {n:"01",t:"Conflito de interesse",d:"Profissionais vinculados a bancos recomendam o que dá mais comissão, não o que é melhor para o cliente."},
-              {n:"02",t:"Rentabilidade abaixo do potencial",d:"Carteiras concentradas em produtos ruins perdem oportunidades simples de ganhar mais."},
-              {n:"03",t:"Falta de estratégia clara",d:"Investir sem plano vira apostas aleatórias — e apostas não constroem patrimônio."},
-              {n:"04",t:"Excesso de informação",d:"Muita informação, pouca clareza. O investidor se perde entre opiniões contraditórias."}
+              {n:"01",t:"Sem controle das finanças",d:"Não saber para onde o dinheiro vai é o primeiro passo para nunca sobrar nada no fim do mês — na pessoa física ou na empresa."},
+              {n:"02",t:"Conflito de interesse",d:"Profissionais vinculados a bancos recomendam o que dá mais comissão, não o que é melhor para o cliente."},
+              {n:"03",t:"Empresa sem visão de caixa",d:"Faturar bem não significa sobrar dinheiro. Sem fluxo de caixa organizado, crescer vira um risco em vez de uma conquista."},
+              {n:"04",t:"Falta de estratégia clara",d:"Investir ou gerir sem plano vira apostas aleatórias — e apostas não constroem patrimônio, seja pessoal ou empresarial."}
             ].map(function(p,i){return (
               <div key={i} style={{padding:"22px 24px",background:"rgba(212,163,40,0.05)",border:"1px solid rgba(212,163,40,0.15)",borderRadius:14,position:"relative",overflow:"hidden"}}>
                 <div style={{fontSize:48,fontWeight:900,color:"rgba(212,163,40,0.15)",letterSpacing:-2,lineHeight:1,position:"absolute",top:10,right:14}}>{p.n}</div>
@@ -28253,13 +28253,13 @@ var ApresentacaoGP=function(){
             <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>NOSSA SOLUÇÃO</span>
           </div>
           <div style={{fontSize:48,fontWeight:900,color:"#0A1628",lineHeight:1.05,letterSpacing:-1.5,marginBottom:10,position:"relative"}}>Três caminhos, <span style={{color:"#D4A328"}}>um destino</span>.</div>
-          <div style={{fontSize:15,color:"#5a5a6e",lineHeight:1.7,marginBottom:36,maxWidth:620,position:"relative"}}>Cada cliente está em um momento da vida financeira. Por isso desenhamos três frentes de atuação, para encontrar você onde você está.</div>
+          <div style={{fontSize:15,color:"#5a5a6e",lineHeight:1.7,marginBottom:36,maxWidth:620,position:"relative"}}>Cada cliente — pessoa física ou empresa — está em um momento diferente da vida financeira. Por isso desenhamos três frentes de atuação, para encontrar você onde você está.</div>
 
           <div style={{display:"flex",flexDirection:"column",gap:14,position:"relative"}}>
             {[
-              {id:"gf",ic:"📊",n:"Gestão Financeira",col:"#38BDF8",publico:"Pessoas, casais e famílias",tagline:"Organização, controle e crescimento sustentável",d:"Planejamento financeiro completo com acompanhamento mensal. Ideal para quem busca equilibrar as finanças do dia a dia e construir reservas consistentes."},
               {id:"gp",ic:"💎",n:"Gestão de Patrimônio",col:"#D4A328",publico:"Investidores com patrimônio a partir de R$ 200 mil",tagline:"Gestão ativa da sua carteira por profissionais certificados",d:"Estratégia, destinação e execução do patrimônio com taxa regressiva. Para quem já construiu capital e quer uma gestão profissional dedicada."},
-              {id:"cf",ic:"🎯",n:"Consultoria Financeira",col:"#2DD4A0",publico:"Investidores que buscam orientação pontual",tagline:"Três sessões: Diagnóstico + Estratégia + Execução",d:"Trabalho pontual de análise e otimização da carteira. Para quem quer uma segunda opinião qualificada e implementação prática, sem compromisso recorrente."}
+              {id:"gf",ic:"📈",n:"Gestão Financeira",col:"#38BDF8",publico:"Pessoas, casais e famílias",tagline:"Organização, controle e crescimento sustentável",d:"Planejamento financeiro completo com acompanhamento mensal. Ideal para quem busca equilibrar as finanças do dia a dia e construir reservas consistentes."},
+              {id:"gfpj",ic:"🏢",n:"Gestão Financeira PJ",col:"#2DD4A0",publico:"Pequenos negócios, empresas em crescimento e holdings",tagline:"Organização, fluxo de caixa e visão estratégica",d:"Planejamento financeiro empresarial com acompanhamento mensal. Para empresas que querem crescer com controle, sem perder o sono com o financeiro."}
             ].map(function(s,i){return (
               <div key={s.id} style={{display:"flex",gap:20,alignItems:"stretch",background:"#fff",borderRadius:16,boxShadow:"0 4px 20px rgba(10,22,40,0.06)",overflow:"hidden"}}>
                 <div style={{width:100,flexShrink:0,background:"linear-gradient(135deg,"+s.col+" 0%,"+s.col+"CC 100%)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:42,boxShadow:"inset -1px 0 0 rgba(0,0,0,0.1)"}}>{s.ic}</div>
@@ -32555,7 +32555,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '410';
+  var SW_VERSION = '411';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
