@@ -28179,136 +28179,7 @@ var ApresentacaoGP=function(){
           </div>
         </div>
 
-        {/* ===== PÁGINA 2: MANIFESTO ===== */}
-        <div className="pp-page" style={{padding:"80px 60px",background:"linear-gradient(180deg,#FAFBFD 0%,#F1F3F8 100%)",pageBreakBefore:"always",position:"relative",overflow:"hidden"}}>
-          <div style={{position:"absolute",top:-40,right:-80,opacity:0.04,pointerEvents:"none"}}>
-            <CourinvestPattern opacity={0.6} size={360} color="#D4A328"/>
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:10,position:"relative"}}>
-            <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,#D4A328)"}}/>
-            <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>NOSSA ESSÊNCIA</span>
-          </div>
-          <div style={{fontSize:64,fontWeight:900,color:"#0A1628",lineHeight:0.95,letterSpacing:-2.5,marginBottom:40,maxWidth:700,position:"relative"}}>
-            Acreditamos que <span style={{color:"#D4A328",fontStyle:"italic"}}>liberdade financeira</span> começa com decisões bem informadas.
-          </div>
-          <div style={{fontSize:17,color:"#3a3a4e",lineHeight:1.8,maxWidth:700,fontWeight:400,position:"relative",marginBottom:60}}>
-            Somos dois irmãos apaixonados pelo mercado financeiro e convictos de que o acesso a investimentos de qualidade não pode ser privilégio de poucos. <strong style={{color:"#0A1628"}}>Descomplicamos decisões. Simplificamos caminhos.</strong> E caminhamos lado a lado com quem confia em nós para construir um futuro próspero.
-          </div>
-
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16,position:"relative"}}>
-            {[
-              {ic:"🎯",t:"Personalizada",d:"Cada cliente é único. Nada de receitas prontas."},
-              {ic:"⚖",t:"Independente",d:"Sem vínculo com bancos. Sem conflito de interesse."},
-              {ic:"🔍",t:"Transparente",d:"Modelo Fee-Based. Você sabe exatamente o que paga."}
-            ].map(function(v,i){return (
-              <div key={i} style={{padding:"24px 22px",background:"#fff",borderRadius:14,boxShadow:"0 4px 20px rgba(10,22,40,0.06)",position:"relative",overflow:"hidden"}}>
-                <div style={{position:"absolute",top:0,left:0,width:"100%",height:3,background:"linear-gradient(90deg,#D4A328,#F5C94B)"}}/>
-                <div style={{fontSize:32,marginBottom:10}}>{v.ic}</div>
-                <div style={{fontSize:18,fontWeight:800,color:"#0A1628",marginBottom:6,letterSpacing:-0.3}}>{v.t}</div>
-                <div style={{fontSize:12,color:"#5a5a6e",lineHeight:1.6}}>{v.d}</div>
-              </div>
-            )})}
-          </div>
-        </div>
-
-        {/* ===== PÁGINA 3: PROBLEMA ===== */}
-        <div className="pp-page" style={{padding:"70px 60px",background:"linear-gradient(180deg,#0A1628 0%,#142B52 100%)",color:"#fff",pageBreakBefore:"always",position:"relative",overflow:"hidden"}}>
-          <div style={{position:"absolute",top:-100,left:-100,opacity:0.05,pointerEvents:"none"}}>
-            <CourinvestPattern opacity={0.6} size={400} color="#F5C94B"/>
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14,position:"relative"}}>
-            <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,#D4A328)"}}/>
-            <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>O DIAGNÓSTICO DO MERCADO</span>
-          </div>
-          <div style={{fontSize:48,fontWeight:900,lineHeight:1.05,letterSpacing:-1.5,marginBottom:20,maxWidth:700,position:"relative",background:"linear-gradient(135deg,#fff 0%,#C8D4E8 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
-            Por que tanta gente perde dinheiro sem perceber?
-          </div>
-          <div style={{fontSize:16,color:"#8B9DC3",lineHeight:1.7,maxWidth:620,marginBottom:40,position:"relative"}}>
-            O mercado financeiro brasileiro evoluiu rapidamente nos últimos anos, mas <strong style={{color:"#fff"}}>a orientação de qualidade ainda é rara</strong>. Seja organizando o orçamento, investindo um patrimônio ou administrando uma empresa, vemos os mesmos padrões se repetirem quando falta uma gestão financeira estruturada:
-          </div>
-
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,position:"relative"}}>
-            {[
-              {n:"01",t:"Sem controle das finanças",d:"Não saber para onde o dinheiro vai é o primeiro passo para nunca sobrar nada no fim do mês — na pessoa física ou na empresa."},
-              {n:"02",t:"Conflito de interesse",d:"Profissionais vinculados a bancos recomendam o que dá mais comissão, não o que é melhor para o cliente."},
-              {n:"03",t:"Empresa sem visão de caixa",d:"Faturar bem não significa sobrar dinheiro. Sem fluxo de caixa organizado, crescer vira um risco em vez de uma conquista."},
-              {n:"04",t:"Falta de estratégia clara",d:"Investir ou gerir sem plano vira apostas aleatórias — e apostas não constroem patrimônio, seja pessoal ou empresarial."}
-            ].map(function(p,i){return (
-              <div key={i} style={{padding:"22px 24px",background:"rgba(212,163,40,0.05)",border:"1px solid rgba(212,163,40,0.15)",borderRadius:14,position:"relative",overflow:"hidden"}}>
-                <div style={{fontSize:48,fontWeight:900,color:"rgba(212,163,40,0.15)",letterSpacing:-2,lineHeight:1,position:"absolute",top:10,right:14}}>{p.n}</div>
-                <div style={{fontSize:17,fontWeight:800,color:"#fff",marginBottom:8,position:"relative",letterSpacing:-0.3}}>{p.t}</div>
-                <div style={{fontSize:12,color:"#8B9DC3",lineHeight:1.6,position:"relative"}}>{p.d}</div>
-              </div>
-            )})}
-          </div>
-        </div>
-
-        {/* ===== PÁGINA 4: SOLUÇÃO - 3 SERVIÇOS ===== */}
-        <div className="pp-page" style={{padding:"70px 60px",background:"linear-gradient(180deg,#FAFBFD 0%,#E8EDF5 100%)",pageBreakBefore:"always",position:"relative",overflow:"hidden"}}>
-          <div style={{position:"absolute",top:40,left:-80,opacity:0.04,pointerEvents:"none"}}>
-            <CourinvestPattern opacity={0.6} size={340} color="#D4A328"/>
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14,position:"relative"}}>
-            <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,#D4A328)"}}/>
-            <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>NOSSA SOLUÇÃO</span>
-          </div>
-          <div style={{fontSize:48,fontWeight:900,color:"#0A1628",lineHeight:1.05,letterSpacing:-1.5,marginBottom:10,position:"relative"}}>Três caminhos, <span style={{color:"#D4A328"}}>um destino</span>.</div>
-          <div style={{fontSize:15,color:"#5a5a6e",lineHeight:1.7,marginBottom:36,maxWidth:620,position:"relative"}}>Cada cliente — pessoa física ou empresa — está em um momento diferente da vida financeira. Por isso desenhamos três frentes de atuação, para encontrar você onde você está.</div>
-
-          <div style={{display:"flex",flexDirection:"column",gap:14,position:"relative"}}>
-            {[
-              {id:"gp",ic:"💎",n:"Gestão de Patrimônio",col:"#D4A328",publico:"Investidores com patrimônio a partir de R$ 200 mil",tagline:"Gestão ativa da sua carteira por profissionais certificados",d:"Estratégia, destinação e execução do patrimônio com taxa regressiva. Para quem já construiu capital e quer uma gestão profissional dedicada."},
-              {id:"gf",ic:"📈",n:"Gestão Financeira",col:"#38BDF8",publico:"Pessoas, casais e famílias",tagline:"Organização, controle e crescimento sustentável",d:"Planejamento financeiro completo com acompanhamento mensal. Ideal para quem busca equilibrar as finanças do dia a dia e construir reservas consistentes."},
-              {id:"gfpj",ic:"🏢",n:"Gestão Financeira PJ",col:"#2DD4A0",publico:"Pequenos negócios, empresas em crescimento e holdings",tagline:"Organização, fluxo de caixa e visão estratégica",d:"Planejamento financeiro empresarial com acompanhamento mensal. Para empresas que querem crescer com controle, sem perder o sono com o financeiro."}
-            ].map(function(s,i){return (
-              <div key={s.id} style={{display:"flex",gap:20,alignItems:"stretch",background:"#fff",borderRadius:16,boxShadow:"0 4px 20px rgba(10,22,40,0.06)",overflow:"hidden"}}>
-                <div style={{width:100,flexShrink:0,background:"linear-gradient(135deg,"+s.col+" 0%,"+s.col+"CC 100%)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:42,boxShadow:"inset -1px 0 0 rgba(0,0,0,0.1)"}}>{s.ic}</div>
-                <div style={{flex:1,padding:"20px 24px"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-                    <div style={{fontSize:11,color:s.col,fontWeight:800,letterSpacing:2}}>{s.id.toUpperCase()}</div>
-                    <div style={{fontSize:20,fontWeight:900,color:"#0A1628",letterSpacing:-0.5}}>{s.n}</div>
-                  </div>
-                  <div style={{fontSize:13,color:"#D4A328",fontWeight:700,marginBottom:8,fontStyle:"italic"}}>{s.tagline}</div>
-                  <div style={{fontSize:12,color:"#5a5a6e",lineHeight:1.6,marginBottom:8}}>{s.d}</div>
-                  <div style={{fontSize:11,color:"#8B9DC3"}}><strong style={{color:"#0A1628"}}>Para quem:</strong> {s.publico}</div>
-                </div>
-              </div>
-            )})}
-          </div>
-        </div>
-
-        {/* ===== PÁGINA 5: METODOLOGIA ===== */}
-        <div className="pp-page" style={{padding:"70px 60px",background:"linear-gradient(180deg,#FAFBFD 0%,#F1F3F8 100%)",pageBreakBefore:"always",position:"relative",overflow:"hidden"}}>
-          <div style={{position:"absolute",top:-40,right:-80,opacity:0.04,pointerEvents:"none"}}>
-            <CourinvestPattern opacity={0.6} size={320} color="#D4A328"/>
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14,position:"relative"}}>
-            <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,#D4A328)"}}/>
-            <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>NOSSA METODOLOGIA</span>
-          </div>
-          <div style={{fontSize:48,fontWeight:900,color:"#0A1628",lineHeight:1.05,letterSpacing:-1.5,marginBottom:14,maxWidth:700,position:"relative"}}>Processo claro. <span style={{color:"#D4A328"}}>Resultado consistente.</span></div>
-          <div style={{fontSize:15,color:"#5a5a6e",lineHeight:1.7,marginBottom:36,maxWidth:620,position:"relative"}}>Seguimos um método estruturado em 4 etapas que garante que cada decisão seja tomada com base em dados, perfil e objetivos — nunca no achismo.</div>
-
-          <div style={{display:"flex",flexDirection:"column",gap:14,position:"relative"}}>
-            <div style={{position:"absolute",left:30,top:40,bottom:40,width:2,background:"linear-gradient(180deg,#D4A32866,transparent)",zIndex:0}}/>
-            {[
-              {t:"Diagnóstico",d:"Entendemos profundamente sua realidade, objetivos e perfil de risco. Sem diagnóstico correto, não existe estratégia eficiente."},
-              {t:"Estratégia",d:"Construímos um plano personalizado, alinhado aos seus objetivos de curto, médio e longo prazo. Cada escolha tem um porquê claro."},
-              {t:"Execução",d:"Colocamos o plano em prática com disciplina. A melhor estratégia é inútil se não for executada da forma correta."},
-              {t:"Acompanhamento",d:"Revisão periódica, ajustes quando necessário. O mercado muda — sua estratégia evolui com ele, sempre alinhada aos seus objetivos."}
-            ].map(function(m,i){return (
-              <div key={i} style={{display:"flex",gap:20,alignItems:"flex-start",position:"relative",zIndex:1}}>
-                <div style={{width:62,height:62,flexShrink:0,background:"linear-gradient(135deg,#D4A328 0%,#D4A328CC 100%)",color:"#fff",borderRadius:16,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,fontWeight:900,letterSpacing:-1,boxShadow:"0 10px 30px rgba(212,163,40,0.4),inset 0 1px 0 rgba(255,255,255,0.3)"}}>{(i+1).toString().padStart(2,"0")}</div>
-                <div style={{flex:1,padding:"18px 22px",background:"#fff",borderRadius:14,boxShadow:"0 4px 20px rgba(10,22,40,0.06)"}}>
-                  <div style={{fontSize:20,fontWeight:900,color:"#0A1628",marginBottom:6,letterSpacing:-0.3}}>{m.t}</div>
-                  <div style={{fontSize:13,color:"#5a5a6e",lineHeight:1.65}}>{m.d}</div>
-                </div>
-              </div>
-            )})}
-          </div>
-        </div>
-
-        {/* ===== PÁGINA 6: SÓCIOS ===== */}
+        {/* ===== PÁGINA 2: SÓCIOS ===== */}
         <div className="pp-page" style={{padding:"70px 60px",background:"linear-gradient(135deg,#0A1628 0%,#142B52 100%)",color:"#fff",pageBreakBefore:"always",position:"relative",overflow:"hidden"}}>
           <div style={{position:"absolute",top:-100,right:-100,opacity:0.05,pointerEvents:"none"}}>
             <CourinvestPattern opacity={0.6} size={400} color="#F5C94B"/>
@@ -28350,7 +28221,174 @@ var ApresentacaoGP=function(){
           </div>
         </div>
 
-        {/* ===== PÁGINA 7: DEPOIMENTOS ===== */}
+        {/* ===== PÁGINA 3: MANIFESTO ===== */}
+        <div className="pp-page" style={{padding:"80px 60px",background:"linear-gradient(180deg,#FAFBFD 0%,#F1F3F8 100%)",pageBreakBefore:"always",position:"relative",overflow:"hidden"}}>
+          <div style={{position:"absolute",top:-40,right:-80,opacity:0.04,pointerEvents:"none"}}>
+            <CourinvestPattern opacity={0.6} size={360} color="#D4A328"/>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:10,position:"relative"}}>
+            <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,#D4A328)"}}/>
+            <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>NOSSA ESSÊNCIA</span>
+          </div>
+          <div style={{fontSize:64,fontWeight:900,color:"#0A1628",lineHeight:0.95,letterSpacing:-2.5,marginBottom:40,maxWidth:700,position:"relative"}}>
+            Acreditamos que <span style={{color:"#D4A328",fontStyle:"italic"}}>liberdade financeira</span> começa com decisões bem informadas.
+          </div>
+          <div style={{fontSize:17,color:"#3a3a4e",lineHeight:1.8,maxWidth:700,fontWeight:400,position:"relative",marginBottom:60}}>
+            Somos dois irmãos apaixonados pelo mercado financeiro e convictos de que o acesso a investimentos de qualidade não pode ser privilégio de poucos. <strong style={{color:"#0A1628"}}>Descomplicamos decisões. Simplificamos caminhos.</strong> E caminhamos lado a lado com quem confia em nós para construir um futuro próspero.
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16,position:"relative"}}>
+            {[
+              {ic:"🎯",t:"Personalizada",d:"Cada cliente é único. Nada de receitas prontas."},
+              {ic:"⚖",t:"Independente",d:"Sem vínculo com bancos. Sem conflito de interesse."},
+              {ic:"🔍",t:"Transparente",d:"Modelo Fee-Based. Você sabe exatamente o que paga."}
+            ].map(function(v,i){return (
+              <div key={i} style={{padding:"24px 22px",background:"#fff",borderRadius:14,boxShadow:"0 4px 20px rgba(10,22,40,0.06)",position:"relative",overflow:"hidden"}}>
+                <div style={{position:"absolute",top:0,left:0,width:"100%",height:3,background:"linear-gradient(90deg,#D4A328,#F5C94B)"}}/>
+                <div style={{fontSize:32,marginBottom:10}}>{v.ic}</div>
+                <div style={{fontSize:18,fontWeight:800,color:"#0A1628",marginBottom:6,letterSpacing:-0.3}}>{v.t}</div>
+                <div style={{fontSize:12,color:"#5a5a6e",lineHeight:1.6}}>{v.d}</div>
+              </div>
+            )})}
+          </div>
+        </div>
+
+        {/* ===== PÁGINA 4: PROBLEMA ===== */}
+        <div className="pp-page" style={{padding:"70px 60px",background:"linear-gradient(180deg,#0A1628 0%,#142B52 100%)",color:"#fff",pageBreakBefore:"always",position:"relative",overflow:"hidden"}}>
+          <div style={{position:"absolute",top:-100,left:-100,opacity:0.05,pointerEvents:"none"}}>
+            <CourinvestPattern opacity={0.6} size={400} color="#F5C94B"/>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14,position:"relative"}}>
+            <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,#D4A328)"}}/>
+            <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>O DIAGNÓSTICO DO MERCADO</span>
+          </div>
+          <div style={{fontSize:48,fontWeight:900,lineHeight:1.05,letterSpacing:-1.5,marginBottom:20,maxWidth:700,position:"relative",background:"linear-gradient(135deg,#fff 0%,#C8D4E8 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
+            Por que tanta gente perde dinheiro sem perceber?
+          </div>
+          <div style={{fontSize:16,color:"#8B9DC3",lineHeight:1.7,maxWidth:620,marginBottom:40,position:"relative"}}>
+            O mercado financeiro brasileiro evoluiu rapidamente nos últimos anos, mas <strong style={{color:"#fff"}}>a orientação de qualidade ainda é rara</strong>. Seja organizando o orçamento, investindo um patrimônio ou administrando uma empresa, vemos os mesmos padrões se repetirem quando falta uma gestão financeira estruturada:
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,position:"relative"}}>
+            {[
+              {n:"01",t:"Sem controle das finanças",d:"Não saber para onde o dinheiro vai é o primeiro passo para nunca sobrar nada no fim do mês — na pessoa física ou na empresa."},
+              {n:"02",t:"Conflito de interesse",d:"Profissionais vinculados a bancos recomendam o que dá mais comissão, não o que é melhor para o cliente."},
+              {n:"03",t:"Empresa sem visão de caixa",d:"Faturar bem não significa sobrar dinheiro. Sem fluxo de caixa organizado, crescer vira um risco em vez de uma conquista."},
+              {n:"04",t:"Falta de estratégia clara",d:"Investir ou gerir sem plano vira apostas aleatórias — e apostas não constroem patrimônio, seja pessoal ou empresarial."}
+            ].map(function(p,i){return (
+              <div key={i} style={{padding:"22px 24px",background:"rgba(212,163,40,0.05)",border:"1px solid rgba(212,163,40,0.15)",borderRadius:14,position:"relative",overflow:"hidden"}}>
+                <div style={{fontSize:48,fontWeight:900,color:"rgba(212,163,40,0.15)",letterSpacing:-2,lineHeight:1,position:"absolute",top:10,right:14}}>{p.n}</div>
+                <div style={{fontSize:17,fontWeight:800,color:"#fff",marginBottom:8,position:"relative",letterSpacing:-0.3}}>{p.t}</div>
+                <div style={{fontSize:12,color:"#8B9DC3",lineHeight:1.6,position:"relative"}}>{p.d}</div>
+              </div>
+            )})}
+          </div>
+        </div>
+
+        {/* ===== PÁGINA 5: MODELO FEE-BASED ===== */}
+        <div className="pp-page" style={{padding:"70px 60px",background:"linear-gradient(180deg,#0A1628 0%,#142B52 100%)",color:"#fff",pageBreakBefore:"always",position:"relative",overflow:"hidden"}}>
+          <div style={{position:"absolute",top:-100,right:-100,opacity:0.05,pointerEvents:"none"}}>
+            <CourinvestPattern opacity={0.6} size={400} color="#F5C94B"/>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14,position:"relative"}}>
+            <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,#D4A328)"}}/>
+            <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>TRANSPARÊNCIA TOTAL</span>
+          </div>
+          <div style={{fontSize:48,fontWeight:900,lineHeight:1.05,letterSpacing:-1.5,marginBottom:20,maxWidth:700,position:"relative",background:"linear-gradient(135deg,#fff 0%,#C8D4E8 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
+            Seu sucesso é o nosso modelo de negócio.
+          </div>
+          <div style={{fontSize:16,color:"#8B9DC3",lineHeight:1.7,maxWidth:640,marginBottom:36,position:"relative"}}>
+            Trabalhamos no modelo <strong style={{color:"#fff"}}>Fee-Based</strong>: você paga pelo serviço prestado, não pelo produto vendido. Sem comissão escondida, sem conflito de interesse — só alinhamento de verdade entre o que é bom pra você e o que é bom pra nós.
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,position:"relative"}}>
+            <div style={{padding:"24px 22px",background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:16}}>
+              <div style={{fontSize:14,fontWeight:800,color:"#8B9DC3",marginBottom:16,letterSpacing:0.5}}>MODELO TRADICIONAL</div>
+              {["Ganha comissão por produto vendido","Incentivo em empurrar produtos de maior comissão, não os melhores pra você","Custos nem sempre claros no contrato"].map(function(t,i){return(
+                <div key={i} style={{display:"flex",gap:10,alignItems:"flex-start",marginBottom:14}}>
+                  <div style={{width:5,height:5,borderRadius:"50%",background:"#8B9DC3",marginTop:7,flexShrink:0}}/>
+                  <div style={{fontSize:13,color:"#8B9DC3",lineHeight:1.6}}>{t}</div>
+                </div>
+              )})}
+            </div>
+            <div style={{padding:"24px 22px",background:"rgba(212,163,40,0.08)",border:"1px solid rgba(212,163,40,0.25)",borderRadius:16}}>
+              <div style={{fontSize:14,fontWeight:800,color:"#D4A328",marginBottom:16,letterSpacing:0.5}}>MODELO COURINVEST</div>
+              {["Cobra pelo serviço prestado — não pelo produto indicado","Incentivo alinhado ao seu resultado, não ao seu banco","Contrato claro: você sabe exatamente quanto paga e por quê"].map(function(t,i){return(
+                <div key={i} style={{display:"flex",gap:10,alignItems:"flex-start",marginBottom:14}}>
+                  <div style={{width:5,height:5,borderRadius:"50%",background:"#D4A328",marginTop:7,flexShrink:0}}/>
+                  <div style={{fontSize:13,color:"#fff",lineHeight:1.6}}>{t}</div>
+                </div>
+              )})}
+            </div>
+          </div>
+        </div>
+
+        {/* ===== PÁGINA 6: SOLUÇÃO - 3 SERVIÇOS ===== */}
+        <div className="pp-page" style={{padding:"70px 60px",background:"linear-gradient(180deg,#FAFBFD 0%,#E8EDF5 100%)",pageBreakBefore:"always",position:"relative",overflow:"hidden"}}>
+          <div style={{position:"absolute",top:40,left:-80,opacity:0.04,pointerEvents:"none"}}>
+            <CourinvestPattern opacity={0.6} size={340} color="#D4A328"/>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14,position:"relative"}}>
+            <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,#D4A328)"}}/>
+            <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>NOSSA SOLUÇÃO</span>
+          </div>
+          <div style={{fontSize:48,fontWeight:900,color:"#0A1628",lineHeight:1.05,letterSpacing:-1.5,marginBottom:10,position:"relative"}}>Três caminhos, <span style={{color:"#D4A328"}}>um destino</span>.</div>
+          <div style={{fontSize:15,color:"#5a5a6e",lineHeight:1.7,marginBottom:36,maxWidth:620,position:"relative"}}>Cada cliente — pessoa física ou empresa — está em um momento diferente da vida financeira. Por isso desenhamos três frentes de atuação, para encontrar você onde você está.</div>
+
+          <div style={{display:"flex",flexDirection:"column",gap:14,position:"relative"}}>
+            {[
+              {id:"gp",ic:"💎",n:"Gestão de Patrimônio",col:"#D4A328",publico:"Investidores com patrimônio a partir de R$ 200 mil",tagline:"Gestão ativa da sua carteira por profissionais certificados",d:"Estratégia, destinação e execução do patrimônio com taxa regressiva. Para quem já construiu capital e quer uma gestão profissional dedicada."},
+              {id:"gf",ic:"📈",n:"Gestão Financeira",col:"#38BDF8",publico:"Pessoas, casais e famílias",tagline:"Organização, controle e crescimento sustentável",d:"Planejamento financeiro completo com acompanhamento mensal. Ideal para quem busca equilibrar as finanças do dia a dia e construir reservas consistentes."},
+              {id:"gfpj",ic:"🏢",n:"Gestão Financeira PJ",col:"#2DD4A0",publico:"Pequenos negócios, empresas em crescimento e holdings",tagline:"Organização, fluxo de caixa e visão estratégica",d:"Planejamento financeiro empresarial com acompanhamento mensal. Para empresas que querem crescer com controle, sem perder o sono com o financeiro."}
+            ].map(function(s,i){return (
+              <div key={s.id} style={{display:"flex",gap:20,alignItems:"stretch",background:"#fff",borderRadius:16,boxShadow:"0 4px 20px rgba(10,22,40,0.06)",overflow:"hidden"}}>
+                <div style={{width:100,flexShrink:0,background:"linear-gradient(135deg,"+s.col+" 0%,"+s.col+"CC 100%)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:42,boxShadow:"inset -1px 0 0 rgba(0,0,0,0.1)"}}>{s.ic}</div>
+                <div style={{flex:1,padding:"20px 24px"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                    <div style={{fontSize:11,color:s.col,fontWeight:800,letterSpacing:2}}>{s.id.toUpperCase()}</div>
+                    <div style={{fontSize:20,fontWeight:900,color:"#0A1628",letterSpacing:-0.5}}>{s.n}</div>
+                  </div>
+                  <div style={{fontSize:13,color:"#D4A328",fontWeight:700,marginBottom:8,fontStyle:"italic"}}>{s.tagline}</div>
+                  <div style={{fontSize:12,color:"#5a5a6e",lineHeight:1.6,marginBottom:8}}>{s.d}</div>
+                  <div style={{fontSize:11,color:"#8B9DC3"}}><strong style={{color:"#0A1628"}}>Para quem:</strong> {s.publico}</div>
+                </div>
+              </div>
+            )})}
+          </div>
+        </div>
+
+        {/* ===== PÁGINA 7: METODOLOGIA ===== */}
+        <div className="pp-page" style={{padding:"70px 60px",background:"linear-gradient(180deg,#FAFBFD 0%,#F1F3F8 100%)",pageBreakBefore:"always",position:"relative",overflow:"hidden"}}>
+          <div style={{position:"absolute",top:-40,right:-80,opacity:0.04,pointerEvents:"none"}}>
+            <CourinvestPattern opacity={0.6} size={320} color="#D4A328"/>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14,position:"relative"}}>
+            <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,#D4A328)"}}/>
+            <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>NOSSA METODOLOGIA</span>
+          </div>
+          <div style={{fontSize:48,fontWeight:900,color:"#0A1628",lineHeight:1.05,letterSpacing:-1.5,marginBottom:14,maxWidth:700,position:"relative"}}>Processo claro. <span style={{color:"#D4A328"}}>Resultado consistente.</span></div>
+          <div style={{fontSize:15,color:"#5a5a6e",lineHeight:1.7,marginBottom:36,maxWidth:620,position:"relative"}}>Seguimos um método estruturado em 4 etapas que garante que cada decisão seja tomada com base em dados, perfil e objetivos — nunca no achismo.</div>
+
+          <div style={{display:"flex",flexDirection:"column",gap:14,position:"relative"}}>
+            <div style={{position:"absolute",left:30,top:40,bottom:40,width:2,background:"linear-gradient(180deg,#D4A32866,transparent)",zIndex:0}}/>
+            {[
+              {t:"Diagnóstico",d:"Entendemos profundamente sua realidade, objetivos e perfil de risco. Sem diagnóstico correto, não existe estratégia eficiente."},
+              {t:"Estratégia",d:"Construímos um plano personalizado, alinhado aos seus objetivos de curto, médio e longo prazo. Cada escolha tem um porquê claro."},
+              {t:"Execução",d:"Colocamos o plano em prática com disciplina. A melhor estratégia é inútil se não for executada da forma correta."},
+              {t:"Acompanhamento",d:"Revisão periódica, ajustes quando necessário. O mercado muda — sua estratégia evolui com ele, sempre alinhada aos seus objetivos."}
+            ].map(function(m,i){return (
+              <div key={i} style={{display:"flex",gap:20,alignItems:"flex-start",position:"relative",zIndex:1}}>
+                <div style={{width:62,height:62,flexShrink:0,background:"linear-gradient(135deg,#D4A328 0%,#D4A328CC 100%)",color:"#fff",borderRadius:16,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,fontWeight:900,letterSpacing:-1,boxShadow:"0 10px 30px rgba(212,163,40,0.4),inset 0 1px 0 rgba(255,255,255,0.3)"}}>{(i+1).toString().padStart(2,"0")}</div>
+                <div style={{flex:1,padding:"18px 22px",background:"#fff",borderRadius:14,boxShadow:"0 4px 20px rgba(10,22,40,0.06)"}}>
+                  <div style={{fontSize:20,fontWeight:900,color:"#0A1628",marginBottom:6,letterSpacing:-0.3}}>{m.t}</div>
+                  <div style={{fontSize:13,color:"#5a5a6e",lineHeight:1.65}}>{m.d}</div>
+                </div>
+              </div>
+            )})}
+          </div>
+        </div>
+
+        {/* ===== PÁGINA 8: DEPOIMENTOS ===== */}
         <div className="pp-page" style={{padding:"70px 60px",background:"linear-gradient(180deg,#FAFBFD 0%,#F1F3F8 100%)",pageBreakBefore:"always",position:"relative",overflow:"hidden"}}>
           <div style={{position:"absolute",top:-40,right:-80,opacity:0.04,pointerEvents:"none"}}>
             <CourinvestPattern opacity={0.6} size={320} color="#D4A328"/>
@@ -28385,7 +28423,7 @@ var ApresentacaoGP=function(){
           </div>
         </div>
 
-        {/* ===== PÁGINA 8: CTA + CONTATO ===== */}
+        {/* ===== PÁGINA 9: CTA + CONTATO ===== */}
         <div className="pp-page" style={{padding:"80px 60px 50px",background:"radial-gradient(ellipse 70% 50% at 50% 30%,rgba(212,163,40,0.25) 0%,transparent 60%),linear-gradient(135deg,#060E1F 0%,#0C1A33 50%,#142B52 100%)",color:"#fff",pageBreakBefore:"always",position:"relative",overflow:"hidden",textAlign:"center"}}>
           <div style={{position:"absolute",top:-100,left:"50%",transform:"translateX(-50%)",opacity:0.04,pointerEvents:"none"}}>
             <CourinvestPattern opacity={0.6} size={600} color="#F5C94B"/>
@@ -32555,7 +32593,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '411';
+  var SW_VERSION = '412';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
