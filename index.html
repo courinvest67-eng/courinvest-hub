@@ -31847,6 +31847,21 @@ function DiagnosticosView(){
                   <div><div style={{color:T.t3,fontSize:9,textTransform:"uppercase"}}>{pctLabel}</div><div style={{fontWeight:700,color:T.t1}}>{(pct||0).toFixed(0)}%</div></div>
                 </div>
 
+                {tipo==="pf" && item.servicoRecomendado && (function(){
+                  var recInfo={
+                    patrimonio:{l:"💎 Recomendado: Gestão de Patrimônio",c:"#D4A328"},
+                    consultoria:{l:"🎯 Recomendado: Consultoria Financeira",c:"#2DD4A0"},
+                    financeira:{l:"📊 Recomendado: Gestão Financeira",c:"#38BDF8"}
+                  }[item.servicoRecomendado];
+                  if(!recInfo)return null;
+                  return (
+                    <div style={{marginTop:10,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <span style={{fontSize:9,fontWeight:800,padding:"3px 8px",borderRadius:20,background:recInfo.c+"22",color:recInfo.c,border:"1px solid "+recInfo.c+"44"}}>{recInfo.l}</span>
+                      {item.patrimonioAtual>0 && <span style={{fontSize:10,color:T.t3}}>Patrimônio informado: {fm(item.patrimonioAtual)}</span>}
+                    </div>
+                  );
+                })()}
+
                 {(item.valorSugeridoMin!=null) && (
                   <div style={{marginTop:12,padding:"10px 12px",background:T.goldD,border:"1px solid "+T.bdr,borderRadius:10}}>
                     <div style={{fontSize:9,fontWeight:800,color:T.gold,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>💡 Sugestão de proposta mensal{item.precoEstimativa?" (estimativa)":""}</div>
@@ -32860,7 +32875,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '421';
+  var SW_VERSION = '422';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
