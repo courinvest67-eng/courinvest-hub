@@ -830,6 +830,22 @@ const _prepararImagensQuebradasParaCaptura=function(raiz){
     }
   });
 };
+/* CORREÇÃO (v420): reportado que TODAS as apresentações pararam de gerar PowerPoint (antes só a
+   Consultoria tinha dado problema, e já tinha sido corrigido). Causa mais provável: o html2canvas
+   (parado desde 2023, versão 1.4.1) não sabe interpretar a função de cor `light-dark(...)` que o
+   Chrome passou a usar com mais frequência no estilo padrão de elementos nativos (inputs, campos
+   de formulário, barra de rolagem) quando o Windows está no tema escuro — ele lança um erro ao
+   tentar ler a cor computada de QUALQUER elemento nessas condições, derrubando a captura inteira
+   de cada slide (não só um elemento específico), o que bate com o sintoma: 100% dos slides de
+   TODAS as apresentações falhando ao mesmo tempo, sem nenhuma mudança de conteúdo. Forçar o
+   documento clonado (usado só pra essa captura, não a tela real) a se comportar como se estivesse
+   sempre no tema claro evita que o navegador resolva qualquer cor computada usando essa função. */
+const _forcarTemaClaroParaCaptura=function(clonedDoc){
+  try{
+    if(clonedDoc&&clonedDoc.documentElement)clonedDoc.documentElement.style.colorScheme="light";
+    if(clonedDoc&&clonedDoc.body)clonedDoc.body.style.colorScheme="light";
+  }catch(_csErr){}
+};
 /* Corre uma promise com um prazo máximo — se estourar, rejeita (o chamador trata igual a
    qualquer outra falha desse slide: loga aviso e pula pro próximo, sem travar o resto). */
 const _comLimiteDeTempo=function(promessa,ms){
@@ -884,6 +900,7 @@ const gerarPPTXDeSlides=async function(containerEl,nomeArquivo){
     }
   };
   var capturas=[];
+  var _ultimoErroPPTX=null;
   try{
     for(var pi=0;pi<pageEls.length;pi++){
       /* CORREÇÃO (v393): o html2canvas cria por baixo dos panos um iframe temporário pra
@@ -898,9 +915,10 @@ const gerarPPTXDeSlides=async function(containerEl,nomeArquivo){
       await new Promise(function(r){requestAnimationFrame(function(){requestAnimationFrame(r);});});
       var canvas=null;
       try{
-        canvas=await _comLimiteDeTempo(window.html2canvas(pageEls[pi],{scale:2,useCORS:true,backgroundColor:"#ffffff",onclone:function(_clonedDoc,clonedEl){_prepararGradienteTextoParaCaptura(clonedEl);_prepararImagensQuebradasParaCaptura(clonedEl);}}),20000);
+        canvas=await _comLimiteDeTempo(window.html2canvas(pageEls[pi],{scale:2,useCORS:true,backgroundColor:"#ffffff",onclone:function(_clonedDoc,clonedEl){_forcarTemaClaroParaCaptura(_clonedDoc);_prepararGradienteTextoParaCaptura(clonedEl);_prepararImagensQuebradasParaCaptura(clonedEl);}}),20000);
       }catch(_pageErr){
         console.warn("[PPTX] Slide "+pi+" falhou ao renderizar, pulando:",_pageErr);
+        _ultimoErroPPTX=(_pageErr&&_pageErr.message)||String(_pageErr);
         continue;
       }
       if(!canvas||canvas.width===0||canvas.height===0){
@@ -929,7 +947,7 @@ const gerarPPTXDeSlides=async function(containerEl,nomeArquivo){
     console.warn("[PPTX] "+_faltantes+" de "+pageEls.length+" slide(s) não puderam ser capturados — o PowerPoint sairá só com os que deram certo.");
   }
   if(capturas.length===0){
-    alert("Não foi possível gerar nenhum slide. Tente novamente.");
+    alert("Não foi possível gerar nenhum slide. Tente novamente."+(_ultimoErroPPTX?"\n\nDetalhe técnico (envie este print se persistir): "+_ultimoErroPPTX:""));
     return false;
   }
   /* Proporção "sob medida": mediana de (largura/altura) entre todos os slides capturados. */
@@ -28895,6 +28913,16 @@ function PropostasView({data,dispatch}){
     var recMes;
     var ehConsultoria=form.servico==="consultoria";
     var temDiagnostico=form.servico!=="financeira";
+    /* CORREÇÃO (v421): a Proposta Comercial usava sempre a mesma cor de destaque (dourado) pra
+       qualquer serviço, mesmo quando o serviço tem identidade visual própria — a apresentação
+       dedicada da Consultoria Financeira (v416) usa verde-água (teal), não dourado. Agora a cor de
+       destaque da proposta (rótulos, números, bordas em primeiro plano) acompanha o serviço
+       escolhido, igual já acontece nas apresentações: GP, GF e GFPJ continuam em dourado (é a cor
+       que as 3 já usam de verdade), só a Consultoria muda pra teal. Texturas de fundo bem sutis
+       (os glows/pontinhos em rgba de baixa opacidade) continuam dourados propositalmente — são
+       decoração de marca, não identidade do serviço. */
+    var accent=ehConsultoria?"#2DD4A0":"#D4A328";
+    var accentLight=ehConsultoria?"#5EEAC1":"#F5C94B";
     if(form.servico==="patrimonio"){recMes=(form.valorPatrimonio||0)*(form.taxaMensal||0)/100;}
     else if(ehConsultoria){recMes=precoConsultoria(form.valorPatrimonio).valor;}
     else{recMes=form.feeFixo||0;}
@@ -28937,12 +28965,12 @@ function PropostasView({data,dispatch}){
           }}>
             {}
             <div style={{position:"absolute",top:-80,right:-120,opacity:0.08,pointerEvents:"none"}}>
-              <CourinvestPattern opacity={0.5} size={500} color="#F5C94B"/>
+              <CourinvestPattern opacity={0.5} size={500} color={accentLight}/>
             </div>
             <div style={{position:"absolute",bottom:-100,left:-100,width:400,height:400,background:"radial-gradient(circle,rgba(212,163,40,0.08),transparent 70%)",pointerEvents:"none"}}/>
             
             {}
-            <div style={{position:"absolute",inset:0,opacity:0.03,backgroundImage:"radial-gradient(#D4A328 1px, transparent 1px)",backgroundSize:"32px 32px",pointerEvents:"none"}}/>
+            <div style={{position:"absolute",inset:0,opacity:0.03,backgroundImage:"radial-gradient("+accent+" 1px, transparent 1px)",backgroundSize:"32px 32px",pointerEvents:"none"}}/>
             
             <div style={{position:"relative",zIndex:1,flex:1,display:"flex",flexDirection:"column"}}>
               {}
@@ -28953,8 +28981,8 @@ function PropostasView({data,dispatch}){
               <div style={{margin:"80px 0"}}>
                 {}
                 <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:24}}>
-                  <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,#D4A328)"}}/>
-                  <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:4}}>PROPOSTA COMERCIAL</span>
+                  <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,"+accent+")"}}/>
+                  <span style={{fontSize:11,color:accent,fontWeight:700,letterSpacing:4}}>PROPOSTA COMERCIAL</span>
                   <span style={{fontSize:9,color:"#8B9DC3",padding:"3px 10px",border:"1px solid rgba(212,163,40,0.3)",borderRadius:20,letterSpacing:1.5}}>{serv.icone} {form.servico==="patrimonio"?"GP":form.servico==="financeira"?"GF":"CI"}</span>
                 </div>
 
@@ -28975,7 +29003,7 @@ function PropostasView({data,dispatch}){
                   maxWidth:480
                 }}>
                   <div style={{position:"absolute",top:-1,left:"10%",right:"10%",height:1,background:"linear-gradient(90deg,transparent,rgba(212,163,40,0.6),transparent)"}}/>
-                  <div style={{fontSize:10,color:"#D4A328",fontWeight:700,letterSpacing:3,marginBottom:10,textTransform:"uppercase"}}>✦ Preparada exclusivamente para</div>
+                  <div style={{fontSize:10,color:accent,fontWeight:700,letterSpacing:3,marginBottom:10,textTransform:"uppercase"}}>✦ Preparada exclusivamente para</div>
                   <div style={{fontSize:32,fontWeight:800,color:"#fff",marginBottom:6,letterSpacing:-0.5,lineHeight:1.1}}>{form.clienteNome||"Cliente"}</div>
                   {form.clienteEmail && <div style={{fontSize:13,color:"#8B9DC3",letterSpacing:0.3}}>{form.clienteEmail}</div>}
                 </div>
@@ -28985,11 +29013,11 @@ function PropostasView({data,dispatch}){
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",paddingTop:24,borderTop:"1px solid rgba(212,163,40,0.15)"}}>
                 <div style={{display:"flex",gap:36,fontSize:11}}>
                   <div>
-                    <div style={{color:"#D4A328",fontWeight:700,letterSpacing:2,marginBottom:4,fontSize:9}}>DATA</div>
+                    <div style={{color:accent,fontWeight:700,letterSpacing:2,marginBottom:4,fontSize:9}}>DATA</div>
                     <div style={{color:"#E8ECF4",fontWeight:500}}>{hoje.toLocaleDateString("pt-BR",{day:"2-digit",month:"long",year:"numeric"})}</div>
                   </div>
                   <div>
-                    <div style={{color:"#D4A328",fontWeight:700,letterSpacing:2,marginBottom:4,fontSize:9}}>VÁLIDA ATÉ</div>
+                    <div style={{color:accent,fontWeight:700,letterSpacing:2,marginBottom:4,fontSize:9}}>VÁLIDA ATÉ</div>
                     <div style={{color:"#E8ECF4",fontWeight:500}}>{validade.toLocaleDateString("pt-BR")}</div>
                   </div>
                 </div>
@@ -29008,18 +29036,18 @@ function PropostasView({data,dispatch}){
           }}>
             {}
             <div style={{position:"absolute",top:20,right:-60,opacity:0.04,pointerEvents:"none"}}>
-              <CourinvestPattern opacity={0.6} size={280} color="#D4A328"/>
+              <CourinvestPattern opacity={0.6} size={280} color={accent}/>
             </div>
             
             <div style={{position:"relative",zIndex:1}}>
               {}
               <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:10}}>
-                <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,#D4A328)"}}/>
-                <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>01 · SOBRE NÓS</span>
+                <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,"+accent+")"}}/>
+                <span style={{fontSize:11,color:accent,fontWeight:700,letterSpacing:3.5}}>01 · SOBRE NÓS</span>
               </div>
               
               <div style={{fontSize:42,fontWeight:900,color:"#0A1628",marginBottom:20,lineHeight:1.05,letterSpacing:-1.2,maxWidth:600}}>
-                Desde <span style={{color:"#D4A328"}}>2019</span>, construindo histórias financeiras.
+                Desde <span style={{color:accent}}>2019</span>, construindo histórias financeiras.
               </div>
 
               <div style={{fontSize:15,lineHeight:1.7,color:"#3a3a4e",marginBottom:40,maxWidth:640,fontWeight:400}}>
@@ -29029,8 +29057,8 @@ function PropostasView({data,dispatch}){
               {}
               <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:16,marginBottom:44}}>
                 {[
-                  {t:"Missão",ic:"🎯",d:"Proporcionar soluções financeiras personalizadas que garantem segurança e tranquilidade, priorizando qualidade de vida e a realização dos sonhos.",col:"#D4A328"},
-                  {t:"Visão",ic:"👁",d:"Ser reconhecida como a empresa financeira mais confiável e inovadora do Brasil, revolucionando como as pessoas planejam seu futuro.",col:"#D4A328"},
+                  {t:"Missão",ic:"🎯",d:"Proporcionar soluções financeiras personalizadas que garantem segurança e tranquilidade, priorizando qualidade de vida e a realização dos sonhos.",col:accent},
+                  {t:"Visão",ic:"👁",d:"Ser reconhecida como a empresa financeira mais confiável e inovadora do Brasil, revolucionando como as pessoas planejam seu futuro.",col:accent},
                   {t:"Independência",ic:"⚖",d:"Profissionais independentes de instituições financeiras, evitando conflitos de interesse. Modelo Fee-Based, cobrança direta ao cliente.",col:"#0A1628"},
                   {t:"Certificação",ic:"✦",d:"Equipe certificada pela CVM (Comissão de Valores Mobiliários), com credenciais CGA, CGE e CEA da ANBIMA.",col:"#0A1628"}
                 ].map(function(b,i){return (
@@ -29053,7 +29081,7 @@ function PropostasView({data,dispatch}){
               </div>
 
               {}
-              <div style={{marginBottom:16,fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>✦ SÓCIOS FUNDADORES</div>
+              <div style={{marginBottom:16,fontSize:11,color:accent,fontWeight:700,letterSpacing:3.5}}>✦ SÓCIOS FUNDADORES</div>
               <div style={{fontSize:28,fontWeight:800,color:"#0A1628",marginBottom:24,letterSpacing:-0.5}}>Quem está por trás da CourInvest</div>
               
               <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:16}}>
@@ -29070,25 +29098,25 @@ function PropostasView({data,dispatch}){
                     boxShadow:"0 10px 40px rgba(10,22,40,0.2), inset 0 1px 0 rgba(255,255,255,0.05)",
                     overflow:"hidden"
                   }}>
-                    <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,#D4A328,#F5C94B,#D4A328)"}}/>
+                    <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,"+accent+","+accentLight+","+accent+")"}}/>
                     <div style={{position:"absolute",top:-40,right:-40,opacity:0.06}}>
-                      <CourinvestPattern opacity={1} size={180} color="#F5C94B"/>
+                      <CourinvestPattern opacity={1} size={180} color={accentLight}/>
                     </div>
                     <div style={{position:"relative",zIndex:1,display:"flex",gap:16,alignItems:"flex-start"}}>
                       {}
-                      <div style={{width:90,height:90,flexShrink:0,borderRadius:"50%",overflow:"hidden",background:"linear-gradient(135deg,#D4A328 0%,#F5C94B 100%)",padding:3,boxShadow:"0 6px 20px rgba(212,163,40,0.3)",position:"relative"}}>
+                      <div style={{width:90,height:90,flexShrink:0,borderRadius:"50%",overflow:"hidden",background:"linear-gradient(135deg,"+accent+" 0%,"+accentLight+" 100%)",padding:3,boxShadow:"0 6px 20px rgba(212,163,40,0.3)",position:"relative"}}>
                         <div style={{width:"100%",height:"100%",borderRadius:"50%",overflow:"hidden",background:"#0A1628",display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
                           <img src={s.foto} alt={s.n} crossOrigin="anonymous" style={{width:"100%",height:"100%",objectFit:"cover",objectPosition:"center top",display:"block"}} onError={function(e){e.target.style.display="none";e.target.nextSibling.style.display="flex"}}/>
-                          <div style={{display:"none",position:"absolute",inset:0,alignItems:"center",justifyContent:"center",fontSize:28,fontWeight:900,color:"#F5C94B",letterSpacing:-1}}>{s.ini}</div>
+                          <div style={{display:"none",position:"absolute",inset:0,alignItems:"center",justifyContent:"center",fontSize:28,fontWeight:900,color:accentLight,letterSpacing:-1}}>{s.ini}</div>
                         </div>
                       </div>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{fontSize:22,fontWeight:900,color:"#fff",letterSpacing:-0.3,marginBottom:4}}>{s.n}</div>
-                        <div style={{fontSize:10,color:"#D4A328",fontWeight:700,letterSpacing:1.5,marginBottom:12,textTransform:"uppercase"}}>{s.c}</div>
+                        <div style={{fontSize:10,color:accent,fontWeight:700,letterSpacing:1.5,marginBottom:12,textTransform:"uppercase"}}>{s.c}</div>
                         <div style={{fontSize:12,color:"#B8C4D6",lineHeight:1.6,marginBottom:12}}>{s.b}</div>
                         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                           {s.cert.map(function(c,j){return (
-                            <span key={j} style={{fontSize:9,fontWeight:700,padding:"4px 10px",background:"rgba(212,163,40,0.15)",border:"1px solid rgba(212,163,40,0.3)",color:"#F5C94B",borderRadius:20,letterSpacing:0.5}}>{c}</span>
+                            <span key={j} style={{fontSize:9,fontWeight:700,padding:"4px 10px",background:"rgba(212,163,40,0.15)",border:"1px solid rgba(212,163,40,0.3)",color:accentLight,borderRadius:20,letterSpacing:0.5}}>{c}</span>
                           )})}
                         </div>
                         {s.reg && <div style={{fontSize:10,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginTop:8}}>{s.reg}</div>}
@@ -29103,11 +29131,11 @@ function PropostasView({data,dispatch}){
           {temDiagnostico && (
           <div className="pp-page" style={{padding:"60px 50px",background:"linear-gradient(180deg,#FAFBFD 0%,#F1F3F8 100%)",pageBreakBefore:"always",position:"relative",overflow:"hidden"}}>
             <div style={{position:"absolute",top:-60,right:-100,opacity:0.04,pointerEvents:"none"}}>
-              <CourinvestPattern opacity={0.6} size={340} color="#D4A328"/>
+              <CourinvestPattern opacity={0.6} size={340} color={accent}/>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:10,position:"relative"}}>
-              <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,#D4A328)"}}/>
-              <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>02 · DIAGNÓSTICO</span>
+              <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,"+accent+")"}}/>
+              <span style={{fontSize:11,color:accent,fontWeight:700,letterSpacing:3.5}}>02 · DIAGNÓSTICO</span>
             </div>
             <div style={{fontSize:42,fontWeight:900,color:"#0A1628",marginBottom:14,lineHeight:1.05,letterSpacing:-1.2,position:"relative"}}>
               {form.servico==="financeira"?"Sua situação financeira atual":
@@ -29130,7 +29158,7 @@ function PropostasView({data,dispatch}){
                 <>
                   {}
                   <div style={{background:"#fff",padding:"26px 28px",borderRadius:12,marginBottom:16,boxShadow:"0 2px 10px rgba(0,0,0,0.04)"}}>
-                    <div style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:2,marginBottom:14}}>💰 FLUXO FINANCEIRO MENSAL</div>
+                    <div style={{fontSize:11,color:accent,fontWeight:700,letterSpacing:2,marginBottom:14}}>💰 FLUXO FINANCEIRO MENSAL</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:16,marginBottom:20}}>
                       <div style={{padding:"16px 18px",background:"#F7F8FB",borderRadius:10,borderTop:"3px solid #2DD4A0"}}>
                         <div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:4}}>RECEITA</div>
@@ -29142,9 +29170,9 @@ function PropostasView({data,dispatch}){
                         <div style={{fontSize:20,fontWeight:800,color:"#DC2626",fontFamily:"'JetBrains Mono'"}}>{fm(form.despesasMensais||0)}</div>
                         <div style={{fontSize:9,color:"#8B9DC3",marginTop:3}}>{pctDesp.toFixed(1)}% da renda</div>
                       </div>
-                      <div style={{padding:"16px 18px",background:"#F7F8FB",borderRadius:10,borderTop:"3px solid #D4A328"}}>
+                      <div style={{padding:"16px 18px",background:"#F7F8FB",borderRadius:10,borderTop:"3px solid "+accent}}>
                         <div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:4}}>CAPACIDADE DE POUPANÇA</div>
-                        <div style={{fontSize:20,fontWeight:800,color:capac>=0?"#D4A328":"#DC2626",fontFamily:"'JetBrains Mono'"}}>{fm(capac)}</div>
+                        <div style={{fontSize:20,fontWeight:800,color:capac>=0?accent:"#DC2626",fontFamily:"'JetBrains Mono'"}}>{fm(capac)}</div>
                         <div style={{fontSize:9,color:"#8B9DC3",marginTop:3}}>{renda>0?((capac/renda)*100).toFixed(1)+"% da renda":"—"}</div>
                       </div>
                     </div>
@@ -29168,7 +29196,7 @@ function PropostasView({data,dispatch}){
                   {}
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:16}}>
                     <div style={{background:"#fff",padding:"18px 20px",borderRadius:12,boxShadow:"0 2px 10px rgba(0,0,0,0.04)"}}>
-                      <div style={{fontSize:10,color:"#D4A328",fontWeight:700,letterSpacing:2,marginBottom:6}}>🛡️ RESERVA DE EMERGÊNCIA</div>
+                      <div style={{fontSize:10,color:accent,fontWeight:700,letterSpacing:2,marginBottom:6}}>🛡️ RESERVA DE EMERGÊNCIA</div>
                       <div style={{fontSize:22,fontWeight:800,color:"#0A1628",fontFamily:"'JetBrains Mono'"}}>{fm(form.reservaEmergencia||0)}</div>
                       <div style={{fontSize:11,color:mesesReserva<3?"#DC2626":mesesReserva<6?"#D97706":"#0F9960",fontWeight:700,marginTop:4}}>
                         {mesesReserva.toFixed(1)} meses de despesas
@@ -29185,7 +29213,7 @@ function PropostasView({data,dispatch}){
                   {}
                   {(form.estadoCivil||form.dependentes>0||form.idade) && (
                     <div style={{background:"#fff",padding:"16px 20px",borderRadius:12,marginBottom:16,boxShadow:"0 2px 10px rgba(0,0,0,0.04)"}}>
-                      <div style={{fontSize:10,color:"#D4A328",fontWeight:700,letterSpacing:2,marginBottom:10}}>👥 PERFIL FAMILIAR</div>
+                      <div style={{fontSize:10,color:accent,fontWeight:700,letterSpacing:2,marginBottom:10}}>👥 PERFIL FAMILIAR</div>
                       <div style={{display:"flex",gap:20,flexWrap:"wrap",fontSize:12,color:"#3a3a4e"}}>
                         {form.estadoCivil && <div><strong style={{color:"#0A1628"}}>Estado civil:</strong> {({solteiro:"Solteiro(a)",casado:"Casado(a)",divorciado:"Divorciado(a)",viuvo:"Viúvo(a)"})[form.estadoCivil]}</div>}
                         {form.dependentes>0 && <div><strong style={{color:"#0A1628"}}>Dependentes:</strong> {form.dependentes}</div>}
@@ -29201,9 +29229,9 @@ function PropostasView({data,dispatch}){
             {form.servico==="patrimonio" && (
               <>
                 <div style={{background:"#fff",padding:"26px 28px",borderRadius:12,marginBottom:18,boxShadow:"0 2px 10px rgba(0,0,0,0.04)"}}>
-                  <div style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:2,marginBottom:18}}>💎 PATRIMÔNIO SOB GESTÃO</div>
+                  <div style={{fontSize:11,color:accent,fontWeight:700,letterSpacing:2,marginBottom:18}}>💎 PATRIMÔNIO SOB GESTÃO</div>
                   <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:18}}>
-                    {form.valorPatrimonio>0 && <div style={{minHeight:60}}><div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:6}}>PATRIMÔNIO LÍQUIDO</div><div style={{fontSize:22,fontWeight:800,color:"#D4A328",fontFamily:"'JetBrains Mono'",lineHeight:1.2}}>{fm(form.valorPatrimonio)}</div></div>}
+                    {form.valorPatrimonio>0 && <div style={{minHeight:60}}><div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:6}}>PATRIMÔNIO LÍQUIDO</div><div style={{fontSize:22,fontWeight:800,color:accent,fontFamily:"'JetBrains Mono'",lineHeight:1.2}}>{fm(form.valorPatrimonio)}</div></div>}
                     {form.receitaTitular>0 && <div style={{minHeight:60}}><div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:6}}>RECEITA MENSAL</div><div style={{fontSize:18,fontWeight:800,color:"#0F9960",fontFamily:"'JetBrains Mono'",lineHeight:1.2}}>{fm(form.receitaTitular)}</div></div>}
                     {form.aporteMensal>0 && <div style={{minHeight:60}}><div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:6}}>APORTE MENSAL</div><div style={{fontSize:18,fontWeight:800,color:"#2563EB",fontFamily:"'JetBrains Mono'",lineHeight:1.2}}>{fm(form.aporteMensal)}</div></div>}
                     <div style={{minHeight:60}}><div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:6}}>PERFIL DE RISCO</div><div style={{fontSize:16,fontWeight:800,color:"#38BDF8",lineHeight:1.2}}>{form.perfilRisco}</div></div>
@@ -29213,13 +29241,13 @@ function PropostasView({data,dispatch}){
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:18}}>
                   {form.corretoras && (
                     <div style={{background:"#fff",padding:"20px 22px",borderRadius:12,boxShadow:"0 2px 10px rgba(0,0,0,0.04)",minHeight:80}}>
-                      <div style={{fontSize:10,color:"#D4A328",fontWeight:700,letterSpacing:2,marginBottom:10}}>🏦 CORRETORAS ATUAIS</div>
+                      <div style={{fontSize:10,color:accent,fontWeight:700,letterSpacing:2,marginBottom:10}}>🏦 CORRETORAS ATUAIS</div>
                       <div style={{fontSize:14,color:"#0A1628",fontWeight:600,lineHeight:1.4,wordBreak:"break-word"}}>{form.corretoras}</div>
                     </div>
                   )}
                   {form.experiencia && (
                     <div style={{background:"#fff",padding:"20px 22px",borderRadius:12,boxShadow:"0 2px 10px rgba(0,0,0,0.04)",minHeight:80}}>
-                      <div style={{fontSize:10,color:"#D4A328",fontWeight:700,letterSpacing:2,marginBottom:10}}>📊 EXPERIÊNCIA</div>
+                      <div style={{fontSize:10,color:accent,fontWeight:700,letterSpacing:2,marginBottom:10}}>📊 EXPERIÊNCIA</div>
                       <div style={{fontSize:14,color:"#0A1628",fontWeight:600,lineHeight:1.4}}>{({iniciante:"Iniciante (0-2 anos)",intermediaria:"Intermediária (2-5 anos)",avancada:"Avançada (5+ anos)",expert:"Expert / Mercado financeiro"})[form.experiencia]||form.experiencia}</div>
                     </div>
                   )}
@@ -29240,23 +29268,23 @@ function PropostasView({data,dispatch}){
                 {form.tipoConsultoria==="pj"?(
                   <>
                     <div style={{background:"#fff",padding:"26px 28px",borderRadius:12,marginBottom:16,boxShadow:"0 2px 10px rgba(0,0,0,0.04)"}}>
-                      <div style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:2,marginBottom:14}}>🏢 DADOS DA EMPRESA</div>
+                      <div style={{fontSize:11,color:accent,fontWeight:700,letterSpacing:2,marginBottom:14}}>🏢 DADOS DA EMPRESA</div>
                       {form.razaoSocial && <div style={{fontSize:20,fontWeight:800,color:"#0A1628",marginBottom:4}}>{form.razaoSocial}</div>}
                       {form.cnpj && <div style={{fontSize:12,color:"#5a5a6e",fontFamily:"'JetBrains Mono'",marginBottom:14}}>CNPJ: {form.cnpj}</div>}
                       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:14,marginTop:14,paddingTop:14,borderTop:"1px solid #e5e7eb"}}>
                         {form.segmento && <div><div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:3}}>SEGMENTO</div><div style={{fontSize:14,fontWeight:700,color:"#0A1628"}}>{form.segmento}</div></div>}
                         {form.faturamento>0 && <div><div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:3}}>FATURAMENTO/MÊS</div><div style={{fontSize:16,fontWeight:800,color:"#0F9960",fontFamily:"'JetBrains Mono'"}}>{fm(form.faturamento)}</div></div>}
                         {form.funcionarios>0 && <div><div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:3}}>FUNCIONÁRIOS</div><div style={{fontSize:16,fontWeight:800,color:"#0A1628",fontFamily:"'JetBrains Mono'"}}>{form.funcionarios}</div></div>}
-                        {form.capitalGiro>0 && <div><div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:3}}>CAPITAL DISPONÍVEL</div><div style={{fontSize:16,fontWeight:800,color:"#D4A328",fontFamily:"'JetBrains Mono'"}}>{fm(form.capitalGiro)}</div></div>}
+                        {form.capitalGiro>0 && <div><div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:3}}>CAPITAL DISPONÍVEL</div><div style={{fontSize:16,fontWeight:800,color:accent,fontFamily:"'JetBrains Mono'"}}>{fm(form.capitalGiro)}</div></div>}
                       </div>
                     </div>
                   </>
                 ):(
                   <div style={{background:"#fff",padding:"26px 28px",borderRadius:12,marginBottom:16,boxShadow:"0 2px 10px rgba(0,0,0,0.04)"}}>
-                    <div style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:2,marginBottom:14}}>👤 PERFIL DO CLIENTE</div>
+                    <div style={{fontSize:11,color:accent,fontWeight:700,letterSpacing:2,marginBottom:14}}>👤 PERFIL DO CLIENTE</div>
                     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:14}}>
                       {form.profissao && <div><div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:3}}>PROFISSÃO</div><div style={{fontSize:14,fontWeight:700,color:"#0A1628"}}>{form.profissao}</div></div>}
-                      {form.valorPatrimonio>0 && <div><div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:3}}>PATRIMÔNIO</div><div style={{fontSize:18,fontWeight:800,color:"#D4A328",fontFamily:"'JetBrains Mono'"}}>{fm(form.valorPatrimonio)}</div></div>}
+                      {form.valorPatrimonio>0 && <div><div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:3}}>PATRIMÔNIO</div><div style={{fontSize:18,fontWeight:800,color:accent,fontFamily:"'JetBrains Mono'"}}>{fm(form.valorPatrimonio)}</div></div>}
                       {form.receitaTitular>0 && <div><div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:3}}>RECEITA/MÊS</div><div style={{fontSize:16,fontWeight:800,color:"#0F9960",fontFamily:"'JetBrains Mono'"}}>{fm(form.receitaTitular)}</div></div>}
                       <div><div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:3}}>PERFIL</div><div style={{fontSize:14,fontWeight:700,color:"#38BDF8"}}>{form.perfilRisco}</div></div>
                     </div>
@@ -29274,8 +29302,8 @@ function PropostasView({data,dispatch}){
 
             {/* ========= ANÁLISE PERSONALIZADA (COMUM) ========= */}
             {form.diagnostico && (
-              <div style={{background:"#fff",padding:"22px 26px",borderRadius:12,marginBottom:16,boxShadow:"0 2px 10px rgba(0,0,0,0.04)",borderLeft:"3px solid #D4A328"}}>
-                <div style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:2,marginBottom:10}}>📋 ANÁLISE PERSONALIZADA</div>
+              <div style={{background:"#fff",padding:"22px 26px",borderRadius:12,marginBottom:16,boxShadow:"0 2px 10px rgba(0,0,0,0.04)",borderLeft:"3px solid "+accent}}>
+                <div style={{fontSize:11,color:accent,fontWeight:700,letterSpacing:2,marginBottom:10}}>📋 ANÁLISE PERSONALIZADA</div>
                 <div style={{fontSize:13,color:"#3a3a4e",lineHeight:1.7,whiteSpace:"pre-wrap"}}>{form.diagnostico}</div>
               </div>
             )}
@@ -29302,8 +29330,8 @@ function PropostasView({data,dispatch}){
               <CourinvestPattern opacity={0.6} size={320} color={serv.cor}/>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:10,position:"relative"}}>
-              <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,#D4A328)"}}/>
-              <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>{temDiagnostico?"03 · METODOLOGIA":"02 · METODOLOGIA"}</span>
+              <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,"+accent+")"}}/>
+              <span style={{fontSize:11,color:accent,fontWeight:700,letterSpacing:3.5}}>{temDiagnostico?"03 · METODOLOGIA":"02 · METODOLOGIA"}</span>
             </div>
             <div style={{fontSize:42,fontWeight:900,color:"#0A1628",marginBottom:14,lineHeight:1.05,letterSpacing:-1.2,position:"relative"}}>Como vamos trabalhar juntos</div>
             <div style={{fontSize:15,color:"#5a5a6e",marginBottom:36,lineHeight:1.7,maxWidth:640,position:"relative"}}>{serv.descricao}</div>
@@ -29322,13 +29350,13 @@ function PropostasView({data,dispatch}){
             </div>
 
             <div style={{position:"relative",padding:"30px 32px",background:"linear-gradient(135deg,#0A1628 0%,#142B52 100%)",borderRadius:18,color:"#fff",boxShadow:"0 15px 50px rgba(10,22,40,0.25)",overflow:"hidden"}}>
-              <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,#D4A328,#F5C94B,#D4A328)"}}/>
+              <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,"+accent+","+accentLight+","+accent+")"}}/>
               <div style={{position:"absolute",right:-40,bottom:-40,opacity:0.05}}>
-                <CourinvestPattern opacity={1} size={240} color="#F5C94B"/>
+                <CourinvestPattern opacity={1} size={240} color={accentLight}/>
               </div>
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18,position:"relative"}}>
                 <span style={{fontSize:20}}>✦</span>
-                <div style={{fontSize:12,color:"#D4A328",fontWeight:800,letterSpacing:3}}>O QUE ESTÁ INCLUSO</div>
+                <div style={{fontSize:12,color:accent,fontWeight:800,letterSpacing:3}}>O QUE ESTÁ INCLUSO</div>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,position:"relative"}}>
                 {serv.entregas.map(function(e,i){return (
@@ -29363,8 +29391,8 @@ function PropostasView({data,dispatch}){
                   <CourinvestPattern opacity={0.6} size={320} color="#2DD4A0"/>
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:10,position:"relative"}}>
-                  <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,#D4A328)"}}/>
-                  <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>04 · RETORNO DO INVESTIMENTO</span>
+                  <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,"+accent+")"}}/>
+                  <span style={{fontSize:11,color:accent,fontWeight:700,letterSpacing:3.5}}>04 · RETORNO DO INVESTIMENTO</span>
                 </div>
                 <div style={{fontSize:42,fontWeight:900,color:"#0A1628",marginBottom:14,lineHeight:1.05,letterSpacing:-1.2,position:"relative"}}>Em quanto tempo a consultoria se paga?</div>
                 <div style={{fontSize:14,color:"#5a5a6e",marginBottom:28,lineHeight:1.6}}>A melhoria da sua carteira — fruto de uma estratégia profissional e um planejamento bem feito — gera ganhos que superam o valor da consultoria em poucos meses.</div>
@@ -29382,9 +29410,9 @@ function PropostasView({data,dispatch}){
                       <div style={{fontSize:9,color:"#8B9DC3",marginTop:2}}>Com melhoria de {form.melhoriaPP.toFixed(1)}pp</div>
                     </div>
                     <div style={{borderLeft:"1px solid rgba(212,163,40,0.3)",paddingLeft:20}}>
-                      <div style={{fontSize:9,color:"#D4A328",fontWeight:700,letterSpacing:1,marginBottom:4}}>SE PAGA EM</div>
-                      <div style={{fontSize:32,fontWeight:900,color:"#D4A328",fontFamily:"'JetBrains Mono'",lineHeight:1}}>{mesesPayback<1?"<1":mesesPayback<12?mesesPayback.toFixed(1):(mesesPayback/12).toFixed(1)}</div>
-                      <div style={{fontSize:10,color:"#D4A328",fontWeight:700,marginTop:2}}>{mesesPayback<1?"MÊS":mesesPayback<12?"MESES":"ANOS"}</div>
+                      <div style={{fontSize:9,color:accent,fontWeight:700,letterSpacing:1,marginBottom:4}}>SE PAGA EM</div>
+                      <div style={{fontSize:32,fontWeight:900,color:accent,fontFamily:"'JetBrains Mono'",lineHeight:1}}>{mesesPayback<1?"<1":mesesPayback<12?mesesPayback.toFixed(1):(mesesPayback/12).toFixed(1)}</div>
+                      <div style={{fontSize:10,color:accent,fontWeight:700,marginTop:2}}>{mesesPayback<1?"MÊS":mesesPayback<12?"MESES":"ANOS"}</div>
                     </div>
                   </div>
                   <div style={{paddingTop:14,borderTop:"1px solid rgba(255,255,255,0.1)",fontSize:11,color:"#8B9DC3",lineHeight:1.5}}>
@@ -29436,14 +29464,14 @@ function PropostasView({data,dispatch}){
                 </div>
 
                 <div style={{background:"#fff",padding:"20px 24px",borderRadius:12,marginBottom:18,boxShadow:"0 2px 8px rgba(0,0,0,0.04)"}}>
-                  <div style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:2,marginBottom:12}}>📈 PROJEÇÃO DETALHADA</div>
+                  <div style={{fontSize:11,color:accent,fontWeight:700,letterSpacing:2,marginBottom:12}}>📈 PROJEÇÃO DETALHADA</div>
                   <table style={{width:"100%",fontSize:12,borderCollapse:"collapse"}}>
                     <thead>
-                      <tr style={{borderBottom:"2px solid #D4A328"}}>
+                      <tr style={{borderBottom:"2px solid "+accent}}>
                         <th style={{padding:"10px 8px",textAlign:"left",fontSize:10,color:"#8B9DC3",letterSpacing:1}}>PERÍODO</th>
                         <th style={{padding:"10px 8px",textAlign:"right",fontSize:10,color:"#8B9DC3",letterSpacing:1}}>SEM MELHORIA</th>
                         <th style={{padding:"10px 8px",textAlign:"right",fontSize:10,color:"#8B9DC3",letterSpacing:1}}>COM MELHORIA</th>
-                        <th style={{padding:"10px 8px",textAlign:"right",fontSize:10,color:"#D4A328",letterSpacing:1}}>DIFERENÇA</th>
+                        <th style={{padding:"10px 8px",textAlign:"right",fontSize:10,color:accent,letterSpacing:1}}>DIFERENÇA</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -29452,14 +29480,14 @@ function PropostasView({data,dispatch}){
                           <td style={{padding:"11px 8px",fontWeight:700,color:"#0A1628"}}>{p.ano} {p.ano===1?"ano":"anos"}</td>
                           <td style={{padding:"11px 8px",textAlign:"right",color:"#5a5a6e",fontFamily:"'JetBrains Mono'"}}>{fm(p.sem)}</td>
                           <td style={{padding:"11px 8px",textAlign:"right",color:"#0F9960",fontWeight:700,fontFamily:"'JetBrains Mono'"}}>{fm(p.com)}</td>
-                          <td style={{padding:"11px 8px",textAlign:"right",color:"#D4A328",fontWeight:800,fontFamily:"'JetBrains Mono'"}}>+{fm(p.diff)}</td>
+                          <td style={{padding:"11px 8px",textAlign:"right",color:accent,fontWeight:800,fontFamily:"'JetBrains Mono'"}}>+{fm(p.diff)}</td>
                         </tr>
                       )})}
                     </tbody>
                   </table>
                 </div>
 
-                <div style={{padding:"14px 18px",background:"#FEF9E7",borderRadius:10,borderLeft:"3px solid #D4A328"}}>
+                <div style={{padding:"14px 18px",background:"#FEF9E7",borderRadius:10,borderLeft:"3px solid "+accent}}>
                   <div style={{fontSize:10,color:"#B8860B",fontWeight:700,marginBottom:4,letterSpacing:1}}>⚠ AVISO SOBRE PROJEÇÕES</div>
                   <div style={{fontSize:10,color:"#5a5a6e",lineHeight:1.5}}>
                     As projeções acima são <strong>meramente ilustrativas</strong> e consideram os percentuais informados. <strong>Não constituem promessa nem garantia de rentabilidade futura.</strong> Investimentos envolvem riscos; rentabilidades passadas não garantem resultados futuros. A CourInvest atua como consultoria independente — o resultado real depende de condições de mercado, execução disciplinada e fatores externos.
@@ -29472,11 +29500,11 @@ function PropostasView({data,dispatch}){
           {}
           <div className="pp-page" style={{padding:"60px 50px",background:"linear-gradient(180deg,#FAFBFD 0%,#E8EDF5 100%)",pageBreakBefore:"always",position:"relative",overflow:"hidden"}}>
             <div style={{position:"absolute",top:40,left:-80,opacity:0.04,pointerEvents:"none"}}>
-              <CourinvestPattern opacity={0.6} size={300} color="#D4A328"/>
+              <CourinvestPattern opacity={0.6} size={300} color={accent}/>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:10,position:"relative"}}>
-              <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,#D4A328)"}}/>
-              <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>{ehConsultoria?"05 · PROPOSTA":(temDiagnostico?"04 · PROPOSTA":"03 · PROPOSTA")}</span>
+              <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,"+accent+")"}}/>
+              <span style={{fontSize:11,color:accent,fontWeight:700,letterSpacing:3.5}}>{ehConsultoria?"05 · PROPOSTA":(temDiagnostico?"04 · PROPOSTA":"03 · PROPOSTA")}</span>
             </div>
             <div style={{fontSize:42,fontWeight:900,color:"#0A1628",marginBottom:10,lineHeight:1.05,letterSpacing:-1.2,position:"relative"}}>Investimento e Precificação</div>
             <div style={{fontSize:14,color:"#5a5a6e",marginBottom:32,maxWidth:600,lineHeight:1.6,position:"relative"}}>Modelo de remuneração transparente, sem conflitos de interesse e cobrança direta ao cliente.</div>
@@ -29491,10 +29519,10 @@ function PropostasView({data,dispatch}){
                       <div key={i} style={{marginBottom:12}}>
                         <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
                           <span style={{fontSize:13,fontWeight:700,color:"#0A1628"}}>{cl.nome}</span>
-                          <span style={{fontSize:14,fontWeight:800,color:cores[cl.macro]||"#D4A328",fontFamily:"'JetBrains Mono'"}}>{cl.pct}%</span>
+                          <span style={{fontSize:14,fontWeight:800,color:cores[cl.macro]||accent,fontFamily:"'JetBrains Mono'"}}>{cl.pct}%</span>
                         </div>
                         <div style={{height:8,background:"#e5e7eb",borderRadius:4,overflow:"hidden"}}>
-                          <div style={{height:"100%",width:cl.pct+"%",background:cores[cl.macro]||"#D4A328",borderRadius:4}}/>
+                          <div style={{height:"100%",width:cl.pct+"%",background:cores[cl.macro]||accent,borderRadius:4}}/>
                         </div>
                       </div>
                     );
@@ -29504,12 +29532,12 @@ function PropostasView({data,dispatch}){
             )}
 
             <div style={{position:"relative",background:"radial-gradient(ellipse 100% 100% at 30% 0%,rgba(212,163,40,0.18) 0%,transparent 60%),linear-gradient(135deg,#0A1628 0%,#142B52 60%,#1F3972 100%)",color:"#fff",padding:"40px 42px",borderRadius:20,marginBottom:24,boxShadow:"0 20px 60px rgba(10,22,40,0.3),inset 0 1px 0 rgba(255,255,255,0.08)",overflow:"hidden"}}>
-              <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,#D4A328,#F5C94B,#D4A328)"}}/>
+              <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,"+accent+","+accentLight+","+accent+")"}}/>
               <div style={{position:"absolute",right:-60,bottom:-60,opacity:0.06,pointerEvents:"none"}}>
-                <CourinvestPattern opacity={1} size={280} color="#F5C94B"/>
+                <CourinvestPattern opacity={1} size={280} color={accentLight}/>
               </div>
-              <div style={{fontSize:11,color:"#D4A328",fontWeight:800,letterSpacing:3,marginBottom:14,textTransform:"uppercase",position:"relative"}}>✦ {ehConsultoria?"Valor Total da Consultoria":"Investimento Mensal"}</div>
-              <div style={{fontSize:56,fontWeight:900,fontFamily:"'JetBrains Mono'",letterSpacing:-2,lineHeight:1,position:"relative",background:"linear-gradient(135deg,#F5C94B 0%,#D4A328 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>{fm(recMes)}{!ehConsultoria && <span style={{fontSize:18,color:"#8B9DC3",fontWeight:500,marginLeft:10,WebkitTextFillColor:"#8B9DC3"}}>/mês</span>}</div>
+              <div style={{fontSize:11,color:accent,fontWeight:800,letterSpacing:3,marginBottom:14,textTransform:"uppercase",position:"relative"}}>✦ {ehConsultoria?"Valor Total da Consultoria":"Investimento Mensal"}</div>
+              <div style={{fontSize:56,fontWeight:900,fontFamily:"'JetBrains Mono'",letterSpacing:-2,lineHeight:1,position:"relative",background:"linear-gradient(135deg,"+accentLight+" 0%,"+accent+" 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>{fm(recMes)}{!ehConsultoria && <span style={{fontSize:18,color:"#8B9DC3",fontWeight:500,marginLeft:10,WebkitTextFillColor:"#8B9DC3"}}>/mês</span>}</div>
               <div style={{fontSize:13,color:"#8B9DC3",marginTop:8,lineHeight:1.5}}>
                 {form.servico==="patrimonio"?
                   ("Taxa de "+(form.taxaMensal||0).toFixed(3)+"% a.m. sobre patrimônio de "+fm(form.valorPatrimonio||0)+" (tabela regressiva)."):
@@ -29523,14 +29551,14 @@ function PropostasView({data,dispatch}){
               {}
               {form.servico==="patrimonio" && (
                 <div style={{marginTop:16,paddingTop:16,borderTop:"1px solid rgba(255,255,255,0.1)"}}>
-                  <div style={{fontSize:10,color:"#D4A328",fontWeight:700,letterSpacing:2,marginBottom:10}}>📋 TABELA REGRESSIVA COMPLETA</div>
+                  <div style={{fontSize:10,color:accent,fontWeight:700,letterSpacing:2,marginBottom:10}}>📋 TABELA REGRESSIVA COMPLETA</div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                     {TABELA_TX_GP.map(function(f,i){
                       var atual=txGestaoRegressiva(form.valorPatrimonio)===f.tx;
                       return (
                         <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"8px 12px",background:atual?"rgba(212,163,40,0.12)":"rgba(255,255,255,0.03)",borderRadius:6,border:atual?"1px solid rgba(212,163,40,0.3)":"1px solid rgba(255,255,255,0.04)"}}>
                           <span style={{fontSize:10,color:atual?"#fff":"#8B9DC3",fontWeight:atual?700:500}}>{f.label}{atual?" ✓":""}</span>
-                          <span style={{fontSize:11,color:atual?"#D4A328":"#8B9DC3",fontWeight:800,fontFamily:"'JetBrains Mono'"}}>{f.tx.toFixed(3)}%</span>
+                          <span style={{fontSize:11,color:atual?accent:"#8B9DC3",fontWeight:800,fontFamily:"'JetBrains Mono'"}}>{f.tx.toFixed(3)}%</span>
                         </div>
                       );
                     })}
@@ -29541,7 +29569,7 @@ function PropostasView({data,dispatch}){
               {}
               {ehConsultoria && (
                 <div style={{marginTop:16,paddingTop:16,borderTop:"1px solid rgba(255,255,255,0.1)"}}>
-                  <div style={{fontSize:10,color:"#D4A328",fontWeight:700,letterSpacing:2,marginBottom:10}}>📋 ESCOPO DO TRABALHO</div>
+                  <div style={{fontSize:10,color:accent,fontWeight:700,letterSpacing:2,marginBottom:10}}>📋 ESCOPO DO TRABALHO</div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                     <div style={{padding:"12px 14px",background:"rgba(45,212,160,0.1)",borderRadius:8,borderLeft:"3px solid #2DD4A0"}}>
                       <div style={{fontSize:10,color:"#2DD4A0",fontWeight:700,letterSpacing:1,marginBottom:4}}>1ª SESSÃO</div>
@@ -29561,7 +29589,7 @@ function PropostasView({data,dispatch}){
                   <>
                     <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
                       <span style={{fontSize:16}}>💰</span>
-                      <div style={{fontSize:12,fontWeight:700,color:"#D4A328",letterSpacing:1}}>PAGAMENTO ÚNICO</div>
+                      <div style={{fontSize:12,fontWeight:700,color:accent,letterSpacing:1}}>PAGAMENTO ÚNICO</div>
                     </div>
                     <div style={{fontSize:12,color:"#8B9DC3",lineHeight:1.6}}>
                       Consultoria é um <strong style={{color:"#fff"}}>trabalho pontual</strong>, cobrado em pagamento único pelas três sessões. Não há mensalidade nem compromisso recorrente — você recebe o plano completo e a implementação, ficando livre para seguir de forma autônoma após isso.
@@ -29571,7 +29599,7 @@ function PropostasView({data,dispatch}){
                   <>
                     <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
                       <span style={{fontSize:16}}>💳</span>
-                      <div style={{fontSize:12,fontWeight:700,color:"#D4A328",letterSpacing:1}}>COBRANÇA RECORRENTE NO CARTÃO DE CRÉDITO</div>
+                      <div style={{fontSize:12,fontWeight:700,color:accent,letterSpacing:1}}>COBRANÇA RECORRENTE NO CARTÃO DE CRÉDITO</div>
                     </div>
                     <div style={{fontSize:12,color:"#8B9DC3",lineHeight:1.6}}>
                       A taxa fixa mensal é debitada automaticamente no cartão de crédito cadastrado, garantindo <strong style={{color:"#fff"}}>praticidade, transparência e previsibilidade</strong>. Sem surpresas e sem burocracia — você foca nos seus objetivos enquanto cuidamos de tudo.
@@ -29587,7 +29615,7 @@ function PropostasView({data,dispatch}){
 
             {form.observacoes && (
               <div style={{background:"#fff",padding:"20px 24px",borderRadius:12,marginBottom:24,boxShadow:"0 2px 8px rgba(0,0,0,0.04)"}}>
-                <div style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:2,marginBottom:8}}>OBSERVAÇÕES</div>
+                <div style={{fontSize:11,color:accent,fontWeight:700,letterSpacing:2,marginBottom:8}}>OBSERVAÇÕES</div>
                 <div style={{fontSize:12,color:"#3a3a4e",lineHeight:1.6,whiteSpace:"pre-wrap"}}>{form.observacoes}</div>
               </div>
             )}
@@ -29611,7 +29639,7 @@ function PropostasView({data,dispatch}){
                 )})}
               </div>
               <div style={{padding:"14px 20px",background:"linear-gradient(135deg,rgba(212,163,40,0.08),rgba(212,163,40,0.02))",border:"1px solid rgba(212,163,40,0.2)",borderRadius:12,fontSize:12,color:"#5a5a6e",lineHeight:1.6,position:"relative"}}>
-                <strong style={{color:"#D4A328",fontSize:13}}>✦ Proposta válida até {validade.toLocaleDateString("pt-BR")}</strong>. Após esse período, os valores e condições poderão ser revistos conforme análise atualizada.
+                <strong style={{color:accent,fontSize:13}}>✦ Proposta válida até {validade.toLocaleDateString("pt-BR")}</strong>. Após esse período, os valores e condições poderão ser revistos conforme análise atualizada.
               </div>
             </div>
           </div>
@@ -29619,22 +29647,22 @@ function PropostasView({data,dispatch}){
           {}
           <div className="pp-page" style={{padding:"70px 50px 50px",background:"radial-gradient(ellipse 60% 40% at 50% 20%,rgba(212,163,40,0.2) 0%,transparent 60%),linear-gradient(135deg,#060E1F 0%,#0C1A33 50%,#142B52 100%)",color:"#fff",textAlign:"center",position:"relative",overflow:"hidden"}}>
             <div style={{position:"absolute",top:-100,left:"50%",transform:"translateX(-50%)",opacity:0.04,pointerEvents:"none"}}>
-              <CourinvestPattern opacity={0.6} size={600} color="#F5C94B"/>
+              <CourinvestPattern opacity={0.6} size={600} color={accentLight}/>
             </div>
-            <div style={{position:"absolute",inset:0,opacity:0.03,backgroundImage:"radial-gradient(#D4A328 1px,transparent 1px)",backgroundSize:"40px 40px",pointerEvents:"none"}}/>
+            <div style={{position:"absolute",inset:0,opacity:0.03,backgroundImage:"radial-gradient("+accent+" 1px,transparent 1px)",backgroundSize:"40px 40px",pointerEvents:"none"}}/>
             
             <div style={{display:"flex",justifyContent:"center",marginBottom:16,position:"relative"}}>
               <CourinvestLogo width={340} darkMode={true}/>
             </div>
-            <div style={{fontSize:10,color:"#D4A328",letterSpacing:4,marginBottom:6,fontWeight:700,position:"relative"}}>✦ ✦ ✦</div>
+            <div style={{fontSize:10,color:accent,letterSpacing:4,marginBottom:6,fontWeight:700,position:"relative"}}>✦ ✦ ✦</div>
             <div style={{fontSize:13,color:"#C8D4E8",letterSpacing:2.5,marginBottom:40,fontWeight:300,fontStyle:"italic",position:"relative"}}>"O caminho certo para sua liberdade financeira"</div>
             <div style={{width:"60%",maxWidth:400,margin:"0 auto 40px",height:1,background:"linear-gradient(90deg,transparent,rgba(212,163,40,0.4),transparent)",position:"relative"}}/>
             
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,maxWidth:640,margin:"0 auto",fontSize:11,position:"relative"}}>
               {[{ic:"✉",lbl:"E-MAIL",val:["courinvest.67@gmail.com"]},{ic:"☏",lbl:"TELEFONE",val:["+55 (32) 98841-4085","+55 (32) 98849-6755"]},{ic:"🌐",lbl:"SITE",val:["courinvest.com.br"]}].map(function(c,i){return (
                 <div key={i} style={{padding:"18px 14px",background:"rgba(212,163,40,0.05)",border:"1px solid rgba(212,163,40,0.15)",borderRadius:12}}>
-                  <div style={{fontSize:18,marginBottom:8,color:"#D4A328"}}>{c.ic}</div>
-                  <div style={{color:"#D4A328",fontWeight:800,marginBottom:6,letterSpacing:2,fontSize:9}}>{c.lbl}</div>
+                  <div style={{fontSize:18,marginBottom:8,color:accent}}>{c.ic}</div>
+                  <div style={{color:accent,fontWeight:800,marginBottom:6,letterSpacing:2,fontSize:9}}>{c.lbl}</div>
                   {c.val.map(function(v,j){return (<a key={j} href={c.ic==="\u2709"?("mailto:"+v):c.ic==="\ud83c\udf10"?("https://"+v):("https://wa.me/"+v.replace(/\D/g,""))} target="_blank" rel="noopener noreferrer" style={{color:"#E8ECF4",fontSize:11,marginBottom:2,textDecoration:"none",display:"block"}}>{v}</a>)})}
                 </div>
               )})}
@@ -32832,7 +32860,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '419';
+  var SW_VERSION = '421';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
