@@ -28632,7 +28632,7 @@ var ApresentacaoGP=function(){
               {id:"gfpj",ic:"🏢",n:"Gestão Financeira PJ",col:"#2DD4A0",publico:"Pequenos negócios, empresas em crescimento e holdings",tagline:"Organização, fluxo de caixa e visão estratégica",d:"Planejamento financeiro empresarial com acompanhamento mensal. Para empresas que querem crescer com controle, sem perder o sono com o financeiro."},
               {id:"cf",ic:"🎯",n:"Consultoria Financeira",col:"#A78BFA",publico:"Investidores que buscam orientação pontual",tagline:"Três sessões: Diagnóstico + Estratégia + Execução",d:"Trabalho pontual de análise e otimização da carteira. Para quem quer uma segunda opinião qualificada e implementação prática, sem compromisso recorrente."}
             ].map(function(s,i){return (
-              <div key={s.id} style={{display:"flex",gap:20,alignItems:"stretch",background:"#fff",borderRadius:16,boxShadow:"0 4px 20px rgba(10,22,40,0.06)",overflow:"hidden"}}>
+              <div key={s.id} onClick={function(){sApres(s.id);window.scrollTo({top:0,behavior:"smooth"});}} title={"Ver apresentação completa de "+s.n} style={{display:"flex",gap:20,alignItems:"stretch",background:"#fff",borderRadius:16,boxShadow:"0 4px 20px rgba(10,22,40,0.06)",overflow:"hidden",cursor:"pointer",transition:"box-shadow 0.2s, transform 0.2s"}} onMouseEnter={function(e){e.currentTarget.style.boxShadow="0 8px 28px rgba(10,22,40,0.14)";e.currentTarget.style.transform="translateY(-2px)";}} onMouseLeave={function(e){e.currentTarget.style.boxShadow="0 4px 20px rgba(10,22,40,0.06)";e.currentTarget.style.transform="translateY(0)";}}>
                 <div style={{width:100,flexShrink:0,background:"linear-gradient(135deg,"+s.col+" 0%,"+s.col+"CC 100%)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:42,boxShadow:"inset -1px 0 0 rgba(0,0,0,0.1)"}}>{s.ic}</div>
                 <div style={{flex:1,padding:"20px 24px"}}>
                   <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
@@ -28641,7 +28641,10 @@ var ApresentacaoGP=function(){
                   </div>
                   <div style={{fontSize:13,color:"#D4A328",fontWeight:700,marginBottom:8,fontStyle:"italic"}}>{s.tagline}</div>
                   <div style={{fontSize:12,color:"#5a5a6e",lineHeight:1.6,marginBottom:8}}>{s.d}</div>
-                  <div style={{fontSize:11,color:"#8B9DC3"}}><strong style={{color:"#0A1628"}}>Para quem:</strong> {s.publico}</div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                    <div style={{fontSize:11,color:"#8B9DC3"}}><strong style={{color:"#0A1628"}}>Para quem:</strong> {s.publico}</div>
+                    <div className="no-print" style={{fontSize:11,color:s.col,fontWeight:800,whiteSpace:"nowrap"}}>Ver apresentação completa →</div>
+                  </div>
                 </div>
               </div>
             )})}
@@ -32910,7 +32913,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '425';
+  var SW_VERSION = '426';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
