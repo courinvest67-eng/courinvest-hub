@@ -901,6 +901,25 @@ const gerarPPTXDeSlides=async function(containerEl,nomeArquivo){
   };
   var capturas=[];
   var _ultimoErroPPTX=null;
+  /* CORREÇÃO (v425): novo erro reportado — "Unable to find element in cloned iframe" — em TODOS
+     os slides de TODAS as apresentações, agora que o v420 conseguiu surfacear o erro técnico
+     real (antes só aparecia "não foi possível gerar nenhum slide", sem detalhe). Essa mensagem é
+     um problema conhecido, bem documentado, do próprio html2canvas: ele clona a página inteira
+     num iframe temporário pra desenhar a captura, e por padrão usa as dimensões "de fora"
+     (offsetWidth/Height) da janela real pra montar esse clone — quando o Windows/Chrome está com
+     escala de tela diferente de 100% (muito comum em notebooks, ex: 125%/150%, configuração de
+     fábrica em boa parte das telas), essas contas de tamanho ficam inconsistentes entre a página
+     original e o clone, e o html2canvas não consegue "reencontrar" o elemento certo dentro do
+     clone — falha ANTES mesmo de tentar desenhar, em 100% das capturas, exatamente o sintoma
+     relatado. Não acontece em ambiente de teste (escala sempre 100%), por isso não foi pego antes.
+     Correção recomendada pela própria documentação do html2canvas: informar explicitamente
+     `windowWidth`/`windowHeight` usando `clientWidth`/`clientHeight` (tamanho "de dentro", em
+     pixels de CSS, sempre consistente independente da escala do Windows) em vez de deixar a
+     biblioteca calcular sozinha. Also adicionado: uma segunda tentativa automática (com uma
+     pequena pausa) quando esse erro específico acontece, pro caso de ainda sobrar alguma
+     inconsistência pontual de tempo, sem custar nada nas capturas que já dão certo de primeira. */
+  var _winWParaCaptura=document.documentElement.clientWidth;
+  var _winHParaCaptura=document.documentElement.clientHeight;
   try{
     for(var pi=0;pi<pageEls.length;pi++){
       /* CORREÇÃO (v393): o html2canvas cria por baixo dos panos um iframe temporário pra
@@ -914,12 +933,27 @@ const gerarPPTXDeSlides=async function(containerEl,nomeArquivo){
          primeiro slide saía, os demais somem sem erro nenhum). */
       await new Promise(function(r){requestAnimationFrame(function(){requestAnimationFrame(r);});});
       var canvas=null;
+      var _opcoesCaptura={scale:2,useCORS:true,backgroundColor:"#ffffff",windowWidth:_winWParaCaptura,windowHeight:_winHParaCaptura,onclone:function(_clonedDoc,clonedEl){_forcarTemaClaroParaCaptura(_clonedDoc);_prepararGradienteTextoParaCaptura(clonedEl);_prepararImagensQuebradasParaCaptura(clonedEl);}};
       try{
-        canvas=await _comLimiteDeTempo(window.html2canvas(pageEls[pi],{scale:2,useCORS:true,backgroundColor:"#ffffff",onclone:function(_clonedDoc,clonedEl){_forcarTemaClaroParaCaptura(_clonedDoc);_prepararGradienteTextoParaCaptura(clonedEl);_prepararImagensQuebradasParaCaptura(clonedEl);}}),20000);
+        canvas=await _comLimiteDeTempo(window.html2canvas(pageEls[pi],_opcoesCaptura),20000);
       }catch(_pageErr){
-        console.warn("[PPTX] Slide "+pi+" falhou ao renderizar, pulando:",_pageErr);
-        _ultimoErroPPTX=(_pageErr&&_pageErr.message)||String(_pageErr);
-        continue;
+        var _msgErro1=(_pageErr&&_pageErr.message)||String(_pageErr);
+        /* Segunda tentativa só pro erro específico de "cloned iframe" — dá um respiro maior e
+           tenta de novo antes de desistir desse slide. */
+        if(/cloned iframe/i.test(_msgErro1)){
+          try{
+            await new Promise(function(r){setTimeout(r,300);});
+            canvas=await _comLimiteDeTempo(window.html2canvas(pageEls[pi],_opcoesCaptura),20000);
+          }catch(_pageErr2){
+            console.warn("[PPTX] Slide "+pi+" falhou de novo na 2ª tentativa, pulando:",_pageErr2);
+            _ultimoErroPPTX=(_pageErr2&&_pageErr2.message)||String(_pageErr2);
+            continue;
+          }
+        }else{
+          console.warn("[PPTX] Slide "+pi+" falhou ao renderizar, pulando:",_pageErr);
+          _ultimoErroPPTX=_msgErro1;
+          continue;
+        }
       }
       if(!canvas||canvas.width===0||canvas.height===0){
         console.warn("[PPTX] Slide "+pi+" gerou canvas vazio, pulando.");
@@ -32876,7 +32910,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '424';
+  var SW_VERSION = '425';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
