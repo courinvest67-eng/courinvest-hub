@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Courinvest — Diagnóstico Financeiro Empresarial</title>
+<meta name="robots" content="noindex">
+<style>
+  :root{
+    --navy:#0A1628; --navy2:#0F2038; --gold:#D4A328; --lightgold:#FBEFD0;
+    --green:#2DD4A0; --red:#F87171; --amber:#FBBF24; --t1:#F5F1E8; --t2:#B8C2D4; --t3:#7A8699;
+    --bdr:rgba(212,163,40,0.22); --card:#111E33;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:linear-gradient(160deg,var(--navy) 0%,#08111f 100%);color:var(--t1);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:28px 16px 60px;}
+  .wrap{width:100%;max-width:560px;}
+  .logo{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:22px;}
+  .logo .mark{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--gold),#a97e1a);
+    display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--navy);font-size:18px;}
+  .logo .name{font-size:19px;font-weight:800;letter-spacing:0.3px;}
+  .logo .name span{color:var(--gold);}
+  .card{background:var(--card);border:1px solid var(--bdr);border-radius:16px;padding:24px 22px;
+    box-shadow:0 20px 50px rgba(0,0,0,0.35);}
+  h1{font-size:21px;margin:0 0 6px;font-weight:800;}
+  .sub{color:var(--t2);font-size:13.5px;line-height:1.55;margin:0 0 20px;}
+  label{display:block;font-size:12px;font-weight:700;color:var(--t2);margin:0 0 6px;text-transform:uppercase;
+    letter-spacing:0.4px;}
+  .field{margin-bottom:14px;}
+  input[type=text],input[type=email],input[type=number]{
+    width:100%;background:#0C1830;border:1px solid var(--bdr);border-radius:9px;padding:12px 13px;
+    color:var(--t1);font-size:14.5px;font-family:inherit;outline:none;transition:border .15s;}
+  input:focus{border-color:var(--gold);}
+  .hint{font-size:11.5px;color:var(--t3);margin-top:5px;}
+  .section-title{font-size:13px;font-weight:800;color:var(--gold);text-transform:uppercase;letter-spacing:0.5px;
+    margin:22px 0 12px;padding-top:16px;border-top:1px solid var(--bdr);}
+  .section-title.first{margin-top:0;padding-top:0;border-top:none;}
+  .cat-row{display:flex;align-items:center;gap:12px;margin-bottom:10px;}
+  .cat-row .ic{font-size:18px;width:26px;text-align:center;flex-shrink:0;}
+  .cat-row .lbl{flex:1;font-size:13.5px;color:var(--t1);}
+  .cat-row input{width:130px;text-align:right;}
+  .money-prefix{position:relative;}
+  .btn{width:100%;background:linear-gradient(135deg,var(--gold),#b98f1f);color:var(--navy);border:none;
+    border-radius:10px;padding:14px;font-size:14.5px;font-weight:800;cursor:pointer;margin-top:6px;
+    letter-spacing:0.2px;transition:opacity .15s;}
+  .btn:disabled{opacity:0.55;cursor:default;}
+  .btn:active:not(:disabled){opacity:0.85;}
+  .btn.secondary{background:transparent;border:1px solid var(--bdr);color:var(--gold);margin-top:10px;}
+  .err{background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:var(--red);
+    border-radius:9px;padding:10px 12px;font-size:12.5px;margin-top:12px;display:none;}
+  .legal{font-size:11px;color:var(--t3);line-height:1.5;margin-top:16px;text-align:center;}
+  .footer{text-align:center;color:var(--t3);font-size:11.5px;margin-top:22px;}
+  #stage-report{display:none;}
+  .kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px;}
+  .kpi{background:#0C1830;border:1px solid var(--bdr);border-radius:12px;padding:14px;}
+  .kpi .l{font-size:10.5px;color:var(--t3);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px;font-weight:700;}
+  .kpi .v{font-size:19px;font-weight:800;}
+  .kpi .v.pos{color:var(--green);}
+  .kpi .v.neg{color:var(--red);}
+  .insight-block{margin-bottom:16px;}
+  .insight-block .bh{font-size:12.5px;font-weight:800;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;}
+  .insight-block.fortes .bh{color:var(--green);}
+  .insight-block.alertas .bh{color:var(--amber);}
+  .insight-block.recs .bh{color:var(--gold);}
+  .insight-item{font-size:13px;line-height:1.55;color:var(--t2);padding:8px 10px;background:rgba(255,255,255,0.03);
+    border-radius:8px;margin-bottom:6px;border-left:3px solid transparent;}
+  .insight-block.fortes .insight-item{border-left-color:var(--green);}
+  .insight-block.alertas .insight-item{border-left-color:var(--amber);}
+  .insight-block.recs .insight-item{border-left-color:var(--gold);}
+  .cta-box{background:linear-gradient(135deg,rgba(212,163,40,0.12),rgba(212,163,40,0.04));
+    border:1px solid var(--bdr);border-radius:12px;padding:18px;margin-top:18px;text-align:center;}
+  .cta-box h3{font-size:15px;margin:0 0 6px;}
+  .cta-box p{font-size:12.5px;color:var(--t2);margin:0 0 14px;line-height:1.5;}
+  .loading{text-align:center;padding:30px 4px;display:none;}
+  .loading .spin{width:34px;height:34px;border:3px solid var(--bdr);border-top-color:var(--gold);border-radius:50%;
+    margin:0 auto 14px;animation:spin 0.8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="logo">
+    <div class="mark">C</div>
+    <div class="name">COUR<span>INVEST</span></div>
+  </div>
+
+  <div class="card">
+    <!-- ===== FORM ===== -->
+    <div id="stage-form">
+      <h1>Diagnóstico Financeiro Empresarial</h1>
+      <p class="sub">Responda em 2 minutos e receba na hora, grátis, um diagnóstico automático da saúde financeira da sua empresa: resultado do mês, margem e recomendações personalizadas.</p>
+
+      <div class="section-title first">🏢 Sua empresa</div>
+      <div class="field">
+        <label>Nome da empresa</label>
+        <input type="text" id="fEmpresa" placeholder="Razão social ou nome fantasia">
+      </div>
+      <div class="field">
+        <label>Faturamento mensal (médio dos últimos meses)</label>
+        <input type="number" id="fFaturamento" placeholder="0,00" min="0" step="0.01">
+      </div>
+
+      <div class="section-title">📊 Custos e despesas no mês</div>
+      <div class="hint" style="margin:-4px 0 14px;">Preencha só o que se aplica — deixe em branco ou 0 o que não tiver.</div>
+      <div id="catRows"></div>
+
+      <div class="section-title">✉️ Receber o diagnóstico</div>
+      <div class="field">
+        <label>Seu nome</label>
+        <input type="text" id="fNome" placeholder="Seu nome">
+      </div>
+      <div class="field">
+        <label>E-mail</label>
+        <input type="email" id="fEmail" placeholder="seuemail@exemplo.com">
+      </div>
+
+      <button class="btn" id="btnGerar" onclick="gerarDiagnostico()">Gerar diagnóstico grátis</button>
+      <div class="err" id="errForm"></div>
+      <p class="legal">Seus dados são usados só para gerar o diagnóstico e, se você quiser, a Courinvest entrar em contato. Não compartilhamos com terceiros.</p>
+    </div>
+
+    <!-- ===== LOADING ===== -->
+    <div class="loading" id="stage-loading">
+      <div class="spin"></div>
+      <div style="color:var(--t2);font-size:13.5px;">Calculando seu diagnóstico...</div>
+    </div>
+
+    <!-- ===== REPORT ===== -->
+    <div id="stage-report">
+      <h1 id="reportTitle">Diagnóstico de <span id="reportEmpresa"></span></h1>
+      <p class="sub">Análise automática com base no que você informou.</p>
+
+      <div class="kpis">
+        <div class="kpi">
+          <div class="l">Resultado do mês</div>
+          <div class="v" id="kpiSaldo">—</div>
+        </div>
+        <div class="kpi">
+          <div class="l">Margem líquida</div>
+          <div class="v" id="kpiPoupanca">—</div>
+        </div>
+      </div>
+
+      <div class="insight-block fortes">
+        <div class="bh">✅ Pontos fortes</div>
+        <div id="listFortes"></div>
+      </div>
+      <div class="insight-block alertas">
+        <div class="bh">⚠️ Pontos de atenção</div>
+        <div id="listAlertas"></div>
+      </div>
+      <div class="insight-block recs">
+        <div class="bh">💡 Recomendações</div>
+        <div id="listRecs"></div>
+      </div>
+
+      <div class="cta-box">
+        <h3>Quer ajuda pra colocar isso em prática?</h3>
+        <p>Fale com um consultor da Courinvest e veja como transformar esse diagnóstico num plano de Gestão Financeira Empresarial de verdade, com acompanhamento contínuo.</p>
+        <a href="https://wa.me/5532988496755?text=Ol%C3%A1!%20Acabei%20de%20fazer%20o%20diagn%C3%B3stico%20financeiro%20da%20minha%20empresa%20e%20quero%20saber%20mais%20sobre%20a%20Gest%C3%A3o%20Financeira%20PJ%20da%20Courinvest." id="ctaWhats" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
+          <button class="btn" type="button">Falar com um consultor</button>
+        </a>
+        <button class="btn secondary" type="button" onclick="location.reload()">Fazer novo diagnóstico</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">Courinvest — Gestão de Investimentos</div>
+</div>
+
+<!-- Firebase (mesmo projeto do Courinvest Hub) -->
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+<script>
+(function(){
+  var firebaseConfig = {
+    apiKey: "AIzaSyC4RLs-5QY3Kzf6Lauqbmj3Qj3C1RnuGtA",
+    authDomain: "dashboard-courinvest.firebaseapp.com",
+    projectId: "dashboard-courinvest",
+    storageBucket: "dashboard-courinvest.firebasestorage.app",
+    messagingSenderId: "688544704461",
+    appId: "1:688544704461:web:9e15d2b8ed4040a7830684"
+  };
+  try{
+    firebase.initializeApp(firebaseConfig);
+    window._db = firebase.firestore();
+  }catch(e){
+    console.error("[Firebase] Falha ao iniciar:", e);
+  }
+})();
+
+/* ===== Categorias do formulário público — versão empresarial (PJ) =====
+   Espelha o padrão de diagnostico.html (pessoa física), mas com categorias e linguagem de negócio.
+   A chave "investimentos" é mantida de propósito (mesmo nome usado na versão pessoal) para reaproveitar
+   sem alteração a mesma lógica de cálculo que já existe e já foi testada — aqui ela representa a
+   "Reserva de Caixa / Investimentos da Empresa", tratada à parte do total de despesas puras, exatamente
+   como um aporte é tratado na versão pessoal. */
+var CATEGORIAS = [
+  {k:"pessoal",l:"Folha de Pagamento (salários e encargos)",ic:"👥"},
+  {k:"prolabore",l:"Pró-labore & Retiradas dos Sócios",ic:"👤"},
+  {k:"fornecedores",l:"Fornecedores & Insumos",ic:"📦"},
+  {k:"estrutura",l:"Aluguel & Estrutura (água, luz, internet)",ic:"🏢"},
+  {k:"marketing",l:"Marketing & Vendas",ic:"📣"},
+  {k:"impostos",l:"Impostos & Taxas",ic:"🧾"},
+  {k:"tecnologia",l:"Tecnologia & Assinaturas",ic:"💻"},
+  {k:"dividas",l:"Empréstimos & Financiamentos",ic:"💳"},
+  {k:"investimentos",l:"Reserva de Caixa / Investimentos da Empresa",ic:"📈"},
+  {k:"outros",l:"Outros",ic:"📁"}
+];
+
+(function montarCategorias(){
+  var wrap = document.getElementById("catRows");
+  CATEGORIAS.forEach(function(cat){
+    var row = document.createElement("div");
+    row.className = "cat-row";
+    row.innerHTML =
+      '<div class="ic">'+cat.ic+'</div>'+
+      '<div class="lbl">'+cat.l+'</div>'+
+      '<input type="number" min="0" step="0.01" placeholder="0,00" id="cat_'+cat.k+'">';
+    wrap.appendChild(row);
+  });
+})();
+
+/* ===== fm() + calcularDiagnosticoPJ() =====
+   Adaptação, para o público empresarial, da mesma lógica de calcularAnaliseFinanceira() usada na versão
+   pessoal (diagnostico.html) e internamente no Hub (courinvest-hub-fonte.html, perto de MACRO_CATS).
+   O esqueleto de cálculo é o mesmo (separar despesas puras de reserva/investimento, medir resultado e
+   margem, gerar pontos fortes/alertas/recomendações por categoria) — só a linguagem e os limiares foram
+   adaptados para o contexto de uma empresa em vez de uma pessoa física. Mantida como cópia independente
+   de propósito (mesmo padrão já adotado em diagnostico.html) — qualquer ajuste futuro na lógica precisa
+   ser replicado nos três lugares manualmente. */
+var fm = function(v){return new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(v);};
+var MACRO_CATS = {};
+CATEGORIAS.forEach(function(c){MACRO_CATS[c.k]={l:c.l,ic:c.ic};});
+
+var calcularDiagnosticoPJ=function(faturamento,despesas,fmtFn){
+  var fmF=fmtFn||fm;
+
+  var tDespPuro=0,tReserva=0;
+  (despesas||[]).forEach(function(d){
+    if((d.macro||"outros")==="investimentos") tReserva+=d.valor;
+    else tDespPuro+=d.valor;
+  });
+
+  var porMacro={};
+  (despesas||[]).forEach(function(d){
+    var k=d.macro||"outros";
+    if(k==="investimentos")return;
+    if(!porMacro[k])porMacro[k]={tot:0,n:0};
+    porMacro[k].tot+=d.valor;porMacro[k].n++;
+  });
+
+  var saldo=faturamento-tDespPuro-tReserva;
+  var margem=faturamento>0?((saldo+tReserva)/faturamento*100):0;
+
+  var pontos={fortes:[],alertas:[],recomendacoes:[]};
+
+  if(margem>=20)pontos.fortes.push("Margem líquida excelente de "+margem.toFixed(0)+"% — bem acima da média da maioria das pequenas e médias empresas brasileiras.");
+  else if(margem>=10)pontos.fortes.push("Margem líquida saudável de "+margem.toFixed(0)+"% — dentro de uma faixa confortável para reinvestir no negócio.");
+  if(saldo>0)pontos.fortes.push("O mês fechou com resultado positivo de "+fmF(saldo)+", reforçando a capacidade de investir no crescimento da empresa.");
+  var pctReserva=faturamento>0?(tReserva/faturamento*100):0;
+  if(tReserva>0 && pctReserva>=10)pontos.fortes.push("A empresa está reservando "+pctReserva.toFixed(0)+"% do faturamento em caixa/investimentos — disciplina que fortalece o capital de giro.");
+
+  if(saldo<0)pontos.alertas.push("O mês fechou com déficit de "+fmF(Math.abs(saldo))+". Vale entender se foi pontual ou se é uma tendência.");
+  if(margem<10 && margem>=0)pontos.alertas.push("Margem líquida apertada ("+margem.toFixed(0)+"%) — abaixo dos 10% considerados um mínimo saudável para sustentar o negócio no médio prazo.");
+
+  var dividasMacro=porMacro["dividas"];
+  if(dividasMacro && faturamento>0){
+    var pctDiv=(dividasMacro.tot/faturamento)*100;
+    if(pctDiv>20)pontos.alertas.push("Empréstimos e financiamentos consomem "+pctDiv.toFixed(0)+"% do faturamento — vale avaliar uma reestruturação ou renegociação de prazos.");
+  }
+
+  var totDesp=tDespPuro||1;
+  Object.keys(porMacro).forEach(function(k){
+    if(k==="pessoal"||k==="fornecedores")return; // costumam ser naturalmente altos e variam muito por segmento
+    var pct=(porMacro[k].tot/totDesp)*100;
+    if(pct>=35){
+      var m=MACRO_CATS[k]||{l:k,ic:"📁"};
+      pontos.alertas.push(m.ic+" "+m.l+" representa "+pct.toFixed(0)+"% dos custos — concentração elevada, vale entender se está dentro do esperado.");
+    }
+  });
+
+  var prolaboreMacro=porMacro["prolabore"];
+  if(prolaboreMacro && faturamento>0 && (prolaboreMacro.tot/faturamento)>0.35)pontos.alertas.push("Pró-labore e retiradas dos sócios somam "+((prolaboreMacro.tot/faturamento)*100).toFixed(0)+"% do faturamento — vale checar se a separação entre o caixa da empresa e o bolso dos sócios está clara.");
+
+  if(saldo>0 && pctReserva<5)pontos.recomendacoes.push("Direcionar parte do resultado positivo de "+fmF(saldo)+" para uma reserva de capital de giro — sugestão: comece guardando "+fmF(saldo*0.3)+" por mês.");
+  if(margem<10)pontos.recomendacoes.push("Mapear com detalhe as 2-3 maiores categorias de custo e buscar renegociação ou redução antes de aumentar preços ou volume.");
+  if(dividasMacro && faturamento>0 && (dividasMacro.tot/faturamento)>0.20)pontos.recomendacoes.push("Priorizar a quitação ou renegociação de dívidas com juros altos antes de comprometer mais caixa em novos investimentos.");
+  var marketingMacro=porMacro["marketing"];
+  if(!marketingMacro || marketingMacro.tot===0)pontos.recomendacoes.push("Nenhum investimento em Marketing & Vendas informado — mesmo um orçamento pequeno e constante ajuda a estabilizar a captação de clientes.");
+  if(tReserva===0)pontos.recomendacoes.push("Não há reserva de caixa formal informada — o ideal é ter de 3 a 6 meses de custos fixos guardados para atravessar meses mais fracos sem sustos.");
+
+  if(pontos.fortes.length===0)pontos.fortes.push("Continue acompanhando os números mês a mês para identificarmos padrões positivos ao longo do tempo.");
+  if(pontos.alertas.length===0)pontos.alertas.push("Nenhum alerta crítico identificado neste período. Bom trabalho!");
+  if(pontos.recomendacoes.length===0)pontos.recomendacoes.push("Cenário equilibrado. Manter o ritmo atual e revisar o orçamento a cada trimestre.");
+
+  return {
+    faturamento:faturamento,tDespPuro:tDespPuro,tReserva:tReserva,
+    porMacro:porMacro,
+    kpis:{saldo:saldo,margem:margem},
+    pontos:pontos
+  };
+};
+
+/* ===== Sugestão de valor de proposta mensal (uso interno — NUNCA exibida ao cliente na tela) =====
+   Diferente da versão pessoal, aqui não existe uma tabela real de preços PJ ainda (a apresentação
+   comercial de Gestão Financeira PJ mostra "sob consulta" justamente por isso) — as faixas abaixo são
+   uma ESTIMATIVA inicial por porte de faturamento, pra servir de ponto de partida até vocês validarem
+   com casos reais e ajustarem os números. Ajustada por sinais de complexidade do próprio diagnóstico. */
+function sugerirPrecoPJ(faturamento, despesas, analise){
+  var tiers=[
+    {ate:30000, min:800, max:1200},
+    {ate:100000, min:1200, max:2500},
+    {ate:300000, min:2500, max:4500},
+    {ate:Infinity, min:4500, max:8000}
+  ];
+  var tier = tiers.filter(function(t){return faturamento<=t.ate})[0] || tiers[tiers.length-1];
+  var min = tier.min, max = tier.max;
+  var motivos = [];
+  var ajuste = 0;
+
+  var dividasMacro = despesas.filter(function(d){return d.macro==="dividas"})[0];
+  var pctDividas = (dividasMacro && faturamento>0) ? (dividasMacro.valor/faturamento*100) : 0;
+  if(pctDividas>15){ ajuste+=0.15; motivos.push("Empréstimos/financiamentos acima de 15% do faturamento ("+pctDividas.toFixed(0)+"%) — reestruturação financeira mais intensa."); }
+
+  if(analise.kpis.margem<5){ ajuste+=0.10; motivos.push("Margem líquida abaixo de 5% (ou negativa) — situação exige acompanhamento mais próximo desde o início."); }
+
+  if(despesas.length>=7){ ajuste+=0.10; motivos.push("Estrutura de custos com "+despesas.length+" categorias ativas — maior complexidade operacional."); }
+
+  if(analise.tReserva===0){ ajuste+=0.05; motivos.push("Nenhuma reserva de caixa informada — indica necessidade de estruturação financeira desde a base."); }
+
+  min = Math.round((min*(1+ajuste))/50)*50;
+  max = Math.round((max*(1+ajuste))/50)*50;
+  if(motivos.length===0) motivos.push("Perfil dentro do padrão pra faixa de faturamento informada — sem ajustes adicionais de complexidade.");
+
+  return {min:min, max:max, motivos:motivos, estimativa:true};
+}
+
+/* ===== Fluxo da página ===== */
+function showError(msg){
+  var el = document.getElementById("errForm");
+  el.textContent = msg;
+  el.style.display = "block";
+}
+function hideError(){
+  document.getElementById("errForm").style.display = "none";
+}
+function numVal(id){
+  var v = document.getElementById(id).value;
+  var n = parseFloat(String(v).replace(",","."));
+  return isNaN(n)?0:n;
+}
+
+function gerarDiagnostico(){
+  hideError();
+  var faturamento = numVal("fFaturamento");
+  var empresa = document.getElementById("fEmpresa").value.trim();
+  var nome = document.getElementById("fNome").value.trim();
+  var email = document.getElementById("fEmail").value.trim();
+
+  if(faturamento<=0){ showError("Informe o faturamento mensal para gerar o diagnóstico."); return; }
+
+  var despesas = [];
+  CATEGORIAS.forEach(function(cat){
+    var v = numVal("cat_"+cat.k);
+    if(v>0) despesas.push({macro:cat.k, valor:v, cat:cat.l});
+  });
+
+  var btn = document.getElementById("btnGerar");
+  btn.disabled = true; btn.textContent = "Gerando...";
+  document.getElementById("stage-form").style.display = "none";
+  document.getElementById("stage-loading").style.display = "block";
+
+  var analise = calcularDiagnosticoPJ(faturamento, despesas);
+  var precoSugerido = sugerirPrecoPJ(faturamento, despesas, analise);
+
+  // Grava o lead + resultado resumido no Firestore (create-only, sem leitura pública) — mesmo padrão
+  // de diagnosticos_publicos/leads_publicos/parceiros_pendentes. Nunca bloqueia a exibição do relatório.
+  // valorSugerido*/justificativaPreco são só pra uso interno (aba Comercial → Diagnósticos no Hub) —
+  // nunca aparecem na tela do cliente. Sem tabela real de preços PJ ainda: são faixas estimadas.
+  if(window._db){
+    window._db.collection("diagnosticos_pj_publicos").add({
+      empresa: empresa || "",
+      nome: nome || "",
+      email: email || "",
+      faturamento: faturamento,
+      despesas: despesas,
+      resultadoMes: analise.kpis.saldo,
+      margem: analise.kpis.margem,
+      valorSugeridoMin: precoSugerido.min,
+      valorSugeridoMax: precoSugerido.max,
+      justificativaPreco: precoSugerido.motivos,
+      precoEstimativa: true,
+      origem: "diagnostico_pj",
+      referrer: (document.referrer || "").slice(0,300),
+      criadoEm: firebase.firestore.FieldValue.serverTimestamp()
+    }).catch(function(e){ console.error("[Diagnóstico PJ] Falha ao registrar lead:", e); });
+  }
+
+  setTimeout(function(){ exibirRelatorio(analise, empresa); }, 500);
+}
+
+function exibirRelatorio(analise, empresa){
+  document.getElementById("stage-loading").style.display = "none";
+  document.getElementById("stage-report").style.display = "block";
+  document.getElementById("reportEmpresa").textContent = empresa || "sua empresa";
+
+  var saldoEl = document.getElementById("kpiSaldo");
+  saldoEl.textContent = fm(analise.kpis.saldo);
+  saldoEl.className = "v " + (analise.kpis.saldo>=0?"pos":"neg");
+
+  var margemEl = document.getElementById("kpiPoupanca");
+  margemEl.textContent = analise.kpis.margem.toFixed(0)+"%";
+  margemEl.className = "v " + (analise.kpis.margem>=10?"pos":"neg");
+
+  var renderList = function(id, itens){
+    var el = document.getElementById(id);
+    el.innerHTML = "";
+    itens.forEach(function(txt){
+      var d = document.createElement("div");
+      d.className = "insight-item";
+      d.textContent = txt;
+      el.appendChild(d);
+    });
+  };
+  renderList("listFortes", analise.pontos.fortes);
+  renderList("listAlertas", analise.pontos.alertas);
+  renderList("listRecs", analise.pontos.recomendacoes);
+}
+</script>
+</body>
+</html>

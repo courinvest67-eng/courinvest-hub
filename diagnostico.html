@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Courinvest — Diagnóstico de Orçamento Familiar</title>
+<meta name="robots" content="noindex">
+<style>
+  :root{
+    --navy:#0A1628; --navy2:#0F2038; --gold:#D4A328; --lightgold:#FBEFD0;
+    --green:#2DD4A0; --red:#F87171; --amber:#FBBF24; --t1:#F5F1E8; --t2:#B8C2D4; --t3:#7A8699;
+    --bdr:rgba(212,163,40,0.22); --card:#111E33;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:linear-gradient(160deg,var(--navy) 0%,#08111f 100%);color:var(--t1);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:28px 16px 60px;}
+  .wrap{width:100%;max-width:560px;}
+  .logo{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:22px;}
+  .logo .mark{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--gold),#a97e1a);
+    display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--navy);font-size:18px;}
+  .logo .name{font-size:19px;font-weight:800;letter-spacing:0.3px;}
+  .logo .name span{color:var(--gold);}
+  .card{background:var(--card);border:1px solid var(--bdr);border-radius:16px;padding:24px 22px;
+    box-shadow:0 20px 50px rgba(0,0,0,0.35);}
+  h1{font-size:21px;margin:0 0 6px;font-weight:800;}
+  .sub{color:var(--t2);font-size:13.5px;line-height:1.55;margin:0 0 20px;}
+  label{display:block;font-size:12px;font-weight:700;color:var(--t2);margin:0 0 6px;text-transform:uppercase;
+    letter-spacing:0.4px;}
+  .field{margin-bottom:14px;}
+  input[type=text],input[type=email],input[type=number]{
+    width:100%;background:#0C1830;border:1px solid var(--bdr);border-radius:9px;padding:12px 13px;
+    color:var(--t1);font-size:14.5px;font-family:inherit;outline:none;transition:border .15s;}
+  input:focus{border-color:var(--gold);}
+  .hint{font-size:11.5px;color:var(--t3);margin-top:5px;}
+  .section-title{font-size:13px;font-weight:800;color:var(--gold);text-transform:uppercase;letter-spacing:0.5px;
+    margin:22px 0 12px;padding-top:16px;border-top:1px solid var(--bdr);}
+  .section-title.first{margin-top:0;padding-top:0;border-top:none;}
+  .cat-row{display:flex;align-items:center;gap:12px;margin-bottom:10px;}
+  .cat-row .ic{font-size:18px;width:26px;text-align:center;flex-shrink:0;}
+  .cat-row .lbl{flex:1;font-size:13.5px;color:var(--t1);}
+  .cat-row input{width:130px;text-align:right;}
+  .money-prefix{position:relative;}
+  .btn{width:100%;background:linear-gradient(135deg,var(--gold),#b98f1f);color:var(--navy);border:none;
+    border-radius:10px;padding:14px;font-size:14.5px;font-weight:800;cursor:pointer;margin-top:6px;
+    letter-spacing:0.2px;transition:opacity .15s;}
+  .btn:disabled{opacity:0.55;cursor:default;}
+  .btn:active:not(:disabled){opacity:0.85;}
+  .btn.secondary{background:transparent;border:1px solid var(--bdr);color:var(--gold);margin-top:10px;}
+  .err{background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:var(--red);
+    border-radius:9px;padding:10px 12px;font-size:12.5px;margin-top:12px;display:none;}
+  .legal{font-size:11px;color:var(--t3);line-height:1.5;margin-top:16px;text-align:center;}
+  .footer{text-align:center;color:var(--t3);font-size:11.5px;margin-top:22px;}
+  #stage-report{display:none;}
+  .kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px;}
+  .kpi{background:#0C1830;border:1px solid var(--bdr);border-radius:12px;padding:14px;}
+  .kpi .l{font-size:10.5px;color:var(--t3);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px;font-weight:700;}
+  .kpi .v{font-size:19px;font-weight:800;}
+  .kpi .v.pos{color:var(--green);}
+  .kpi .v.neg{color:var(--red);}
+  .insight-block{margin-bottom:16px;}
+  .insight-block .bh{font-size:12.5px;font-weight:800;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;}
+  .insight-block.fortes .bh{color:var(--green);}
+  .insight-block.alertas .bh{color:var(--amber);}
+  .insight-block.recs .bh{color:var(--gold);}
+  .insight-item{font-size:13px;line-height:1.55;color:var(--t2);padding:8px 10px;background:rgba(255,255,255,0.03);
+    border-radius:8px;margin-bottom:6px;border-left:3px solid transparent;}
+  .insight-block.fortes .insight-item{border-left-color:var(--green);}
+  .insight-block.alertas .insight-item{border-left-color:var(--amber);}
+  .insight-block.recs .insight-item{border-left-color:var(--gold);}
+  .cta-box{background:linear-gradient(135deg,rgba(212,163,40,0.12),rgba(212,163,40,0.04));
+    border:1px solid var(--bdr);border-radius:12px;padding:18px;margin-top:18px;text-align:center;}
+  .cta-box h3{font-size:15px;margin:0 0 6px;}
+  .cta-box p{font-size:12.5px;color:var(--t2);margin:0 0 14px;line-height:1.5;}
+  .loading{text-align:center;padding:30px 4px;display:none;}
+  .loading .spin{width:34px;height:34px;border:3px solid var(--bdr);border-top-color:var(--gold);border-radius:50%;
+    margin:0 auto 14px;animation:spin 0.8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="logo">
+    <div class="mark">C</div>
+    <div class="name">COUR<span>INVEST</span></div>
+  </div>
+
+  <div class="card">
+    <!-- ===== FORM ===== -->
+    <div id="stage-form">
+      <h1>Diagnóstico de Orçamento Familiar</h1>
+      <p class="sub">Responda em 2 minutos e receba na hora, grátis, um diagnóstico automático da sua saúde financeira: saldo do mês, taxa de poupança e recomendações personalizadas.</p>
+
+      <div class="section-title first">💰 Sua renda mensal</div>
+      <div class="field">
+        <label>Renda total no mês (todas as fontes)</label>
+        <input type="number" id="fRenda" placeholder="0,00" min="0" step="0.01">
+      </div>
+      <div class="field">
+        <label>Patrimônio já investido hoje (opcional)</label>
+        <input type="number" id="fPatrimonio" placeholder="0,00" min="0" step="0.01">
+        <div class="hint">Some tudo que você já tem investido (ações, fundos, renda fixa, previdência etc.). Ajuda a gente a te indicar o serviço certo no final.</div>
+      </div>
+
+      <div class="section-title">📊 Suas despesas no mês</div>
+      <div class="hint" style="margin:-4px 0 14px;">Preencha só o que se aplica — deixe em branco ou 0 o que não tiver.</div>
+      <div id="catRows"></div>
+
+      <div class="section-title">✉️ Receber o diagnóstico</div>
+      <div class="field">
+        <label>Seu nome</label>
+        <input type="text" id="fNome" placeholder="Seu nome">
+      </div>
+      <div class="field">
+        <label>E-mail</label>
+        <input type="email" id="fEmail" placeholder="seuemail@exemplo.com">
+      </div>
+
+      <button class="btn" id="btnGerar" onclick="gerarDiagnostico()">Gerar meu diagnóstico grátis</button>
+      <div class="err" id="errForm"></div>
+      <p class="legal">Seus dados são usados só para gerar o diagnóstico e, se você quiser, a Courinvest entrar em contato. Não compartilhamos com terceiros.</p>
+    </div>
+
+    <!-- ===== LOADING ===== -->
+    <div class="loading" id="stage-loading">
+      <div class="spin"></div>
+      <div style="color:var(--t2);font-size:13.5px;">Calculando seu diagnóstico...</div>
+    </div>
+
+    <!-- ===== REPORT ===== -->
+    <div id="stage-report">
+      <h1 id="reportTitle">Seu diagnóstico, <span id="reportNome"></span></h1>
+      <p class="sub">Análise automática com base no que você informou.</p>
+
+      <div class="kpis">
+        <div class="kpi">
+          <div class="l">Saldo do mês</div>
+          <div class="v" id="kpiSaldo">—</div>
+        </div>
+        <div class="kpi">
+          <div class="l">Taxa de poupança</div>
+          <div class="v" id="kpiPoupanca">—</div>
+        </div>
+      </div>
+
+      <div class="insight-block fortes">
+        <div class="bh">✅ Pontos fortes</div>
+        <div id="listFortes"></div>
+      </div>
+      <div class="insight-block alertas">
+        <div class="bh">⚠️ Pontos de atenção</div>
+        <div id="listAlertas"></div>
+      </div>
+      <div class="insight-block recs">
+        <div class="bh">💡 Recomendações</div>
+        <div id="listRecs"></div>
+      </div>
+
+      <div class="cta-box">
+        <h3 id="ctaTitulo">Quer ajuda pra colocar isso em prática?</h3>
+        <p id="ctaTexto">Fale com um consultor da Courinvest e veja como transformar esse diagnóstico num plano de Gestão Financeira de verdade, com acompanhamento contínuo.</p>
+        <a href="#" id="ctaWhats" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
+          <button class="btn" type="button" id="ctaBotao">Falar com um consultor</button>
+        </a>
+        <button class="btn secondary" type="button" onclick="location.reload()">Fazer novo diagnóstico</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">Courinvest — Gestão de Investimentos</div>
+</div>
+
+<!-- Firebase (mesmo projeto do Courinvest Hub) -->
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+<script>
+(function(){
+  var firebaseConfig = {
+    apiKey: "AIzaSyC4RLs-5QY3Kzf6Lauqbmj3Qj3C1RnuGtA",
+    authDomain: "dashboard-courinvest.firebaseapp.com",
+    projectId: "dashboard-courinvest",
+    storageBucket: "dashboard-courinvest.firebasestorage.app",
+    messagingSenderId: "688544704461",
+    appId: "1:688544704461:web:9e15d2b8ed4040a7830684"
+  };
+  try{
+    firebase.initializeApp(firebaseConfig);
+    window._db = firebase.firestore();
+  }catch(e){
+    console.error("[Firebase] Falha ao iniciar:", e);
+  }
+})();
+
+/* ===== Categorias do formulário público (subconjunto simplificado do MACRO_CATS interno do Hub) =====
+   As chaves moradia/alimentacao/lazer/assinaturas/dividas/investimentos precisam bater exatamente com
+   as que calcularAnaliseFinanceira() reconhece por nome — ver courinvest-hub-fonte.html. */
+var CATEGORIAS = [
+  {k:"moradia",l:"Moradia (aluguel, condomínio, contas)",ic:"🏠"},
+  {k:"alimentacao",l:"Alimentação (mercado, delivery, restaurante)",ic:"🍽️"},
+  {k:"transporte",l:"Transporte (combustível, app, transporte público)",ic:"🚗"},
+  {k:"saude",l:"Saúde (plano, farmácia, consultas)",ic:"🏥"},
+  {k:"educacao",l:"Educação (escola, cursos, material)",ic:"🎓"},
+  {k:"lazer",l:"Lazer & Viagem",ic:"🎉"},
+  {k:"assinaturas",l:"Assinaturas & Apps",ic:"📱"},
+  {k:"dividas",l:"Dívidas / Cartão de crédito",ic:"💳"},
+  {k:"investimentos",l:"Investimentos / Aportes do mês",ic:"📈"},
+  {k:"outros",l:"Outros",ic:"📦"}
+];
+
+(function montarCategorias(){
+  var wrap = document.getElementById("catRows");
+  CATEGORIAS.forEach(function(cat){
+    var row = document.createElement("div");
+    row.className = "cat-row";
+    row.innerHTML =
+      '<div class="ic">'+cat.ic+'</div>'+
+      '<div class="lbl">'+cat.l+'</div>'+
+      '<input type="number" min="0" step="0.01" placeholder="0,00" id="cat_'+cat.k+'">';
+    wrap.appendChild(row);
+  });
+})();
+
+/* ===== fm() + calcularAnaliseFinanceira() =====
+   Cópia fiel da função pura em courinvest-hub-fonte.html (perto de MACRO_CATS). Ver
+   claude/diagnostico-orcamento-autoatendido.md — mantidas em sincronia manualmente: qualquer ajuste
+   na lógica de análise do Hub deve ser replicado aqui também. */
+var fm = function(v){return new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(v);};
+var MACRO_CATS = {};
+CATEGORIAS.forEach(function(c){MACRO_CATS[c.k]={l:c.l,ic:c.ic};});
+
+var calcularAnaliseFinanceira=function(histMensal,receitasAtual,despesasAtual,fmtFn){
+  var fmF=fmtFn||fm;
+  var receitas=receitasAtual||[];
+  var despesas=despesasAtual||[];
+  var hist=(histMensal||[]).slice().sort(function(a,b){return b.mes.localeCompare(a.mes)});
+  var refDate=new Date();refDate.setDate(1);refDate.setMonth(refDate.getMonth()-1);
+  var mesAtualKey=refDate.getFullYear()+"-"+String(refDate.getMonth()+1).padStart(2,"0");
+
+  var separar=function(despArr){
+    var tD=0,tI=0;
+    (despArr||[]).forEach(function(d){
+      if((d.macro||"outros")==="investimentos") tI+=d.valor;
+      else tD+=d.valor;
+    });
+    return {tDespPuro:tD,tInv:tI};
+  };
+
+  var snapAtual=hist.find(function(h){return h.mes===mesAtualKey})||{
+    mes:mesAtualKey,receitas:receitas,despesas:despesas,
+    tRec:receitas.reduce(function(s,x){return s+x.valor},0),
+    tDesp:despesas.reduce(function(s,x){return s+x.valor},0)
+  };
+
+  var sepAtual=separar(snapAtual.despesas);
+  snapAtual.tDespPuro=sepAtual.tDespPuro;
+  snapAtual.tInv=sepAtual.tInv;
+
+  var snapAnterior=hist.find(function(h){return h.mes!==mesAtualKey})||null;
+  if(snapAnterior){
+    var sepAnt=separar(snapAnterior.despesas);
+    snapAnterior.tDespPuro=sepAnt.tDespPuro;
+    snapAnterior.tInv=sepAnt.tInv;
+  }
+
+  var ultimos3=hist.filter(function(h){return h.mes!==mesAtualKey}).slice(0,3);
+  var media3m=null;
+  if(ultimos3.length>0){
+    var sumR=0,sumD=0,sumI=0,porMacro={};
+    ultimos3.forEach(function(h){
+      var s=separar(h.despesas);
+      sumR+=h.tRec||0;sumD+=s.tDespPuro;sumI+=s.tInv;
+      (h.despesas||[]).forEach(function(d){
+        var k=d.macro||"outros";
+        if(k==="investimentos")return;
+        if(!porMacro[k])porMacro[k]=0;
+        porMacro[k]+=d.valor;
+      });
+    });
+    var porMacroMedia={};
+    for(var k in porMacro)porMacroMedia[k]=porMacro[k]/ultimos3.length;
+    media3m={tRec:sumR/ultimos3.length,tDesp:sumD/ultimos3.length,tInv:sumI/ultimos3.length,porMacro:porMacroMedia,n:ultimos3.length};
+  }
+
+  var atualPorMacro={};
+  snapAtual.despesas.forEach(function(d){
+    var k=d.macro||"outros";
+    if(k==="investimentos")return;
+    if(!atualPorMacro[k])atualPorMacro[k]={tot:0,n:0,itens:[]};
+    atualPorMacro[k].tot+=d.valor;atualPorMacro[k].n++;
+    atualPorMacro[k].itens.push(d);
+  });
+  var antPorMacro={};
+  if(snapAnterior){
+    snapAnterior.despesas.forEach(function(d){
+      var k=d.macro||"outros";
+      if(k==="investimentos")return;
+      if(!antPorMacro[k])antPorMacro[k]=0;
+      antPorMacro[k]+=d.valor;
+    });
+  }
+
+  var atualInv=snapAtual.despesas.filter(function(d){return(d.macro||"")==="investimentos"});
+  var antInv=snapAnterior?snapAnterior.despesas.filter(function(d){return(d.macro||"")==="investimentos"}):[];
+
+  var saldoAtual=snapAtual.tRec-snapAtual.tDespPuro-snapAtual.tInv;
+  var txPoupAtual=snapAtual.tRec>0?((saldoAtual+snapAtual.tInv)/snapAtual.tRec*100):0;
+  var saldoAnt=snapAnterior?(snapAnterior.tRec-snapAnterior.tDespPuro-snapAnterior.tInv):null;
+  var txPoupAnt=snapAnterior&&snapAnterior.tRec>0?((saldoAnt+snapAnterior.tInv)/snapAnterior.tRec*100):null;
+  var varDesp=snapAnterior?((snapAtual.tDespPuro-snapAnterior.tDespPuro)/(snapAnterior.tDespPuro||1)*100):null;
+  var varRec=snapAnterior?((snapAtual.tRec-snapAnterior.tRec)/(snapAnterior.tRec||1)*100):null;
+  var varInv=snapAnterior&&snapAnterior.tInv>0?((snapAtual.tInv-snapAnterior.tInv)/snapAnterior.tInv*100):null;
+
+  var pontos={fortes:[],alertas:[],recomendacoes:[]};
+
+  if(txPoupAtual>=20)pontos.fortes.push("Excelente disciplina financeira: taxa de poupança de "+txPoupAtual.toFixed(0)+"% supera a meta clássica de 20%.");
+  else if(txPoupAtual>=10)pontos.fortes.push("Taxa de poupança saudável de "+txPoupAtual.toFixed(0)+"% — dentro do recomendado para construção de patrimônio.");
+  if(saldoAtual>0)pontos.fortes.push("Mês fechou com saldo positivo de "+fmF(saldoAtual)+", reforçando a capacidade de aportes.");
+  var invMacro=atualPorMacro["investimentos"];
+  if(invMacro && snapAtual.tRec>0 && (invMacro.tot/snapAtual.tRec)>=0.15)pontos.fortes.push("Aportes em investimentos representam "+((invMacro.tot/snapAtual.tRec)*100).toFixed(0)+"% da receita — acima da média do mercado brasileiro (~6%).");
+  if(snapAnterior && varDesp!==null && varDesp<=-5)pontos.fortes.push("Despesas reduziram "+Math.abs(varDesp).toFixed(0)+"% vs. mês anterior — excelente controle.");
+  if(snapAnterior && varRec!==null && varRec>=10)pontos.fortes.push("Receita cresceu "+varRec.toFixed(0)+"% vs. mês anterior — momento favorável para acelerar aportes.");
+
+  if(saldoAtual<0)pontos.alertas.push("Mês fechou com déficit de "+fmF(Math.abs(saldoAtual))+". Atenção ao consumo da reserva.");
+  if(txPoupAtual<10 && txPoupAtual>=0)pontos.alertas.push("Taxa de poupança baixa ("+txPoupAtual.toFixed(0)+"%) — abaixo do mínimo de 10% recomendado.");
+  if(snapAnterior && varDesp!==null && varDesp>=10)pontos.alertas.push("Despesas subiram "+varDesp.toFixed(0)+"% vs. mês anterior. Identifique a categoria responsável.");
+  if(snapAnterior){
+    Object.keys(atualPorMacro).forEach(function(k){
+      var ant=antPorMacro[k]||0;
+      var atu=atualPorMacro[k].tot;
+      if(ant>0 && atu>=ant*1.3 && (atu-ant)>=300){
+        var m=MACRO_CATS[k]||{l:k,ic:"📦"};
+        if(k==="investimentos"){
+          pontos.fortes.push(m.ic+" Aportes em "+m.l+" cresceram "+((atu-ant)/ant*100).toFixed(0)+"% ("+fmF(atu-ant)+" a mais) — disciplina exemplar de acumulação.");
+        }else{
+          pontos.alertas.push(m.ic+" "+m.l+" cresceu "+((atu-ant)/ant*100).toFixed(0)+"% ("+fmF(atu-ant)+" a mais).");
+        }
+      }
+    });
+    var antInv2=antPorMacro["investimentos"]||0;
+    var atuInv2=(atualPorMacro["investimentos"]||{tot:0}).tot;
+    if(antInv2>0 && atuInv2<antInv2*0.7 && (antInv2-atuInv2)>=300){
+      pontos.alertas.push("📈 Aportes em Investimentos caíram "+((antInv2-atuInv2)/antInv2*100).toFixed(0)+"% ("+fmF(antInv2-atuInv2)+" a menos). Avalie se foi pontual.");
+    }
+  }
+
+  var dividasMacro=atualPorMacro["dividas"];
+  if(dividasMacro && snapAtual.tRec>0){
+    var pctDiv=(dividasMacro.tot/snapAtual.tRec)*100;
+    if(pctDiv>30)pontos.alertas.push("Cartão/dívidas consomem "+pctDiv.toFixed(0)+"% da receita — limite saudável é até 30%.");
+  }
+
+  var totDespAtual=snapAtual.tDesp||1;
+  Object.keys(atualPorMacro).forEach(function(k){
+    var pct=(atualPorMacro[k].tot/totDespAtual)*100;
+    if(pct>=40 && k!=="investimentos" && k!=="moradia"){
+      var m=MACRO_CATS[k]||{l:k,ic:"📦"};
+      pontos.alertas.push(m.ic+" "+m.l+" representa "+pct.toFixed(0)+"% das despesas — concentração elevada.");
+    }
+  });
+
+  if(saldoAtual>0 && (!invMacro || (invMacro.tot/saldoAtual)<0.5))pontos.recomendacoes.push("Direcionar pelo menos 50% do saldo positivo de "+fmF(saldoAtual)+" para investimentos — sugestão de aporte mensal: "+fmF(saldoAtual*0.5)+".");
+  if(txPoupAtual<10)pontos.recomendacoes.push("Estabelecer meta gradual: aumentar a poupança em 2 pontos percentuais por mês até atingir 15-20%.");
+  if(dividasMacro && (dividasMacro.tot/snapAtual.tRec)>0.30)pontos.recomendacoes.push("Priorizar quitação de dívidas com juros altos (cartão rotativo, cheque especial) antes de novos investimentos.");
+  var alimMacro=atualPorMacro["alimentacao"];
+  if(alimMacro && (alimMacro.tot/totDespAtual)>0.25)pontos.recomendacoes.push("Alimentação acima de 25% das despesas — reavaliar frequência de delivery e refeições fora.");
+  var lazerMacro=atualPorMacro["lazer"];
+  if(lazerMacro && (lazerMacro.tot/totDespAtual)>0.15)pontos.recomendacoes.push("Lazer & Viagem em "+((lazerMacro.tot/totDespAtual)*100).toFixed(0)+"% — definir orçamento mensal específico evita surpresas.");
+  var assinMacro=atualPorMacro["assinaturas"];
+  if(assinMacro && assinMacro.n>=4)pontos.recomendacoes.push("Você tem "+assinMacro.n+" assinaturas ativas ("+fmF(assinMacro.tot)+"/mês = "+fmF(assinMacro.tot*12)+"/ano). Vale uma auditoria.");
+  if(!atualPorMacro["investimentos"] && saldoAtual>1000)pontos.recomendacoes.push("Iniciar aportes mensais em renda fixa (Tesouro Selic) ou previdência — mesmo R$500/mês fazem diferença em 10 anos.");
+
+  if(pontos.fortes.length===0)pontos.fortes.push("Continue registrando seus dados mês a mês para identificarmos padrões positivos ao longo do tempo.");
+  if(pontos.alertas.length===0)pontos.alertas.push("Nenhum alerta crítico identificado neste período. Bom trabalho!");
+  if(pontos.recomendacoes.length===0)pontos.recomendacoes.push("Cenário equilibrado. Manter o ritmo atual e revisar metas a cada trimestre.");
+
+  var topDesp=snapAtual.despesas.filter(function(d){return(d.macro||"")!=="investimentos"}).sort(function(a,b){return b.valor-a.valor}).slice(0,5);
+
+  return {
+    mesRef:snapAtual.mes,
+    snapAtual:snapAtual,snapAnterior:snapAnterior,media3m:media3m,
+    atualPorMacro:atualPorMacro,
+    atualInv:atualInv,antInv:antInv,
+    kpis:{saldoAtual:saldoAtual,txPoupAtual:txPoupAtual,saldoAnt:saldoAnt,txPoupAnt:txPoupAnt,varDesp:varDesp,varRec:varRec,varInv:varInv},
+    pontos:pontos,
+    topDesp:topDesp,
+    historico:hist.slice(0,12)
+  };
+};
+
+/* ===== Sugestão de valor de proposta mensal (uso interno — NUNCA exibida ao cliente na tela) =====
+   Ponto de partida pra quem for montar a proposta, calculado a partir do próprio diagnóstico. Faixa
+   base ancorada nos valores reais que a Gestão Financeira pessoal já usou (R$ 510 individual / R$ 790
+   casal, hoje ocultos da apresentação comercial em favor de "sob consulta"), escalada por renda e
+   ajustada por sinais de complexidade encontrados no diagnóstico. É só um ponto de partida — quem senta
+   com o cliente sempre pode (e deve) ajustar pra cima ou pra baixo. */
+function sugerirPrecoGF(renda, despesas, analise){
+  var tiers=[
+    {ate:6000, min:450, max:550},
+    {ate:12000, min:510, max:680},
+    {ate:25000, min:650, max:950},
+    {ate:Infinity, min:900, max:1500}
+  ];
+  var tier = tiers.filter(function(t){return renda<=t.ate})[0] || tiers[tiers.length-1];
+  var min = tier.min, max = tier.max;
+  var motivos = [];
+  var ajuste = 0;
+
+  var dividasMacro = despesas.filter(function(d){return d.macro==="dividas"})[0];
+  var pctDividas = (dividasMacro && renda>0) ? (dividasMacro.valor/renda*100) : 0;
+  if(pctDividas>20){ ajuste+=0.10; motivos.push("Dívidas/cartão acima de 20% da renda ("+pctDividas.toFixed(0)+"%) — provável necessidade de reestruturação de dívidas."); }
+
+  if(analise.kpis.saldoAtual<0){ ajuste+=0.10; motivos.push("Mês fechou no negativo — diagnóstico indica necessidade de intervenção mais próxima logo de início."); }
+
+  if(despesas.length>=7){ ajuste+=0.05; motivos.push("Orçamento com "+despesas.length+" categorias ativas — maior complexidade de acompanhamento mensal."); }
+
+  min = Math.round((min*(1+ajuste))/10)*10;
+  max = Math.round((max*(1+ajuste))/10)*10;
+  if(motivos.length===0) motivos.push("Perfil dentro do padrão pra faixa de renda informada — sem ajustes adicionais de complexidade.");
+
+  return {min:min, max:max, motivos:motivos};
+}
+
+/* ===== Recomendação de serviço (Fase 1 da captação de leads qualificados — 15/09/2026) =====
+   Antes disso, o CTA final sempre apontava pra Gestão Financeira, não importa o perfil de quem
+   preencheu. Esse formulário só pergunta renda/despesas do mês (fluxo), não patrimônio acumulado —
+   por isso o novo campo opcional de "patrimônio já investido" é o que permite diferenciar quem só
+   precisa organizar o orçamento de quem já tem dinheiro investido e se beneficiaria mais de gestão
+   profissional ou de uma consultoria pontual. Faixa de corte (R$200 mil) alinhada com a mesma que já
+   divide as faixas de Gestão de Patrimônio em TABELA_PRECOS_CI no Hub (courinvest-hub-fonte.html). */
+function recomendarServico(patrimonio){
+  if(patrimonio>=200000){
+    return {
+      servico:"patrimonio",
+      titulo:"Seu próximo passo: Gestão de Patrimônio",
+      texto:"Com o patrimônio que você já tem investido, gestão profissional e independente — sem conflito de interesse, com acompanhamento contínuo — costuma trazer mais resultado do que só organizar o orçamento.",
+      botao:"Falar sobre Gestão de Patrimônio",
+      msg:"Olá! Acabei de fazer o diagnóstico de orçamento familiar e, como já tenho patrimônio investido, quero saber mais sobre a Gestão de Patrimônio da Courinvest."
+    };
+  }
+  if(patrimonio>0){
+    return {
+      servico:"consultoria",
+      titulo:"Seu próximo passo: Consultoria Financeira",
+      texto:"Você já tem investimentos — uma Consultoria Financeira pontual (diagnóstico, estratégia e execução em 3 sessões, sem compromisso recorrente) é o jeito mais direto de saber se sua carteira está bem alocada.",
+      botao:"Falar sobre Consultoria Financeira",
+      msg:"Olá! Acabei de fazer o diagnóstico de orçamento familiar e, como já tenho alguns investimentos, quero saber mais sobre a Consultoria Financeira da Courinvest."
+    };
+  }
+  return {
+    servico:"financeira",
+    titulo:"Quer ajuda pra colocar isso em prática?",
+    texto:"Fale com um consultor da Courinvest e veja como transformar esse diagnóstico num plano de Gestão Financeira de verdade, com acompanhamento contínuo.",
+    botao:"Falar com um consultor",
+    msg:"Olá! Acabei de fazer o diagnóstico de orçamento familiar e quero saber mais sobre a Gestão Financeira da Courinvest."
+  };
+}
+
+/* ===== Fluxo da página ===== */
+function showError(msg){
+  var el = document.getElementById("errForm");
+  el.textContent = msg;
+  el.style.display = "block";
+}
+function hideError(){
+  document.getElementById("errForm").style.display = "none";
+}
+function numVal(id){
+  var v = document.getElementById(id).value;
+  var n = parseFloat(String(v).replace(",","."));
+  return isNaN(n)?0:n;
+}
+
+function gerarDiagnostico(){
+  hideError();
+  var renda = numVal("fRenda");
+  var patrimonio = numVal("fPatrimonio");
+  var nome = document.getElementById("fNome").value.trim();
+  var email = document.getElementById("fEmail").value.trim();
+
+  if(renda<=0){ showError("Informe sua renda mensal para gerar o diagnóstico."); return; }
+
+  var despesas = [];
+  CATEGORIAS.forEach(function(cat){
+    var v = numVal("cat_"+cat.k);
+    if(v>0) despesas.push({macro:cat.k, valor:v, cat:cat.l, orc:0});
+  });
+
+  var btn = document.getElementById("btnGerar");
+  btn.disabled = true; btn.textContent = "Gerando...";
+  document.getElementById("stage-form").style.display = "none";
+  document.getElementById("stage-loading").style.display = "block";
+
+  var receitas = [{valor:renda, integrante:nome||"Você"}];
+  var analise = calcularAnaliseFinanceira([], receitas, despesas);
+  var precoSugerido = sugerirPrecoGF(renda, despesas, analise);
+  var recomendacao = recomendarServico(patrimonio);
+
+  // Grava o lead + resultado resumido no Firestore (create-only, sem leitura pública) — mesmo padrão
+  // de leads_publicos/parceiros_pendentes. Nunca bloqueia a exibição do relatório se falhar.
+  // valorSugerido* e justificativaPreco são só pra uso interno (aba Comercial → Diagnósticos no Hub) —
+  // nunca aparecem na tela do cliente. patrimonioAtual/servicoRecomendado idem — alimentam a
+  // qualificação do lead (ver claude/diagnostico-orcamento-autoatendido.md).
+  if(window._db){
+    window._db.collection("diagnosticos_publicos").add({
+      nome: nome || "",
+      email: email || "",
+      renda: renda,
+      despesas: despesas,
+      patrimonioAtual: patrimonio,
+      servicoRecomendado: recomendacao.servico,
+      saldoMes: analise.kpis.saldoAtual,
+      taxaPoupanca: analise.kpis.txPoupAtual,
+      valorSugeridoMin: precoSugerido.min,
+      valorSugeridoMax: precoSugerido.max,
+      justificativaPreco: precoSugerido.motivos,
+      origem: "diagnostico_orcamento",
+      referrer: (document.referrer || "").slice(0,300),
+      criadoEm: firebase.firestore.FieldValue.serverTimestamp()
+    }).catch(function(e){ console.error("[Diagnóstico] Falha ao registrar lead:", e); });
+  }
+
+  setTimeout(function(){ exibirRelatorio(analise, nome, recomendacao); }, 500);
+}
+
+function exibirRelatorio(analise, nome, recomendacao){
+  document.getElementById("stage-loading").style.display = "none";
+  document.getElementById("stage-report").style.display = "block";
+  document.getElementById("reportNome").textContent = nome ? nome.split(" ")[0] : "";
+
+  if(recomendacao){
+    document.getElementById("ctaTitulo").textContent = recomendacao.titulo;
+    document.getElementById("ctaTexto").textContent = recomendacao.texto;
+    document.getElementById("ctaBotao").textContent = recomendacao.botao;
+    document.getElementById("ctaWhats").href = "https://wa.me/5532988496755?text=" + encodeURIComponent(recomendacao.msg);
+  }
+
+  var saldoEl = document.getElementById("kpiSaldo");
+  saldoEl.textContent = fm(analise.kpis.saldoAtual);
+  saldoEl.className = "v " + (analise.kpis.saldoAtual>=0?"pos":"neg");
+
+  var poupEl = document.getElementById("kpiPoupanca");
+  poupEl.textContent = analise.kpis.txPoupAtual.toFixed(0)+"%";
+  poupEl.className = "v " + (analise.kpis.txPoupAtual>=10?"pos":"neg");
+
+  var renderList = function(id, itens){
+    var el = document.getElementById(id);
+    el.innerHTML = "";
+    itens.forEach(function(txt){
+      var d = document.createElement("div");
+      d.className = "insight-item";
+      d.textContent = txt;
+      el.appendChild(d);
+    });
+  };
+  renderList("listFortes", analise.pontos.fortes);
+  renderList("listAlertas", analise.pontos.alertas);
+  renderList("listRecs", analise.pontos.recomendacoes);
+}
+</script>
+</body>
+</html>
