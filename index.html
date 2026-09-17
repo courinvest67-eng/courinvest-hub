@@ -29611,16 +29611,21 @@ function PropostasView({data,dispatch}){
               {ehConsultoria && (
                 <div style={{marginTop:16,paddingTop:16,borderTop:"1px solid rgba(255,255,255,0.1)"}}>
                   <div style={{fontSize:10,color:accent,fontWeight:700,letterSpacing:2,marginBottom:10}}>📋 ESCOPO DO TRABALHO</div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
                     <div style={{padding:"12px 14px",background:"rgba(45,212,160,0.1)",borderRadius:8,borderLeft:"3px solid #2DD4A0"}}>
                       <div style={{fontSize:10,color:"#2DD4A0",fontWeight:700,letterSpacing:1,marginBottom:4}}>1ª SESSÃO</div>
                       <div style={{fontSize:11,color:"#fff",fontWeight:700,marginBottom:2}}>Diagnóstico</div>
-                      <div style={{fontSize:10,color:"#8B9DC3",lineHeight:1.4}}>Análise completa da carteira e planejamento da estratégia</div>
+                      <div style={{fontSize:10,color:"#8B9DC3",lineHeight:1.4}}>Análise da carteira atual e identificação de oportunidades de melhoria</div>
                     </div>
                     <div style={{padding:"12px 14px",background:"rgba(45,212,160,0.1)",borderRadius:8,borderLeft:"3px solid #2DD4A0"}}>
                       <div style={{fontSize:10,color:"#2DD4A0",fontWeight:700,letterSpacing:1,marginBottom:4}}>2ª SESSÃO</div>
+                      <div style={{fontSize:11,color:"#fff",fontWeight:700,marginBottom:2}}>Definição da Estratégia</div>
+                      <div style={{fontSize:10,color:"#8B9DC3",lineHeight:1.4}}>Construção da nova estratégia, com as recomendações de realocação fundamentadas</div>
+                    </div>
+                    <div style={{padding:"12px 14px",background:"rgba(45,212,160,0.1)",borderRadius:8,borderLeft:"3px solid #2DD4A0"}}>
+                      <div style={{fontSize:10,color:"#2DD4A0",fontWeight:700,letterSpacing:1,marginBottom:4}}>3ª SESSÃO</div>
                       <div style={{fontSize:11,color:"#fff",fontWeight:700,marginBottom:2}}>Execução</div>
-                      <div style={{fontSize:10,color:"#8B9DC3",lineHeight:1.4}}>Implementação da estratégia definida na primeira sessão</div>
+                      <div style={{fontSize:10,color:"#8B9DC3",lineHeight:1.4}}>Implementação prática da estratégia planejada</div>
                     </div>
                   </div>
                 </div>
@@ -30268,8 +30273,9 @@ function PropostasView({data,dispatch}){
                 <div style={{padding:"12px 14px",background:"rgba(45,212,160,0.05)",borderRadius:8,border:"1px solid rgba(45,212,160,0.15)",marginBottom:12}}>
                   <div style={{fontSize:10,color:T.green,fontWeight:700,marginBottom:4}}>📋 ESCOPO DO TRABALHO</div>
                   <div style={{fontSize:11,color:T.t2,lineHeight:1.5}}>
-                    <strong style={{color:T.green}}>Sessão 1</strong> — Diagnóstico e planejamento da nova estratégia<br/>
-                    <strong style={{color:T.green}}>Sessão 2</strong> — Execução da estratégia definida
+                    <strong style={{color:T.green}}>Sessão 1</strong>: Diagnóstico da carteira atual<br/>
+                    <strong style={{color:T.green}}>Sessão 2</strong>: Definição da nova estratégia<br/>
+                    <strong style={{color:T.green}}>Sessão 3</strong>: Execução da estratégia definida
                   </div>
                 </div>
                 
@@ -30303,7 +30309,7 @@ function PropostasView({data,dispatch}){
                       <div style={{fontSize:10,color:T.t3,fontWeight:600,letterSpacing:1,marginBottom:6}}>VALOR TOTAL DA CONSULTORIA</div>
                       {pc.tipo==="percentual" && <div style={{fontSize:11,color:T.t2,marginBottom:6}}>{fm(pc.base)} × 1%</div>}
                       <div style={{fontSize:26,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(pc.valor)}</div>
-                      <div style={{fontSize:10,color:T.t3,marginTop:6,fontStyle:"italic"}}>Trabalho pontual com 3 sessões — pagamento único</div>
+                      <div style={{fontSize:10,color:T.t3,marginTop:6,fontStyle:"italic"}}>Trabalho pontual com 3 sessões, pagamento único</div>
                     </div>
                   );
                 })()}
@@ -32916,7 +32922,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '429';
+  var SW_VERSION = '430';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
