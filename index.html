@@ -2755,6 +2755,7 @@ function Dash({data:d,onSel:os,goTo}){
           patrimonio:pat>0?fmV(pat):"—",
           rentabilidade:rent,
           tipo_servico:isPlan?"Gestão Financeira":"Gestão de Patrimônio",
+          titulo_email:"Relatório",
           report_html:reportHtmlFinal,
           from_name:cfg.nomeRemetente||"Courinvest",
           reply_to:cfg.remetente||"",
@@ -26427,6 +26428,7 @@ function NewsView({data,dispatch}){
                     patrimonio:"R$ 1.250.000,00",
                     rentabilidade:"+1,85%",
                     tipo_servico:"🧪 TESTE — Gestão de Patrimônio",
+                    titulo_email:"Relatório",
                     report_html:reportHtmlFinal,
                     from_name:cfg.nomeRemetente||"Courinvest",
                     reply_to:cfg.remetente||"",
@@ -31870,16 +31872,20 @@ function DiagnosticosView({data}){
     sConvEnviando(true);
     var slug=tipo==="pj"?"diagnostico-pj.html":"diagnostico.html";
     var link="https://courinvest67-eng.github.io/courinvest-hub/"+slug+"?nome="+encodeURIComponent(nome)+"&email="+encodeURIComponent(email);
+    /* Remetente/reply-to fixo em courinvest.67@gmail.com pra esse e-mail de convite (pedido
+       explícito do Igor) — independente do que estiver configurado em Configurações → E-mail
+       pros relatórios mensais, que continua usando cfg.remetente normalmente. */
+    var REMETENTE_CONVITE="courinvest.67@gmail.com";
     var emailHtml=montarEmailRelatorioHtml({
       nome:nome,
       mesRefStr:"",
-      tituloTopo:"Diagnóstico Financeiro Gratuito",
-      introTxt:"Foi um prazer conversar com você. Para darmos o próximo passo e montarmos uma proposta personalizada, preencha o diagnóstico financeiro gratuito abaixo — leva só alguns minutos.",
+      tituloTopo:"Diagnóstico Financeiro",
+      introTxt:"Foi um prazer conversar com você. Para darmos o próximo passo e montarmos uma proposta personalizada, preencha o diagnóstico financeiro abaixo — leva só alguns minutos.",
       destaque:null,
       mercado:null,
-      remetente:cfg.remetente||"contato@courinvest.com.br",
+      remetente:REMETENTE_CONVITE,
       supportHtml:'💬 <b>Alguma dúvida?</b><br>Responda este e-mail — teremos prazer em ajudar.'
-    }).replace("%%PDF_BUTTON%%",'<a class="cta-btn" href="'+link+'" target="_blank" rel="noopener">🩺 Preencher Diagnóstico Gratuito</a>')
+    }).replace("%%PDF_BUTTON%%",'<a class="cta-btn" href="'+link+'" target="_blank" rel="noopener">🩺 Preencher Diagnóstico</a>')
       .replace('<p>Período de referência: </p>','');
 
     var templateParams={
@@ -31888,25 +31894,36 @@ function DiagnosticosView({data}){
       mes_ref:"",
       patrimonio:"—",
       rentabilidade:"—",
-      tipo_servico:"Diagnóstico Gratuito",
+      tipo_servico:"Diagnóstico",
+      titulo_email:"Diagnóstico",
       report_html:emailHtml,
       from_name:cfg.nomeRemetente||"Courinvest",
-      reply_to:cfg.remetente||"",
+      reply_to:REMETENTE_CONVITE,
     };
+    /* Importante: o envio do e-mail (EmailJS) e o registro do convite (Firestore) são etapas
+       separadas — se o e-mail for enviado mas o Firestore falhar (ex: regra de permissão faltando
+       pra coleção diagnosticos_convites), o lead já recebeu o e-mail normalmente. Por isso o aviso
+       de erro, nesse caso, é diferente: confirma que o e-mail saiu e avisa que só o registro do
+       convite (a listinha de "aguardando resposta") não pôde ser salvo. */
     window.emailjs.send(cfg.serviceId,cfg.templateId,templateParams).then(function(){
-      if(window._fbDB){
-        return window._fbDB.collection("diagnosticos_convites").add({
-          nome:nome,email:email,tipo:tipo,status:"pendente",
-          criadoEm:firebase.firestore.FieldValue.serverTimestamp()
-        });
-      }
-    }).then(function(){
       sConvNome("");sConvEmail("");sConvEnviando(false);
-      alert("✅ Convite enviado para "+email+"! Assim que o diagnóstico chegar, ele aparece na lista abaixo.");
-      carregar();
+      if(!window._fbDB){
+        alert("✅ Convite enviado para "+email+"!");
+        return;
+      }
+      window._fbDB.collection("diagnosticos_convites").add({
+        nome:nome,email:email,tipo:tipo,status:"pendente",
+        criadoEm:firebase.firestore.FieldValue.serverTimestamp()
+      }).then(function(){
+        alert("✅ Convite enviado para "+email+"! Assim que o diagnóstico chegar, ele aparece na lista abaixo.");
+        carregar();
+      }).catch(function(e){
+        console.error("[Diagnósticos] Erro ao salvar convite em diagnosticos_convites:",e);
+        alert("✅ O e-mail foi enviado para "+email+" normalmente.\n\n⚠️ Mas não consegui salvar o registro do convite (erro: "+(e&&e.message||JSON.stringify(e))+"), então ele não vai aparecer na lista de \"aguardando resposta\" — provavelmente falta liberar a coleção diagnosticos_convites nas regras do Firestore.");
+      });
     }).catch(function(e){
       sConvEnviando(false);
-      alert("Erro ao enviar o convite: "+(e&&e.text||e&&e.message||JSON.stringify(e)));
+      alert("❌ Erro ao enviar o e-mail do convite: "+(e&&e.text||e&&e.message||JSON.stringify(e)));
     });
   };
 
@@ -33032,7 +33049,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '433';
+  var SW_VERSION = '434';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
