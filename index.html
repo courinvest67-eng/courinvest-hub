@@ -29099,7 +29099,7 @@ function PropostasView({data,dispatch}){
               <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:16,marginBottom:44}}>
                 {[
                   {t:"Missão",ic:"🎯",d:"Proporcionar soluções financeiras personalizadas que garantem segurança e tranquilidade, priorizando qualidade de vida e a realização dos sonhos.",col:accent},
-                  {t:"Visão",ic:"👁",d:"Ser reconhecida como a empresa financeira mais confiável e inovadora do Brasil, revolucionando como as pessoas planejam seu futuro.",col:accent},
+                  {t:"Visão",ic:"👁",d:"Ser reconhecida como uma empresa referência em consultoria e planejamento financeiro, transformando como as pessoas planejam seu futuro.",col:accent},
                   {t:"Independência",ic:"⚖",d:"Profissionais independentes de instituições financeiras, evitando conflitos de interesse. Modelo Fee-Based, cobrança direta ao cliente.",col:"#0A1628"},
                   {t:"Certificação",ic:"✦",d:"Equipe certificada pela CVM (Comissão de Valores Mobiliários), com credenciais CGA, CGE e CEA da ANBIMA.",col:"#0A1628"}
                 ].map(function(b,i){return (
@@ -31817,25 +31817,105 @@ function AppWithAuth(){
    sugestão é só um ponto de partida pra negociação, nunca aparece pro cliente, e no caso de PJ ainda
    é uma estimativa (sem tabela real de preços validada).
 ═══════════════════════════════════════ */
-function DiagnosticosView(){
+function DiagnosticosView({data}){
   const[tipo,sTipo]=useState("pf");
   const[itensPF,sItensPF]=useState([]);
   const[itensPJ,sItensPJ]=useState([]);
+  const[convites,sConvites]=useState([]);
   const[loading,sLoading]=useState(true);
+  const[convNome,sConvNome]=useState("");
+  const[convEmail,sConvEmail]=useState("");
+  const[convEnviando,sConvEnviando]=useState(false);
 
   const carregar=function(){
     if(!window._fbDB){sLoading(false);return;}
     sLoading(true);
     Promise.all([
       window._fbDB.collection("diagnosticos_publicos").orderBy("criadoEm","desc").limit(100).get().catch(function(e){console.error("[Diagnósticos] Erro ao ler diagnosticos_publicos:",e);return{docs:[]}}),
-      window._fbDB.collection("diagnosticos_pj_publicos").orderBy("criadoEm","desc").limit(100).get().catch(function(e){console.error("[Diagnósticos] Erro ao ler diagnosticos_pj_publicos:",e);return{docs:[]}})
+      window._fbDB.collection("diagnosticos_pj_publicos").orderBy("criadoEm","desc").limit(100).get().catch(function(e){console.error("[Diagnósticos] Erro ao ler diagnosticos_pj_publicos:",e);return{docs:[]}}),
+      window._fbDB.collection("diagnosticos_convites").orderBy("criadoEm","desc").limit(100).get().catch(function(e){console.error("[Diagnósticos] Erro ao ler diagnosticos_convites:",e);return{docs:[]}})
     ]).then(function(res){
       sItensPF(res[0].docs.map(function(doc){return Object.assign({_id:doc.id},doc.data())}));
       sItensPJ(res[1].docs.map(function(doc){return Object.assign({_id:doc.id},doc.data())}));
+      sConvites(res[2].docs.map(function(doc){return Object.assign({_id:doc.id},doc.data())}));
       sLoading(false);
     });
   };
   useEffect(function(){carregar();},[]);
+
+  /* ===== CONVITE POR E-MAIL (enviar o link do diagnóstico pro lead logo após a apresentação) =====
+     Reaproveita o mesmo EmailJS já configurado em Configurações → E-mail (d.config.emailjs) e o
+     mesmo template visual do relatório mensal (montarEmailRelatorioHtml), só trocando o conteúdo:
+     em vez do botão de baixar PDF, um botão que leva direto pro diagnostico.html/diagnostico-pj.html
+     já com nome e e-mail preenchidos na URL (?nome=...&email=...). Cada convite enviado fica salvo
+     em diagnosticos_convites (nome,email,tipo,status,criadoEm) só pra aparecer como "aguardando
+     resposta" aqui embaixo — assim que o lead preenche e o diagnóstico chega em diagnosticos_publicos/
+     diagnosticos_pj_publicos com o mesmo e-mail, o convite some sozinho da lista de pendentes
+     (comparação por e-mail, calculada na hora de renderizar — não precisa marcar nada no Firestore). */
+  const enviarConvite=function(){
+    var nome=(convNome||"").trim();
+    var email=(convEmail||"").trim().toLowerCase();
+    if(!nome){alert("Informe o nome do lead.");return;}
+    if(!email||email.indexOf("@")<0){alert("Informe um e-mail válido.");return;}
+    var cfg=data&&data.config&&data.config.emailjs;
+    if(!cfg||!cfg.publicKey||!cfg.serviceId||!cfg.templateId){
+      alert("E-mail automático não configurado. Acesse Configurações → E-mail para configurar o EmailJS.");
+      return;
+    }
+    try{
+      if(window.emailjs)window.emailjs.init({publicKey:cfg.publicKey,limitRate:false});
+      else{alert("⚠️ SDK do EmailJS não carregou. Recarregue a página e tente novamente.");return;}
+    }catch(e){alert("Erro ao iniciar EmailJS: "+e.message);return;}
+
+    sConvEnviando(true);
+    var slug=tipo==="pj"?"diagnostico-pj.html":"diagnostico.html";
+    var link="https://courinvest67-eng.github.io/courinvest-hub/"+slug+"?nome="+encodeURIComponent(nome)+"&email="+encodeURIComponent(email);
+    var emailHtml=montarEmailRelatorioHtml({
+      nome:nome,
+      mesRefStr:"",
+      tituloTopo:"Diagnóstico Financeiro Gratuito",
+      introTxt:"Foi um prazer conversar com você. Para darmos o próximo passo e montarmos uma proposta personalizada, preencha o diagnóstico financeiro gratuito abaixo — leva só alguns minutos.",
+      destaque:null,
+      mercado:null,
+      remetente:cfg.remetente||"contato@courinvest.com.br",
+      supportHtml:'💬 <b>Alguma dúvida?</b><br>Responda este e-mail — teremos prazer em ajudar.'
+    }).replace("%%PDF_BUTTON%%",'<a class="cta-btn" href="'+link+'" target="_blank" rel="noopener">🩺 Preencher Diagnóstico Gratuito</a>')
+      .replace('<p>Período de referência: </p>','');
+
+    var templateParams={
+      to_email:email,
+      to_name:nome.split(" ")[0],
+      mes_ref:"",
+      patrimonio:"—",
+      rentabilidade:"—",
+      tipo_servico:"Diagnóstico Gratuito",
+      report_html:emailHtml,
+      from_name:cfg.nomeRemetente||"Courinvest",
+      reply_to:cfg.remetente||"",
+    };
+    window.emailjs.send(cfg.serviceId,cfg.templateId,templateParams).then(function(){
+      if(window._fbDB){
+        return window._fbDB.collection("diagnosticos_convites").add({
+          nome:nome,email:email,tipo:tipo,status:"pendente",
+          criadoEm:firebase.firestore.FieldValue.serverTimestamp()
+        });
+      }
+    }).then(function(){
+      sConvNome("");sConvEmail("");sConvEnviando(false);
+      alert("✅ Convite enviado para "+email+"! Assim que o diagnóstico chegar, ele aparece na lista abaixo.");
+      carregar();
+    }).catch(function(e){
+      sConvEnviando(false);
+      alert("Erro ao enviar o convite: "+(e&&e.text||e&&e.message||JSON.stringify(e)));
+    });
+  };
+
+  const cancelarConvite=function(item){
+    if(window._fbDB){
+      window._fbDB.collection("diagnosticos_convites").doc(item._id).update({status:"cancelado"}).catch(function(e){console.error(e);});
+    }
+    sConvites(function(prev){return prev.map(function(x){return x._id===item._id?Object.assign({},x,{status:"cancelado"}):x;});});
+  };
 
   const marcarStatus=function(colecao,item,status){
     if(window._fbDB){
@@ -31851,6 +31931,8 @@ function DiagnosticosView(){
   };
 
   const listaAtual = tipo==="pf" ? itensPF : itensPJ;
+  const emailsRecebidos = new Set(listaAtual.map(function(x){return (x.email||"").trim().toLowerCase();}).filter(Boolean));
+  const convitesPendentes = convites.filter(function(c){return c.tipo===tipo && c.status!=="cancelado" && !emailsRecebidos.has((c.email||"").trim().toLowerCase());});
 
   return (
     <div>
@@ -31863,6 +31945,34 @@ function DiagnosticosView(){
         <button onClick={function(){sTipo("pf")}} style={{padding:"8px 16px",borderRadius:12,fontSize:11,fontWeight:600,cursor:"pointer",border:tipo==="pf"?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.04)",background:tipo==="pf"?T.goldD:"transparent",color:tipo==="pf"?T.gold:T.t3}}>👤 Pessoa Física ({itensPF.length})</button>
         <button onClick={function(){sTipo("pj")}} style={{padding:"8px 16px",borderRadius:12,fontSize:11,fontWeight:600,cursor:"pointer",border:tipo==="pj"?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.04)",background:tipo==="pj"?T.goldD:"transparent",color:tipo==="pj"?T.gold:T.t3}}>🏢 Empresas / PJ ({itensPJ.length})</button>
       </div>
+
+      {}
+      <Cd style={{padding:16,marginBottom:16}} hov={false}>
+        <div style={{fontSize:11,fontWeight:700,color:T.t1,marginBottom:2}}>✉️ Convidar lead para o diagnóstico {tipo==="pj"?"(empresarial)":"(pessoal)"}</div>
+        <div style={{fontSize:10,color:T.t3,marginBottom:12}}>Acabou de apresentar pro lead? Insira o nome e e-mail dele que já mandamos o link do diagnóstico {tipo==="pj"?"empresarial":"pessoal"} por e-mail, preenchido com os dados dele.</div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <input value={convNome} onChange={function(e){sConvNome(e.target.value)}} placeholder="Nome do lead" style={{flex:"1 1 160px",padding:"9px 12px",borderRadius:8,border:"1px solid "+T.bdrL,background:T.w3,color:T.t1,fontSize:12}}/>
+          <input value={convEmail} onChange={function(e){sConvEmail(e.target.value)}} placeholder="e-mail@lead.com" type="email" style={{flex:"1 1 200px",padding:"9px 12px",borderRadius:8,border:"1px solid "+T.bdrL,background:T.w3,color:T.t1,fontSize:12}}/>
+          <button onClick={enviarConvite} disabled={convEnviando} style={{padding:"9px 18px",borderRadius:8,border:"1px solid "+T.gold,background:T.goldD,color:T.gold,fontWeight:700,fontSize:12,cursor:convEnviando?"default":"pointer",opacity:convEnviando?0.6:1,whiteSpace:"nowrap"}}>{convEnviando?"Enviando...":"📧 Enviar convite"}</button>
+        </div>
+
+        {convitesPendentes.length>0 && (
+          <div style={{marginTop:14,paddingTop:14,borderTop:"1px solid "+T.bdrL}}>
+            <div style={{fontSize:10,fontWeight:700,color:T.t3,letterSpacing:1,marginBottom:8,textTransform:"uppercase"}}>⏳ Aguardando resposta ({convitesPendentes.length})</div>
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {convitesPendentes.map(function(c){return (
+                <div key={c._id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,padding:"8px 12px",background:T.w3,borderRadius:8,flexWrap:"wrap"}}>
+                  <div style={{fontSize:11,color:T.t2}}><strong style={{color:T.t1}}>{c.nome}</strong> · {c.email} <span style={{color:T.t3}}>· convite enviado em {fmtData(c.criadoEm)}</span></div>
+                  <div style={{display:"flex",gap:6}}>
+                    <a href={"mailto:"+c.email} style={{textDecoration:"none"}}><button style={{background:"transparent",border:"1px solid "+T.bdrL,borderRadius:6,padding:"4px 8px",color:T.t2,cursor:"pointer",fontSize:10}}>✉️ E-mail</button></a>
+                    <button onClick={function(){cancelarConvite(c)}} style={{background:"transparent",border:"1px solid "+T.bdrL,borderRadius:6,padding:"4px 8px",color:T.t3,cursor:"pointer",fontSize:10}}>Cancelar</button>
+                  </div>
+                </div>
+              );})}
+            </div>
+          </div>
+        )}
+      </Cd>
 
       {loading ? (
         <Cd style={{padding:28,textAlign:"center"}} hov={false}><div style={{fontSize:13,color:T.t3}}>Carregando...</div></Cd>
@@ -31969,7 +32079,7 @@ function ComercialView({data,dispatch}){
       {}
       {subTab==="pipeline" && <PipelineView data={data} dispatch={dispatch}/>}
       {subTab==="apresentacao" && <ApresentacaoView/>}
-      {subTab==="diagnosticos" && <DiagnosticosView/>}
+      {subTab==="diagnosticos" && <DiagnosticosView data={data}/>}
       {subTab==="propostas" && <PropostasView data={data} dispatch={dispatch}/>}
     </div>
   );
@@ -32922,7 +33032,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '431';
+  var SW_VERSION = '433';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
