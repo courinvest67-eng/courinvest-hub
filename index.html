@@ -28785,6 +28785,7 @@ function PropostasView({data,dispatch}){
   const[wizard,sWizard]=useState(1);
   const[form,sForm]=useState(null);
   const[gerandoPPTX,setGerandoPPTX]=useState(false);
+  const[enviandoEmailProposta,setEnviandoEmailProposta]=useState(false);
   const propostas=data.propostas||[];
   
   
@@ -28865,6 +28866,78 @@ function PropostasView({data,dispatch}){
   const atualizarStatus=function(p,s){
     var atualizado={...p,status:s};
     dispatch({t:"REPLACE_ALL",p:{...data,propostas:propostas.map(function(x){return x.id===p.id?atualizado:x})}});
+  };
+
+  /* ===== ENVIO DA PROPOSTA POR E-MAIL (EmailJS) =====
+     Reaproveita o mesmo nome/e-mail já coletados na etapa 1 do formulário (form.clienteNome/
+     form.clienteEmail — nenhum campo novo precisou ser criado) e o mesmo padrão já usado nos
+     relatórios mensais e no convite de diagnóstico: gera um PDF de verdade a partir do próprio
+     documento #proposta-print (mesmo conteúdo do botão "Imprimir/Salvar PDF"), sobe pro Storage
+     (gerarPdfLinkCourinvest) e manda por e-mail com um botão "Baixar Proposta em PDF". Remetente/
+     reply-to fixo em courinvest.67@gmail.com, mesmo padrão adotado no convite de diagnóstico. */
+  const enviarPropostaPorEmail=function(){
+    if(!form.clienteEmail){
+      alert("Informe o e-mail do cliente na etapa \"1. Dados do Cliente\" antes de enviar (clique em ✏ Editar).");
+      return;
+    }
+    var cfg=data&&data.config&&data.config.emailjs;
+    if(!cfg||!cfg.publicKey||!cfg.serviceId||!cfg.templateId){
+      alert("E-mail automático não configurado. Acesse Configurações → E-mail para configurar o EmailJS.");
+      return;
+    }
+    var el=document.getElementById("proposta-print");
+    if(!el){alert("Proposta não encontrada.");return;}
+    try{
+      if(window.emailjs)window.emailjs.init({publicKey:cfg.publicKey,limitRate:false});
+      else{alert("⚠️ SDK do EmailJS não carregou. Recarregue a página e tente novamente.");return;}
+    }catch(e){alert("Erro ao iniciar EmailJS: "+e.message);return;}
+
+    setEnviandoEmailProposta(true);
+    var serv=SERVICOS_CI[form.servico]||SERVICOS_CI.patrimonio;
+    var REMETENTE_PROPOSTA="courinvest.67@gmail.com";
+    var fullHtml="<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}body{margin:0;padding:0}@page{margin:0;size:820px auto}</style></head><body>"+el.outerHTML+"</body></html>";
+    var nomeArquivo=(form.clienteNome||"cliente").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
+    var pathStorage="propostas/"+(form.id||Date.now())+"/proposta-"+(nomeArquivo||"cliente")+".pdf";
+
+    gerarPdfLinkCourinvest(pathStorage,fullHtml).then(function(pdfUrl){
+      var botaoHtml=pdfUrl
+        ?'<a class="cta-btn" href="'+pdfUrl+'" target="_blank" rel="noopener">📄 Baixar Proposta em PDF</a>'
+        :'<span class="cta-fallback">Entre em contato para receber a proposta em PDF.</span>';
+      var emailHtml=montarEmailRelatorioHtml({
+        nome:form.clienteNome,
+        mesRefStr:"",
+        tituloTopo:"Proposta Comercial",
+        introTxt:"Foi um prazer conversar com você. Segue abaixo a sua proposta personalizada de <strong>"+serv.nome+"</strong>.",
+        destaque:null,
+        mercado:null,
+        remetente:REMETENTE_PROPOSTA,
+        supportHtml:'💬 <b>Alguma dúvida?</b><br>Responda este e-mail — teremos prazer em ajudar.'
+      }).replace("%%PDF_BUTTON%%",botaoHtml).replace('<p>Período de referência: </p>','');
+
+      var templateParams={
+        to_email:form.clienteEmail,
+        to_name:(form.clienteNome||"").split(" ")[0],
+        mes_ref:"",
+        patrimonio:"—",
+        rentabilidade:"—",
+        tipo_servico:serv.nome,
+        titulo_email:"Proposta",
+        report_html:emailHtml,
+        from_name:cfg.nomeRemetente||"Courinvest",
+        reply_to:REMETENTE_PROPOSTA,
+      };
+      return window.emailjs.send(cfg.serviceId,cfg.templateId,templateParams);
+    }).then(function(){
+      setEnviandoEmailProposta(false);
+      /* Só sobe status pra "Enviada" se ainda estava em rascunho — reenviar uma proposta já
+         marcada como "Aceita"/"Recusada" não deve voltar o status pra trás. */
+      var statusAtual=(form.status||"rascunho");
+      if(statusAtual==="rascunho")atualizarStatus(form,"enviada");
+      alert("✅ Proposta enviada para "+form.clienteEmail+"!");
+    }).catch(function(e){
+      setEnviandoEmailProposta(false);
+      alert("❌ Erro ao enviar a proposta: "+(e&&e.text||e&&e.message||JSON.stringify(e)));
+    });
   };
 
   /* ========== VIEW: LIST ========== */
@@ -28987,6 +29060,7 @@ function PropostasView({data,dispatch}){
     setGerandoPPTX(false);
   }
 }}>{gerandoPPTX?"⏳ Gerando...":"📊 Gerar PowerPoint"}</Bt>
+            <Bt v="secondary" disabled={enviandoEmailProposta} onClick={enviarPropostaPorEmail} title={form.clienteEmail?"Enviar pro e-mail: "+form.clienteEmail:"Informe o e-mail do cliente na etapa 1 antes de enviar"}>{enviandoEmailProposta?"⏳ Enviando...":"📧 Enviar por E-mail"}</Bt>
             <Bt onClick={function(){
   var el=document.getElementById("proposta-print");
   if(!el){alert("Apresentação não encontrada");return;}
@@ -33049,7 +33123,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '434';
+  var SW_VERSION = '435';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
