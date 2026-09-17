@@ -29241,7 +29241,7 @@ function PropostasView({data,dispatch}){
                       <div style={{fontSize:22,fontWeight:800,color:"#0A1628",fontFamily:"'JetBrains Mono'"}}>{fm(form.reservaEmergencia||0)}</div>
                       <div style={{fontSize:11,color:mesesReserva<3?"#DC2626":mesesReserva<6?"#D97706":"#0F9960",fontWeight:700,marginTop:4}}>
                         {mesesReserva.toFixed(1)} meses de despesas
-                        {mesesReserva<3?" — ATENÇÃO":mesesReserva<6?" — Pode melhorar":" — Ideal ✓"}
+                        {mesesReserva<3?": ATENÇÃO":mesesReserva<6?": Pode melhorar":": Ideal ✓"}
                       </div>
                     </div>
                     <div style={{background:"#fff",padding:"18px 20px",borderRadius:12,boxShadow:"0 2px 10px rgba(0,0,0,0.04)"}}>
@@ -29436,7 +29436,7 @@ function PropostasView({data,dispatch}){
                   <span style={{fontSize:11,color:accent,fontWeight:700,letterSpacing:3.5}}>04 · RETORNO DO INVESTIMENTO</span>
                 </div>
                 <div style={{fontSize:42,fontWeight:900,color:"#0A1628",marginBottom:14,lineHeight:1.05,letterSpacing:-1.2,position:"relative"}}>Em quanto tempo a consultoria se paga?</div>
-                <div style={{fontSize:14,color:"#5a5a6e",marginBottom:28,lineHeight:1.6}}>A melhoria da sua carteira — fruto de uma estratégia profissional e um planejamento bem feito — gera ganhos que superam o valor da consultoria em poucos meses.</div>
+                <div style={{fontSize:14,color:"#5a5a6e",marginBottom:28,lineHeight:1.6}}>A melhoria da sua carteira, fruto de uma estratégia profissional e um planejamento bem feito, gera ganhos que superam o valor da consultoria em poucos meses.</div>
 
                 <div style={{background:"linear-gradient(135deg,#0A1628 0%,#1A2842 100%)",color:"#fff",padding:"28px 32px",borderRadius:14,marginBottom:22}}>
                   <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:20,marginBottom:18}}>
@@ -29531,7 +29531,7 @@ function PropostasView({data,dispatch}){
                 <div style={{padding:"14px 18px",background:"#FEF9E7",borderRadius:10,borderLeft:"3px solid "+accent}}>
                   <div style={{fontSize:10,color:"#B8860B",fontWeight:700,marginBottom:4,letterSpacing:1}}>⚠ AVISO SOBRE PROJEÇÕES</div>
                   <div style={{fontSize:10,color:"#5a5a6e",lineHeight:1.5}}>
-                    As projeções acima são <strong>meramente ilustrativas</strong> e consideram os percentuais informados. <strong>Não constituem promessa nem garantia de rentabilidade futura.</strong> Investimentos envolvem riscos; rentabilidades passadas não garantem resultados futuros. A CourInvest atua como consultoria independente — o resultado real depende de condições de mercado, execução disciplinada e fatores externos.
+                    As projeções acima são <strong>meramente ilustrativas</strong> e consideram os percentuais informados. <strong>Não constituem promessa nem garantia de rentabilidade futura.</strong> Investimentos envolvem riscos; rentabilidades passadas não garantem resultados futuros. A CourInvest atua como consultoria independente: o resultado real depende de condições de mercado, execução disciplinada e fatores externos.
                   </div>
                 </div>
               </div>
@@ -29638,7 +29638,7 @@ function PropostasView({data,dispatch}){
                       <div style={{fontSize:12,fontWeight:700,color:accent,letterSpacing:1}}>PAGAMENTO ÚNICO</div>
                     </div>
                     <div style={{fontSize:12,color:"#8B9DC3",lineHeight:1.6}}>
-                      Consultoria é um <strong style={{color:"#fff"}}>trabalho pontual</strong>, cobrado em pagamento único pelas três sessões. Não há mensalidade nem compromisso recorrente — você recebe o plano completo e a implementação, ficando livre para seguir de forma autônoma após isso.
+                      Consultoria é um <strong style={{color:"#fff"}}>trabalho pontual</strong>, cobrado em pagamento único pelas três sessões. Não há mensalidade nem compromisso recorrente, você recebe o plano completo e a implementação, ficando livre para seguir de forma autônoma após isso.
                     </div>
                   </>
                 ):(
@@ -29648,7 +29648,7 @@ function PropostasView({data,dispatch}){
                       <div style={{fontSize:12,fontWeight:700,color:accent,letterSpacing:1}}>COBRANÇA RECORRENTE NO CARTÃO DE CRÉDITO</div>
                     </div>
                     <div style={{fontSize:12,color:"#8B9DC3",lineHeight:1.6}}>
-                      A taxa fixa mensal é debitada automaticamente no cartão de crédito cadastrado, garantindo <strong style={{color:"#fff"}}>praticidade, transparência e previsibilidade</strong>. Sem surpresas e sem burocracia — você foca nos seus objetivos enquanto cuidamos de tudo.
+                      A taxa fixa mensal é debitada automaticamente no cartão de crédito cadastrado, garantindo <strong style={{color:"#fff"}}>praticidade, transparência e previsibilidade</strong>. Sem surpresas e sem burocracia, você foca nos seus objetivos enquanto cuidamos de tudo.
                     </div>
                   </>
                 )}
@@ -29949,7 +29949,7 @@ function PropostasView({data,dispatch}){
         {wizard===3 && (
           <Cd style={{padding:24}} hov={false}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
-              <div style={{fontSize:14,fontWeight:700,color:T.gold}}>3. Diagnóstico — {SERVICOS_CI[form.servico].nome}</div>
+              <div style={{fontSize:14,fontWeight:700,color:T.gold}}>3. Diagnóstico: {SERVICOS_CI[form.servico].nome}</div>
               <span style={{fontSize:9,color:T.t3,padding:"3px 8px",background:SERVICOS_CI[form.servico].cor+"22",borderRadius:4,color:SERVICOS_CI[form.servico].cor}}>{SERVICOS_CI[form.servico].icone} campos específicos</span>
             </div>
 
@@ -30217,7 +30217,7 @@ function PropostasView({data,dispatch}){
                   <div>
                     <div style={{fontSize:11,fontWeight:700,color:T.cyan}}>🎯 Cliente prefere Consultoria Pontual (mesmo com patrimônio acima de R$ 200k)</div>
                     <div style={{fontSize:10,color:T.t3,marginTop:2,lineHeight:1.5}}>
-                      Cobra <strong style={{color:T.t1}}>1% do patrimônio total</strong> = <strong style={{color:T.green}}>{fm(form.valorPatrimonio*0.01)}</strong> — pagamento único.
+                      Cobra <strong style={{color:T.t1}}>1% do patrimônio total</strong> = <strong style={{color:T.green}}>{fm(form.valorPatrimonio*0.01)}</strong>, pagamento único.
                     </div>
                   </div>
                 </label>
@@ -30269,7 +30269,7 @@ function PropostasView({data,dispatch}){
             ):form.servico==="consultoria"?(
               
               <div style={{marginBottom:16}}>
-                <div style={{fontSize:11,fontWeight:700,color:T.green,marginBottom:10,letterSpacing:.5}}>🎯 PRECIFICAÇÃO — TRABALHO PONTUAL</div>
+                <div style={{fontSize:11,fontWeight:700,color:T.green,marginBottom:10,letterSpacing:.5}}>🎯 PRECIFICAÇÃO: TRABALHO PONTUAL</div>
                 <div style={{padding:"12px 14px",background:"rgba(45,212,160,0.05)",borderRadius:8,border:"1px solid rgba(45,212,160,0.15)",marginBottom:12}}>
                   <div style={{fontSize:10,color:T.green,fontWeight:700,marginBottom:4}}>📋 ESCOPO DO TRABALHO</div>
                   <div style={{fontSize:11,color:T.t2,lineHeight:1.5}}>
@@ -32922,7 +32922,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '430';
+  var SW_VERSION = '431';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
