@@ -26713,6 +26713,19 @@ function precoConsultoria(patrimonio){
   var excedente=p-500000;
   return{tipo:"percentual",valor:Math.min(basePatamar+excedente*0.006,teto),base:p,excedente:excedente,pct:0.6,valorPix:null,teto:teto};
 }
+/* Consultoria PJ (trabalho pontual, 4 etapas) — faixas fixas por faturamento ANUAL da empresa, vigente a partir da v444 (alinhada à aba Propostas na v448):
+   - Até R$500 mil/ano: R$8.000 fixo (R$7.600 no PIX, 5% off)
+   - R$500 mil a R$2 milhões/ano: R$14.000 fixo (R$13.300 no PIX)
+   - R$2 milhões a R$10 milhões/ano: R$22.000 fixo (R$20.900 no PIX)
+   - Acima de R$10 milhões/ano: R$32.000 fixo (R$30.400 no PIX)
+*/
+function precoConsultoriaPJ(faturamentoAnual){
+  var f=faturamentoAnual||0;
+  var valor=f<=500000?8000:f<=2000000?14000:f<=10000000?22000:32000;
+  var faixaIdx=f<=500000?0:f<=2000000?1:f<=10000000?2:3;
+  var valorPix=Math.round(valor*0.95*100)/100;
+  return{tipo:"fixo",valor:valor,valorPix:valorPix,base:f,faixaIdx:faixaIdx};
+}
 const TABELA_TX_GP=[
   {de:0,ate:200000,tx:0.15,label:"Até R$ 200 mil"},
   {de:200000,ate:1000000,tx:0.15,label:"R$ 200 mil a R$ 1 milhão"},
@@ -26751,6 +26764,17 @@ const SERVICOS_CI={
     descricao:"Consultoria financeira independente realizada em três sessões estruturadas. Na primeira, diagnóstico completo da carteira. Na segunda, definição da nova estratégia de investimentos. Na terceira, execução prática das recomendações. Um trabalho pontual para quem busca orientação qualificada sem compromisso recorrente.",
     entregas:["Análise completa da carteira de investimentos atual","Diagnóstico profissional com pontos de melhoria","Estratégia personalizada de otimização","Recomendações de realocação fundamentadas","Execução da estratégia definida","Orientação tributária dos investimentos","Material de suporte para decisões futuras"],
     metodologia:[{t:"Sessão 1: Diagnóstico",d:"Análise profunda da carteira atual e identificação de oportunidades de melhoria"},{t:"Sessão 2: Definição da Estratégia",d:"Construção da nova estratégia de investimentos, com as recomendações de realocação fundamentadas"},{t:"Sessão 3: Execução",d:"Implementação prática da estratégia planejada, com todas as recomendações devidamente operacionalizadas"}]
+  },
+  consultoriaPJ:{
+    id:"consultoria",
+    nome:"Consultoria Financeira PJ",
+    cor:"#9B8BD0",
+    icone:"🧭",
+    publico:"Empresas que buscam organizar as finanças e estruturar um plano de ação pontual",
+    headline:"Trabalho pontual de diagnóstico e organização financeira da empresa",
+    descricao:"Consultoria financeira pontual para empresas, realizada em quatro etapas estruturadas. Na primeira, levantamento dos dados financeiros, contábeis e societários. Na segunda, diagnóstico completo da situação financeira. Na terceira, construção do plano de ação. Na quarta, apoio na execução das principais recomendações. Um trabalho pontual para quem busca organizar as finanças da empresa sem compromisso recorrente.",
+    entregas:["Levantamento completo dos dados financeiros e contábeis","Diagnóstico profissional de caixa, fluxo e endividamento","Plano de ação com prioridades e metas práticas","Recomendações fundamentadas para organizar as finanças","Apoio na implementação das principais recomendações","Indicadores para acompanhar a saúde financeira da empresa","Material de suporte para decisões futuras"],
+    metodologia:[{t:"Etapa 1: Levantamento de Dados",d:"Coleta das informações financeiras, contábeis e societárias da empresa, necessárias para o diagnóstico"},{t:"Etapa 2: Diagnóstico",d:"Levantamento completo da situação financeira da empresa: caixa, fluxo, endividamento e indicadores"},{t:"Etapa 3: Plano de Ação",d:"Construção do plano com prioridades, metas e recomendações práticas para organizar as finanças"},{t:"Etapa 4: Execução",d:"Apoio na implementação das principais recomendações, com acompanhamento próximo da equipe"}]
   }
 };
 
@@ -28672,7 +28696,7 @@ var ApresentacaoGP=function(){
   if(!el){alert("Apresentação não encontrada");return;}
   setGerandoPPTX(true);
   try{
-    var nomeTab={institucional:"institucional",gp:"gestao-patrimonio",gf:"gestao-financeira",gfpj:"gestao-financeira-pj",cf:"consultoria-financeira"}[apres]||"comercial";
+    var nomeTab={institucional:"institucional",gp:"gestao-patrimonio",gf:"gestao-financeira",gfpj:"gestao-financeira-pj",cf:"consultoria-financeira",cpj:"consultoria-pj"}[apres]||"comercial";
     await gerarPPTXDeSlides(el,"courinvest-apresentacao-"+nomeTab+".pptx");
   }finally{
     setGerandoPPTX(false);
@@ -28944,7 +28968,7 @@ var ApresentacaoGP=function(){
           </div>
         </div>
 
-        {/* ===== PÁGINA 6: SOLUÇÃO - 4 SERVIÇOS ===== */}
+        {/* ===== PÁGINA 6: SOLUÇÃO - 5 SERVIÇOS ===== */}
         <div className="pp-page" style={{padding:"70px 60px",background:"linear-gradient(180deg,#FAFBFD 0%,#E8EDF5 100%)",pageBreakBefore:"always",position:"relative",overflow:"hidden"}}>
           <div style={{position:"absolute",top:40,left:-80,opacity:0.04,pointerEvents:"none"}}>
             <CourinvestPattern opacity={0.6} size={340} color="#D4A328"/>
@@ -28953,17 +28977,18 @@ var ApresentacaoGP=function(){
             <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,#D4A328)"}}/>
             <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:3.5}}>NOSSA SOLUÇÃO</span>
           </div>
-          <div style={{fontSize:48,fontWeight:900,color:"#0A1628",lineHeight:1.05,letterSpacing:-1.5,marginBottom:10,position:"relative"}}>Quatro caminhos, <span style={{color:"#D4A328"}}>um destino</span>.</div>
-          <div style={{fontSize:15,color:"#5a5a6e",lineHeight:1.7,marginBottom:36,maxWidth:620,position:"relative"}}>Cada cliente, pessoa física ou empresa, está em um momento diferente da vida financeira. Por isso desenhamos quatro frentes de atuação, para encontrar você onde você está.</div>
+          <div style={{fontSize:48,fontWeight:900,color:"#0A1628",lineHeight:1.05,letterSpacing:-1.5,marginBottom:10,position:"relative"}}>Cinco caminhos, <span style={{color:"#D4A328"}}>um destino</span>.</div>
+          <div style={{fontSize:15,color:"#5a5a6e",lineHeight:1.7,marginBottom:36,maxWidth:620,position:"relative"}}>Cada cliente, pessoa física ou empresa, está em um momento diferente da vida financeira. Por isso desenhamos cinco frentes de atuação, para encontrar você onde você está.</div>
 
           <div style={{display:"flex",flexDirection:"column",gap:12,position:"relative"}}>
             {[
               {id:"gp",ic:"💎",n:"Gestão de Patrimônio",col:"#D4A328",publico:"Investidores com patrimônio a partir de R$ 200 mil",tagline:"Gestão ativa da sua carteira por profissionais certificados",d:"Estratégia, destinação e execução do patrimônio com taxa regressiva. Para quem já construiu capital e quer uma gestão profissional dedicada."},
               {id:"gf",ic:"📈",n:"Gestão Financeira",col:"#38BDF8",publico:"Pessoas, casais e famílias",tagline:"Organização, controle e crescimento sustentável",d:"Planejamento financeiro completo com acompanhamento mensal. Ideal para quem busca equilibrar as finanças do dia a dia e construir reservas consistentes."},
               {id:"gfpj",ic:"🏢",n:"Gestão Financeira PJ",col:"#2DD4A0",publico:"Pequenos negócios, empresas em crescimento e holdings",tagline:"Organização, fluxo de caixa e visão estratégica",d:"Planejamento financeiro empresarial com acompanhamento mensal. Para empresas que querem crescer com controle, sem perder o sono com o financeiro."},
-              {id:"cf",ic:"🎯",n:"Consultoria Financeira",col:"#A78BFA",publico:"Investidores que buscam orientação pontual",tagline:"Três sessões: Diagnóstico + Estratégia + Execução",d:"Trabalho pontual de análise e otimização da carteira. Para quem quer uma segunda opinião qualificada e implementação prática, sem compromisso recorrente."}
+              {id:"cf",ic:"🎯",n:"Consultoria Financeira",col:"#A78BFA",publico:"Investidores que buscam orientação pontual",tagline:"Três sessões: Diagnóstico + Estratégia + Execução",d:"Trabalho pontual de análise e otimização da carteira. Para quem quer uma segunda opinião qualificada e implementação prática, sem compromisso recorrente."},
+              {id:"cpj",ic:"🧭",n:"Consultoria PJ",col:"#F472B6",publico:"Empresas que buscam organização financeira pontual",tagline:"Quatro etapas: Levantamento + Diagnóstico + Plano + Execução",d:"Trabalho pontual de diagnóstico e organização financeira da empresa. Para quem quer um plano de ação estruturado e implementação prática, sem compromisso recorrente."}
             ].map(function(s,i){
-              var pdfSlug={gp:"gestao-patrimonio",gf:"gestao-financeira",gfpj:"gestao-financeira-pj",cf:"consultoria-financeira"}[s.id];
+              var pdfSlug={gp:"gestao-patrimonio",gf:"gestao-financeira",gfpj:"gestao-financeira-pj",cf:"consultoria-financeira",cpj:"consultoria-pj"}[s.id];
               var pdfUrl="https://courinvest67-eng.github.io/courinvest-hub/courinvest-apresentacao-"+pdfSlug+".pdf";
               return (
               <a key={s.id} href={pdfUrl} target="_blank" rel="noopener noreferrer" onClick={function(e){e.preventDefault();sApres(s.id);window.scrollTo({top:0,behavior:"smooth"});}} title={"Ver apresentação completa de "+s.n} style={{display:"flex",gap:20,alignItems:"stretch",background:"#fff",borderRadius:16,boxShadow:"0 4px 20px rgba(10,22,40,0.06)",overflow:"hidden",cursor:"pointer",transition:"box-shadow 0.2s, transform 0.2s",textDecoration:"none",color:"inherit"}} onMouseEnter={function(e){e.currentTarget.style.boxShadow="0 8px 28px rgba(10,22,40,0.14)";e.currentTarget.style.transform="translateY(-2px)";}} onMouseLeave={function(e){e.currentTarget.style.boxShadow="0 4px 20px rgba(10,22,40,0.06)";e.currentTarget.style.transform="translateY(0)";}}>
@@ -29377,10 +29402,12 @@ function PropostasView({data,dispatch}){
        que as 3 já usam de verdade), só a Consultoria muda pra teal. Texturas de fundo bem sutis
        (os glows/pontinhos em rgba de baixa opacidade) continuam dourados propositalmente — são
        decoração de marca, não identidade do serviço. */
-    var accent=ehConsultoria?"#2DD4A0":"#D4A328";
-    var accentLight=ehConsultoria?"#5EEAC1":"#F5C94B";
+    var ehConsultoriaPJ=ehConsultoria && form.tipoConsultoria==="pj";
+    if(ehConsultoriaPJ)serv=SERVICOS_CI.consultoriaPJ;
+    var accent=ehConsultoriaPJ?"#9B8BD0":ehConsultoria?"#2DD4A0":"#D4A328";
+    var accentLight=ehConsultoriaPJ?"#C4B8EA":ehConsultoria?"#5EEAC1":"#F5C94B";
     if(form.servico==="patrimonio"){recMes=(form.valorPatrimonio||0)*(form.taxaMensal||0)/100;}
-    else if(ehConsultoria){recMes=precoConsultoria(form.valorPatrimonio).valor;}
+    else if(ehConsultoria){recMes=form.tipoConsultoria==="pj"?precoConsultoriaPJ(form.faturamento).valor:precoConsultoria(form.valorPatrimonio).valor;}
     else{recMes=form.feeFixo||0;}
     return (
       <div>
@@ -29440,7 +29467,7 @@ function PropostasView({data,dispatch}){
                 <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:24}}>
                   <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,"+accent+")"}}/>
                   <span style={{fontSize:11,color:accent,fontWeight:700,letterSpacing:4}}>PROPOSTA COMERCIAL</span>
-                  <span style={{fontSize:9,color:"#8B9DC3",padding:"3px 10px",border:"1px solid rgba(212,163,40,0.3)",borderRadius:20,letterSpacing:1.5}}>{serv.icone} {form.servico==="patrimonio"?"GP":form.servico==="financeira"?"GF":"CF"}</span>
+                  <span style={{fontSize:9,color:"#8B9DC3",padding:"3px 10px",border:"1px solid rgba(212,163,40,0.3)",borderRadius:20,letterSpacing:1.5}}>{serv.icone} {form.servico==="patrimonio"?"GP":form.servico==="financeira"?"GF":ehConsultoriaPJ?"CF PJ":"CF"}</span>
                 </div>
 
                 {}
@@ -29730,7 +29757,7 @@ function PropostasView({data,dispatch}){
                       {form.cnpj && <div style={{fontSize:12,color:"#5a5a6e",fontFamily:"'JetBrains Mono'",marginBottom:14}}>CNPJ: {form.cnpj}</div>}
                       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:14,marginTop:14,paddingTop:14,borderTop:"1px solid #e5e7eb"}}>
                         {form.segmento && <div><div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:3}}>SEGMENTO</div><div style={{fontSize:14,fontWeight:700,color:"#0A1628"}}>{form.segmento}</div></div>}
-                        {form.faturamento>0 && <div><div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:3}}>FATURAMENTO/MÊS</div><div style={{fontSize:16,fontWeight:800,color:"#0F9960",fontFamily:"'JetBrains Mono'"}}>{fm(form.faturamento)}</div></div>}
+                        {form.faturamento>0 && <div><div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:3}}>FATURAMENTO ANUAL</div><div style={{fontSize:16,fontWeight:800,color:"#0F9960",fontFamily:"'JetBrains Mono'"}}>{fm(form.faturamento)}</div></div>}
                         {form.funcionarios>0 && <div><div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:3}}>FUNCIONÁRIOS</div><div style={{fontSize:16,fontWeight:800,color:"#0A1628",fontFamily:"'JetBrains Mono'"}}>{form.funcionarios}</div></div>}
                         {form.capitalGiro>0 && <div><div style={{fontSize:9,color:"#8B9DC3",fontWeight:700,letterSpacing:1,marginBottom:3}}>CAPITAL DISPONÍVEL</div><div style={{fontSize:16,fontWeight:800,color:accent,fontFamily:"'JetBrains Mono'"}}>{fm(form.capitalGiro)}</div></div>}
                       </div>
@@ -30000,6 +30027,10 @@ function PropostasView({data,dispatch}){
                   ("Taxa de "+(form.taxaMensal||0).toFixed(3)+"% a.m. sobre patrimônio de "+fm(form.valorPatrimonio||0)+" (tabela regressiva)."):
                  ehConsultoria?
                   (function(){
+                    if(form.tipoConsultoria==="pj"){
+                      var pcPJ=precoConsultoriaPJ(form.faturamento||0);
+                      return "Valor fixo de "+fm(pcPJ.valor)+" ("+fm(pcPJ.valorPix)+" à vista no PIX, 5% de desconto), conforme a faixa de faturamento anual da empresa. Pagamento único pelo trabalho pontual.";
+                    }
                     var pcTxt=precoConsultoria(form.valorPatrimonio||0);
                     if(pcTxt.tipo==="fixo")return "Valor fixo para patrimônios até R$ 150.000 (R$ "+pcTxt.valorPix.toFixed(2).replace(".",",")+" à vista no PIX, 5% de desconto). Pagamento único pelo trabalho pontual.";
                     if(pcTxt.pct===1.0)return "1% sobre patrimônio sob consultoria de "+fm(form.valorPatrimonio||0)+". Pagamento único.";
@@ -30030,22 +30061,23 @@ function PropostasView({data,dispatch}){
               {ehConsultoria && (
                 <div style={{marginTop:16,paddingTop:16,borderTop:"1px solid rgba(255,255,255,0.1)"}}>
                   <div style={{fontSize:10,color:accent,fontWeight:700,letterSpacing:2,marginBottom:10}}>📋 ESCOPO DO TRABALHO</div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-                    <div style={{padding:"12px 14px",background:"rgba(45,212,160,0.1)",borderRadius:8,borderLeft:"3px solid #2DD4A0"}}>
-                      <div style={{fontSize:10,color:"#2DD4A0",fontWeight:700,letterSpacing:1,marginBottom:4}}>1ª SESSÃO</div>
-                      <div style={{fontSize:11,color:"#fff",fontWeight:700,marginBottom:2}}>Diagnóstico</div>
-                      <div style={{fontSize:10,color:"#8B9DC3",lineHeight:1.4}}>Análise da carteira atual e identificação de oportunidades de melhoria</div>
-                    </div>
-                    <div style={{padding:"12px 14px",background:"rgba(45,212,160,0.1)",borderRadius:8,borderLeft:"3px solid #2DD4A0"}}>
-                      <div style={{fontSize:10,color:"#2DD4A0",fontWeight:700,letterSpacing:1,marginBottom:4}}>2ª SESSÃO</div>
-                      <div style={{fontSize:11,color:"#fff",fontWeight:700,marginBottom:2}}>Definição da Estratégia</div>
-                      <div style={{fontSize:10,color:"#8B9DC3",lineHeight:1.4}}>Construção da nova estratégia, com as recomendações de realocação fundamentadas</div>
-                    </div>
-                    <div style={{padding:"12px 14px",background:"rgba(45,212,160,0.1)",borderRadius:8,borderLeft:"3px solid #2DD4A0"}}>
-                      <div style={{fontSize:10,color:"#2DD4A0",fontWeight:700,letterSpacing:1,marginBottom:4}}>3ª SESSÃO</div>
-                      <div style={{fontSize:11,color:"#fff",fontWeight:700,marginBottom:2}}>Execução</div>
-                      <div style={{fontSize:10,color:"#8B9DC3",lineHeight:1.4}}>Implementação prática da estratégia planejada</div>
-                    </div>
+                  <div style={{display:"grid",gridTemplateColumns:ehConsultoriaPJ?"1fr 1fr 1fr 1fr":"1fr 1fr 1fr",gap:10}}>
+                    {(ehConsultoriaPJ?[
+                      {n:"ETAPA 1",t:"Levantamento de Dados",d:"Coleta das informações financeiras, contábeis e societárias da empresa"},
+                      {n:"ETAPA 2",t:"Diagnóstico",d:"Levantamento completo da situação financeira: caixa, fluxo, endividamento e indicadores"},
+                      {n:"ETAPA 3",t:"Plano de Ação",d:"Construção do plano com prioridades, metas e recomendações práticas"},
+                      {n:"ETAPA 4",t:"Execução",d:"Apoio na implementação das principais recomendações"}
+                    ]:[
+                      {n:"1ª SESSÃO",t:"Diagnóstico",d:"Análise da carteira atual e identificação de oportunidades de melhoria"},
+                      {n:"2ª SESSÃO",t:"Definição da Estratégia",d:"Construção da nova estratégia, com as recomendações de realocação fundamentadas"},
+                      {n:"3ª SESSÃO",t:"Execução",d:"Implementação prática da estratégia planejada"}
+                    ]).map(function(et,i){return(
+                      <div key={i} style={{padding:"12px 14px",background:accent+"1A",borderRadius:8,borderLeft:"3px solid "+accent}}>
+                        <div style={{fontSize:10,color:accent,fontWeight:700,letterSpacing:1,marginBottom:4}}>{et.n}</div>
+                        <div style={{fontSize:11,color:"#fff",fontWeight:700,marginBottom:2}}>{et.t}</div>
+                        <div style={{fontSize:10,color:"#8B9DC3",lineHeight:1.4}}>{et.d}</div>
+                      </div>
+                    );})}
                   </div>
                 </div>
               )}
@@ -30057,9 +30089,9 @@ function PropostasView({data,dispatch}){
                       <div style={{fontSize:12,fontWeight:700,color:accent,letterSpacing:1}}>PAGAMENTO ÚNICO</div>
                     </div>
                     <div style={{fontSize:12,color:"#8B9DC3",lineHeight:1.6}}>
-                      Consultoria é um <strong style={{color:"#fff"}}>trabalho pontual</strong>, cobrado em pagamento único pelas três sessões. Não há mensalidade nem compromisso recorrente, você recebe o plano completo e a implementação, ficando livre para seguir de forma autônoma após isso.
-                      {precoConsultoria(form.valorPatrimonio||0).tipo==="fixo" && (
-                        <><br/><strong style={{color:accentLight}}>Pagando à vista no PIX, o valor sai com 5% de desconto</strong> ({fm(precoConsultoria(form.valorPatrimonio||0).valorPix)} em vez de {fm(precoConsultoria(form.valorPatrimonio||0).valor)}).</>
+                      Consultoria é um <strong style={{color:"#fff"}}>trabalho pontual</strong>, cobrado em pagamento único pelas {ehConsultoriaPJ?"quatro etapas":"três sessões"}. Não há mensalidade nem compromisso recorrente, você recebe o plano completo e a implementação, ficando livre para seguir de forma autônoma após isso.
+                      {(ehConsultoriaPJ?precoConsultoriaPJ(form.faturamento||0):precoConsultoria(form.valorPatrimonio||0)).tipo==="fixo" && (
+                        <><br/><strong style={{color:accentLight}}>Pagando à vista no PIX, o valor sai com 5% de desconto</strong> ({fm((ehConsultoriaPJ?precoConsultoriaPJ(form.faturamento||0):precoConsultoria(form.valorPatrimonio||0)).valorPix)} em vez de {fm((ehConsultoriaPJ?precoConsultoriaPJ(form.faturamento||0):precoConsultoria(form.valorPatrimonio||0)).valor)}).</>
                       )}
                     </div>
                   </>
@@ -30357,7 +30389,7 @@ function PropostasView({data,dispatch}){
             )}
 
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:12,marginBottom:20}}>
-              {Object.values(SERVICOS_CI).map(function(s){
+              {["patrimonio","financeira","consultoria"].map(function(k){return SERVICOS_CI[k];}).map(function(s){
                 var sel=form.servico===s.id;
                 return (
                   <div key={s.id} onClick={function(){upF("servico",s.id);upF("_servicoAutoSugerido",false);}} style={{padding:20,borderRadius:12,border:sel?"2px solid "+s.cor:"1px solid "+T.bdrL,background:sel?s.cor+"11":T.w3,cursor:"pointer",transition:"all 0.2s"}}>
@@ -30553,8 +30585,8 @@ function PropostasView({data,dispatch}){
                         <input value={form.segmento||""} onChange={function(e){upF("segmento",e.target.value)}} placeholder="Ex: Varejo, Serviços..." style={inpS}/>
                       </div>
                       <div>
-                        <div style={{fontSize:10,color:T.t3,fontWeight:600,marginBottom:4}}>FATURAMENTO MENSAL (R$)</div>
-                        <input type="number" step="10000" value={form.faturamento||0} onChange={function(e){upF("faturamento",+e.target.value||0)}} style={{...inpS,color:T.green,fontWeight:700,fontFamily:"'JetBrains Mono'"}}/>
+                        <div style={{fontSize:10,color:T.t3,fontWeight:600,marginBottom:4}}>FATURAMENTO ANUAL (R$)</div>
+                        <input type="number" step="50000" value={form.faturamento||0} onChange={function(e){upF("faturamento",+e.target.value||0)}} style={{...inpS,color:T.green,fontWeight:700,fontFamily:"'JetBrains Mono'"}}/>
                       </div>
                       <div>
                         <div style={{fontSize:10,color:T.t3,fontWeight:600,marginBottom:4}}>FUNCIONÁRIOS</div>
@@ -30699,6 +30731,56 @@ function PropostasView({data,dispatch}){
               </div>
             ):form.servico==="consultoria"?(
               
+              form.tipoConsultoria==="pj" ? (
+                <div style={{marginBottom:16}}>
+                  <div style={{fontSize:11,fontWeight:700,color:T.purple,marginBottom:10,letterSpacing:.5}}>🎯 PRECIFICAÇÃO: TRABALHO PONTUAL (PJ)</div>
+                  <div style={{padding:"12px 14px",background:"rgba(155,139,208,0.06)",borderRadius:8,border:"1px solid rgba(155,139,208,0.2)",marginBottom:12}}>
+                    <div style={{fontSize:10,color:T.purple,fontWeight:700,marginBottom:4}}>📋 ESCOPO DO TRABALHO</div>
+                    <div style={{fontSize:11,color:T.t2,lineHeight:1.5}}>
+                      <strong style={{color:T.purple}}>Etapa 1</strong>: Levantamento de Dados<br/>
+                      <strong style={{color:T.purple}}>Etapa 2</strong>: Diagnóstico<br/>
+                      <strong style={{color:T.purple}}>Etapa 3</strong>: Plano de Ação<br/>
+                      <strong style={{color:T.purple}}>Etapa 4</strong>: Execução
+                    </div>
+                  </div>
+
+                  <div style={{fontSize:10,color:T.t3,marginBottom:8}}>Cálculo automático baseado no faturamento anual da empresa:</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:14}}>
+                    {(function(){
+                      var pc=precoConsultoriaPJ(form.faturamento);
+                      var faixas=[
+                        {l:"Até R$ 500 mil/ano",v:"R$ 8.000,00"},
+                        {l:"R$ 500 mil a R$ 2 milhões/ano",v:"R$ 14.000,00"},
+                        {l:"R$ 2 a R$ 10 milhões/ano",v:"R$ 22.000,00"},
+                        {l:"Acima de R$ 10 milhões/ano",v:"R$ 32.000,00"}
+                      ];
+                      return faixas.map(function(f,i){
+                        var faixaAtual=pc.faixaIdx===i;
+                        return (
+                          <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,background:faixaAtual?T.purpleD||"rgba(155,139,208,0.12)":"rgba(255,255,255,0.015)",border:faixaAtual?"1.5px solid "+T.purple:"1px solid "+T.bdrL}}>
+                            <div style={{flex:1,fontSize:12,fontWeight:faixaAtual?700:500,color:faixaAtual?T.purple:T.t2}}>{f.l}</div>
+                            <div style={{fontSize:14,fontWeight:800,color:faixaAtual?T.purple:T.t3,fontFamily:"'JetBrains Mono'"}}>{f.v}</div>
+                            {faixaAtual && <span style={{fontSize:8,fontWeight:700,color:T.purple,background:T.purple+"22",padding:"2px 6px",borderRadius:3}}>✓ APLICADA</span>}
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
+
+                  {}
+                  {(function(){
+                    var pc=precoConsultoriaPJ(form.faturamento);
+                    return (
+                      <div style={{padding:"14px 16px",background:"rgba(155,139,208,0.12)",border:"1px solid "+T.purple+"33",borderRadius:10}}>
+                        <div style={{fontSize:10,color:T.t3,fontWeight:600,letterSpacing:1,marginBottom:6}}>VALOR TOTAL DA CONSULTORIA</div>
+                        <div style={{fontSize:26,fontWeight:800,color:T.purple,fontFamily:"'JetBrains Mono'"}}>{fm(pc.valor)}</div>
+                        <div style={{fontSize:12,color:T.purple,fontWeight:700,marginTop:4}}>{fm(pc.valorPix)} à vista no PIX (5% off)</div>
+                        <div style={{fontSize:10,color:T.t3,marginTop:6,fontStyle:"italic"}}>Trabalho pontual com 4 etapas, pagamento único</div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              ) : (
               <div style={{marginBottom:16}}>
                 <div style={{fontSize:11,fontWeight:700,color:T.green,marginBottom:10,letterSpacing:.5}}>🎯 PRECIFICAÇÃO: TRABALHO PONTUAL</div>
                 <div style={{padding:"12px 14px",background:"rgba(45,212,160,0.05)",borderRadius:8,border:"1px solid rgba(45,212,160,0.15)",marginBottom:12}}>
@@ -30792,6 +30874,7 @@ function PropostasView({data,dispatch}){
                   );
                 })()}
               </div>
+              )
             ):(
               
               <div style={{marginBottom:16}}>
@@ -33485,7 +33568,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '448';
+  var SW_VERSION = '450';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
