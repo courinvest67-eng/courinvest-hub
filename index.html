@@ -865,10 +865,32 @@ const _comLimiteDeTempo=function(promessa,ms){
     });
   });
 };
-const gerarPPTXDeSlides=async function(containerEl,nomeArquivo){
-  if(!containerEl){alert("Conteúdo não encontrado pra gerar o PowerPoint.");return false;}
+const gerarPPTXDeSlides=async function(containerElVivo,nomeArquivo){
+  if(!containerElVivo){alert("Conteúdo não encontrado pra gerar o PowerPoint.");return false;}
   if(typeof window.html2canvas==="undefined"){alert("Biblioteca de captura (html2canvas) não carregou. Verifique sua conexão e tente novamente.");return false;}
   if(typeof window.PptxGenJS==="undefined"){alert("Biblioteca de PowerPoint (PptxGenJS) não carregou. Verifique sua conexão e tente novamente.");return false;}
+  /* CORREÇÃO (v438): "Unable to find element in cloned iframe" continuava acontecendo (v425 e v437
+     não resolveram — a causa real era outra). O Hub é uma SPA com sincronização em tempo real
+     (indicador "SYNC" no topo, ligado ao Firestore) — reproduzido isoladamente: se QUALQUER
+     atualização em tempo real disparar uma re-renderização do React ENQUANTO o html2canvas está
+     no meio de uma captura (mesmo em uma parte da árvore que nem aparece na tela), o React pode
+     recriar os nós do DOM da apresentação; o html2canvas guarda uma referência de ONDE o elemento
+     está pra "reencontrá-lo" dentro do clone temporário que ele cria, e se esse nó foi substituído
+     nesse meio-tempo, ele não encontra mais nada — exatamente esse erro. Testado e confirmado: ao
+     simular esse tipo de re-renderização durante a captura, o mesmíssimo erro (100% dos slides)
+     aparece; sem ele, nunca. Os outros dois recursos que já usam captura de tela (o botão "Imprimir
+     / Salvar PDF" e o PDF por e-mail) nunca tiveram esse problema por acaso: os dois já trabalham
+     em cima de uma CÓPIA desconectada (cloneNode / reconstrução via innerHTML), imune a qualquer
+     atualização do React durante o processo — só o PowerPoint ainda capturava os elementos "ao
+     vivo" da tela direto. Correção: clona o conteúdo pra fora da árvore do React ANTES de começar
+     (num wrapper fixo fora da tela) e captura sempre a partir dessa cópia parada no tempo — nunca
+     mais o elemento vivo, que pode mudar embaixo do html2canvas a qualquer momento. */
+  var _wrapperCloneOffscreen=document.createElement("div");
+  _wrapperCloneOffscreen.style.cssText="position:fixed;top:0;left:-99999px;width:"+(containerElVivo.offsetWidth||800)+"px;pointer-events:none;";
+  var containerEl=containerElVivo.cloneNode(true);
+  _wrapperCloneOffscreen.appendChild(containerEl);
+  document.body.appendChild(_wrapperCloneOffscreen);
+  try{
   var pageEls=Array.prototype.slice.call(containerEl.querySelectorAll(".pp-page"));
   if(pageEls.length===0){
     /* CORREÇÃO (v392): a Apresentação "Gestão Financeira" (mais antiga que as outras) nunca usou
@@ -1034,6 +1056,9 @@ const gerarPPTXDeSlides=async function(containerEl,nomeArquivo){
     console.warn("[PPTX] Falha ao gerar arquivo:",e);
     alert("Não foi possível gerar o arquivo PowerPoint. Tente novamente.");
     return false;
+  }
+  }finally{
+    try{document.body.removeChild(_wrapperCloneOffscreen);}catch(_e){}
   }
 };
 
@@ -33151,7 +33176,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '437';
+  var SW_VERSION = '438';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
