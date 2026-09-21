@@ -410,7 +410,14 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent){
              nível "retina" que 2x dava. Todo o resto do código (fatiamento de páginas altas,
              recorte de linha de tabela etc.) usa canvas.width/height medidos na hora, não um "2"
              fixo, então se ajusta sozinho a essa mudança. */
-          canvas=await window.html2canvas(pageEls[pi],{scale:1.5,useCORS:true,backgroundColor:"#ffffff"});
+          /* onclone (CORREÇÃO): faltava aqui o mesmo tratamento de texto em degradê/tema claro/
+             imagens quebradas que o gerarPPTXDeSlides já usa (ver _prepararGradienteTextoParaCaptura
+             e vizinhas, definidas mais acima) — sem isso, qualquer título ou valor com efeito de
+             "texto em degradê" (background-clip:text) sai com uma caixa sólida/distorcida atrás
+             das letras em vez do gradiente sutil (reportado com print: capa da proposta e o valor
+             "R$ 5.360,00" saindo visualmente quebrados no PDF do e-mail, apesar de saírem perfeitos
+             no "Imprimir/Salvar PDF" do navegador e na tela). */
+          canvas=await window.html2canvas(pageEls[pi],{scale:1.5,useCORS:true,backgroundColor:"#ffffff",onclone:function(_clonedDoc,clonedEl){_forcarTemaClaroParaCaptura(_clonedDoc);_prepararGradienteTextoParaCaptura(clonedEl);_prepararImagensQuebradasParaCaptura(clonedEl);}});
         }catch(_pageErr){
           console.warn("[PDF] Página "+pi+" falhou ao renderizar, pulando:",_pageErr);
           continue;
@@ -29180,7 +29187,7 @@ function PropostasView({data,dispatch}){
                 <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:24}}>
                   <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,"+accent+")"}}/>
                   <span style={{fontSize:11,color:accent,fontWeight:700,letterSpacing:4}}>PROPOSTA COMERCIAL</span>
-                  <span style={{fontSize:9,color:"#8B9DC3",padding:"3px 10px",border:"1px solid rgba(212,163,40,0.3)",borderRadius:20,letterSpacing:1.5}}>{serv.icone} {form.servico==="patrimonio"?"GP":form.servico==="financeira"?"GF":"CI"}</span>
+                  <span style={{fontSize:9,color:"#8B9DC3",padding:"3px 10px",border:"1px solid rgba(212,163,40,0.3)",borderRadius:20,letterSpacing:1.5}}>{serv.icone} {form.servico==="patrimonio"?"GP":form.servico==="financeira"?"GF":"CF"}</span>
                 </div>
 
                 {}
@@ -33225,7 +33232,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '441';
+  var SW_VERSION = '443';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
