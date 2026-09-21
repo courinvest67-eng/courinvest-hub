@@ -29743,7 +29743,7 @@ function PropostasView({data,dispatch}){
                     var pcTxt=precoConsultoria(form.valorPatrimonio||0);
                     if(pcTxt.tipo==="fixo")return "Valor fixo para patrimônios até R$ 150.000 (R$ "+pcTxt.valorPix.toFixed(2).replace(".",",")+" à vista no PIX, 5% de desconto). Pagamento único pelo trabalho pontual.";
                     if(pcTxt.pct===1.0)return "1% sobre patrimônio sob consultoria de "+fm(form.valorPatrimonio||0)+". Pagamento único.";
-                    return "R$ 5.000 + 0,6% sobre o que excede R$ 500.000 (patrimônio de "+fm(form.valorPatrimonio||0)+"), com teto de R$ 12.000. Pagamento único.";
+                    return "R$ 5.000 + 0,6% sobre o que excede R$ 500.000 (patrimônio de "+fm(form.valorPatrimonio||0)+"). Pagamento único.";
                   })():
                   "Fee fixo mensal pela prestação de serviço."}
               </div>
@@ -29836,7 +29836,7 @@ function PropostasView({data,dispatch}){
                 <div style={{fontSize:12,color:"#0F9960",fontWeight:800,letterSpacing:2.5}}>PRÓXIMOS PASSOS</div>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:18,position:"relative"}}>
-                {(form.servico==="financeira"?[{n:"1",t:"Grupo de Trabalho",d:"Criação do grupo no WhatsApp para alinhamento contínuo"},{n:"2",t:"Contrato",d:"Formalização do contrato de prestação de serviço"},{n:"3",t:"Reunião Inicial",d:"Reunião inicial do serviço"},{n:"4",t:"Integração Bancária",d:"Integração bancária de todas as contas"}]:[{n:"1",t:"Revisão",d:"Análise detalhada desta proposta"},{n:"2",t:"Alinhamento",d:"Reunião para esclarecimentos e ajustes"},{n:"3",t:"Assinatura",d:"Formalização do contrato de prestação"},{n:"4",t:"Início",d:"Começo dos trabalhos na data acordada"}]).map(function(p,i){return (
+                {(form.servico==="financeira"?[{n:"1",t:"Grupo de Trabalho",d:"Criação do grupo no WhatsApp para alinhamento contínuo"},{n:"2",t:"Contrato",d:"Formalização do contrato de prestação de serviço"},{n:"3",t:"Reunião Inicial",d:"Reunião inicial do serviço"},{n:"4",t:"Integração Bancária",d:"Integração bancária de todas as contas"}]:ehConsultoria?[{n:"1",t:"Análise da Proposta",d:"Revisão detalhada dos termos e valores propostos"},{n:"2",t:"Aceite",d:"Confirmação do aceite da proposta"},{n:"3",t:"Contrato e Pagamento",d:"Envio do contrato e do link para pagamento"},{n:"4",t:"Alinhamento",d:"Alinhamento da data da primeira sessão"}]:[{n:"1",t:"Revisão",d:"Análise detalhada desta proposta"},{n:"2",t:"Alinhamento",d:"Reunião para esclarecimentos e ajustes"},{n:"3",t:"Assinatura",d:"Formalização do contrato de prestação"},{n:"4",t:"Início",d:"Começo dos trabalhos na data acordada"}]).map(function(p,i){return (
                   <div key={i} style={{display:"flex",gap:12,alignItems:"flex-start",padding:"10px 12px",background:"#F7F8FB",borderRadius:10}}>
                     <div style={{width:32,height:32,flexShrink:0,background:"linear-gradient(135deg,#2DD4A0,#0F9960)",color:"#fff",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:900,boxShadow:"0 4px 12px rgba(45,212,160,0.3)"}}>{p.n}</div>
                     <div>
@@ -33225,7 +33225,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '440';
+  var SW_VERSION = '441';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
