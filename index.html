@@ -26650,15 +26650,16 @@ function NewsView({data,dispatch}){
 /* ============ PROPOSTAS COMERCIAIS ============ */
 
 /* === TABELA DE PREÇOS COURINVEST (vigente) ===
-   R$1 – R$100.000        → Consultoria Financeira Pontual → R$ 990 fixo
-   R$100.001 – R$200.000  → Consultoria Financeira Pontual → 1% do patrimônio
+   R$1 – R$150.000        → Consultoria Financeira Pontual → R$ 2.100 fixo (R$ 1.995 à vista no PIX, 5% off)
+   R$150.001 – R$200.000  → Consultoria Financeira Pontual → 1% do patrimônio
    R$200.001 – R$1.000.000→ Gestão de Patrimônio          → 0,15% a.m. (sobre o total)
    Acima de R$1.000.000   → Gestão de Patrimônio          → 0,10% a.m. (sobre o total)
-   Obs: cliente com pat > R$200k que opte por Consultoria → cobra 1% (pontual)
+   Obs: cliente com pat > R$200k que opte por Consultoria → cobra conforme faixa (precoConsultoria):
+        1% até R$500k, 0,6% (teto R$12.000) acima de R$500k
 */
 var TABELA_PRECOS_CI=[
-  {de:0,        ate:100000,  servico:"consultoria", tipo:"fixo",       valor:990,    label:"Consultoria Financeira (pontual)",pct:null,  txMes:null},
-  {de:100000,   ate:200000,  servico:"consultoria", tipo:"percentual",  valor:null,   label:"Consultoria Financeira (pontual)",pct:1.0,   txMes:null},
+  {de:0,        ate:150000,  servico:"consultoria", tipo:"fixo",       valor:2100,   label:"Consultoria Financeira (pontual)",pct:null,  txMes:null},
+  {de:150000,   ate:200000,  servico:"consultoria", tipo:"percentual",  valor:null,   label:"Consultoria Financeira (pontual)",pct:1.0,   txMes:null},
   {de:200000,   ate:1000000, servico:"patrimonio",  tipo:"taxa_mensal", valor:null,   label:"Gestão de Patrimônio",            pct:null,  txMes:0.15},
   {de:1000000,  ate:null,    servico:"patrimonio",  tipo:"taxa_mensal", valor:null,   label:"Gestão de Patrimônio",            pct:null,  txMes:0.10},
 ];
@@ -26682,14 +26683,23 @@ function txGestaoRegressiva(patrimonio){
   if(patrimonio<=1000000)return 0.15;
   return 0.10;
 }
-/* Consultoria Financeira (trabalho pontual, 3 sessões):
-   - patrimônio <= R$ 100k: valor fixo de R$ 990
-   - patrimônio > R$ 100k: 1% sobre o patrimônio (inclusive para pat > R$200k que escolha consultoria)
+/* Consultoria Financeira (trabalho pontual, 3 sessões) — vigente a partir de v439:
+   - patrimônio <= R$ 150k: valor fixo de R$ 2.100 (R$ 1.995 com 5% de desconto à vista no PIX)
+   - R$ 150k < patrimônio <= R$ 500k: 1% sobre o patrimônio (inclusive para pat > R$200k que escolha consultoria)
+   - patrimônio > R$ 500k: 0,6% sobre o patrimônio, com teto de R$ 12.000
 */
 function precoConsultoria(patrimonio){
   var p=patrimonio||0;
-  if(p<=100000)return{tipo:"fixo",valor:990,base:0,pct:0};
-  return{tipo:"percentual",valor:p*0.01,base:p,pct:1.0};
+  if(p<=150000){
+    var valorFixo=2100;
+    var valorPix=Math.round(valorFixo*0.95*100)/100;
+    return{tipo:"fixo",valor:valorFixo,valorPix:valorPix,base:0,pct:0,teto:null};
+  }
+  if(p<=500000){
+    return{tipo:"percentual",valor:p*0.01,base:p,pct:1.0,valorPix:null,teto:null};
+  }
+  var teto=12000;
+  return{tipo:"percentual",valor:Math.min(p*0.006,teto),base:p,pct:0.6,valorPix:null,teto:teto};
 }
 const TABELA_TX_GP=[
   {de:0,ate:200000,tx:0.15,label:"Até R$ 200 mil"},
@@ -27928,26 +27938,38 @@ function ApresentacaoView(){
           </div>
           <div style={{fontSize:36,fontWeight:900,color:C.navy,lineHeight:1.1,letterSpacing:-1,marginBottom:16}}>Preço <span style={{color:C.teal}}>simples e transparente.</span></div>
           <div style={{fontSize:15,color:"#4A5568",lineHeight:1.8,maxWidth:560,marginBottom:48}}>Transparência do início ao fim: o valor da consultoria acompanha o tamanho do seu patrimônio, sem surpresas.</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24,maxWidth:680,margin:"0 auto"}}>
-            <div style={{padding:"36px 32px",background:"linear-gradient(145deg,#f9f9f9,#fff)",border:"1px solid rgba(45,212,160,0.25)",borderRadius:16,position:"relative",overflow:"hidden"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:20,maxWidth:980,margin:"0 auto"}}>
+            <div style={{padding:"32px 26px",background:"linear-gradient(145deg,#f9f9f9,#fff)",border:"1px solid rgba(45,212,160,0.25)",borderRadius:16,position:"relative",overflow:"hidden"}}>
               <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,"+C.teal+","+C.tealL+")"}}/>
-              <div style={{fontSize:10,fontWeight:700,color:C.teal,letterSpacing:3,marginBottom:16,textTransform:"uppercase"}}>Até R$ 100 mil</div>
-              <div style={{fontSize:22,fontWeight:900,color:C.navy,lineHeight:1.2,marginBottom:12}}>Valor fixo</div>
-              <div style={{fontSize:13,color:"#5a6577",lineHeight:1.8,marginBottom:28}}>Ideal para quem está começando a construir patrimônio e quer uma primeira orientação profissional qualificada.</div>
-              <div style={{borderTop:"1px solid rgba(45,212,160,0.15)",paddingTop:20}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.teal,letterSpacing:3,marginBottom:16,textTransform:"uppercase"}}>Até R$ 150 mil</div>
+              <div style={{fontSize:20,fontWeight:900,color:C.navy,lineHeight:1.2,marginBottom:12}}>Valor fixo</div>
+              <div style={{fontSize:12.5,color:"#5a6577",lineHeight:1.8,marginBottom:24}}>Ideal para quem está começando a construir patrimônio e quer uma primeira orientação profissional qualificada.</div>
+              <div style={{borderTop:"1px solid rgba(45,212,160,0.15)",paddingTop:18}}>
                 <div style={{fontSize:11,color:"#9CA3AF",letterSpacing:1,marginBottom:4}}>VALOR DA CONSULTORIA</div>
-                <div style={{fontSize:28,fontWeight:900,color:C.navy}}>R$ 990</div>
+                <div style={{fontSize:24,fontWeight:900,color:C.navy}}>R$ 2.100</div>
+                <div style={{fontSize:11,color:C.teal,fontWeight:700,marginTop:4}}>R$ 1.995 à vista no PIX (5% off)</div>
                 <div style={{fontSize:11,color:"#9CA3AF",marginTop:4}}>Pagamento único, pelas 3 sessões</div>
               </div>
             </div>
-            <div style={{padding:"36px 32px",background:"linear-gradient(145deg,"+C.navy+",#142B52)",border:"1px solid rgba(45,212,160,0.35)",borderRadius:16,position:"relative",overflow:"hidden",boxShadow:"0 20px 60px rgba(10,22,40,0.2)"}}>
+            <div style={{padding:"32px 26px",background:"linear-gradient(145deg,"+C.navy+",#142B52)",border:"1px solid rgba(45,212,160,0.35)",borderRadius:16,position:"relative",overflow:"hidden",boxShadow:"0 20px 60px rgba(10,22,40,0.2)"}}>
               <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,"+C.teal+","+C.tealL+","+C.teal+")"}}/>
-              <div style={{fontSize:10,fontWeight:700,color:C.teal,letterSpacing:3,marginBottom:16,textTransform:"uppercase"}}>Acima de R$ 100 mil</div>
-              <div style={{fontSize:22,fontWeight:900,color:"#fff",lineHeight:1.2,marginBottom:12}}>1% do patrimônio analisado</div>
-              <div style={{fontSize:13,color:"#8B9DC3",lineHeight:1.8,marginBottom:28}}>Para carteiras maiores, o valor acompanha a complexidade e o tamanho do patrimônio avaliado.</div>
-              <div style={{borderTop:"1px solid rgba(45,212,160,0.15)",paddingTop:20}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.teal,letterSpacing:3,marginBottom:16,textTransform:"uppercase"}}>R$ 150 mil a R$ 500 mil</div>
+              <div style={{fontSize:20,fontWeight:900,color:"#fff",lineHeight:1.2,marginBottom:12}}>1% do patrimônio</div>
+              <div style={{fontSize:12.5,color:"#8B9DC3",lineHeight:1.8,marginBottom:24}}>Para carteiras maiores, o valor acompanha a complexidade e o tamanho do patrimônio avaliado.</div>
+              <div style={{borderTop:"1px solid rgba(45,212,160,0.15)",paddingTop:18}}>
                 <div style={{fontSize:11,color:"rgba(255,255,255,0.4)",letterSpacing:1,marginBottom:4}}>VALOR DA CONSULTORIA</div>
-                <div style={{fontSize:18,fontWeight:800,color:"#fff"}}>1% sobre o patrimônio</div>
+                <div style={{fontSize:16,fontWeight:800,color:"#fff"}}>1% sobre o patrimônio</div>
+                <div style={{fontSize:11,color:"rgba(255,255,255,0.4)",marginTop:4}}>Pagamento único, pelas 3 sessões</div>
+              </div>
+            </div>
+            <div style={{padding:"32px 26px",background:"linear-gradient(145deg,"+C.navy+",#142B52)",border:"1px solid rgba(45,212,160,0.35)",borderRadius:16,position:"relative",overflow:"hidden",boxShadow:"0 20px 60px rgba(10,22,40,0.2)"}}>
+              <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,"+C.teal+","+C.tealL+","+C.teal+")"}}/>
+              <div style={{fontSize:10,fontWeight:700,color:C.teal,letterSpacing:3,marginBottom:16,textTransform:"uppercase"}}>Acima de R$ 500 mil</div>
+              <div style={{fontSize:20,fontWeight:900,color:"#fff",lineHeight:1.2,marginBottom:12}}>0,6% do patrimônio</div>
+              <div style={{fontSize:12.5,color:"#8B9DC3",lineHeight:1.8,marginBottom:24}}>Para os patrimônios mais robustos, com teto de valor — a consultoria nunca ultrapassa esse limite.</div>
+              <div style={{borderTop:"1px solid rgba(45,212,160,0.15)",paddingTop:18}}>
+                <div style={{fontSize:11,color:"rgba(255,255,255,0.4)",letterSpacing:1,marginBottom:4}}>VALOR DA CONSULTORIA</div>
+                <div style={{fontSize:16,fontWeight:800,color:"#fff"}}>0,6% (teto de R$ 12.000)</div>
                 <div style={{fontSize:11,color:"rgba(255,255,255,0.4)",marginTop:4}}>Pagamento único, pelas 3 sessões</div>
               </div>
             </div>
@@ -29712,9 +29734,12 @@ function PropostasView({data,dispatch}){
                 {form.servico==="patrimonio"?
                   ("Taxa de "+(form.taxaMensal||0).toFixed(3)+"% a.m. sobre patrimônio de "+fm(form.valorPatrimonio||0)+" (tabela regressiva)."):
                  ehConsultoria?
-                  (precoConsultoria(form.valorPatrimonio).tipo==="fixo"?
-                    "Valor fixo para patrimônios até R$ 100.000. Pagamento único pelo trabalho pontual.":
-                    "1% sobre patrimônio sob consultoria de "+fm(form.valorPatrimonio||0)+". Pagamento único."):
+                  (function(){
+                    var pcTxt=precoConsultoria(form.valorPatrimonio||0);
+                    if(pcTxt.tipo==="fixo")return "Valor fixo para patrimônios até R$ 150.000 (R$ "+pcTxt.valorPix.toFixed(2).replace(".",",")+" à vista no PIX, 5% de desconto). Pagamento único pelo trabalho pontual.";
+                    if(pcTxt.pct===1.0)return "1% sobre patrimônio sob consultoria de "+fm(form.valorPatrimonio||0)+". Pagamento único.";
+                    return "0,6% sobre patrimônio sob consultoria de "+fm(form.valorPatrimonio||0)+", com teto de R$ 12.000. Pagamento único.";
+                  })():
                   "Fee fixo mensal pela prestação de serviço."}
               </div>
               
@@ -29768,6 +29793,9 @@ function PropostasView({data,dispatch}){
                     </div>
                     <div style={{fontSize:12,color:"#8B9DC3",lineHeight:1.6}}>
                       Consultoria é um <strong style={{color:"#fff"}}>trabalho pontual</strong>, cobrado em pagamento único pelas três sessões. Não há mensalidade nem compromisso recorrente, você recebe o plano completo e a implementação, ficando livre para seguir de forma autônoma após isso.
+                      {precoConsultoria(form.valorPatrimonio||0).tipo==="fixo" && (
+                        <><br/><strong style={{color:accentLight}}>Pagando à vista no PIX, o valor sai com 5% de desconto</strong> ({fm(precoConsultoria(form.valorPatrimonio||0).valorPix)} em vez de {fm(precoConsultoria(form.valorPatrimonio||0).valor)}).</>
+                      )}
                     </div>
                   </>
                 ):(
@@ -29982,14 +30010,14 @@ function PropostasView({data,dispatch}){
                 </thead>
                 <tbody>
                   {[
-                    {de:"R$ 1",ate:"R$ 100.000",srv:"Consultoria Financeira (pontual)",preco:"R$ 990 fixo",cor:T.cyan},
-                    {de:"R$ 100.000,01",ate:"R$ 200.000",srv:"Consultoria Financeira (pontual)",preco:"1% do patrimônio",cor:T.cyan},
+                    {de:"R$ 1",ate:"R$ 150.000",srv:"Consultoria Financeira (pontual)",preco:"R$ 2.100 fixo (R$ 1.995 no PIX)",cor:T.cyan},
+                    {de:"R$ 150.000,01",ate:"R$ 200.000",srv:"Consultoria Financeira (pontual)",preco:"1% do patrimônio",cor:T.cyan},
                     {de:"R$ 200.000,01",ate:"R$ 1.000.000",srv:"Gestão de Patrimônio",preco:"0,15% a.m. (sobre o total)",cor:T.gold},
                     {de:"Acima de",ate:"R$ 1.000.000",srv:"Gestão de Patrimônio",preco:"0,10% a.m. (sobre o total)",cor:T.gold},
                   ].map(function(row,i){
                     var ativo=form.valorPatrimonio>0&&(function(){
-                      if(i===0)return form.valorPatrimonio<=100000;
-                      if(i===1)return form.valorPatrimonio>100000&&form.valorPatrimonio<=200000;
+                      if(i===0)return form.valorPatrimonio<=150000;
+                      if(i===1)return form.valorPatrimonio>150000&&form.valorPatrimonio<=200000;
                       if(i===2)return form.valorPatrimonio>200000&&form.valorPatrimonio<=1000000;
                       if(i===3)return form.valorPatrimonio>1000000;
                     })();
@@ -30007,7 +30035,7 @@ function PropostasView({data,dispatch}){
                 </tbody>
               </table>
               <div style={{padding:"6px 12px 8px",fontSize:9,color:T.t3,lineHeight:1.5,borderTop:"1px solid "+T.bdrL}}>
-                ⚠️ Cliente com patrimônio acima de R$200k que opte por Consultoria pontual: cobra 1% do patrimônio total.
+                ⚠️ Cliente com patrimônio acima de R$200k que opte por Consultoria pontual: cobra 1% até R$500k e 0,6% (teto de R$12.000) acima de R$500k.
               </div>
             </div>
 
@@ -30016,7 +30044,11 @@ function PropostasView({data,dispatch}){
               var faixa=faixaPrecoCI(form.valorPatrimonio);
               if(!faixa)return null;
               var sugerido=faixa.servico;
-              var precoLabel=faixa.tipo==="fixo"?"R$ 990 fixo":faixa.tipo==="percentual"?"1% = "+fm(form.valorPatrimonio*0.01):"Taxa: "+faixa.txMes+"% a.m. = "+fm(form.valorPatrimonio*faixa.txMes/100)+"/mês";
+              var precoLabel=faixa.servico==="consultoria"?(function(){
+                var pcAuto=precoConsultoria(form.valorPatrimonio);
+                if(pcAuto.tipo==="fixo")return "R$ "+pcAuto.valor.toLocaleString("pt-BR")+" fixo (R$ "+pcAuto.valorPix.toFixed(2).replace(".",",")+" no PIX)";
+                return (pcAuto.pct)+"% = "+fm(pcAuto.valor)+(pcAuto.teto?" (teto R$ "+pcAuto.teto.toLocaleString("pt-BR")+")":"");
+              })():"Taxa: "+faixa.txMes+"% a.m. = "+fm(form.valorPatrimonio*faixa.txMes/100)+"/mês";
               var cor=sugerido==="patrimonio"?T.gold:T.cyan;
               return (
                 <div style={{marginBottom:16,padding:"10px 14px",background:cor+"11",border:"1px solid "+cor+"33",borderRadius:10,display:"flex",alignItems:"center",gap:10}}>
@@ -30047,7 +30079,11 @@ function PropostasView({data,dispatch}){
                   <div>
                     <div style={{fontSize:11,fontWeight:700,color:T.cyan,marginBottom:2}}>🎯 Cliente prefere Consultoria Pontual (mesmo com patrimônio acima de R$200k)</div>
                     <div style={{fontSize:10,color:T.t3,lineHeight:1.5}}>
-                      Neste caso, cobrar <strong style={{color:T.t1}}>1% do patrimônio total</strong> ({fm(form.valorPatrimonio*0.01)}) como pagamento único, conforme tabela de preços.
+                      {(function(){
+                        var pcForcar=precoConsultoria(form.valorPatrimonio);
+                        var pctTxt=pcForcar.pct===1.0?"1%":"0,6% (teto de R$ 12.000)";
+                        return (<>Neste caso, cobrar <strong style={{color:T.t1}}>{pctTxt} do patrimônio total</strong> ({fm(pcForcar.valor)}) como pagamento único, conforme tabela de preços.</>);
+                      })()}
                     </div>
                   </div>
                 </label>
@@ -30412,18 +30448,23 @@ function PropostasView({data,dispatch}){
                 <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:14}}>
                   {(function(){
                     var pc=precoConsultoria(form.valorPatrimonio);
-                    var isFixo=pc.tipo==="fixo";
+                    var faixaAtual=pc.tipo==="fixo"?0:(pc.pct===1.0?1:2);
                     return (
                       <>
-                        <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,background:isFixo?T.greenD:"rgba(255,255,255,0.015)",border:isFixo?"1.5px solid "+T.green:"1px solid "+T.bdrL}}>
-                          <div style={{flex:1,fontSize:12,fontWeight:isFixo?700:500,color:isFixo?T.green:T.t2}}>Patrimônio até R$ 100.000</div>
-                          <div style={{fontSize:14,fontWeight:800,color:isFixo?T.green:T.t3,fontFamily:"'JetBrains Mono'"}}>R$ 990,00</div>
-                          {isFixo && <span style={{fontSize:8,fontWeight:700,color:T.green,background:T.green+"22",padding:"2px 6px",borderRadius:3}}>✓ APLICADA</span>}
+                        <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,background:faixaAtual===0?T.greenD:"rgba(255,255,255,0.015)",border:faixaAtual===0?"1.5px solid "+T.green:"1px solid "+T.bdrL}}>
+                          <div style={{flex:1,fontSize:12,fontWeight:faixaAtual===0?700:500,color:faixaAtual===0?T.green:T.t2}}>Patrimônio até R$ 150.000</div>
+                          <div style={{fontSize:14,fontWeight:800,color:faixaAtual===0?T.green:T.t3,fontFamily:"'JetBrains Mono'"}}>R$ 2.100,00</div>
+                          {faixaAtual===0 && <span style={{fontSize:8,fontWeight:700,color:T.green,background:T.green+"22",padding:"2px 6px",borderRadius:3}}>✓ APLICADA</span>}
                         </div>
-                        <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,background:!isFixo?T.greenD:"rgba(255,255,255,0.015)",border:!isFixo?"1.5px solid "+T.green:"1px solid "+T.bdrL}}>
-                          <div style={{flex:1,fontSize:12,fontWeight:!isFixo?700:500,color:!isFixo?T.green:T.t2}}>Patrimônio acima de R$ 100.000</div>
-                          <div style={{fontSize:14,fontWeight:800,color:!isFixo?T.green:T.t3,fontFamily:"'JetBrains Mono'"}}>1% do patrimônio</div>
-                          {!isFixo && <span style={{fontSize:8,fontWeight:700,color:T.green,background:T.green+"22",padding:"2px 6px",borderRadius:3}}>✓ APLICADA</span>}
+                        <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,background:faixaAtual===1?T.greenD:"rgba(255,255,255,0.015)",border:faixaAtual===1?"1.5px solid "+T.green:"1px solid "+T.bdrL}}>
+                          <div style={{flex:1,fontSize:12,fontWeight:faixaAtual===1?700:500,color:faixaAtual===1?T.green:T.t2}}>Patrimônio de R$ 150.000 a R$ 500.000</div>
+                          <div style={{fontSize:14,fontWeight:800,color:faixaAtual===1?T.green:T.t3,fontFamily:"'JetBrains Mono'"}}>1% do patrimônio</div>
+                          {faixaAtual===1 && <span style={{fontSize:8,fontWeight:700,color:T.green,background:T.green+"22",padding:"2px 6px",borderRadius:3}}>✓ APLICADA</span>}
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,background:faixaAtual===2?T.greenD:"rgba(255,255,255,0.015)",border:faixaAtual===2?"1.5px solid "+T.green:"1px solid "+T.bdrL}}>
+                          <div style={{flex:1,fontSize:12,fontWeight:faixaAtual===2?700:500,color:faixaAtual===2?T.green:T.t2}}>Patrimônio acima de R$ 500.000</div>
+                          <div style={{fontSize:14,fontWeight:800,color:faixaAtual===2?T.green:T.t3,fontFamily:"'JetBrains Mono'"}}>0,6% (teto R$ 12.000)</div>
+                          {faixaAtual===2 && <span style={{fontSize:8,fontWeight:700,color:T.green,background:T.green+"22",padding:"2px 6px",borderRadius:3}}>✓ APLICADA</span>}
                         </div>
                       </>
                     );
@@ -30436,8 +30477,9 @@ function PropostasView({data,dispatch}){
                   return (
                     <div style={{padding:"14px 16px",background:T.greenD,border:"1px solid "+T.green+"33",borderRadius:10}}>
                       <div style={{fontSize:10,color:T.t3,fontWeight:600,letterSpacing:1,marginBottom:6}}>VALOR TOTAL DA CONSULTORIA</div>
-                      {pc.tipo==="percentual" && <div style={{fontSize:11,color:T.t2,marginBottom:6}}>{fm(pc.base)} × 1%</div>}
+                      {pc.tipo==="percentual" && <div style={{fontSize:11,color:T.t2,marginBottom:6}}>{fm(pc.base)} × {pc.pct}%{pc.teto && pc.valor>=pc.teto?" (teto aplicado)":""}</div>}
                       <div style={{fontSize:26,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(pc.valor)}</div>
+                      {pc.tipo==="fixo" && <div style={{fontSize:12,color:T.green,fontWeight:700,marginTop:4}}>{fm(pc.valorPix)} à vista no PIX (5% off)</div>}
                       <div style={{fontSize:10,color:T.t3,marginTop:6,fontStyle:"italic"}}>Trabalho pontual com 3 sessões, pagamento único</div>
                     </div>
                   );
@@ -33176,7 +33218,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '438';
+  var SW_VERSION = '439';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
