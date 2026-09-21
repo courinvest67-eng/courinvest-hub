@@ -920,6 +920,22 @@ const gerarPPTXDeSlides=async function(containerEl,nomeArquivo){
      inconsistência pontual de tempo, sem custar nada nas capturas que já dão certo de primeira. */
   var _winWParaCaptura=document.documentElement.clientWidth;
   var _winHParaCaptura=document.documentElement.clientHeight;
+  /* CORREÇÃO (v437): "Unable to find element in cloned iframe" reportado agora no celular (a v425
+     já tinha corrigido a mesma mensagem, mas causada por escala de tela diferente de 100% no
+     Windows — aqui é outra causa raiz, específica de rolagem). O html2canvas localiza o elemento
+     de destino DENTRO do documento clonado percorrendo a mesma árvore/posições do documento
+     original — se a página estiver rolada (scrollX/scrollY≠0) no momento da captura, essa
+     correspondência de posição fica inconsistente entre original e clone, e ele "perde" o
+     elemento (erro reportado). Isso é raro no desktop (o botão "Gerar PowerPoint" fica fixo no
+     topo da aba) mas comum no celular: a tela é bem mais estreita que os slides (desenhados pra
+     ~800px de largura), então a página normalmente já nasce com rolagem horizontal (e a vertical
+     muda sozinha conforme a barra de endereço do navegador aparece/some ao rolar). Zera a rolagem
+     da janela ANTES de começar a capturar (e devolve pra posição original no final, sucesso ou
+     erro) e informa isso explicitamente pro html2canvas — eliminando essa inconsistência na
+     raiz, não só nas telas de PC. */
+  var _scrollXOriginal=window.scrollX||window.pageXOffset||0;
+  var _scrollYOriginal=window.scrollY||window.pageYOffset||0;
+  if(_scrollXOriginal!==0||_scrollYOriginal!==0){window.scrollTo(0,0);}
   try{
     for(var pi=0;pi<pageEls.length;pi++){
       /* CORREÇÃO (v393): o html2canvas cria por baixo dos panos um iframe temporário pra
@@ -933,7 +949,7 @@ const gerarPPTXDeSlides=async function(containerEl,nomeArquivo){
          primeiro slide saía, os demais somem sem erro nenhum). */
       await new Promise(function(r){requestAnimationFrame(function(){requestAnimationFrame(r);});});
       var canvas=null;
-      var _opcoesCaptura={scale:2,useCORS:true,backgroundColor:"#ffffff",windowWidth:_winWParaCaptura,windowHeight:_winHParaCaptura,onclone:function(_clonedDoc,clonedEl){_forcarTemaClaroParaCaptura(_clonedDoc);_prepararGradienteTextoParaCaptura(clonedEl);_prepararImagensQuebradasParaCaptura(clonedEl);}};
+      var _opcoesCaptura={scale:2,useCORS:true,backgroundColor:"#ffffff",windowWidth:_winWParaCaptura,windowHeight:_winHParaCaptura,scrollX:0,scrollY:0,onclone:function(_clonedDoc,clonedEl){_forcarTemaClaroParaCaptura(_clonedDoc);_prepararGradienteTextoParaCaptura(clonedEl);_prepararImagensQuebradasParaCaptura(clonedEl);}};
       try{
         canvas=await _comLimiteDeTempo(window.html2canvas(pageEls[pi],_opcoesCaptura),20000);
       }catch(_pageErr){
@@ -975,6 +991,7 @@ const gerarPPTXDeSlides=async function(containerEl,nomeArquivo){
     }
   }finally{
     CanvasRenderingContext2D.prototype.createPattern=_origCreatePattern;
+    if(_scrollXOriginal!==0||_scrollYOriginal!==0){window.scrollTo(_scrollXOriginal,_scrollYOriginal);}
   }
   var _faltantes=pageEls.length-capturas.length;
   if(capturas.length>0&&_faltantes>0){
@@ -28895,7 +28912,18 @@ function PropostasView({data,dispatch}){
     setEnviandoEmailProposta(true);
     var serv=SERVICOS_CI[form.servico]||SERVICOS_CI.patrimonio;
     var REMETENTE_PROPOSTA="courinvest.67@gmail.com";
-    var fullHtml="<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}body{margin:0;padding:0}@page{margin:0;size:820px auto}</style></head><body>"+el.outerHTML+"</body></html>";
+    /* innerHTML (não outerHTML!): _gerarPdfLinkCourinvestInner procura as "páginas" olhando os
+       filhos DIRETOS do <body> (ver pageEls em gerarPdfLinkCourinvest) — igual ao relatório
+       mensal, cujo HTML já vem como uma sequência de <div class="cv-page"> irmãos, sem nenhum
+       wrapper em volta. Usar outerHTML aqui envolve todas as .pp-page da proposta dentro de UM
+       único <div id="proposta-print"> extra, que vira a ÚNICA "página" encontrada — ou seja, a
+       proposta inteira (todas as seções) é renderizada de uma vez como um canvas gigante só,
+       reproduzindo exatamente o bug do html2pdf.js antigo (canvas grande demais == falha
+       silenciosa em algumas máquinas) que o fatiamento página-por-página foi feito pra evitar.
+       Isso fazia gerarPdfLinkCourinvest sempre resolver null pra propostas — e-mail saía com o
+       texto de fallback ("Entre em contato para receber a proposta em PDF.") em vez do botão de
+       download, mesmo com o e-mail em si sendo enviado normalmente. */
+    var fullHtml="<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}body{margin:0;padding:0}@page{margin:0;size:820px auto}</style></head><body>"+el.innerHTML+"</body></html>";
     var nomeArquivo=(form.clienteNome||"cliente").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
     var pathStorage="propostas/"+(form.id||Date.now())+"/proposta-"+(nomeArquivo||"cliente")+".pdf";
 
@@ -33123,7 +33151,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '435';
+  var SW_VERSION = '437';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
