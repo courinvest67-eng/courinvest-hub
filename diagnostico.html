@@ -191,6 +191,20 @@
   }
 })();
 
+/* Pré-preenche nome/e-mail quando o link vem de um convite enviado pelo Hub (Comercial →
+   Diagnósticos → "Convidar lead"), ex: diagnostico.html?nome=Fulano&email=fulano@x.com —
+   evita o lead ter que digitar de novo o que já disse na reunião. Se o link não tiver esses
+   parâmetros (acesso direto, sem convite), o formulário continua em branco como sempre. */
+(function preencherViaLink(){
+  try{
+    var params = new URLSearchParams(window.location.search);
+    var nomeParam = params.get("nome");
+    var emailParam = params.get("email");
+    if(nomeParam) document.getElementById("fNome").value = nomeParam;
+    if(emailParam) document.getElementById("fEmail").value = emailParam;
+  }catch(e){}
+})();
+
 /* ===== Categorias do formulário público (subconjunto simplificado do MACRO_CATS interno do Hub) =====
    As chaves moradia/alimentacao/lazer/assinaturas/dividas/investimentos precisam bater exatamente com
    as que calcularAnaliseFinanceira() reconhece por nome — ver courinvest-hub-fonte.html. */
