@@ -27005,9 +27005,30 @@ function irParseB3Posicao(wb){
 }
 
 /* ---------- Parser: B3 "Movimentação" (xlsx) — dividendos/JCP/rendimentos/bonificações do ano ---------- */
+/* Agrupa as linhas de um tipo de movimentação (Dividendo/JCP/Rendimento) por empresa/fundo — usa o
+   TICKER como chave (mais estável que o nome) e o nome "bonito" vem do Produto, tirando o próprio
+   ticker do começo (ex: "ABEV3 - AMBEV S.A." vira "AMBEV S.A."). Ordenado do maior pro menor valor,
+   pra virar direto uma tabela "quem pagou mais" no relatório — pedido explícito do Igor pra
+   detalhar dividendo por empresa, não só o total. */
+function irAgruparPorEmpresa(rows,filtroRegex){
+  var porTicker={};
+  rows.forEach(function(r){
+    var mov=String(r["Movimentação"]||"");
+    if(!filtroRegex.test(mov))return;
+    var val=irNum(r["Valor da Operação"]);
+    var tk=String(r["TICKER"]||"").trim();
+    var prod=String(r["Produto"]||"").trim();
+    var nome=prod?(prod.split(" - ").slice(1).join(" - ")||prod):(tk||"-");
+    var chave=tk||prod||nome;
+    if(!chave)return;
+    if(!porTicker[chave])porTicker[chave]={ticker:tk||chave,nome:nome,valor:0};
+    porTicker[chave].valor+=val;
+  });
+  return Object.keys(porTicker).map(function(k){return porTicker[k]}).sort(function(a,b){return b.valor-a.valor});
+}
 function irParseB3Movimentacao(wb){
   var ws=wb.Sheets["Movimentação"];
-  if(!ws)return {dividendos:0,jcp:0,rendimentosFii:0,bonificacoes:[]};
+  if(!ws)return {dividendos:0,jcp:0,rendimentosFii:0,bonificacoes:[],porEmpresaDividendos:[],porEmpresaJcp:[],porFundoRendimentos:[]};
   var rows=XLSX.utils.sheet_to_json(ws,{defval:""});
   var dividendos=0,jcp=0,rendimentosFii=0,bonificacoes=[];
   rows.forEach(function(r){
@@ -27017,7 +27038,10 @@ function irParseB3Movimentacao(wb){
     else if(/rendimento/i.test(mov)){rendimentosFii+=val}
     else if(/bonifica/i.test(mov)){bonificacoes.push({ticker:String(r["TICKER"]||"").trim(),produto:r["Produto"],qtd:irNum(r["Quantidade"]),data:r["Data"]})}
   });
-  return {dividendos:dividendos,jcp:jcp,rendimentosFii:rendimentosFii,bonificacoes:bonificacoes};
+  var porEmpresaDividendos=irAgruparPorEmpresa(rows,/dividendo/i);
+  var porEmpresaJcp=irAgruparPorEmpresa(rows,/jcp|juros sobre capital/i);
+  var porFundoRendimentos=irAgruparPorEmpresa(rows,/rendimento/i);
+  return {dividendos:dividendos,jcp:jcp,rendimentosFii:rendimentosFii,bonificacoes:bonificacoes,porEmpresaDividendos:porEmpresaDividendos,porEmpresaJcp:porEmpresaJcp,porFundoRendimentos:porFundoRendimentos};
 }
 
 /* ---------- Parser: Informe de Rendimentos BR (PDF) — Rico/XP, C6, PicPay e genérico ----------
@@ -27252,19 +27276,18 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
     +'@media print{.section{page-break-inside:avoid}table{page-break-inside:avoid}}'
     +'</style>';
 
-  /* Logo oficial da Courinvest — mesmo markup usado na capa dos relatórios mensais (logoCapa em
-     gerarRelatorio), pra manter os dois no mesmo padrão visual: arco dourado em "C" + wordmark. */
-  var logoSVG='<div style="display:flex;align-items:center;gap:14px">'
-    +'<svg width="48" height="48" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0">'
-    +'<defs><linearGradient id="lgCapaIR" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">'
-    +'<stop offset="0%" stop-color="#F0D060"/><stop offset="50%" stop-color="#D4A328"/><stop offset="100%" stop-color="#B8891A"/></linearGradient></defs>'
-    +'<circle cx="50" cy="50" r="46" stroke="url(#lgCapaIR)" stroke-width="0.5" opacity=".15" fill="none"/>'
-    +'<path d="M50 6 C18 6,6 26,6 50 C6 74,18 94,50 94" stroke="url(#lgCapaIR)" stroke-width="5" stroke-linecap="round" fill="none"/>'
-    +'<path d="M50 18 C28 18,18 32,18 50 C18 68,28 82,50 82" stroke="url(#lgCapaIR)" stroke-width="4" stroke-linecap="round" fill="none" opacity=".7"/>'
-    +'<circle cx="58" cy="50" r="4" fill="url(#lgCapaIR)"/></svg>'
+  /* Logo oficial da Courinvest — ícone RASTER real (COURINVEST_ICON_URI, o mesmo PNG usado no
+     componente Logo do menu lateral e no CourinvestLogo reutilizável), não mais um SVG desenhado à
+     mão tentando imitar o formato. Referencia a variável global direto (declarada mais cedo no
+     mesmo arquivo/script), sem duplicar o base64. Layout horizontal (ícone à esquerda, texto à
+     direita) com subtítulo dourado — no padrão que o Igor apontou como o correto. */
+  var logoSVG='<div style="display:flex;align-items:center;gap:16px">'
+    +'<svg width="60" height="60" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0">'
+    +'<image href="'+COURINVEST_ICON_URI+'" x="22.6" y="4" width="54.8" height="92" preserveAspectRatio="xMidYMid meet"/>'
+    +'</svg>'
     +'<div style="display:flex;flex-direction:column">'
-    +'<div style="font-size:18px;font-weight:800;color:#fff;letter-spacing:1.5px;line-height:1;font-family:Outfit,sans-serif">COURINVEST</div>'
-    +'<div style="font-size:8.5px;font-weight:600;color:#B8C4D6;letter-spacing:3px;margin-top:3px;font-family:Outfit,sans-serif">CONSULTORIA EM INVESTIMENTOS</div>'
+    +'<div style="font-size:19px;font-weight:800;color:#fff;letter-spacing:1.5px;line-height:1;font-family:Outfit,sans-serif">COURINVEST</div>'
+    +'<div style="font-size:9px;font-weight:600;color:#D4A328;letter-spacing:3px;margin-top:4px;font-family:Outfit,sans-serif">CONSULTORIA EM INVESTIMENTOS</div>'
     +'</div></div>';
 
   var html='<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório Anual de IR '+anoDec+' — '+pessoa.nome+'</title>'+css+'</head><body><div class="page">';
@@ -27366,6 +27389,37 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
     html+='<tr><td>Juros sobre Capital Próprio (JCP)</td><td class="num">'+irFmtR(movimentacao.jcp)+'</td><td style="font-size:9px;color:#7a8399">Tributação Exclusiva, Código 10</td></tr>';
     html+='<tr><td>Rendimentos de FIIs</td><td class="num">'+irFmtR(movimentacao.rendimentosFii)+'</td><td style="font-size:9px;color:#7a8399">Rendimentos Isentos, Código 99</td></tr>';
     html+='</tbody></table>';
+    /* ---------- Detalhamento por empresa/fundo — pedido explícito do Igor: não só o total, quem pagou
+       quanto. Uma tabela por tipo de rendimento (Dividendos / JCP / FIIs-Fiagro-FI-Infra), cada uma só
+       aparece se houver pelo menos uma linha daquele tipo na Movimentação do ano. */
+    if(movimentacao.porEmpresaDividendos&&movimentacao.porEmpresaDividendos.length){
+      html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">💰 Dividendos por Empresa</h3>';
+      html+='<table><thead><tr><th>Ticker</th><th>Empresa</th><th class="num">Valor Recebido no Ano</th></tr></thead><tbody>';
+      movimentacao.porEmpresaDividendos.forEach(function(e){
+        html+='<tr><td class="tk">'+(e.ticker||"-")+'</td><td>'+(e.nome||"-")+'</td><td class="num">'+irFmtR(e.valor)+'</td></tr>';
+      });
+      html+='<tr class="total"><td colspan="2">TOTAL DIVIDENDOS</td><td class="num">'+irFmtR(movimentacao.dividendos)+'</td></tr>';
+      html+='</tbody></table>';
+      html+='<div class="box box-tip"><b>💡 Como declarar:</b> lance cada empresa separadamente no Código 09 (Rendimentos Isentos), com o CNPJ de cada uma — não some tudo num lançamento só.</div>';
+    }
+    if(movimentacao.porEmpresaJcp&&movimentacao.porEmpresaJcp.length){
+      html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🏦 JCP por Empresa</h3>';
+      html+='<table><thead><tr><th>Ticker</th><th>Empresa</th><th class="num">Valor Recebido no Ano</th></tr></thead><tbody>';
+      movimentacao.porEmpresaJcp.forEach(function(e){
+        html+='<tr><td class="tk">'+(e.ticker||"-")+'</td><td>'+(e.nome||"-")+'</td><td class="num">'+irFmtR(e.valor)+'</td></tr>';
+      });
+      html+='<tr class="total"><td colspan="2">TOTAL JCP</td><td class="num">'+irFmtR(movimentacao.jcp)+'</td></tr>';
+      html+='</tbody></table>';
+    }
+    if(movimentacao.porFundoRendimentos&&movimentacao.porFundoRendimentos.length){
+      html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🏢 Proventos por Fundo (FII / Fiagro / FI-Infra)</h3>';
+      html+='<table><thead><tr><th>Ticker</th><th>Fundo</th><th class="num">Valor Recebido no Ano</th></tr></thead><tbody>';
+      movimentacao.porFundoRendimentos.forEach(function(e){
+        html+='<tr><td class="tk">'+(e.ticker||"-")+'</td><td>'+(e.nome||"-")+'</td><td class="num">'+irFmtR(e.valor)+'</td></tr>';
+      });
+      html+='<tr class="total"><td colspan="2">TOTAL PROVENTOS</td><td class="num">'+irFmtR(movimentacao.rendimentosFii)+'</td></tr>';
+      html+='</tbody></table>';
+    }
     if(movimentacao.bonificacoes.length)html+='<div class="box box-tip"><b>💡 Bonificações em ativos:</b> '+movimentacao.bonificacoes.length+' evento(s) no ano — aumentam a quantidade de cotas/ações sem custo adicional; ajuste o preço médio proporcionalmente.</div>';
     html+='</div></div>';
   }
@@ -27824,8 +27878,6 @@ var AbaRelatorioIR=function({data}){
     </div>
   );
 };
-
-
 var AbaTutoriais = function({data}) {
 var [clienteSel, setClienteSel] = React.useState(null);
 var [instSel, setInstSel] = React.useState([]);
@@ -34577,7 +34629,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '456';
+  var SW_VERSION = '457';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
