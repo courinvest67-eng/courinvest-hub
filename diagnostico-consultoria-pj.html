@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Courinvest — Diagnóstico de Consultoria Financeira PJ</title>
+<meta name="robots" content="noindex">
+<style>
+  :root{
+    --navy:#0A1628; --navy2:#0F2038; --gold:#D4A328; --lightgold:#FBEFD0;
+    --purple:#9B8BD0; --purpleL:#C4B8EA;
+    --green:#2DD4A0; --red:#F87171; --amber:#FBBF24; --t1:#F5F1E8; --t2:#B8C2D4; --t3:#7A8699;
+    --bdr:rgba(155,139,208,0.28); --card:#111E33;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:linear-gradient(160deg,var(--navy) 0%,#08111f 100%);color:var(--t1);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:28px 16px 60px;}
+  .wrap{width:100%;max-width:560px;}
+  .logo{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:22px;}
+  .logo .mark{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--purple),#6E5EA8);
+    display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:18px;}
+  .logo .name{font-size:19px;font-weight:800;letter-spacing:0.3px;}
+  .logo .name span{color:var(--purple);}
+  .card{background:var(--card);border:1px solid var(--bdr);border-radius:16px;padding:24px 22px;
+    box-shadow:0 20px 50px rgba(0,0,0,0.35);}
+  h1{font-size:21px;margin:0 0 6px;font-weight:800;}
+  .sub{color:var(--t2);font-size:13.5px;line-height:1.55;margin:0 0 20px;}
+  label{display:block;font-size:12px;font-weight:700;color:var(--t2);margin:0 0 6px;text-transform:uppercase;
+    letter-spacing:0.4px;}
+  .field{margin-bottom:14px;}
+  input[type=text],input[type=email],input[type=number],input[type=tel],select{
+    width:100%;background:#0C1830;border:1px solid var(--bdr);border-radius:9px;padding:12px 13px;
+    color:var(--t1);font-size:14.5px;font-family:inherit;outline:none;transition:border .15s;
+    -webkit-appearance:none;appearance:none;}
+  select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9'><path d='M1 1l6 6 6-6' stroke='%237A8699' stroke-width='2' fill='none' fill-rule='evenodd'/></svg>");
+    background-repeat:no-repeat;background-position:right 14px center;padding-right:34px;}
+  input:focus,select:focus{border-color:var(--purple);}
+  .hint{font-size:11.5px;color:var(--t3);margin-top:5px;}
+  .section-title{font-size:13px;font-weight:800;color:var(--purple);text-transform:uppercase;letter-spacing:0.5px;
+    margin:22px 0 12px;padding-top:16px;border-top:1px solid var(--bdr);}
+  .section-title.first{margin-top:0;padding-top:0;border-top:none;}
+  .chk-row{display:flex;align-items:flex-start;gap:10px;margin-bottom:9px;padding:10px 12px;background:#0C1830;
+    border:1px solid var(--bdr);border-radius:9px;cursor:pointer;}
+  .chk-row input{margin-top:2px;width:16px;height:16px;flex-shrink:0;accent-color:var(--purple);}
+  .chk-row .lbl{font-size:13px;color:var(--t1);line-height:1.4;}
+  .chk-outro{margin-top:8px;}
+  .btn{width:100%;background:linear-gradient(135deg,var(--purple),#7C6BB8);color:#fff;border:none;
+    border-radius:10px;padding:14px;font-size:14.5px;font-weight:800;cursor:pointer;margin-top:6px;
+    letter-spacing:0.2px;transition:opacity .15s;}
+  .btn:disabled{opacity:0.55;cursor:default;}
+  .btn:active:not(:disabled){opacity:0.85;}
+  .btn.secondary{background:transparent;border:1px solid var(--bdr);color:var(--purple);margin-top:10px;}
+  .err{background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:var(--red);
+    border-radius:9px;padding:10px 12px;font-size:12.5px;margin-top:12px;display:none;}
+  .legal{font-size:11px;color:var(--t3);line-height:1.5;margin-top:16px;text-align:center;}
+  .footer{text-align:center;color:var(--t3);font-size:11.5px;margin-top:22px;}
+  #stage-report{display:none;}
+  .kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px;}
+  .kpi{background:#0C1830;border:1px solid var(--bdr);border-radius:12px;padding:14px;}
+  .kpi .l{font-size:10.5px;color:var(--t3);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px;font-weight:700;}
+  .kpi .v{font-size:19px;font-weight:800;}
+  .kpi .v.pos{color:var(--green);}
+  .kpi .v.neg{color:var(--amber);}
+  .insight-block{margin-bottom:16px;}
+  .insight-block .bh{font-size:12.5px;font-weight:800;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;}
+  .insight-block.fortes .bh{color:var(--green);}
+  .insight-block.alertas .bh{color:var(--amber);}
+  .insight-block.recs .bh{color:var(--purple);}
+  .insight-item{font-size:13px;line-height:1.55;color:var(--t2);padding:8px 10px;background:rgba(255,255,255,0.03);
+    border-radius:8px;margin-bottom:6px;border-left:3px solid transparent;}
+  .insight-block.fortes .insight-item{border-left-color:var(--green);}
+  .insight-block.alertas .insight-item{border-left-color:var(--amber);}
+  .insight-block.recs .insight-item{border-left-color:var(--purple);}
+  .cta-box{background:linear-gradient(135deg,rgba(155,139,208,0.14),rgba(155,139,208,0.04));
+    border:1px solid var(--bdr);border-radius:12px;padding:18px;margin-top:18px;text-align:center;}
+  .cta-box h3{font-size:15px;margin:0 0 6px;}
+  .cta-box p{font-size:12.5px;color:var(--t2);margin:0 0 14px;line-height:1.5;}
+  .etapas{display:flex;flex-direction:column;gap:0;margin-top:4px;}
+  .etapa{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--bdr);align-items:flex-start;}
+  .etapa:last-child{border-bottom:none;}
+  .etapa .n{min-width:24px;height:24px;border-radius:7px;background:linear-gradient(135deg,var(--purple),#7C6BB8);
+    display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:#fff;flex-shrink:0;}
+  .etapa .t{font-size:12.5px;color:var(--t1);font-weight:700;}
+  .etapa .d{font-size:11px;color:var(--t3);line-height:1.4;margin-top:2px;}
+  .loading{text-align:center;padding:30px 4px;display:none;}
+  .loading .spin{width:34px;height:34px;border:3px solid var(--bdr);border-top-color:var(--purple);border-radius:50%;
+    margin:0 auto 14px;animation:spin 0.8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="logo">
+    <div class="mark">C</div>
+    <div class="name">COUR<span>INVEST</span></div>
+  </div>
+
+  <div class="card">
+    <!-- ===== FORM ===== -->
+    <div id="stage-form">
+      <h1>Diagnóstico de Consultoria Financeira PJ</h1>
+      <p class="sub">Responda em 3 minutos e receba na hora, grátis, um panorama da organização financeira da sua empresa — o primeiro passo da nossa consultoria pontual, feita em quatro etapas.</p>
+
+      <div class="section-title first">🏢 Sobre sua empresa</div>
+      <div class="field">
+        <label>Nome da empresa</label>
+        <input type="text" id="fEmpresa" placeholder="Razão social ou nome fantasia">
+      </div>
+      <div class="field">
+        <label>Faturamento anual aproximado</label>
+        <input type="number" id="fFaturamento" placeholder="0,00" min="0" step="0.01">
+        <div class="hint">Usado só para dimensionar o diagnóstico ao porte da empresa.</div>
+      </div>
+      <div class="field">
+        <label>Tempo de atividade da empresa (anos)</label>
+        <input type="number" id="fTempo" placeholder="0" min="0" step="1">
+      </div>
+      <div class="field">
+        <label>Número de sócios</label>
+        <input type="number" id="fSocios" placeholder="1" min="1" step="1">
+      </div>
+
+      <div class="section-title">📋 Situação financeira atual</div>
+      <div class="field">
+        <label>Como está a contabilidade da empresa?</label>
+        <select id="fContabilidade">
+          <option value="organizada">Organizada e atualizada</option>
+          <option value="parcial">Parcialmente organizada</option>
+          <option value="desorganizada">Desorganizada</option>
+          <option value="naosei">Não sei dizer</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Separação entre finanças pessoais (sócios) e da empresa</label>
+        <select id="fSeparacao">
+          <option value="sim">Sim, bem separado</option>
+          <option value="parcial">Parcialmente separado</option>
+          <option value="nao">Não, tudo misturado</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Controle de fluxo de caixa</label>
+        <select id="fFluxo">
+          <option value="sim">Controle rígido e atualizado</option>
+          <option value="basico">Só um controle básico</option>
+          <option value="nao">Não tenho controle</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Indicadores de gestão (DRE, margem, ponto de equilíbrio...)</label>
+        <select id="fIndicadores">
+          <option value="tem_acompanha">Tenho e acompanho com frequência</option>
+          <option value="tem_naousa">Tenho, mas não uso no dia a dia</option>
+          <option value="nao_tem">Não tenho</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Planejamento financeiro formal (metas, plano de ação)</label>
+        <select id="fPlanejamento">
+          <option value="estruturado">Tenho um plano estruturado</option>
+          <option value="informal">Tenho algo informal, sem método</option>
+          <option value="nao_tem">Não tenho</option>
+        </select>
+      </div>
+
+      <div class="section-title">🎯 Principais desafios (marque quantos quiser)</div>
+      <div id="desafiosWrap"></div>
+      <div class="field chk-outro">
+        <label>Outro desafio (opcional)</label>
+        <input type="text" id="fOutroDesafio" placeholder="Descreva em poucas palavras">
+      </div>
+
+      <div class="section-title">✉️ Receber o diagnóstico</div>
+      <div class="field">
+        <label>Seu nome</label>
+        <input type="text" id="fNome" placeholder="Seu nome">
+      </div>
+      <div class="field">
+        <label>E-mail</label>
+        <input type="email" id="fEmail" placeholder="seuemail@exemplo.com">
+      </div>
+      <div class="field">
+        <label>WhatsApp (opcional)</label>
+        <input type="tel" id="fWhatsapp" placeholder="(32) 99999-9999">
+      </div>
+
+      <button class="btn" id="btnGerar" onclick="gerarDiagnostico()">Gerar diagnóstico grátis</button>
+      <div class="err" id="errForm"></div>
+      <p class="legal">Seus dados são usados só para gerar o diagnóstico e, se você quiser, a Courinvest entrar em contato. Não compartilhamos com terceiros.</p>
+    </div>
+
+    <!-- ===== LOADING ===== -->
+    <div class="loading" id="stage-loading">
+      <div class="spin"></div>
+      <div style="color:var(--t2);font-size:13.5px;">Calculando seu diagnóstico...</div>
+    </div>
+
+    <!-- ===== REPORT ===== -->
+    <div id="stage-report">
+      <h1 id="reportTitle">Diagnóstico de <span id="reportEmpresa"></span></h1>
+      <p class="sub">Panorama automático da organização financeira da empresa, com base no que você informou.</p>
+
+      <div class="kpis">
+        <div class="kpi">
+          <div class="l">Faturamento anual</div>
+          <div class="v" id="kpiFaturamento">—</div>
+        </div>
+        <div class="kpi">
+          <div class="l">Índice de organização</div>
+          <div class="v" id="kpiOrganizacao">—</div>
+        </div>
+      </div>
+
+      <div class="insight-block fortes">
+        <div class="bh">✅ Pontos fortes</div>
+        <div id="listFortes"></div>
+      </div>
+      <div class="insight-block alertas">
+        <div class="bh">⚠️ Pontos de atenção</div>
+        <div id="listAlertas"></div>
+      </div>
+      <div class="insight-block recs">
+        <div class="bh">💡 Recomendações</div>
+        <div id="listRecs"></div>
+      </div>
+
+      <div class="section-title" style="margin-top:22px;">🧭 Como funciona a consultoria</div>
+      <div class="etapas">
+        <div class="etapa"><div class="n">1</div><div><div class="t">Levantamento de Dados</div><div class="d">Coleta das informações financeiras, contábeis e societárias da empresa.</div></div></div>
+        <div class="etapa"><div class="n">2</div><div><div class="t">Diagnóstico</div><div class="d">Análise completa de caixa, fluxo, endividamento e indicadores.</div></div></div>
+        <div class="etapa"><div class="n">3</div><div><div class="t">Plano de Ação</div><div class="d">Prioridades, metas e recomendações práticas para organizar as finanças.</div></div></div>
+        <div class="etapa"><div class="n">4</div><div><div class="t">Execução</div><div class="d">Apoio na implementação das principais recomendações.</div></div></div>
+      </div>
+
+      <div class="cta-box">
+        <h3>Quer transformar esse diagnóstico num plano de ação?</h3>
+        <p>Fale com um consultor da Courinvest e veja como a Consultoria Financeira PJ pode organizar as finanças da sua empresa em quatro etapas.</p>
+        <a href="https://wa.me/5532988496755?text=Ol%C3%A1!%20Acabei%20de%20fazer%20o%20diagn%C3%B3stico%20de%20consultoria%20financeira%20PJ%20e%20quero%20saber%20mais." id="ctaWhats" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
+          <button class="btn" type="button">Falar com um consultor</button>
+        </a>
+        <button class="btn secondary" type="button" onclick="location.reload()">Fazer novo diagnóstico</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">Courinvest — Gestão de Investimentos</div>
+</div>
+
+<!-- Firebase (mesmo projeto do Courinvest Hub) -->
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+<script>
+(function(){
+  var firebaseConfig = {
+    apiKey: "AIzaSyC4RLs-5QY3Kzf6Lauqbmj3Qj3C1RnuGtA",
+    authDomain: "dashboard-courinvest.firebaseapp.com",
+    projectId: "dashboard-courinvest",
+    storageBucket: "dashboard-courinvest.firebasestorage.app",
+    messagingSenderId: "688544704461",
+    appId: "1:688544704461:web:9e15d2b8ed4040a7830684"
+  };
+  try{
+    firebase.initializeApp(firebaseConfig);
+    window._db = firebase.firestore();
+  }catch(e){
+    console.error("[Firebase] Falha ao iniciar:", e);
+  }
+})();
+
+/* Pré-preenche nome/e-mail quando o link vem de um convite enviado pelo Hub (Comercial →
+   Diagnósticos → "Convidar lead"), ex: diagnostico-consultoria-pj.html?nome=Fulano&email=fulano@x.com —
+   evita o lead ter que digitar de novo o que já disse na reunião. Se o link não tiver esses
+   parâmetros (acesso direto, sem convite), o formulário continua em branco como sempre. */
+(function preencherViaLink(){
+  try{
+    var params = new URLSearchParams(window.location.search);
+    var nomeParam = params.get("nome");
+    var emailParam = params.get("email");
+    if(nomeParam) document.getElementById("fNome").value = nomeParam;
+    if(emailParam) document.getElementById("fEmail").value = emailParam;
+  }catch(e){}
+})();
+
+/* ===== Desafios (checkboxes multi-select) =====
+   Espelha, em espírito, o padrão de categorias em lista de diagnostico.html/diagnostico-pj.html,
+   mas aqui cada item é um desafio (não um valor em R$) — o lead marca quantos se aplicarem. */
+var DESAFIOS = [
+  "Organizar o fluxo de caixa",
+  "Entender se a empresa é realmente lucrativa",
+  "Reduzir custos e desperdícios",
+  "Preparar a empresa para crescer ou captar investimento",
+  "Planejamento societário / sucessão",
+  "Separar claramente as finanças pessoais e da empresa",
+  "Estruturar indicadores e relatórios de gestão"
+];
+
+(function montarDesafios(){
+  var wrap = document.getElementById("desafiosWrap");
+  DESAFIOS.forEach(function(d,i){
+    var row = document.createElement("label");
+    row.className = "chk-row";
+    row.innerHTML = '<input type="checkbox" class="chkDesafio" value="'+d.replace(/"/g,'&quot;')+'"><span class="lbl">'+d+'</span>';
+    wrap.appendChild(row);
+  });
+})();
+
+/* ===== fm() ===== */
+var fm = function(v){return new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(v);};
+
+/* ===== precoConsultoriaPJ() — cópia intencional da mesma função usada internamente no Hub
+   (courinvest-hub-fonte.html, perto de SERVICOS_CI.consultoriaPJ) e no wizard de Propostas, pra
+   que a sugestão de valor gerada aqui já bata com a tabela real usada na hora de montar a proposta
+   formal. Mantida como cópia independente (mesmo padrão já adotado nos outros diagnósticos públicos)
+   — qualquer ajuste futuro nas faixas de preço precisa ser replicado nos dois lugares manualmente. */
+function precoConsultoriaPJ(faturamentoAnual){
+  var f = faturamentoAnual||0;
+  var valor = f<=500000?8000:f<=2000000?14000:f<=10000000?22000:32000;
+  var faixaLabel = f<=500000?"até R$ 500 mil/ano":f<=2000000?"de R$ 500 mil a R$ 2 mi/ano":f<=10000000?"de R$ 2 mi a R$ 10 mi/ano":"acima de R$ 10 mi/ano";
+  var valorPix = Math.round(valor*0.95*100)/100;
+  return {valor:valor, valorPix:valorPix, faixaLabel:faixaLabel};
+}
+
+/* ===== calcularDiagnosticoCPJ() =====
+   Diferente dos outros dois diagnósticos públicos (que analisam um mês de caixa), a Consultoria PJ
+   é um trabalho pontual de organização financeira — então aqui o "diagnóstico" é de MATURIDADE
+   ORGANIZACIONAL: um índice de 0 a 100 construído a partir de 5 perguntas de múltipla escolha sobre
+   contabilidade, separação PF/PJ, fluxo de caixa, indicadores e planejamento formal, mais os desafios
+   que o lead marcar. Pontos fortes/alertas/recomendações são gerados a partir dessas mesmas respostas,
+   sempre remetendo às quatro etapas da consultoria (ver SERVICOS_CI.consultoriaPJ no Hub). */
+function calcularDiagnosticoCPJ(respostas){
+  var score = 100;
+  var pontos = {fortes:[],alertas:[],recomendacoes:[]};
+
+  var mapaContabilidade = {
+    organizada:{pts:0,forte:"Contabilidade organizada e atualizada — boa base para a Etapa 1 (Levantamento de Dados) ser rápida."},
+    parcial:{pts:-8,alerta:"Contabilidade só parcialmente organizada — pode exigir um levantamento de dados mais cuidadoso na Etapa 1."},
+    desorganizada:{pts:-16,alerta:"Contabilidade desorganizada — a Etapa 1 (Levantamento de Dados) será o ponto de partida essencial do trabalho."},
+    naosei:{pts:-12,alerta:"Não há clareza sobre o estado atual da contabilidade — um dos primeiros pontos a esclarecer na Etapa 1."}
+  };
+  var c = mapaContabilidade[respostas.contabilidade]||mapaContabilidade.naosei;
+  score += c.pts; if(c.forte)pontos.fortes.push(c.forte); if(c.alerta)pontos.alertas.push(c.alerta);
+
+  var mapaSeparacao = {
+    sim:{pts:0,forte:"Finanças pessoais dos sócios já separadas da empresa — reduz ruído na análise do caixa real do negócio."},
+    parcial:{pts:-8,alerta:"Separação parcial entre finanças pessoais e da empresa — vale revisar na Etapa 2 (Diagnóstico) para não distorcer o resultado real."},
+    nao:{pts:-16,alerta:"Finanças pessoais e da empresa ainda estão misturadas — um dos pontos centrais a resolver no Plano de Ação."}
+  };
+  var s = mapaSeparacao[respostas.separacao]||mapaSeparacao.nao;
+  score += s.pts; if(s.forte)pontos.fortes.push(s.forte); if(s.alerta)pontos.alertas.push(s.alerta);
+
+  var mapaFluxo = {
+    sim:{pts:0,forte:"Fluxo de caixa com controle rígido — facilita bastante a etapa de Diagnóstico."},
+    basico:{pts:-8,alerta:"Controle de fluxo de caixa só básico — dificulta enxergar sazonalidades e gargalos com precisão."},
+    nao:{pts:-16,alerta:"Sem controle de fluxo de caixa — hoje a empresa toma decisões financeiras sem visibilidade real do caixa."}
+  };
+  var f = mapaFluxo[respostas.fluxo]||mapaFluxo.nao;
+  score += f.pts; if(f.forte)pontos.fortes.push(f.forte); if(f.alerta)pontos.alertas.push(f.alerta);
+
+  var mapaIndicadores = {
+    tem_acompanha:{pts:0,forte:"Já acompanha indicadores de gestão com frequência — maturidade acima da média das empresas desse porte."},
+    tem_naousa:{pts:-10,alerta:"Possui indicadores, mas não usa no dia a dia — o Plano de Ação pode transformá-los em rotina de decisão."},
+    nao_tem:{pts:-18,alerta:"Não possui indicadores de gestão (DRE, margem, ponto de equilíbrio) — decisões hoje dependem de percepção, não de dados."}
+  };
+  var ind = mapaIndicadores[respostas.indicadores]||mapaIndicadores.nao_tem;
+  score += ind.pts; if(ind.forte)pontos.fortes.push(ind.forte); if(ind.alerta)pontos.alertas.push(ind.alerta);
+
+  var mapaPlanejamento = {
+    estruturado:{pts:0,forte:"Já possui um plano financeiro estruturado — a consultoria pode focar em refinar e executar, não em criar do zero."},
+    informal:{pts:-9,alerta:"Planejamento financeiro existe, mas de forma informal — falta um método para dar consistência às decisões."},
+    nao_tem:{pts:-18,alerta:"Não há planejamento financeiro formal — é exatamente o que a Etapa 3 (Plano de Ação) endereça."}
+  };
+  var p = mapaPlanejamento[respostas.planejamento]||mapaPlanejamento.nao_tem;
+  score += p.pts; if(p.forte)pontos.fortes.push(p.forte); if(p.alerta)pontos.alertas.push(p.alerta);
+
+  score = Math.max(0, Math.min(100, Math.round(score)));
+
+  var mapaRec = {
+    organizada:null, parcial:"Concluir a organização contábil antes ou durante a Etapa 1, para acelerar o levantamento de dados.",
+    desorganizada:"Priorizar a organização contábil básica em paralelo à Etapa 1 — é a fundação de todo o diagnóstico.", naosei:"Levantar com o contador o real estado das demonstrações financeiras logo na Etapa 1."
+  };
+  if(mapaRec[respostas.contabilidade])pontos.recomendacoes.push(mapaRec[respostas.contabilidade]);
+
+  if(respostas.separacao!=="sim")pontos.recomendacoes.push("Estruturar pró-labore e distribuição de lucros formais para separar de vez o bolso dos sócios do caixa da empresa.");
+  if(respostas.fluxo!=="sim")pontos.recomendacoes.push("Implementar um controle de fluxo de caixa simples e recorrente já como primeiro entregável da consultoria.");
+  if(respostas.indicadores==="nao_tem")pontos.recomendacoes.push("Criar um painel básico de indicadores (faturamento, margem, ponto de equilíbrio) na Etapa 2, para embasar o Plano de Ação.");
+  if(respostas.planejamento==="nao_tem")pontos.recomendacoes.push("Construir, na Etapa 3, um plano de ação com prioridades e metas trimestrais realistas para a empresa.");
+
+  (respostas.desafios||[]).forEach(function(d){
+    pontos.recomendacoes.push("Desafio prioritário identificado — \""+d+"\" — será endereçado diretamente no Plano de Ação (Etapa 3).");
+  });
+
+  if(pontos.fortes.length===0)pontos.fortes.push("Ainda não há pontos totalmente consolidados, mas isso é justamente o que a consultoria pontual resolve com um plano estruturado.");
+  if(pontos.alertas.length===0)pontos.alertas.push("Nenhum alerta crítico identificado nas respostas. Base sólida para uma consultoria mais rápida.");
+  if(pontos.recomendacoes.length===0)pontos.recomendacoes.push("Estrutura já relativamente madura — a consultoria pode focar em refinar processos e acelerar a execução do que já existe.");
+
+  return {score:score, pontos:pontos};
+}
+
+/* ===== Fluxo da página ===== */
+function showError(msg){
+  var el = document.getElementById("errForm");
+  el.textContent = msg;
+  el.style.display = "block";
+}
+function hideError(){
+  document.getElementById("errForm").style.display = "none";
+}
+function numVal(id){
+  var v = document.getElementById(id).value;
+  var n = parseFloat(String(v).replace(",","."));
+  return isNaN(n)?0:n;
+}
+
+function gerarDiagnostico(){
+  hideError();
+  var faturamento = numVal("fFaturamento");
+  var empresa = document.getElementById("fEmpresa").value.trim();
+  var tempoAtividade = numVal("fTempo");
+  var numSocios = numVal("fSocios") || 1;
+  var nome = document.getElementById("fNome").value.trim();
+  var email = document.getElementById("fEmail").value.trim();
+  var whatsapp = document.getElementById("fWhatsapp").value.trim();
+
+  if(faturamento<=0){ showError("Informe o faturamento anual aproximado para gerar o diagnóstico."); return; }
+  if(!nome){ showError("Informe seu nome para receber o diagnóstico."); return; }
+  if(!email || email.indexOf("@")<0){ showError("Informe um e-mail válido para receber o diagnóstico."); return; }
+
+  var respostas = {
+    contabilidade: document.getElementById("fContabilidade").value,
+    separacao: document.getElementById("fSeparacao").value,
+    fluxo: document.getElementById("fFluxo").value,
+    indicadores: document.getElementById("fIndicadores").value,
+    planejamento: document.getElementById("fPlanejamento").value,
+    desafios: Array.prototype.slice.call(document.querySelectorAll(".chkDesafio:checked")).map(function(el){return el.value;})
+  };
+  var outroDesafio = document.getElementById("fOutroDesafio").value.trim();
+  if(outroDesafio) respostas.desafios.push(outroDesafio);
+
+  var btn = document.getElementById("btnGerar");
+  btn.disabled = true; btn.textContent = "Gerando...";
+  document.getElementById("stage-form").style.display = "none";
+  document.getElementById("stage-loading").style.display = "block";
+
+  var analise = calcularDiagnosticoCPJ(respostas);
+  var preco = precoConsultoriaPJ(faturamento);
+  var justificativaPreco = [
+    "Faturamento anual informado "+preco.faixaLabel+".",
+    "Índice de organização financeira: "+analise.score+"%"+(analise.score<60?" — maior necessidade de estruturação na Etapa 1/2.":" — estrutura já relativamente organizada.")
+  ];
+  if((respostas.desafios||[]).length>0){
+    justificativaPreco.push((respostas.desafios.length)+" desafio(s) prioritário(s) identificado(s): "+respostas.desafios.join(", ")+".");
+  }
+
+  // Grava o lead + resultado resumido no Firestore (create-only, sem leitura pública) — mesmo padrão
+  // de diagnosticos_publicos/diagnosticos_pj_publicos. valorSugerido*/justificativaPreco são só pra
+  // uso interno (aba Comercial → Diagnósticos no Hub) — nunca aparecem na tela do lead. Diferente do
+  // diagnóstico de Gestão Financeira PJ, aqui já existe uma tabela real de preços (precoConsultoriaPJ),
+  // então precoEstimativa fica false — não é um chute, é o mesmo valor que a proposta formal usaria.
+  if(window._db){
+    window._db.collection("diagnosticos_consultoria_pj_publicos").add({
+      empresa: empresa || "",
+      nome: nome || "",
+      email: email || "",
+      whatsapp: whatsapp || "",
+      faturamentoAnual: faturamento,
+      tempoAtividade: tempoAtividade,
+      numSocios: numSocios,
+      respostas: respostas,
+      desafios: respostas.desafios,
+      indiceOrganizacao: analise.score,
+      valorSugeridoMin: preco.valorPix,
+      valorSugeridoMax: preco.valor,
+      justificativaPreco: justificativaPreco,
+      precoEstimativa: false,
+      origem: "diagnostico_consultoria_pj",
+      referrer: (document.referrer || "").slice(0,300),
+      criadoEm: firebase.firestore.FieldValue.serverTimestamp()
+    }).catch(function(e){ console.error("[Diagnóstico Consultoria PJ] Falha ao registrar lead:", e); });
+  }
+
+  setTimeout(function(){ exibirRelatorio(analise, empresa, faturamento); }, 500);
+}
+
+function exibirRelatorio(analise, empresa, faturamento){
+  document.getElementById("stage-loading").style.display = "none";
+  document.getElementById("stage-report").style.display = "block";
+  document.getElementById("reportEmpresa").textContent = empresa || "sua empresa";
+
+  document.getElementById("kpiFaturamento").textContent = fm(faturamento);
+
+  var orgEl = document.getElementById("kpiOrganizacao");
+  orgEl.textContent = analise.score+"%";
+  orgEl.className = "v " + (analise.score>=60?"pos":"neg");
+
+  var renderList = function(id, itens){
+    var el = document.getElementById(id);
+    el.innerHTML = "";
+    itens.forEach(function(txt){
+      var d = document.createElement("div");
+      d.className = "insight-item";
+      d.textContent = txt;
+      el.appendChild(d);
+    });
+  };
+  renderList("listFortes", analise.pontos.fortes);
+  renderList("listAlertas", analise.pontos.alertas);
+  renderList("listRecs", analise.pontos.recomendacoes);
+}
+</script>
+</body>
+</html>
