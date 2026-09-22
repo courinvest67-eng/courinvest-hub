@@ -27315,6 +27315,7 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
   html+='<div class="toc-section-title">PARTE 1 — INVESTIMENTOS NO BRASIL</div>';
   var idx=1;
   tiposBR.forEach(function(tp){var info=byTipo[tp].info;html+='<div class="toc-item"><span><b>1.'+idx+'</b>Bens e Direitos — '+info.nome+'</span><span>Grupo '+info.grp+' / Código '+info.cod+'</span></div>';idx++});
+  html+='<div class="toc-item"><span><b>1.'+(idx++)+'</b>O Que Este Relatório Não Captura Automaticamente</span><span>Fundos não listados / Prejuízos / Aluguel de ações</span></div>';
   if(resumosInformesBR.length)html+='<div class="toc-item"><span><b>1.'+(idx++)+'</b>Resumo dos Informes de Rendimentos</span><span>Isentos / Tributação Exclusiva</span></div>';
   if(movimentacao)html+='<div class="toc-item"><span><b>1.'+(idx++)+'</b>Rendimentos do Ano (B3) — Dividendos, JCP, Proventos</span><span>Movimentação B3</span></div>';
   html+='<div class="toc-item"><span><b>1.'+(idx++)+'</b>Exemplos Práticos — Como Declarar Cada Rendimento</span><span>Dividendos / Bonificação / JCP / Proventos</span></div>';
@@ -27349,6 +27350,7 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
     html+='<tr class="total"><td colspan="4">TOTAL '+info.nome.toUpperCase()+'</td><td class="num">'+irFmtR(totalGrupo)+'</td><td></td></tr>';
     html+='</tbody></table>';
     if(tp==="fii")html+='<div class="box box-tip"><b>💡 DICA:</b> Rendimentos mensais de FIIs são isentos de IR para PF. Declare em "Rendimentos Isentos", Código 99 (Outros) ou conforme indicado pela corretora.</div>';
+    if(tp==="fii")html+='<div class="box box-warn"><b>⚠ Se algum fundo foi incorporado por outro no ano:</b> é comum um FII/Fiagro/FI-Infra ser incorporado por outro (mesmo CNPJ ou CNPJ novo), trocando de ticker. Confira no informe da corretora se algum fundo da tabela acima "sumiu" e virou outro. Se sim: (1) declare o fundo antigo com saldo em 31/12/'+anoBase+' = R$ 0,00; (2) crie um item novo pro fundo que incorporou, com saldo em 31/12/'+(anoBase-1)+' = R$ 0,00 e saldo em 31/12/'+anoBase+' = o custo de aquisição herdado das cotas convertidas; (3) na Discriminação, mencione "recebidas por incorporação do fundo anterior em '+anoBase+'" — o custo de aquisição é herdado, isso não é venda nem gera ganho de capital.</div>';
     if(tp==="fiagro")html+='<div class="box box-tip"><b>💡 DICA:</b> Fiagro é uma classe de fundo distinta do FII "tradicional" (agro em vez de imóveis), com código próprio na declaração. Rendimentos mensais também são isentos de IR para PF — declare em "Rendimentos Isentos", Código 99.</div>';
     if(tp==="fundo_infra")html+='<div class="box box-tip"><b>💡 DICA:</b> FI-Infra (fundo incentivado de infraestrutura) também tem código próprio, diferente do FII. Rendimentos são isentos de IR para PF por lei — declare em "Rendimentos Isentos", Código 99.</div>';
     if(tp==="acao")html+='<div class="box box-tip"><b>💡 DICA:</b> Dividendos são isentos (Código 09). JCP entra em "Tributação Exclusiva" (Código 10). Vendas acima de R$ 20.000/mês exigem apuração mensal de DARF.</div>';
@@ -27358,6 +27360,24 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
     html+='</div></div>';
     i1++;
   });
+
+  /* ===== Lembretes gerais — itens que não vêm dos arquivos da B3 =====
+     Dois pontos que aparecem com frequência em carteiras reais mas que o parser (baseado só nos
+     arquivos de Posição/Movimentação da B3) não consegue capturar automaticamente: fundos de
+     investimento tradicionais (não listados em bolsa, custodiados direto no banco/corretora — não
+     aparecem nos arquivos de B3) e prejuízo de anos anteriores a compensar em renda variável (depende
+     da declaração do ano passado, não desse conjunto de documentos). Conteúdo educativo fixo. */
+  html+='<div class="pagelight"><div class="section">';
+  html+='<div class="section-eyebrow"><span class="section-eyebrow-line"></span><span class="section-eyebrow-text">PARTE 1 · LEMBRETES</span></div>';
+  html+='<h2 class="section-title">O Que Este Relatório <i>Não</i> Captura Automaticamente</h2>';
+  html+='<div class="section-path">📍 Estes dois itens não vêm dos arquivos de Posição/Movimentação da B3 — confira manualmente se aplicam à sua carteira.</div>';
+  html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🏦 Fundos de Investimento Tradicionais (não listados em bolsa)</h3>';
+  html+='<div class="step"><div class="step-text">Fundos DI, multimercado ou de renda fixa contratados direto no banco/corretora (sem ticker, não negociados na B3 — ex.: um fundo exclusivo do seu banco) <b>não aparecem nos arquivos de Posição/Movimentação da B3</b>, porque não são ativos negociados em bolsa. Se você tem esse tipo de fundo, declare manualmente com base no extrato do banco/corretora: <b>Bens e Direitos, Grupo 07, Código 01</b> ("Fundos sujeitos a tributação periódica"), CNPJ do fundo (não da instituição), com os saldos de 31/12 de cada ano. O rendimento resgatado no ano, se houver, entra em "Tributação Exclusiva", Código 06.</div></div>';
+  html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">📉 Prejuízos a Compensar (Renda Variável)</h3>';
+  html+='<div class="step"><div class="step-text">Se você teve prejuízo em operações de bolsa (comuns ou day-trade) em anos anteriores e ainda não compensou tudo com lucros, esse saldo <b>precisa ser transportado da sua declaração do ano passado</b> — este relatório não tem acesso a ela. Confira na ficha <b>Renda Variável → Operações Comuns/Day-Trade</b> do programa do ano anterior se há prejuízo acumulado, e informe esse valor no campo "Prejuízo a compensar" de janeiro do ano corrente. Lembre-se: prejuízo de operações comuns só compensa lucro de operações comuns; prejuízo de day-trade só compensa lucro de day-trade — os dois não se misturam.</div></div>';
+  html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">📄 Aluguel de Ações (BTC)</h3>';
+  html+='<div class="step"><div class="step-text">Se sua carteira tem receita de "aluguel de ações" (BTC — Banco de Títulos, oferecido por várias corretoras, inclusive no exterior), esse valor normalmente vem discriminado à parte no informe de rendimentos, com seu próprio IR retido na fonte. Como o tratamento exato pode variar conforme a corretora e vem descrito de forma diferente em cada informe, confira a linha específica no seu documento e, em caso de dúvida sobre o código exato, confirme com seu contador antes de declarar — esse relatório não presume um valor quando não consegue identificar essa receita com segurança nos arquivos anexados.</div></div>';
+  html+='</div></div>';
 
   /* ===== Resumo dos Informes de Rendimentos (BR) ===== */
   if(resumosInformesBR.length){
@@ -27446,6 +27466,7 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
   html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🏦 Juros sobre Capital Próprio (JCP)</h3>';
   html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Sujeitos à Tributação Exclusiva/Definitiva</b> → Código <b>10 – Juros sobre Capital Próprio</b> → CNPJ da empresa → valor <b>bruto</b> recebido no ano (o Informe de Rendimentos já traz esse total separado dos dividendos).</div></div>';
   html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu R$ 500,00 brutos de JCP, com R$ 75,00 já retidos na fonte pela empresa (15%) → lança R$ 500,00 (valor bruto) no Código 10. O imposto retido é informativo — já foi pago pela empresa, não gera DARF nem cobrança adicional.</div>';
+  html+='<div class="box box-warn"><b>⚠ JCP "em trânsito" (creditado mas ainda não pago):</b> se a empresa <b>creditou</b> o JCP contabilmente até 31/12/'+anoBase+' mas só efetuou o <b>pagamento</b> em '+(anoBase+1)+', esse valor não entra na Tributação Exclusiva deste ano (só quando for pago) — mas precisa aparecer como <b>Bens e Direitos, Grupo 99, Código 07</b> ("Outros bens e direitos"), com o saldo credor em 31/12/'+anoBase+' e zerado no ano anterior. Confira no informe de rendimentos da corretora se há uma linha de "JCP a receber" ou "JCP declarado e não pago".</div>';
 
   html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🏢 Proventos de FII, Fiagro e FI-Infra</h3>';
   html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Isentos e Não Tributáveis</b> → Código <b>99 – Outros</b> → CNPJ do fundo (administrador) → valor total recebido no ano <b>daquele fundo especificamente</b> (um lançamento por fundo, não um total único).</div></div>';
@@ -27489,10 +27510,24 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
     html+='<div class="section"><div class="section-eyebrow"><span class="section-eyebrow-line"></span><span class="section-eyebrow-text">PARTE 2 · ITEM 2.'+i2+'</span></div>';
     html+='<h2 class="section-title" style="color:#7C3AED">Dividendos no Exterior — <i>Onde Declarar</i></h2>';
     html+='<div class="box box-imp"><b>📌 Diferente do dividendo brasileiro:</b> dividendo de ação/ETF no exterior <b>NÃO é isento</b> — é tributado a <b>15% ao ano</b>, dentro do próprio ajuste anual (Lei 14.754/2023), junto com ganhos de capital e juros de aplicações financeiras no exterior do mesmo ano.</div>';
-    html+='<div class="step"><div class="step-num">ONDE DECLARAR</div><div class="step-text">O Programa IRPF monta sozinho um <b>"Demonstrativo de Apuração — Lei nº 14.754/2023"</b>, somando todos os rendimentos de aplicações financeiras no exterior do ano (dividendos + ganhos de capital + juros), aplicando <b>15%</b> sobre o total e gerando um <b>único DARF (código 0211)</b> — pagável à vista ou parcelado em até 8x, com vencimento junto ao ajuste anual.</div></div>';
-    html+='<div class="step"><div class="step-num">IMPOSTO PAGO LÁ FORA</div><div class="step-text">O imposto retido no exterior (ex.: withholding tax dos EUA) pode ser <b>abatido do imposto devido no Brasil, até o limite de 15%</b> — sem precisar de acordo de reciprocidade específico pra esse regime. Se a retenção lá fora já foi de 15% ou mais sobre aquele valor, não sobra imposto a pagar aqui.</div></div>';
-    html+='<div class="box box-warn"><b>⚠ Onde NÃO declarar:</b> dividendo do exterior <b>não</b> vai em "Rendimentos Isentos e Não Tributáveis" (não é isento) e <b>não</b> passa mais por carnê-leão mensal nem por um GCAP separado — isso valia antes de 2024. Desde a Lei 14.754/2023, o único lugar correto é dentro do demonstrativo de apuração específico da lei, junto com os demais rendimentos de aplicações financeiras no exterior do ano.</div>';
-    html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu US$ 200,00 em dividendos de uma ação americana (≈ R$ 1.100,00 no câmbio do dia do recebimento), com US$ 30,00 retidos na fonte pelos EUA (15%, ≈ R$ 165,00). No demonstrativo da Lei 14.754/2023: imposto devido no Brasil = R$ 1.100,00 × 15% = R$ 165,00; como já foram retidos R$ 165,00 no exterior, o crédito cobre integralmente o imposto devido — <b>nada a pagar adicionalmente aqui</b> sobre esse valor.</div>';
+    /* ---------- A TELA de verdade onde o dividendo e o imposto retido são lançados ----------
+       Ponto que o Igor pediu especificamente ("onde a tela que declara os dividendos e o que foi
+       retido de IR"): o relatório antes só explicava o resultado (o Demonstrativo de Apuração que o
+       programa monta sozinho), sem mostrar o passo de ENTRADA de dados. Na prática (confirmado por
+       um guia de declaração real, exercício 2026): não existe uma ficha separada de "dividendos do
+       exterior" pra preencher — o valor entra dentro da PRÓPRIA ficha de Bens e Direitos de cada
+       ativo (a mesma já criada no item 2.2/2.3 acima), numa seção que fica mais abaixo no formulário
+       chamada "Aplicação Financeira". A ficha de "Rendimentos > Lucros e Dividendos Recebidos de
+       Pessoa Jurídica no Exterior" só se aplica a quem tem holding/empresa offshore própria — não é
+       o caso de quem só tem ações e ETFs via corretora. */
+    html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Abra a ficha <b>Bens e Direitos</b> e selecione o ativo (a mesma ação ou ETF já cadastrado no item anterior) — <b>não</b> crie um lançamento novo. Role a tela para baixo até a seção <b>"Aplicação Financeira"</b>, que fica dentro do próprio cadastro do bem.</div></div>';
+    html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text">No campo <b>"Lucro ou Prejuízo"</b>, informe o total de dividendos recebidos daquele ativo no ano (em reais) — é a coluna <b>"Dividendos"</b> da tabela acima. No campo <b>"Imposto pago no Exterior"</b>, informe o total retido na fonte lá fora — é a coluna <b>"Imp. Exterior"</b> da mesma tabela.</div></div>';
+    html+='<div class="step"><div class="step-num">PASSO 3</div><div class="step-text">Repita para <b>cada ativo</b> que pagou dividendo no ano (uma ação/ETF de cada vez) — não dá pra lançar um total único. Ativos que não pagaram dividendo (Lucro ou Prejuízo = R$ 0,00) não precisam preencher essa seção.</div></div>';
+    html+='<div class="box box-tip"><b>💡 Conversão cambial:</b> o dividendo é convertido pela <b>cotação PTAX de venda</b> do dia do pagamento; o imposto retido lá fora é convertido pela <b>cotação PTAX de compra</b> do dia do pagamento. Normalmente a corretora (ex.: Vest, Avenue, Interactive Brokers) já entrega esses dois valores convertidos em reais no informe de rendimentos anual — é só copiar, sem precisar converter na mão.</div>';
+    html+='<div class="step"><div class="step-num">PASSO 4</div><div class="step-text">O Programa IRPF soma sozinho tudo o que foi lançado na seção "Aplicação Financeira" de cada ativo (dividendos + ganhos de capital + juros do ano) e monta o <b>"Demonstrativo de Apuração — Lei nº 14.754/2023"</b>, aplicando <b>15%</b> sobre o total e gerando um <b>único DARF (código 0211)</b> — pagável à vista ou parcelado em até 8x, com vencimento junto ao ajuste anual.</div></div>';
+    html+='<div class="step"><div class="step-num">IMPOSTO PAGO LÁ FORA</div><div class="step-text">O imposto retido no exterior (ex.: withholding tax dos EUA) que você lançou no Passo 2 é <b>abatido automaticamente do imposto devido no Brasil, até o limite de 15%</b> — sem precisar de acordo de reciprocidade específico pra esse regime. Se a retenção lá fora já foi de 15% ou mais sobre aquele valor, não sobra imposto a pagar aqui.</div></div>';
+    html+='<div class="box box-warn"><b>⚠ Onde NÃO declarar:</b> dividendo do exterior <b>não</b> vai em "Rendimentos Isentos e Não Tributáveis" (não é isento) e <b>não</b> passa mais por carnê-leão mensal nem por um GCAP separado — isso valia antes de 2024. Também <b>não</b> é a ficha "Rendimentos Recebidos de Pessoa Jurídica no Exterior" (essa é só pra sócio/titular de empresa offshore própria, não pra quem só tem ações/ETFs numa corretora internacional). Desde a Lei 14.754/2023, o lugar correto é a seção "Aplicação Financeira" de cada ativo em Bens e Direitos, descrita acima.</div>';
+    html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu US$ 200,00 em dividendos de uma ação americana (≈ R$ 1.100,00 no câmbio do dia do recebimento), com US$ 30,00 retidos na fonte pelos EUA (15%, ≈ R$ 165,00). Na ficha dessa ação em Bens e Direitos → Aplicação Financeira: Lucro ou Prejuízo = R$ 1.100,00; Imposto pago no Exterior = R$ 165,00. No demonstrativo da Lei 14.754/2023: imposto devido no Brasil = R$ 1.100,00 × 15% = R$ 165,00; como já foram retidos R$ 165,00 no exterior, o crédito cobre integralmente o imposto devido — <b>nada a pagar adicionalmente aqui</b> sobre esse valor.</div>';
     html+='</div>';
     i2++;
 
@@ -27511,6 +27546,12 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
     }
     html+='</div>';
     if(!resumoTributarioExterior||resumoTributarioExterior.baseCalculo===null)html+='<div class="box box-warn"><b>⚠ ATENÇÃO:</b> Resumo tributário oficial não encontrado no informe anexado — preencha manualmente com base no documento da corretora.</div>';
+    if(resumoTributarioExterior && resumoTributarioExterior.baseCalculo!==null){
+      var irGross15=0.15*(resumoTributarioExterior.baseCalculo||0);
+      if(resumoTributarioExterior.impostoPagoExterior>irGross15+0.005){
+        html+='<div class="box box-warn"><b>⚠ Crédito não aproveitado integralmente:</b> o imposto pago no exterior ('+irFmtR(resumoTributarioExterior.impostoPagoExterior)+') foi maior que os 15% devidos no Brasil sobre esse rendimento ('+irFmtR(irGross15)+'), então não há imposto a pagar aqui — mas o excedente <b>não gera restituição nem pode ser aproveitado em anos seguintes</b>. O crédito de imposto pago no exterior vale só até o limite do imposto devido no mesmo ano-calendário.</div>';
+      }
+    }
     html+='<div class="box box-imp"><b>📌 CBE OBRIGATÓRIA:</b> Se o total no exterior em 31/12/'+anoBase+' ultrapassou <b>US$ 1.000.000</b>, é obrigatório declarar a CBE no Banco Central até 5 de abril de '+anoDec+'. Acesse: bcb.gov.br/cbe</div>';
     html+='</div></div>';
   }
@@ -34629,7 +34670,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '457';
+  var SW_VERSION = '458';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
