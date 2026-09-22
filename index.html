@@ -20568,52 +20568,6 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
             })()}
 
               {}
-              <div style={{fontSize:10,color:T.t3,fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>📋 Declarar os Investimentos no IRPF</div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10,marginBottom:20}}>
-                <Cd onClick={function(){sIrpfMode(true)}} style={{padding:16,cursor:"pointer"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <div style={{fontSize:24}}>🧭</div>
-                    <div style={{flex:1}}>
-                      <div style={{fontSize:12,fontWeight:700,color:T.gold}}>IRPF · Assistente</div>
-                      <div style={{fontSize:9,color:T.t3,marginTop:2}}>Passo a passo interativo</div>
-                    </div>
-                  </div>
-                </Cd>
-                <Cd onClick={function(){sReportHtml(gerarRelatorio("irpf_light",d))}} style={{padding:16,cursor:"pointer"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <div style={{fontSize:24}}>📄</div>
-                    <div style={{flex:1}}>
-                      <div style={{fontSize:12,fontWeight:700,color:T.gold}}>IRPF · Guia Rápido</div>
-                      <div style={{fontSize:9,color:T.t3,marginTop:2}}>Relatório simples p/ impressão</div>
-                    </div>
-                  </div>
-                </Cd>
-              </div>
-
-              {}
-              <div style={{fontSize:10,color:T.t3,fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>💰 Tabela de Aportes</div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10,marginBottom:22}}>
-                <Cd onClick={function(){sReportHtml(gerarRelatorio("aporte",d))}} style={{padding:16,cursor:"pointer"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <div style={{fontSize:24}}>🌙</div>
-                    <div style={{flex:1}}>
-                      <div style={{fontSize:12,fontWeight:700,color:T.gold}}>Aportes · Versão Dark</div>
-                      <div style={{fontSize:9,color:T.t3,marginTop:2}}>Tela/apresentação</div>
-                    </div>
-                  </div>
-                </Cd>
-                <Cd onClick={function(){sReportHtml(gerarRelatorio("aporte_light",d))}} style={{padding:16,cursor:"pointer"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <div style={{fontSize:24}}>☀️</div>
-                    <div style={{flex:1}}>
-                      <div style={{fontSize:12,fontWeight:700,color:T.gold}}>Aportes · Versão Light</div>
-                      <div style={{fontSize:9,color:T.t3,marginTop:2}}>Para imprimir</div>
-                    </div>
-                  </div>
-                </Cd>
-              </div>
-
-              {}
               <div style={{display:"flex",gap:8,flexWrap:"wrap",paddingTop:14,borderTop:"1px solid "+T.w3}}>
                 <Bt v="secondary" style={{fontSize:11}} onClick={function(){
                   var assunto=encodeURIComponent("Relatório — "+c.nome+" | Courinvest");
@@ -26849,6 +26803,880 @@ var PRODUTOS = [
 "Câmbio / Moeda Estrangeira","Criptoativos"
 ];
 
+/* ============================================================================
+   RELATÓRIO ANUAL DE IR — módulo centralizado
+   Substitui o antigo fluxo por-cliente (IRPF Assistente / Guia Rápido / Aportes
+   Dark / Light). Permite anexar Informes de Rendimentos (BR e exterior) e
+   posições/movimentações da B3 para qualquer pessoa — cliente do Hub ou
+   "avulso" (quem contrata só o relatório de IR, sem ser cliente de gestão) —
+   e gera um único relatório consolidado, no padrão visual dos relatórios
+   mensais da Courinvest (capa dark/dourado + páginas de conteúdo claras).
+   ========================================================================= */
+
+/* ---------- Taxonomia IRPF (Grupo/Código/Ficha) — usada no relatório ---------- */
+var IR_TAXONOMIA={
+  acao:{grp:"03",cod:"01",nome:"Ações",loc:"105 - Brasil",ficha:"Bens e Direitos > Grupo 03 > Código 01"},
+  fii:{grp:"07",cod:"03",nome:"FIIs",loc:"105 - Brasil",ficha:"Bens e Direitos > Grupo 07 > Código 03"},
+  bdr:{grp:"04",cod:"04",nome:"BDRs",loc:"105 - Brasil",ficha:"Bens e Direitos > Grupo 04 > Código 04"},
+  cdb:{grp:"04",cod:"02",nome:"CDB",loc:"105 - Brasil",ficha:"Bens e Direitos > Grupo 04 > Código 02"},
+  lci:{grp:"04",cod:"03",nome:"LCI",loc:"105 - Brasil",ficha:"Bens e Direitos > Grupo 04 > Código 03"},
+  lca:{grp:"04",cod:"03",nome:"LCA",loc:"105 - Brasil",ficha:"Bens e Direitos > Grupo 04 > Código 03"},
+  lc:{grp:"04",cod:"02",nome:"LC",loc:"105 - Brasil",ficha:"Bens e Direitos > Grupo 04 > Código 02"},
+  cri:{grp:"04",cod:"03",nome:"CRI",loc:"105 - Brasil",ficha:"Bens e Direitos > Grupo 04 > Código 03"},
+  cra:{grp:"04",cod:"03",nome:"CRA",loc:"105 - Brasil",ficha:"Bens e Direitos > Grupo 04 > Código 03"},
+  deb:{grp:"04",cod:"03",nome:"Debêntures",loc:"105 - Brasil",ficha:"Bens e Direitos > Grupo 04 > Código 03"},
+  tesouro:{grp:"04",cod:"02",nome:"Tesouro Direto",loc:"105 - Brasil",ficha:"Bens e Direitos > Grupo 04 > Código 02"},
+  stock_us:{grp:"03",cod:"01",nome:"Stocks EUA",loc:"249 - Estados Unidos",ficha:"Bens e Direitos > Grupo 03 > Código 01"},
+  etf_int:{grp:"07",cod:"99",nome:"ETFs / Fundos no Exterior",loc:"249 - Estados Unidos",ficha:"Bens e Direitos > Grupo 07 > Código 99"}
+};
+var IR_CORRETORAS_EXTERIOR=["Vest","Banco Inter Internacional","C6 Global Invest","XP Internacional"];
+var IR_CORRETORAS_EXTERIOR_COM_PARSER=["Vest"];
+
+function irNum(v){
+  if(v===undefined||v===null||v==="-"||v==="")return 0;
+  if(typeof v==="number")return v;
+  var s=String(v).trim().replace(/R\$\s?|US\$\s?/g,"");
+  if(s==="-"||s==="")return 0;
+  if(s.indexOf(",")>=0 && s.indexOf(".")>=0){s=s.replace(/\./g,"").replace(",",".")}
+  else if(s.indexOf(",")>=0){s=s.replace(",",".")}
+  var n=parseFloat(s);
+  return isNaN(n)?0:n;
+}
+function irFmtR(v){return "R$ "+(+v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}
+
+/* ---------- Leitura de arquivos (PDF via pdf.js / XLSX via SheetJS — mesmas libs já usadas no Hub) ---------- */
+function irLerPdfTexto(file){
+  return new Promise(function(resolve,reject){
+    if(typeof pdfjsLib==="undefined"){reject(new Error("PDF.js não carregado"));return}
+    var reader=new FileReader();
+    reader.onerror=function(){reject(new Error("Falha ao ler "+file.name))};
+    reader.onload=function(e){
+      var data=new Uint8Array(e.target.result);
+      pdfjsLib.getDocument({data:data}).promise.then(function(pdf){
+        var promises=[];
+        var _loop=function(p){
+          promises.push(pdf.getPage(p).then(function(page){
+            return page.getTextContent().then(function(tc){
+              /* reconstrói "linhas visuais": agrupa itens de texto por coordenada Y (com tolerância)
+                 e ordena por X dentro de cada linha — evita que colunas de uma tabela do PDF
+                 saiam embaralhadas (equivalente ao "pdftotext -layout"). */
+              var linhas=[];
+              tc.items.forEach(function(it){
+                var y=Math.round(it.transform[5]);
+                var x=it.transform[4];
+                var linha=null;
+                for(var i=0;i<linhas.length;i++){if(Math.abs(linhas[i].y-y)<=2){linha=linhas[i];break}}
+                if(!linha){linha={y:y,itens:[]};linhas.push(linha)}
+                linha.itens.push({x:x,str:it.str});
+              });
+              linhas.sort(function(a,b){return b.y-a.y});
+              return linhas.map(function(l){
+                return l.itens.sort(function(a,b){return a.x-b.x}).map(function(i){return i.str}).join(" ");
+              }).join("\n");
+            });
+          }));
+        };
+        for(var p=1;p<=pdf.numPages;p++)_loop(p);
+        Promise.all(promises).then(function(pages){resolve(pages.join("\n"))}).catch(reject);
+      }).catch(reject);
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+function irLerXlsx(file){
+  return new Promise(function(resolve,reject){
+    var reader=new FileReader();
+    reader.onerror=function(){reject(new Error("Falha ao ler "+file.name))};
+    reader.onload=function(e){
+      try{ resolve(XLSX.read(e.target.result,{type:"array",raw:true,cellDates:true})) }
+      catch(err){ reject(err) }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+/* ---------- Parser: B3 "Posição" (xlsx) — ações, BDRs, fundos, renda fixa, tesouro ---------- */
+function irClassificarRendaFixa(produto){
+  var p=(produto||"").toUpperCase();
+  if(p.indexOf("LCI")>=0)return "lci";
+  if(p.indexOf("LCA")>=0)return "lca";
+  if(p.indexOf("CRI")>=0)return "cri";
+  if(p.indexOf("CRA")>=0)return "cra";
+  if(p.indexOf("DEB")>=0)return "deb";
+  return "cdb";
+}
+function irParseB3Posicao(wb){
+  var ativos=[]; var avisos=[];
+  function linhas(nome){
+    var ws=wb.Sheets[nome];
+    if(!ws)return [];
+    return XLSX.utils.sheet_to_json(ws,{defval:""});
+  }
+  linhas("Acoes").forEach(function(r){
+    var prod=String(r["Produto"]||"").trim(); var tk=String(r["Código de Negociação"]||"").trim();
+    if(!prod||!tk||/^total/i.test(prod))return;
+    var qtd=irNum(r["Quantidade"]), ct=irNum(r["Valor Atualizado"]);
+    ativos.push({tp:"acao",tk:tk,nm:prod.split(" - ").slice(1).join(" - ")||prod,qtd:qtd,cT:ct,pm:qtd?ct/qtd:0,inst:String(r["Instituição"]||"").trim(),cnpj:String(r["CNPJ da Empresa"]||"").trim()});
+  });
+  linhas("BDR").forEach(function(r){
+    var prod=String(r["Produto"]||"").trim(); var tk=String(r["Código de Negociação"]||"").trim();
+    if(!prod||!tk||/^total/i.test(prod))return;
+    var qtd=irNum(r["Quantidade"]), ct=irNum(r["Valor Atualizado"]);
+    ativos.push({tp:"bdr",tk:tk,nm:prod.split(" - ").slice(1).join(" - ")||prod,qtd:qtd,cT:ct,pm:qtd?ct/qtd:0,inst:String(r["Instituição"]||"").trim()});
+  });
+  var fundos=linhas("Fundo de Investimento");
+  if(fundos.length)avisos.push("Fundos de Investimento (aba \"Fundo de Investimento\" da Posição B3): classificados por padrão como FII (Grupo 07/Código 03) — confira se algum é Fiagro (Código 02) ou FI-Infra (Código 10) antes de declarar.");
+  fundos.forEach(function(r){
+    var tk=String(r["Código de Negociação"]||"").trim();
+    if(!tk||/^total/i.test(tk))return;
+    var qtd=irNum(r["Quantidade"]), ct=irNum(r["Valor Atualizado"]);
+    ativos.push({tp:"fii",tk:tk,nm:tk,qtd:qtd,cT:ct,pm:qtd?ct/qtd:0,inst:String(r["Administrador"]||"").trim(),cnpj:String(r["CNPJ do Fundo"]||"").trim()});
+  });
+  linhas("Renda Fixa").forEach(function(r){
+    var prod=String(r["Produto"]||"").trim();
+    if(!prod||/^total/i.test(prod))return;
+    var saldo=irNum(r["Valor Atualizado MTM"])||irNum(r["Valor Atualizado CURVA"])||irNum(r["Valor Atualizado FECHAMENTO"]);
+    ativos.push({tp:irClassificarRendaFixa(prod),tk:String(r["Código"]||"").trim()||prod,nm:prod,qtd:irNum(r["Quantidade"]),cT:saldo,pm:0,inst:String(r["Instituição"]||"").trim()});
+  });
+  linhas("Tesouro Direto").forEach(function(r){
+    var prod=String(r["Produto"]||"").trim();
+    if(!prod||/^total/i.test(prod))return;
+    ativos.push({tp:"tesouro",tk:prod,nm:prod,qtd:irNum(r["Quantidade"]),cT:irNum(r["Valor Atualizado"]),pm:0,inst:String(r["Instituição"]||"").trim()});
+  });
+  return {ativos:ativos,avisos:avisos};
+}
+
+/* ---------- Parser: B3 "Movimentação" (xlsx) — dividendos/JCP/rendimentos/bonificações do ano ---------- */
+function irParseB3Movimentacao(wb){
+  var ws=wb.Sheets["Movimentação"];
+  if(!ws)return {dividendos:0,jcp:0,rendimentosFii:0,bonificacoes:[]};
+  var rows=XLSX.utils.sheet_to_json(ws,{defval:""});
+  var dividendos=0,jcp=0,rendimentosFii=0,bonificacoes=[];
+  rows.forEach(function(r){
+    var mov=String(r["Movimentação"]||""); var val=irNum(r["Valor da Operação"]);
+    if(/jcp|juros sobre capital/i.test(mov)){jcp+=val}
+    else if(/dividendo/i.test(mov)){dividendos+=val}
+    else if(/rendimento/i.test(mov)){rendimentosFii+=val}
+    else if(/bonifica/i.test(mov)){bonificacoes.push({ticker:String(r["TICKER"]||"").trim(),produto:r["Produto"],qtd:irNum(r["Quantidade"]),data:r["Data"]})}
+  });
+  return {dividendos:dividendos,jcp:jcp,rendimentosFii:rendimentosFii,bonificacoes:bonificacoes};
+}
+
+/* ---------- Parser: Informe de Rendimentos BR (PDF) — Rico/XP, C6, PicPay e genérico ----------
+   Todos os bancos/corretoras seguem o vocabulário padronizado da IN RFB 698/06
+   ("Rendimentos Isentos", "Rendimentos Sujeitos à Tributação Exclusiva", "Bens e Direitos",
+   "Dívidas e Ônus Reais"), o que permite um parser único por palavras-chave em vez de um
+   parser por instituição. */
+function irDetectarCorretoraBR(texto){
+  if(/XP INVESTIMENTOS|WWW\.RICO\.COM\.BR/i.test(texto))return "Rico/XP";
+  if(/C6 BANK|BANCO C6 S\.A|C6 CTVM/i.test(texto))return "C6 Bank";
+  if(/PICPAY/i.test(texto))return "PicPay";
+  if(/BTG PACTUAL/i.test(texto))return "BTG Pactual";
+  if(/ITA[UÚ]/i.test(texto))return "Itaú";
+  return "Corretora não identificada";
+}
+function irParseInformeBR(texto,anoBase){
+  var corretora=irDetectarCorretoraBR(texto);
+  var linhasTx=texto.split("\n").map(function(l){return l.replace(/\s+/g," ").trim()}).filter(Boolean);
+  var reValor="R?\\$?\\s?-?\\s?[\\d\\.]*\\d,\\d{2}|-";
+  var reLinhaValores=new RegExp("("+reValor+")\\s+("+reValor+")(?:\\s+("+reValor+"))?\\s*$");
+  var reValorUnico=new RegExp("("+reValor+")\\s*$");
+
+  var resultado={corretora:corretora,isentos:{total:0,itens:[]},exclusiva:{total:0,itens:[]},saldoConta:{total:0,itens:[]},dividas:{total:0,itens:[]},bensDireitos:{total:0,itens:[]}};
+  var secao=null,pendingGrupo=null,pendingCodigo=null,finalizado=false;
+  var jaEntrou={isentos:false,exclusiva:false,dividas:false};
+
+  linhasTx.forEach(function(linha){
+    if(finalizado)return;
+    if(/^ficha\b/i.test(linha))return;
+    if(/fonte\s+pagadora\s+\d+\s*\/\s*\d+/i.test(linha)){
+      jaEntrou.isentos=false;jaEntrou.exclusiva=false;jaEntrou.dividas=false;pendingGrupo=null;pendingCodigo=null;return;
+    }
+    if(/rendimentos\s+tribut[aá]veis,\s*dedu|informa[çc][oõ]es\s+complementares|detalhamento\s+dos\s+ativos|relat[oó]rios\s+e\s+documentos\s+auxiliares/i.test(linha)){finalizado=true;secao=null;return}
+    if(/rendimentos\s+isent/i.test(linha)){secao=jaEntrou.isentos?null:"isentos";jaEntrou.isentos=true;return}
+    if(/sujeit[oa]s?\s+[aà]\s+tributa[çc][ãa]o\s+exclusiv/i.test(linha)){secao=jaEntrou.exclusiva?null:"exclusiva";jaEntrou.exclusiva=true;return}
+    if(/saldo\s+em\s+conta/i.test(linha)){secao="saldoConta";return}
+    if(/d[íi]vidas?\s+e\s+[oô]nus/i.test(linha)){secao=jaEntrou.dividas?null:"dividas";jaEntrou.dividas=true;return}
+    if(/bens\s+e\s+direitos/i.test(linha) && !/saldo\s+em\s+conta/i.test(linha)){secao="bensDireitos";return}
+
+    var gMatch=linha.match(/grupo\s*(?:de\s+bens)?:?\s*(\d{1,2})/i); if(gMatch)pendingGrupo=gMatch[1];
+    var cMatch=linha.match(/c[óo]digo:?\s*(\d{1,2})/i); if(cMatch)pendingCodigo=cMatch[1];
+    if(!secao)return;
+
+    var m=linha.match(reLinhaValores);
+    var v1,v2,v3;
+    if(m){v1=irNum(m[1]);v2=irNum(m[2]);v3=m[3]!==undefined?irNum(m[3]):null}
+    else{
+      var m1=linha.match(reValorUnico);
+      if(!m1)return;
+      v1=0;v2=irNum(m1[1]);v3=v2;m=m1;
+    }
+    var label=linha.slice(0,m.index).trim().replace(/^(fonte pagadora|especifica[çc][aã]o)\s*/i,"").trim();
+    if(!label)label="(sem rótulo)";
+    if(/saldos?\s+em\s+31\/12/i.test(linha))return;
+    if(/^cnpj/i.test(label))return;
+    var isTotalLine=/total/i.test(label)||/^total:?$/i.test(linha);
+    var codeMatch=linha.match(/c[óo]d\.?\s*(\d{1,2})/i)||linha.match(/c[óo]digo:?\s*(\d{1,2})/i);
+    var grpMatch=linha.match(/grupo\s*(?:de\s+bens)?:?\s*(\d{1,2})/i);
+    resultado[secao].itens.push({label:label,saldoAnt:v1,saldoAtual:v2,rendimento:v3!==null?v3:0,codigo:codeMatch?codeMatch[1]:pendingCodigo,grupo:grpMatch?grpMatch[1]:pendingGrupo,isTotal:isTotalLine});
+  });
+
+  ["isentos","exclusiva","saldoConta","dividas","bensDireitos"].forEach(function(sec){
+    var itens=resultado[sec].itens;
+    var totalLines=itens.filter(function(i){return i.isTotal});
+    var fonte=totalLines.length>0?totalLines:itens;
+    resultado[sec].total=fonte.reduce(function(s,i){return s+i.saldoAtual},0);
+  });
+  return resultado;
+}
+
+/* ---------- Parser: Informe Vest (exterior) — único com parser real por enquanto ---------- */
+function irParseVestPdf(texto){
+  var linhasTx=texto.split("\n").map(function(l){return l.replace(/\s+/g," ").trim()}).filter(Boolean);
+  var ativos=[]; var saldoContaExterior=null; var resumoTributario=null;
+
+  var idxSaldo=linhasTx.findIndex(function(l){return /06\s*\/\s*99/.test(l) && /R\$/.test(l)});
+  if(idxSaldo>=0){
+    var vals=linhasTx[idxSaldo].match(/R\$\s*([\d.,]+)/g);
+    if(vals&&vals.length>=2)saldoContaExterior={ant:irNum(vals[0]),atual:irNum(vals[1])};
+  }
+
+  var reAtivo=/^(\d{2})\s*\/\s*(\d{2})\s+(STOCK|ETF)\s+([A-Z0-9\.\-]+|-)\s+(.*?)(R\$\s*[\d.,\-]+|-)\s+(R\$\s*[\d.,\-]+|-)\s*$/;
+  linhasTx.forEach(function(linha,idx){
+    var m=linha.match(reAtivo);
+    if(!m)return;
+    var grupo=m[1],codigo=m[2],tipo=m[3],simbolo=m[4];
+    var nome="";
+    var janela=linhasTx.slice(Math.max(0,idx-4),idx+2).join(" ");
+    if(simbolo&&simbolo!=="-"){
+      var mNome=janela.match(new RegExp("\\("+simbolo.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\)\\s*\\/\\/\\s*([^\\/]+?)\\s*\\/\\/"));
+      if(mNome)nome=mNome[1].trim();
+    }
+    var bloco=linhasTx.slice(idx,idx+6).join(" ");
+    var mGanhos=bloco.match(/Ganhos de capital:\s*R\$\s*([\d.,\-]+)\s*\/\/\s*Imposto pago:\s*R\$\s*([\d.,\-]+)\s+Lucro ou Preju[ií]zo:\s*R\$\s*([\d.,\-]+)/);
+    var mDiv=bloco.match(/Dividendos:\s*R\$\s*([\d.,\-]+)\s*\/\/\s*Imposto pago:\s*R\$\s*([\d.,\-]+)\s+Imposto pago no Exterior:\s*R\$\s*([\d.,\-]+)/);
+    ativos.push({
+      tp:tipo==="STOCK"?"stock_us":"etf_int",tk:simbolo,nm:nome||simbolo,grupo:grupo,codigo:codigo,
+      saldo2024:irNum(m[6]),saldo2025:irNum(m[7]),
+      ganhosCapital:mGanhos?irNum(mGanhos[1]):0,impostoGanhos:mGanhos?irNum(mGanhos[2]):0,lucroPrejuizo:mGanhos?irNum(mGanhos[3]):0,
+      dividendos:mDiv?irNum(mDiv[1]):0,impostoDividendos:mDiv?irNum(mDiv[2]):0,impostoExterior:mDiv?irNum(mDiv[3]):0
+    });
+  });
+
+  var idxResumo=linhasTx.findIndex(function(l){return /resumo\s+tribut[aá]rio/i.test(l)});
+  if(idxResumo>=0){
+    var blocoR=linhasTx.slice(idxResumo,idxResumo+40).join(" | ");
+    var get=function(label){
+      var re=new RegExp(label+"[\\s\\S]*?R\\$\\s*([\\d.,\\-]+)","i");
+      var mm=blocoR.match(re);
+      return mm?irNum(mm[1]):null;
+    };
+    resumoTributario={
+      ganhosCapital:get("Ganhos de Capital"),
+      dividendos:get("\\|\\s*Dividendos"),
+      baseCalculo:get("Base de C[aá]lculo"),
+      impostoPagoExterior:get("Imposto Pago no Exterior"),
+      impostoDevido:get("Imposto Devido")
+    };
+  }
+  return {ativos:ativos,saldoContaExterior:saldoContaExterior,resumoTributario:resumoTributario};
+}
+
+/* ---------- Gerador do HTML do relatório consolidado (padrão visual dos relatórios mensais) ---------- */
+function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
+  var anoDec=anoBase+1;
+  var hoje=new Date().toLocaleDateString("pt-BR");
+  var ativosBR=dados.ativosBR||[];
+  var ativosExterior=dados.ativosExterior||[];
+  var resumosInformesBR=dados.resumosInformesBR||[];
+  var movimentacao=dados.movimentacao||null;
+  var saldoContaExterior=dados.saldoContaExterior||null;
+  var resumoTributarioExterior=dados.resumoTributarioExterior||null;
+  var fontesUsadas=dados.fontesUsadas||[];
+  var itensRevisaoManual=dados.itensRevisaoManual||[];
+
+  var totalPatrimonioBR=ativosBR.reduce(function(s,a){return s+(a.cT||0)},0);
+  var totalPatrimonioExterior=ativosExterior.reduce(function(s,a){return s+(a.saldo2025||0)},0);
+  var totalGeral=totalPatrimonioBR+totalPatrimonioExterior+(saldoContaExterior?saldoContaExterior.atual:0);
+
+  var byTipo={};
+  ativosBR.forEach(function(a){
+    var info=IR_TAXONOMIA[a.tp]; if(!info)return;
+    if(!byTipo[a.tp])byTipo[a.tp]={info:info,ativos:[]};
+    byTipo[a.tp].ativos.push(a);
+  });
+  var tiposBR=Object.keys(byTipo);
+
+  var byTipoExt={};
+  ativosExterior.forEach(function(a){
+    var info=IR_TAXONOMIA[a.tp]; if(!info)return;
+    if(!byTipoExt[a.tp])byTipoExt[a.tp]={info:info,ativos:[]};
+    byTipoExt[a.tp].ativos.push(a);
+  });
+  var tiposExt=Object.keys(byTipoExt);
+
+  var css='<style>'
+    +'@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap");'
+    +'*{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}'
+    +'html,body{background:#F1F3F8;color:#0A1628;font-family:"Outfit",sans-serif;-webkit-font-smoothing:antialiased;font-size:11px;line-height:1.55}'
+    +'@page{size:A4;margin:0}'
+    +'.page{max-width:820px;margin:0 auto;padding:0;position:relative}'
+    +'.cover{min-height:96vh;display:flex;flex-direction:column;justify-content:space-between;padding:52px 44px;page-break-after:always;background:linear-gradient(135deg,#0A1530 0%,#050A14 100%);color:#fff;position:relative;overflow:hidden}'
+    +'.cover::before{content:"";position:absolute;inset:0;background-image:radial-gradient(circle at 50% 30%, rgba(212,163,40,0.08) 0%, transparent 60%);pointer-events:none}'
+    +'.cover-inner{position:relative;z-index:1;display:flex;flex-direction:column;height:100%}'
+    +'.cover-top{display:flex;justify-content:space-between;align-items:flex-start}'
+    +'.logo-text{font-size:22px;font-weight:800;color:#D4A328;letter-spacing:2px;line-height:1}'
+    +'.logo-sub{font-size:9px;color:#8B94A7;letter-spacing:3px;margin-top:4px;font-weight:600}'
+    +'.cover-center{text-align:center;padding:50px 10px;margin:auto 0}'
+    +'.cover-badge{display:inline-block;padding:6px 18px;background:rgba(212,163,40,0.1);border:1px solid rgba(212,163,40,0.3);border-radius:20px;color:#D4A328;font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:22px}'
+    +'.cover-title{font-size:46px;font-weight:900;color:#fff;letter-spacing:-1.2px;line-height:1.08}'
+    +'.cover-title i{color:#D4A328;font-style:italic}'
+    +'.cover-sub{font-size:14px;color:#9CADC9;font-weight:500;margin-top:14px;letter-spacing:1px;text-transform:uppercase}'
+    +'.cover-info-box{background:linear-gradient(145deg,#fffbeb,#fef3c7);border:1px solid rgba(212,163,40,0.35);border-radius:16px;padding:24px 28px;margin:30px auto 0;max-width:520px;text-align:left}'
+    +'.cover-info-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(10,22,40,0.08)}'
+    +'.cover-info-row:last-child{border-bottom:none}'
+    +'.cover-info-label{font-size:9px;color:#8a6d1f;font-weight:700;letter-spacing:1.5px;text-transform:uppercase}'
+    +'.cover-info-value{font-size:13px;color:#1a1a2e;font-weight:700;font-family:"JetBrains Mono",monospace}'
+    +'.cover-bottom{text-align:center;padding-top:18px;border-top:1px solid rgba(212,163,40,0.18)}'
+    +'.cover-bottom-text{font-size:10px;color:#8B94A7;line-height:1.6;font-style:italic}'
+    +'.cover-bottom-by{font-size:12px;color:#D4A328;font-weight:700;margin-top:8px;letter-spacing:.5px}'
+
+    +'.pagelight{background:linear-gradient(180deg,#FAFBFD 0%,#F1F3F8 100%);padding:36px 40px;page-break-after:always}'
+    +'.pagelight:last-child{page-break-after:auto}'
+    +'.toc-title{font-size:26px;font-weight:900;color:#0A1628;letter-spacing:-.6px;margin-bottom:20px;border-bottom:2px solid rgba(212,163,40,0.3);padding-bottom:10px}'
+    +'.toc-title i{color:#D4A328;font-style:italic}'
+    +'.toc-section-title{font-size:12px;font-weight:800;color:#0A1628;letter-spacing:.5px;margin:16px 0 8px;padding:7px 12px;border-radius:8px;background:rgba(212,163,40,0.1)}'
+    +'.toc-item{display:flex;justify-content:space-between;padding:6px 12px;font-size:11px;color:#3a4358;border-bottom:1px dashed rgba(10,22,40,0.08)}'
+    +'.toc-item b{color:#D4A328;font-family:"JetBrains Mono",monospace;margin-right:8px}'
+
+    +'.section{padding:16px 0;page-break-inside:avoid}'
+    +'.section-eyebrow{display:flex;align-items:center;gap:10px;margin-bottom:8px}'
+    +'.section-eyebrow-line{display:inline-block;height:1px;width:32px;background:linear-gradient(90deg,#D4A328,transparent)}'
+    +'.section-eyebrow-text{font-size:10px;color:#D4A328;font-weight:700;letter-spacing:2.5px}'
+    +'.section-title{font-size:24px;font-weight:900;color:#0A1628;letter-spacing:-.6px;margin-bottom:10px;line-height:1.15}'
+    +'.section-title i{color:#D4A328;font-style:italic}'
+    +'.section-path{padding:9px 13px;background:rgba(212,163,40,0.07);border:1px solid rgba(212,163,40,0.2);border-left:3px solid #D4A328;border-radius:6px;font-size:10px;color:#3a4358;margin-bottom:12px;line-height:1.5}'
+    +'.section-path b{color:#8a6d1f}'
+
+    +'.step{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid rgba(10,22,40,0.05)}'
+    +'.step-num{flex-shrink:0;width:48px;font-size:9px;font-weight:800;color:#8a6d1f;background:rgba(212,163,40,0.1);text-align:center;padding:4px 0;border-radius:4px;height:fit-content}'
+    +'.step-text{flex:1;font-size:10.5px;color:#3a4358;line-height:1.55}'
+    +'.step-text b{color:#0A1628}'
+
+    +'table{width:100%;border-collapse:collapse;margin:12px 0;background:#fff;border-radius:10px;overflow:hidden;font-size:10px;box-shadow:0 2px 12px rgba(10,22,40,0.05)}'
+    +'th{background:rgba(212,163,40,0.12);color:#8a6d1f;padding:8px 10px;text-align:left;font-size:8.5px;letter-spacing:.6px;text-transform:uppercase;font-weight:800;border-bottom:1px solid rgba(212,163,40,0.25)}'
+    +'th.num{text-align:right}'
+    +'td{padding:7px 10px;border-bottom:1px solid rgba(10,22,40,0.05);font-size:10px;color:#3a4358}'
+    +'td.num{text-align:right;font-family:"JetBrains Mono",monospace;font-weight:600;color:#0A1628}'
+    +'td.tk{font-weight:800;color:#0A1628;font-family:"JetBrains Mono",monospace}'
+    +'tr:last-child td{border-bottom:none}'
+    +'tr.total td{background:rgba(212,163,40,0.08);font-weight:800;color:#0A1628;border-top:1px solid rgba(212,163,40,0.3)}'
+
+    +'.box{padding:11px 14px;border-radius:8px;margin:10px 0;font-size:10px;line-height:1.6;border-left:3px solid}'
+    +'.box-tip{background:rgba(56,189,248,0.07);border:1px solid rgba(56,189,248,0.2);border-left-color:#0284C7;color:#3a4358}'
+    +'.box-tip b{color:#0284C7}'
+    +'.box-warn{background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);border-left-color:#B45309;color:#3a4358}'
+    +'.box-warn b{color:#B45309}'
+    +'.box-imp{background:rgba(217,48,37,0.06);border:1px solid rgba(217,48,37,0.2);border-left-color:#D93025;color:#3a4358}'
+    +'.box-imp b{color:#D93025}'
+
+    +'.tax-summary{background:linear-gradient(145deg,#fffbeb,#fef3c7);border:1px solid rgba(212,163,40,0.35);border-radius:14px;padding:18px 20px;margin:12px 0}'
+    +'.tax-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid rgba(10,22,40,0.07);font-size:12px}'
+    +'.tax-row:last-child{border-bottom:none;border-top:2px solid rgba(212,163,40,0.35);margin-top:4px;padding-top:11px;font-size:14px;font-weight:800}'
+    +'.tax-row span:first-child{color:#3a4358}'
+    +'.tax-row span:last-child{color:#8a6d1f;font-family:"JetBrains Mono",monospace;font-weight:700}'
+    +'.tax-row.zero span:last-child{color:#0F9D58}'
+
+    +'.badge-broker{display:inline-block;padding:2px 10px;border-radius:14px;font-size:9px;font-weight:700;background:rgba(10,22,40,0.06);color:#0A1628;margin-bottom:8px}'
+
+    +'.footer{margin-top:30px;padding-top:16px;border-top:1px solid rgba(212,163,40,0.25);font-size:9px;color:#7a8399;line-height:1.6;text-align:center}'
+    +'.footer b{color:#8a6d1f}'
+    +'@media print{.section{page-break-inside:avoid}table{page-break-inside:avoid}}'
+    +'</style>';
+
+  var logoSVG='<svg width="36" height="36" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="2" fill="#D4A328"/><circle cx="20" cy="20" r="8" fill="none" stroke="#D4A328" stroke-width="1.5" opacity=".6"/><circle cx="20" cy="20" r="14" fill="none" stroke="#D4A328" stroke-width="1.5"/><path d="M 20 6 A 14 14 0 0 0 20 34" fill="none" stroke="#D4A328" stroke-width="2.5" stroke-linecap="round"/></svg>';
+
+  var html='<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório Anual de IR '+anoDec+' — '+pessoa.nome+'</title>'+css+'</head><body><div class="page">';
+
+  /* ===== CAPA ===== */
+  html+='<div class="cover"><div class="cover-inner">';
+  html+='<div class="cover-top"><div>'+logoSVG+'<div class="logo-text" style="margin-top:8px">COURINVEST</div><div class="logo-sub">CONSULTORIA EM INVESTIMENTOS</div></div>';
+  html+='<div style="text-align:right;font-size:9px;color:#8B94A7;letter-spacing:1px"><div>EXERCÍCIO '+anoDec+'</div><div style="margin-top:4px;color:#D4A328;font-weight:700">ANO-CALENDÁRIO '+anoBase+'</div></div></div>';
+  html+='<div class="cover-center">';
+  html+='<div class="cover-badge">📑 RELATÓRIO ANUAL DE IR</div>';
+  html+='<h1 class="cover-title">Imposto de <i>Renda</i></h1><h1 class="cover-title">Pessoa <i>Física</i></h1>';
+  html+='<div class="cover-sub">Passo a passo para declaração · '+anoDec+' (ano-calendário '+anoBase+')</div>';
+  html+='<div class="cover-info-box">';
+  html+='<div class="cover-info-row"><span class="cover-info-label">Contribuinte</span><span class="cover-info-value">'+pessoa.nome+'</span></div>';
+  if(pessoa.cpf)html+='<div class="cover-info-row"><span class="cover-info-label">CPF</span><span class="cover-info-value">'+pessoa.cpf+'</span></div>';
+  html+='<div class="cover-info-row"><span class="cover-info-label">Patrimônio Total Declarável</span><span class="cover-info-value">'+irFmtR(totalGeral)+'</span></div>';
+  html+='<div class="cover-info-row"><span class="cover-info-label">Ativos no Brasil</span><span class="cover-info-value">'+ativosBR.length+' ativos · '+irFmtR(totalPatrimonioBR)+'</span></div>';
+  if(ativosExterior.length)html+='<div class="cover-info-row"><span class="cover-info-label">Ativos no Exterior</span><span class="cover-info-value">'+ativosExterior.length+' ativos · '+irFmtR(totalPatrimonioExterior)+'</span></div>';
+  html+='</div></div>';
+  html+='<div class="cover-bottom"><div class="cover-bottom-text">Elaborado a partir dos informes de rendimentos e posições anexados. Não substitui a orientação de um contador ou profissional tributário.</div><div class="cover-bottom-by">Elaborado por COURINVEST · Gerado em '+hoje+'</div></div>';
+  html+='</div></div>';
+
+  /* ===== SUMÁRIO ===== */
+  html+='<div class="pagelight"><h2 class="toc-title">Sum<i>ário</i></h2>';
+  html+='<div class="toc-section-title">PARTE 1 — INVESTIMENTOS NO BRASIL</div>';
+  var idx=1;
+  tiposBR.forEach(function(tp){var info=byTipo[tp].info;html+='<div class="toc-item"><span><b>1.'+idx+'</b>Bens e Direitos — '+info.nome+'</span><span>Grupo '+info.grp+' / Código '+info.cod+'</span></div>';idx++});
+  if(resumosInformesBR.length)html+='<div class="toc-item"><span><b>1.'+(idx++)+'</b>Resumo dos Informes de Rendimentos</span><span>Isentos / Tributação Exclusiva</span></div>';
+  if(movimentacao)html+='<div class="toc-item"><span><b>1.'+(idx++)+'</b>Rendimentos do Ano (B3) — Dividendos, JCP, Proventos</span><span>Movimentação B3</span></div>';
+  if(tiposExt.length){
+    html+='<div class="toc-section-title">PARTE 2 — INVESTIMENTOS NO EXTERIOR</div>';
+    var idx2=1;
+    html+='<div class="toc-item"><span><b>2.'+(idx2++)+'</b>Saldo em Conta — Corretora Exterior</span><span>Grupo 06 / Código 99</span></div>';
+    tiposExt.forEach(function(tp){var info=byTipoExt[tp].info;html+='<div class="toc-item"><span><b>2.'+idx2+'</b>Bens e Direitos — '+info.nome+'</span><span>Grupo '+info.grp+' / Código '+info.cod+'</span></div>';idx2++});
+    html+='<div class="toc-item"><span><b>2.'+idx2+'</b>Resumo Tributário — Lei 14.754/2023</span><span>Imposto a Pagar</span></div>';
+  }
+  html+='</div>';
+
+  /* ===== PARTE 1 — BRASIL: Bens e Direitos por tipo ===== */
+  var i1=1;
+  tiposBR.forEach(function(tp){
+    var info=byTipo[tp].info,ativos=byTipo[tp].ativos;
+    var totalGrupo=ativos.reduce(function(s,a){return s+(a.cT||0)},0);
+    html+='<div class="pagelight"><div class="section">';
+    html+='<div class="section-eyebrow"><span class="section-eyebrow-line"></span><span class="section-eyebrow-text">PARTE 1 · ITEM 1.'+i1+'</span></div>';
+    html+='<h2 class="section-title">Bens e Direitos — <i>'+info.nome+'</i></h2>';
+    html+='<div class="section-path">📍 <b>Caminho:</b> Fichas → '+info.ficha+' → Localização: '+info.loc+'</div>';
+    html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">No Programa IRPF '+anoDec+', acesse <b>Bens e Direitos</b> → <b>Novo</b> → Grupo <b>'+info.grp+'</b>, Código <b>'+info.cod+'</b>.</div></div>';
+    html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text"><b>Localização:</b> '+info.loc+'. Preencha o CNPJ do emissor/empresa/fundo conforme a tabela abaixo.</div></div>';
+    html+='<div class="step"><div class="step-num">PASSO 3</div><div class="step-text">Em <b>Discriminação</b>: "[QUANTIDADE] de [NOME] ([TICKER]), preço médio R$ [PM], custodiado na [CORRETORA]."</div></div>';
+    html+='<div class="step"><div class="step-num">PASSO 4</div><div class="step-text">Preencha <b>Situação em 31/12/'+(anoBase-1)+'</b> e <b>Situação em 31/12/'+anoBase+'</b> (saldo atual = coluna abaixo).</div></div>';
+    html+='<table><thead><tr><th>Ticker</th><th>Nome</th><th class="num">Qtd</th><th class="num">PM (R$)</th><th class="num">Saldo 31/12/'+anoBase+'</th><th>Corretora</th></tr></thead><tbody>';
+    ativos.forEach(function(a){
+      html+='<tr><td class="tk">'+(a.tk||"-")+'</td><td>'+(a.nm||"-")+'</td><td class="num">'+(a.qtd||0).toLocaleString("pt-BR",{maximumFractionDigits:4})+'</td><td class="num">'+(a.pm||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+'</td><td class="num">'+irFmtR(a.cT)+'</td><td style="font-size:9px;color:#7a8399">'+(a.inst||"-")+'</td></tr>';
+    });
+    html+='<tr class="total"><td colspan="4">TOTAL '+info.nome.toUpperCase()+'</td><td class="num">'+irFmtR(totalGrupo)+'</td><td></td></tr>';
+    html+='</tbody></table>';
+    if(tp==="fii")html+='<div class="box box-tip"><b>💡 DICA:</b> Rendimentos mensais de FIIs são isentos de IR para PF. Declare em "Rendimentos Isentos", Código 26 (FII) ou conforme indicado pela corretora.</div>';
+    if(tp==="acao")html+='<div class="box box-tip"><b>💡 DICA:</b> Dividendos são isentos (Código 09). JCP entra em "Tributação Exclusiva" (Código 10). Vendas acima de R$ 20.000/mês exigem apuração mensal de DARF.</div>';
+    if(tp==="cdb"||tp==="lc")html+='<div class="box box-tip"><b>💡 DICA:</b> Rendimentos de CDB/LC têm IR retido na fonte (tabela regressiva). Declare em "Tributação Exclusiva", Código 06.</div>';
+    if(tp==="lci"||tp==="lca"||tp==="cri"||tp==="cra")html+='<div class="box box-tip"><b>💡 DICA:</b> '+info.nome+' é isento de IR para PF. Declare o rendimento em "Rendimentos Isentos", Código 12.</div>';
+    if(tp==="tesouro")html+='<div class="box box-tip"><b>💡 DICA:</b> Tesouro Direto: use o CNPJ da corretora custodiante (não o do Tesouro Nacional). Rendimentos em "Tributação Exclusiva", Código 06.</div>';
+    html+='</div></div>';
+    i1++;
+  });
+
+  /* ===== Resumo dos Informes de Rendimentos (BR) ===== */
+  if(resumosInformesBR.length){
+    html+='<div class="pagelight"><div class="section">';
+    html+='<div class="section-eyebrow"><span class="section-eyebrow-line"></span><span class="section-eyebrow-text">PARTE 1 · RESUMO DOS INFORMES</span></div>';
+    html+='<h2 class="section-title">Resumo dos Informes de <i>Rendimentos</i></h2>';
+    html+='<div class="section-path">📍 Valores extraídos automaticamente dos Informes de Rendimentos anexados. Confira sempre com o documento original antes de declarar.</div>';
+    resumosInformesBR.forEach(function(r){
+      html+='<div class="badge-broker">🏦 '+r.corretora+'</div>';
+      html+='<table><thead><tr><th>Ficha</th><th class="num">Valor</th></tr></thead><tbody>';
+      html+='<tr><td>Rendimentos Isentos e Não Tributáveis</td><td class="num">'+irFmtR(r.isentos.total)+'</td></tr>';
+      html+='<tr><td>Rendimentos Sujeitos à Tributação Exclusiva</td><td class="num">'+irFmtR(r.exclusiva.total)+'</td></tr>';
+      html+='<tr><td>Saldo em Conta (Bens e Direitos — Grupo 06)</td><td class="num">'+irFmtR(r.saldoConta.total)+'</td></tr>';
+      if(r.bensDireitos.total)html+='<tr><td>Outros Bens e Direitos declarados na corretora</td><td class="num">'+irFmtR(r.bensDireitos.total)+'</td></tr>';
+      html+='<tr><td>Dívidas e Ônus Reais</td><td class="num">'+irFmtR(r.dividas.total)+'</td></tr>';
+      html+='</tbody></table>';
+    });
+    html+='</div></div>';
+  }
+
+  /* ===== Rendimentos do ano (B3 Movimentação) ===== */
+  if(movimentacao){
+    html+='<div class="pagelight"><div class="section">';
+    html+='<div class="section-eyebrow"><span class="section-eyebrow-line"></span><span class="section-eyebrow-text">PARTE 1 · RENDIMENTOS DO ANO</span></div>';
+    html+='<h2 class="section-title">Dividendos, JCP e <i>Proventos</i></h2>';
+    html+='<div class="section-path">📍 Consolidado a partir da Movimentação B3 do ano-calendário '+anoBase+'.</div>';
+    html+='<table><thead><tr><th>Tipo de Rendimento</th><th class="num">Total no ano</th><th>Ficha</th></tr></thead><tbody>';
+    html+='<tr><td>Dividendos</td><td class="num">'+irFmtR(movimentacao.dividendos)+'</td><td style="font-size:9px;color:#7a8399">Rendimentos Isentos, Código 09</td></tr>';
+    html+='<tr><td>Juros sobre Capital Próprio (JCP)</td><td class="num">'+irFmtR(movimentacao.jcp)+'</td><td style="font-size:9px;color:#7a8399">Tributação Exclusiva, Código 10</td></tr>';
+    html+='<tr><td>Rendimentos de FIIs</td><td class="num">'+irFmtR(movimentacao.rendimentosFii)+'</td><td style="font-size:9px;color:#7a8399">Rendimentos Isentos, Código 26</td></tr>';
+    html+='</tbody></table>';
+    if(movimentacao.bonificacoes.length)html+='<div class="box box-tip"><b>💡 Bonificações em ativos:</b> '+movimentacao.bonificacoes.length+' evento(s) no ano — aumentam a quantidade de cotas/ações sem custo adicional; ajuste o preço médio proporcionalmente.</div>';
+    html+='</div></div>';
+  }
+
+  /* ===== PARTE 2 — EXTERIOR ===== */
+  if(tiposExt.length||saldoContaExterior){
+    html+='<div class="pagelight"><div style="text-align:center;margin:20px 0 24px"><div class="cover-badge" style="background:rgba(167,139,250,0.12);color:#7C3AED;border-color:rgba(124,58,237,0.3)">PARTE 2</div><h2 style="font-size:28px;font-weight:900;color:#7C3AED;letter-spacing:-.8px;margin-top:10px">Investimentos no <i style="font-style:italic">Exterior</i></h2><div style="font-size:11px;color:#7a8399;margin-top:4px">Lei 14.754/2023 · Tributação Exclusiva 15%</div></div>';
+    html+='<div class="box box-imp"><b>📌 IMPORTANTE:</b> Pela Lei 14.754/2023, dividendos + ganhos de capital no exterior são tributados a <b>15%</b>. O imposto pago no exterior pode ser deduzido até o limite do imposto devido no Brasil.</div>';
+
+    if(saldoContaExterior){
+      html+='<div class="section"><div class="section-eyebrow"><span class="section-eyebrow-line"></span><span class="section-eyebrow-text">PARTE 2 · ITEM 2.1</span></div><h2 class="section-title" style="color:#7C3AED">Saldo em Conta — <i>Corretora Exterior</i></h2>';
+      html+='<div class="section-path">📍 <b>Caminho:</b> Fichas → Bens e Direitos → Grupo 06 → Código 99 → Localização: 249 - Estados Unidos</div>';
+      html+='<table><thead><tr><th>Descrição</th><th class="num">Saldo 31/12/'+(anoBase-1)+'</th><th class="num">Saldo 31/12/'+anoBase+'</th></tr></thead><tbody>';
+      html+='<tr><td>Saldo em conta na corretora</td><td class="num">'+irFmtR(saldoContaExterior.ant)+'</td><td class="num">'+irFmtR(saldoContaExterior.atual)+'</td></tr>';
+      html+='</tbody></table></div>';
+    }
+    var i2=2;
+    tiposExt.forEach(function(tp){
+      var info=byTipoExt[tp].info,ativos=byTipoExt[tp].ativos;
+      var totalGrupo=ativos.reduce(function(s,a){return s+(a.saldo2025||0)},0);
+      html+='<div class="section"><div class="section-eyebrow"><span class="section-eyebrow-line"></span><span class="section-eyebrow-text">PARTE 2 · ITEM 2.'+i2+'</span></div>';
+      html+='<h2 class="section-title" style="color:#7C3AED">Bens e Direitos — <i>'+info.nome+'</i></h2>';
+      html+='<div class="section-path">📍 Grupo <b>'+info.grp+'</b>, Código <b>'+info.cod+'</b>. Localização: 249 - Estados Unidos. Deixe o CNPJ em branco (empresa estrangeira).</div>';
+      html+='<table><thead><tr><th>Ticker</th><th>Nome</th><th class="num">Saldo 31/12/'+(anoBase-1)+'</th><th class="num">Saldo 31/12/'+anoBase+'</th><th class="num">Dividendos</th><th class="num">Imp. Exterior</th></tr></thead><tbody>';
+      ativos.forEach(function(a){
+        html+='<tr><td class="tk" style="color:#7C3AED">'+(a.tk||"-")+'</td><td>'+(a.nm||"-")+'</td><td class="num">'+irFmtR(a.saldo2024)+'</td><td class="num">'+irFmtR(a.saldo2025)+'</td><td class="num">'+irFmtR(a.dividendos)+'</td><td class="num">'+irFmtR(a.impostoExterior)+'</td></tr>';
+      });
+      html+='<tr class="total"><td colspan="3">TOTAL '+info.nome.toUpperCase()+'</td><td class="num">'+irFmtR(totalGrupo)+'</td><td colspan="2"></td></tr>';
+      html+='</tbody></table></div>';
+      i2++;
+    });
+
+    html+='<div class="section"><div class="section-eyebrow"><span class="section-eyebrow-line"></span><span class="section-eyebrow-text">PARTE 2 · RESUMO TRIBUTÁRIO</span></div>';
+    html+='<h2 class="section-title" style="color:#7C3AED">Resumo Tributário — <i>Lei 14.754/2023</i></h2>';
+    html+='<div class="tax-summary">';
+    if(resumoTributarioExterior && resumoTributarioExterior.baseCalculo!==null){
+      html+='<div class="tax-row"><span>Ganhos de Capital</span><span>'+irFmtR(resumoTributarioExterior.ganhosCapital)+'</span></div>';
+      html+='<div class="tax-row"><span>Dividendos</span><span>'+irFmtR(resumoTributarioExterior.dividendos)+'</span></div>';
+      html+='<div class="tax-row"><span>Base de Cálculo (Rendimento Tributável)</span><span>'+irFmtR(resumoTributarioExterior.baseCalculo)+'</span></div>';
+      html+='<div class="tax-row"><span>Imposto Pago no Exterior (Dedutível)</span><span>'+irFmtR(resumoTributarioExterior.impostoPagoExterior)+'</span></div>';
+      html+='<div class="tax-row'+(resumoTributarioExterior.impostoDevido===0?" zero":"")+'"><span>Imposto a Pagar no Brasil</span><span>'+irFmtR(resumoTributarioExterior.impostoDevido)+'</span></div>';
+    } else {
+      html+='<div class="tax-row"><span>Patrimônio Total no Exterior</span><span>'+irFmtR(totalPatrimonioExterior)+'</span></div>';
+      html+='<div class="tax-row"><span>Dividendos / Ganhos de Capital / Imposto Pago no Exterior</span><span>preencher do informe</span></div>';
+    }
+    html+='</div>';
+    if(!resumoTributarioExterior||resumoTributarioExterior.baseCalculo===null)html+='<div class="box box-warn"><b>⚠ ATENÇÃO:</b> Resumo tributário oficial não encontrado no informe anexado — preencha manualmente com base no documento da corretora.</div>';
+    html+='<div class="box box-imp"><b>📌 CBE OBRIGATÓRIA:</b> Se o total no exterior em 31/12/'+anoBase+' ultrapassou <b>US$ 1.000.000</b>, é obrigatório declarar a CBE no Banco Central até 5 de abril de '+anoDec+'. Acesse: bcb.gov.br/cbe</div>';
+    html+='</div></div>';
+  }
+
+  /* ===== Corretoras/itens sem parser + revisão manual ===== */
+  if(itensRevisaoManual.length){
+    html+='<div class="pagelight"><div class="section">';
+    html+='<div class="section-eyebrow"><span class="section-eyebrow-line"></span><span class="section-eyebrow-text">REVISÃO MANUAL</span></div>';
+    html+='<h2 class="section-title">Itens para Revisão <i>Manual</i></h2>';
+    html+='<div class="box box-warn"><b>⚠ Estes itens não puderam ser processados automaticamente</b> — confira e complemente o relatório manualmente antes de enviar ao cliente.</div>';
+    html+='<table><thead><tr><th>Arquivo</th><th>Motivo</th></tr></thead><tbody>';
+    itensRevisaoManual.forEach(function(it){html+='<tr><td>📎 '+it.arquivo+'</td><td>'+it.motivo+'</td></tr>'});
+    html+='</tbody></table></div></div>';
+  }
+
+  /* ===== Rodapé / Documentos utilizados ===== */
+  html+='<div class="pagelight"><div class="footer">';
+  html+='<b>COURINVEST · CONFIDENCIAL</b><br/>Cliente: '+pessoa.nome+'<br/>';
+  if(fontesUsadas.length)html+='Documentos utilizados: '+fontesUsadas.join(", ")+'<br/>';
+  html+='Este relatório é uma ferramenta de apoio e não substitui a orientação de um contador. Os códigos e fichas referem-se ao Programa IRPF '+anoDec+' da Receita Federal.';
+  html+='</div></div>';
+
+  html+='</div></body></html>';
+  return html;
+}
+
+/* ---------- Componente da aba "Relatório Anual de IR" ---------- */
+var AbaRelatorioIR=function({data}){
+  var d=data||{};
+  var clientes=d.cl||d.clientes||[];
+  var [avulsos,sAvulsos]=React.useState([]);
+  var [loadingAvulsos,sLoadingAvulsos]=React.useState(true);
+  var [busca,sBusca]=React.useState("");
+  var [pessoaSel,sPessoaSel]=React.useState(null);
+  var [novoAvulsoAberto,sNovoAvulsoAberto]=React.useState(false);
+  var [novoAvulso,sNovoAvulso]=React.useState({nome:"",email:"",telefone:"",cpf:""});
+  var [anoBase,sAnoBase]=React.useState(new Date().getFullYear()-1);
+  var [arqInformesBR,sArqInformesBR]=React.useState([]);
+  var [arqPosicaoB3,sArqPosicaoB3]=React.useState(null);
+  var [arqMovB3,sArqMovB3]=React.useState(null);
+  var [corretoraExterior,sCorretoraExterior]=React.useState("Vest");
+  var [arqExterior,sArqExterior]=React.useState(null);
+  var [processando,sProcessando]=React.useState(false);
+  var [progresso,sProgresso]=React.useState("");
+  var [toastMsg,sToastMsg]=React.useState(null);
+  var [relatorios,sRelatorios]=React.useState([]);
+  var [loadingRelatorios,sLoadingRelatorios]=React.useState(true);
+
+  var toast=function(m){sToastMsg(m);setTimeout(function(){sToastMsg(null)},3800)};
+
+  React.useEffect(function(){
+    if(!window._fbDB){sLoadingAvulsos(false);sLoadingRelatorios(false);return}
+    window._fbDB.collection("ir_avulsos").orderBy("criadoEm","desc").limit(200).get().then(function(snap){
+      sAvulsos(snap.docs.map(function(doc){return {id:doc.id,tipo:"avulso",...doc.data()}}));
+      sLoadingAvulsos(false);
+    }).catch(function(e){console.error("[RelatórioIR] erro ao ler ir_avulsos:",e);sLoadingAvulsos(false)});
+    window._fbDB.collection("ir_relatorios").orderBy("geradoEm","desc").limit(100).get().then(function(snap){
+      sRelatorios(snap.docs.map(function(doc){return {id:doc.id,...doc.data()}}));
+      sLoadingRelatorios(false);
+    }).catch(function(e){console.error("[RelatórioIR] erro ao ler ir_relatorios:",e);sLoadingRelatorios(false)});
+  },[]);
+
+  var pessoas=React.useMemo(function(){
+    var lista=[];
+    clientes.forEach(function(c){lista.push({id:c.id,tipo:"cliente",nome:c.nome,cpf:c.cpf||"",email:c.email||""})});
+    avulsos.forEach(function(a){lista.push({id:a.id,tipo:"avulso",nome:a.nome,cpf:a.cpf||"",email:a.email||""})});
+    if(!busca.trim())return lista.slice(0,30);
+    var q=busca.toLowerCase();
+    return lista.filter(function(p){return (p.nome||"").toLowerCase().indexOf(q)>=0}).slice(0,30);
+  },[clientes,avulsos,busca]);
+
+  var salvarNovoAvulso=function(){
+    if(!novoAvulso.nome.trim()){toast("⚠️ Informe o nome");return}
+    if(!window._fbDB){toast("⚠️ Sem conexão com o banco de dados");return}
+    var payload={nome:novoAvulso.nome.trim(),email:novoAvulso.email.trim(),telefone:novoAvulso.telefone.trim(),cpf:novoAvulso.cpf.trim(),criadoEm:new Date().toISOString(),criadoPor:"courinvest.67@gmail.com"};
+    window._fbDB.collection("ir_avulsos").add(payload).then(function(ref){
+      var pessoa={id:ref.id,tipo:"avulso",...payload};
+      sAvulsos(function(p){return [pessoa,...p]});
+      sPessoaSel(pessoa);
+      sNovoAvulsoAberto(false);
+      sNovoAvulso({nome:"",email:"",telefone:"",cpf:""});
+      toast("✅ Cadastro salvo — "+pessoa.nome);
+    }).catch(function(e){console.error(e);toast("❌ Erro ao salvar cadastro")});
+  };
+
+  var gerarRelatorio=async function(){
+    if(!pessoaSel){toast("⚠️ Selecione um cliente ou cadastre um avulso");return}
+    var temArquivo=arqInformesBR.length||arqPosicaoB3||arqMovB3||arqExterior;
+    if(!temArquivo){toast("⚠️ Anexe ao menos um documento");return}
+    sProcessando(true);
+    var fontesUsadas=[];
+    var itensRevisaoManual=[];
+    var ativosBR=[],avisosB3=[];
+    var resumosInformesBR=[];
+    var movimentacao=null;
+    var ativosExterior=[],saldoContaExterior=null,resumoTributarioExterior=null;
+
+    try{
+      if(arqPosicaoB3){
+        sProgresso("Lendo posição B3...");
+        try{
+          var wbPos=await irLerXlsx(arqPosicaoB3);
+          var rPos=irParseB3Posicao(wbPos);
+          ativosBR=ativosBR.concat(rPos.ativos);
+          avisosB3=avisosB3.concat(rPos.avisos);
+          fontesUsadas.push(arqPosicaoB3.name);
+        }catch(e){console.error(e);itensRevisaoManual.push({arquivo:arqPosicaoB3.name,motivo:"Falha ao ler a planilha de Posição B3: "+e.message})}
+      }
+      if(arqMovB3){
+        sProgresso("Lendo movimentação B3...");
+        try{
+          var wbMov=await irLerXlsx(arqMovB3);
+          movimentacao=irParseB3Movimentacao(wbMov);
+          fontesUsadas.push(arqMovB3.name);
+        }catch(e){console.error(e);itensRevisaoManual.push({arquivo:arqMovB3.name,motivo:"Falha ao ler a planilha de Movimentação B3: "+e.message})}
+      }
+      for(var i=0;i<arqInformesBR.length;i++){
+        var f=arqInformesBR[i];
+        sProgresso("Lendo informe de rendimentos "+(i+1)+"/"+arqInformesBR.length+"...");
+        try{
+          var texto=await irLerPdfTexto(f);
+          var r=irParseInformeBR(texto,anoBase);
+          resumosInformesBR.push(r);
+          fontesUsadas.push(f.name+" ("+r.corretora+")");
+          if(r.corretora==="Corretora não identificada")itensRevisaoManual.push({arquivo:f.name,motivo:"Layout da corretora não reconhecido — confira os valores extraídos e complemente manualmente se necessário."});
+        }catch(e){console.error(e);itensRevisaoManual.push({arquivo:f.name,motivo:"Falha ao processar o PDF: "+e.message})}
+      }
+      if(avisosB3.length)avisosB3.forEach(function(a){itensRevisaoManual.push({arquivo:arqPosicaoB3?arqPosicaoB3.name:"Posição B3",motivo:a})});
+
+      if(arqExterior){
+        sProgresso("Lendo informe do exterior...");
+        if(IR_CORRETORAS_EXTERIOR_COM_PARSER.indexOf(corretoraExterior)>=0){
+          try{
+            var textoExt=await irLerPdfTexto(arqExterior);
+            var rExt=irParseVestPdf(textoExt);
+            ativosExterior=rExt.ativos;
+            saldoContaExterior=rExt.saldoContaExterior;
+            resumoTributarioExterior=rExt.resumoTributario;
+            fontesUsadas.push(arqExterior.name+" ("+corretoraExterior+")");
+          }catch(e){console.error(e);itensRevisaoManual.push({arquivo:arqExterior.name,motivo:"Falha ao processar o informe da "+corretoraExterior+": "+e.message})}
+        } else {
+          itensRevisaoManual.push({arquivo:arqExterior.name,motivo:"Ainda não há parser automático para "+corretoraExterior+" — arquivo registrado, preencha a Parte 2 manualmente com base neste documento."});
+          fontesUsadas.push(arqExterior.name+" ("+corretoraExterior+" — revisão manual)");
+        }
+      }
+
+      sProgresso("Montando relatório...");
+      var pessoaFmt={id:pessoaSel.id,nome:pessoaSel.nome,cpf:pessoaSel.cpf,tipo:pessoaSel.tipo};
+      var dadosRel={ativosBR:ativosBR,ativosExterior:ativosExterior,resumosInformesBR:resumosInformesBR,movimentacao:movimentacao,saldoContaExterior:saldoContaExterior,resumoTributarioExterior:resumoTributarioExterior,fontesUsadas:fontesUsadas,itensRevisaoManual:itensRevisaoManual};
+      var html=montarRelatorioIRAnualHTML(pessoaFmt,anoBase,dadosRel);
+
+      var w=window.open("","_blank");
+      if(w){w.document.write(html);w.document.close()}
+      else toast("⚠️ Pop-up bloqueado — permita pop-ups para abrir o relatório");
+
+      if(window._fbDB){
+        var docId=pessoaSel.id+"_"+anoBase;
+        window._fbDB.collection("ir_relatorios").doc(docId).set({
+          pessoaId:pessoaSel.id,pessoaNome:pessoaSel.nome,pessoaTipo:pessoaSel.tipo,pessoaCpf:pessoaSel.cpf||"",
+          anoBase:anoBase,geradoEm:new Date().toISOString(),geradoPor:"courinvest.67@gmail.com",
+          ativosBR:ativosBR,ativosExterior:ativosExterior,resumosInformesBR:resumosInformesBR,movimentacao:movimentacao,
+          saldoContaExterior:saldoContaExterior,resumoTributarioExterior:resumoTributarioExterior,
+          fontesUsadas:fontesUsadas,itensRevisaoManual:itensRevisaoManual
+        }).then(function(){
+          window._fbDB.collection("ir_relatorios").orderBy("geradoEm","desc").limit(100).get().then(function(snap){
+            sRelatorios(snap.docs.map(function(doc){return {id:doc.id,...doc.data()}}));
+          });
+        }).catch(function(e){console.error("[RelatórioIR] erro ao salvar:",e)});
+      }
+      toast("✅ Relatório gerado"+(itensRevisaoManual.length?" — "+itensRevisaoManual.length+" item(ns) para revisão manual":""));
+    }catch(e){
+      console.error(e);
+      toast("❌ Erro ao gerar relatório: "+e.message);
+    }finally{
+      sProcessando(false);
+      sProgresso("");
+    }
+  };
+
+  var reabrirRelatorio=function(rel){
+    var pessoaFmt={id:rel.pessoaId,nome:rel.pessoaNome,cpf:rel.pessoaCpf,tipo:rel.pessoaTipo};
+    var html=montarRelatorioIRAnualHTML(pessoaFmt,rel.anoBase,rel);
+    var w=window.open("","_blank");
+    if(w){w.document.write(html);w.document.close()}
+    else toast("⚠️ Pop-up bloqueado — permita pop-ups para abrir o relatório");
+  };
+
+  var excluirRelatorio=function(rel){
+    if(!window._fbDB)return;
+    window._fbDB.collection("ir_relatorios").doc(rel.id).delete().then(function(){
+      sRelatorios(function(p){return p.filter(function(x){return x.id!==rel.id})});
+      toast("🗑️ Relatório removido");
+    }).catch(function(e){console.error(e);toast("❌ Erro ao remover")});
+  };
+
+  var uploadZone=function({label,icon,accept,multiple,onFiles,arquivo,arquivos}){
+    var inputRef=React.useRef(null);
+    return (
+      <div style={{flex:1,minWidth:220}}>
+        <input ref={inputRef} type="file" accept={accept} multiple={!!multiple} style={{display:"none"}}
+          onChange={function(ev){var files=Array.from(ev.target.files||[]);if(files.length)onFiles(multiple?files:files[0]);ev.target.value=""}}/>
+        <button onClick={function(){inputRef.current&&inputRef.current.click()}}
+          style={{width:"100%",padding:"14px 12px",borderRadius:12,border:"1px dashed "+T.bdrL,background:T.w3,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:4,color:T.t2}}>
+          <span style={{fontSize:22}}>{icon}</span>
+          <span style={{fontSize:11,fontWeight:700}}>{label}</span>
+          <span style={{fontSize:9,color:T.t3}}>
+            {multiple ? (arquivos&&arquivos.length ? arquivos.length+" arquivo(s) anexado(s)" : "Clique para anexar (múltiplos)") : (arquivo ? arquivo.name : "Clique para anexar")}
+          </span>
+        </button>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      {toastMsg && <div style={{position:"fixed",top:20,right:20,zIndex:9999,background:T.bg2,border:"1px solid "+T.bdr,borderRadius:12,padding:"12px 18px",boxShadow:"0 12px 32px rgba(0,0,0,0.4)",color:T.t1,fontSize:13,fontWeight:600}}>{toastMsg}</div>}
+
+      <Cd style={{padding:20}}>
+        <div style={{fontSize:16,fontWeight:800,color:T.t1,marginBottom:4}}>📑 Relatório Anual de IR</div>
+        <div style={{fontSize:12,color:T.t3,marginBottom:18}}>Anexe os informes de rendimentos e as posições da B3 para gerar um relatório de declaração de IR personalizado — para clientes do Hub ou para quem contrata só esse serviço avulso.</div>
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 160px",gap:12,marginBottom:16}}>
+          <div>
+            <div style={{fontSize:10,color:T.t3,fontWeight:700,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Cliente ou avulso</div>
+            {pessoaSel ? (
+              <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:T.w3,borderRadius:10,border:"1px solid "+T.bdrL}}>
+                <Bg c={pessoaSel.tipo==="cliente"?"gold":"cyan"}>{pessoaSel.tipo==="cliente"?"Cliente":"Avulso"}</Bg>
+                <div style={{flex:1,fontSize:13,fontWeight:700,color:T.t1}}>{pessoaSel.nome}</div>
+                <Bt v="ghost" style={{fontSize:11,padding:"4px 8px"}} onClick={function(){sPessoaSel(null)}}>Trocar</Bt>
+              </div>
+            ) : (
+              <div>
+                <input value={busca} onChange={function(e){sBusca(e.target.value)}} placeholder="Buscar cliente ou avulso pelo nome..."
+                  style={{width:"100%",padding:"10px 14px",borderRadius:10,border:"1px solid "+T.bdrL,background:T.w3,color:T.t1,fontSize:13}}/>
+                {(loadingAvulsos) ? null : (
+                  <div style={{maxHeight:180,overflowY:"auto",marginTop:6,border:pessoas.length?"1px solid "+T.bdrL:"none",borderRadius:10}}>
+                    {pessoas.map(function(p){
+                      return (
+                        <div key={p.tipo+"_"+p.id} onClick={function(){sPessoaSel(p)}}
+                          style={{padding:"9px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:10,borderBottom:"1px solid "+T.bdrL,fontSize:12}}>
+                          <Bg c={p.tipo==="cliente"?"gold":"cyan"}>{p.tipo==="cliente"?"Cliente":"Avulso"}</Bg>
+                          <span style={{color:T.t1,fontWeight:600}}>{p.nome}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <Bt v="secondary" style={{fontSize:11,marginTop:8}} onClick={function(){sNovoAvulsoAberto(true)}}>+ Novo avulso (não é cliente)</Bt>
+              </div>
+            )}
+          </div>
+          <div>
+            <div style={{fontSize:10,color:T.t3,fontWeight:700,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Ano-calendário</div>
+            <input type="number" value={anoBase} onChange={function(e){sAnoBase(parseInt(e.target.value)||anoBase)}}
+              style={{width:"100%",padding:"10px 14px",borderRadius:10,border:"1px solid "+T.bdrL,background:T.w3,color:T.t1,fontSize:13,fontFamily:"'JetBrains Mono'"}}/>
+          </div>
+        </div>
+
+        {novoAvulsoAberto && (
+          <Cd style={{padding:16,marginBottom:16,background:T.w3}} hov={false}>
+            <div style={{fontSize:12,fontWeight:700,color:T.t1,marginBottom:10}}>Novo cadastro avulso</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+              <input placeholder="Nome completo *" value={novoAvulso.nome} onChange={function(e){sNovoAvulso(function(p){return {...p,nome:e.target.value}})}} style={{padding:"9px 12px",borderRadius:8,border:"1px solid "+T.bdrL,background:T.bg2,color:T.t1,fontSize:12}}/>
+              <input placeholder="CPF" value={novoAvulso.cpf} onChange={function(e){sNovoAvulso(function(p){return {...p,cpf:e.target.value}})}} style={{padding:"9px 12px",borderRadius:8,border:"1px solid "+T.bdrL,background:T.bg2,color:T.t1,fontSize:12}}/>
+              <input placeholder="E-mail" value={novoAvulso.email} onChange={function(e){sNovoAvulso(function(p){return {...p,email:e.target.value}})}} style={{padding:"9px 12px",borderRadius:8,border:"1px solid "+T.bdrL,background:T.bg2,color:T.t1,fontSize:12}}/>
+              <input placeholder="Telefone" value={novoAvulso.telefone} onChange={function(e){sNovoAvulso(function(p){return {...p,telefone:e.target.value}})}} style={{padding:"9px 12px",borderRadius:8,border:"1px solid "+T.bdrL,background:T.bg2,color:T.t1,fontSize:12}}/>
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <Bt v="primary" style={{fontSize:12}} onClick={salvarNovoAvulso}>Salvar cadastro</Bt>
+              <Bt v="ghost" style={{fontSize:12}} onClick={function(){sNovoAvulsoAberto(false)}}>Cancelar</Bt>
+            </div>
+          </Cd>
+        )}
+
+        <div style={{fontSize:10,color:T.t3,fontWeight:700,letterSpacing:.5,textTransform:"uppercase",margin:"6px 0 8px"}}>🇧🇷 Documentos — Brasil</div>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16}}>
+          {uploadZone({label:"Informe(s) de Rendimentos",icon:"📄",accept:".pdf",multiple:true,arquivos:arqInformesBR,onFiles:function(files){sArqInformesBR(function(p){return p.concat(files)})}})}
+          {uploadZone({label:"Posição B3 (xlsx)",icon:"📊",accept:".xlsx,.xls",arquivo:arqPosicaoB3,onFiles:sArqPosicaoB3})}
+          {uploadZone({label:"Movimentação B3 (xlsx)",icon:"📈",accept:".xlsx,.xls",arquivo:arqMovB3,onFiles:sArqMovB3})}
+        </div>
+        {arqInformesBR.length>0 && (
+          <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:16,marginTop:-8}}>
+            {arqInformesBR.map(function(f,idx){
+              return <span key={idx} style={{fontSize:10,padding:"4px 10px",background:T.w3,borderRadius:20,color:T.t2,display:"flex",alignItems:"center",gap:6}}>📎 {f.name}
+                <span style={{cursor:"pointer",color:T.red}} onClick={function(){sArqInformesBR(function(p){return p.filter(function(_,i){return i!==idx})})}}>✕</span>
+              </span>;
+            })}
+          </div>
+        )}
+
+        <div style={{fontSize:10,color:T.t3,fontWeight:700,letterSpacing:.5,textTransform:"uppercase",margin:"6px 0 8px"}}>🌎 Documentos — Exterior (opcional)</div>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-start",marginBottom:8}}>
+          <div style={{minWidth:200}}>
+            <div style={{fontSize:9,color:T.t3,marginBottom:4}}>Corretora</div>
+            <select value={corretoraExterior} onChange={function(e){sCorretoraExterior(e.target.value)}}
+              style={{width:"100%",padding:"10px 12px",borderRadius:10,border:"1px solid "+T.bdrL,background:T.w3,color:T.t1,fontSize:12}}>
+              {IR_CORRETORAS_EXTERIOR.map(function(c){return <option key={c} value={c}>{c}{IR_CORRETORAS_EXTERIOR_COM_PARSER.indexOf(c)<0?" (revisão manual)":""}</option>})}
+            </select>
+          </div>
+          {uploadZone({label:"Informe da Corretora Exterior",icon:"🌐",accept:".pdf",arquivo:arqExterior,onFiles:sArqExterior})}
+        </div>
+        {IR_CORRETORAS_EXTERIOR_COM_PARSER.indexOf(corretoraExterior)<0 && (
+          <div style={{fontSize:10,color:T.orange,marginBottom:12}}>⚠️ Ainda não há extração automática para {corretoraExterior} — o arquivo será registrado e marcado para revisão manual no relatório.</div>
+        )}
+
+        <div style={{display:"flex",gap:10,alignItems:"center",marginTop:8,paddingTop:16,borderTop:"1px solid "+T.bdrL}}>
+          <Bt v="primary" onClick={gerarRelatorio} disabled={processando}>{processando?"⏳ "+(progresso||"Processando..."):"✨ Gerar Relatório Consolidado"}</Bt>
+          {pessoaSel && <span style={{fontSize:11,color:T.t3}}>para <b style={{color:T.t1}}>{pessoaSel.nome}</b> — ano-calendário {anoBase}</span>}
+        </div>
+      </Cd>
+
+      <Cd style={{padding:20}}>
+        <div style={{fontSize:14,fontWeight:800,color:T.t1,marginBottom:12}}>📚 Relatórios gerados</div>
+        {loadingRelatorios ? (
+          <div style={{fontSize:12,color:T.t3}}>Carregando...</div>
+        ) : relatorios.length===0 ? (
+          <div style={{fontSize:12,color:T.t3}}>Nenhum relatório gerado ainda.</div>
+        ) : (
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {relatorios.map(function(rel){
+              return (
+                <div key={rel.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:T.w3,borderRadius:10,border:"1px solid "+T.bdrL}}>
+                  <Bg c={rel.pessoaTipo==="cliente"?"gold":"cyan"}>{rel.pessoaTipo==="cliente"?"Cliente":"Avulso"}</Bg>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:13,fontWeight:700,color:T.t1}}>{rel.pessoaNome} — {rel.anoBase}</div>
+                    <div style={{fontSize:10,color:T.t3}}>Gerado em {rel.geradoEm?new Date(rel.geradoEm).toLocaleString("pt-BR"):"-"}{rel.itensRevisaoManual&&rel.itensRevisaoManual.length?" · ⚠️ "+rel.itensRevisaoManual.length+" item(ns) p/ revisão":""}</div>
+                  </div>
+                  <Bt v="secondary" style={{fontSize:11}} onClick={function(){reabrirRelatorio(rel)}}>Abrir</Bt>
+                  <Bt v="ghost" style={{fontSize:11,color:T.red}} onClick={function(){excluirRelatorio(rel)}}>Excluir</Bt>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Cd>
+    </div>
+  );
+};
+
+
 var AbaTutoriais = function({data}) {
 var [clienteSel, setClienteSel] = React.useState(null);
 var [instSel, setInstSel] = React.useState([]);
@@ -30925,7 +31753,7 @@ function PropostasView({data,dispatch}){
   return null;
 }
 
-const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"interacoes",l:"Interações",i:"📡"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"parceiros",l:"Parceiros",i:"🤝"},{id:"fiscal",l:"Fiscal",i:"🧾"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"tutoriais",l:"Tutoriais",i:"📚"}];
+const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"interacoes",l:"Interações",i:"📡"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"parceiros",l:"Parceiros",i:"🤝"},{id:"fiscal",l:"Fiscal",i:"🧾"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"irAnual",l:"Relatório IR",i:"📑"}];
 
 /* ============ AUTH + FIRESTORE SYNC ============ */
 
@@ -33197,7 +34025,7 @@ function App({authUser}){
     });
   },[notsReais,pushPerm]);
   const go=function(p){sPg(p);sSel(null);sShowMenu(false)};
-  const titles={dashboard:"Dashboard",clients:sel?sel.nome:"Clientes",interacoes:"Interações",financeiro:"Financeiro da Empresa",comercial:"Comercial",metas:"Painel de Metas",agenda:"Agenda",news:"Notícias & Mercado",import:"Importar",tutoriais:"Tutoriais"};
+  const titles={dashboard:"Dashboard",clients:sel?sel.nome:"Clientes",interacoes:"Interações",financeiro:"Financeiro da Empresa",comercial:"Comercial",metas:"Painel de Metas",agenda:"Agenda",news:"Notícias & Mercado",import:"Importar",irAnual:"Relatório Anual de IR"};
 
   
   const[isMobile,setMobile]=useState(window.innerWidth<768);
@@ -33473,7 +34301,7 @@ function App({authUser}){
           {pg==="comercial" && <ComercialView data={d} dispatch={dp}/>}
           {pg==="agenda" && <Ag d={d} dp={dp} sPg={sPg}/>}
           {pg==="news" && <NewsView data={d} dispatch={dp}/>}
-          {pg==="tutoriais" && <AbaTutoriais data={d} dispatch={dp}/>}
+          {pg==="irAnual" && <AbaRelatorioIR data={d} dispatch={dp}/>}
           {pg==="import" && <ImportView/>}
         </div>
       </div>
@@ -33600,7 +34428,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '451';
+  var SW_VERSION = '452';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
