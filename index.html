@@ -27028,20 +27028,29 @@ function irAgruparPorEmpresa(rows,filtroRegex){
 }
 function irParseB3Movimentacao(wb){
   var ws=wb.Sheets["Movimentação"];
-  if(!ws)return {dividendos:0,jcp:0,rendimentosFii:0,bonificacoes:[],porEmpresaDividendos:[],porEmpresaJcp:[],porFundoRendimentos:[]};
+  if(!ws)return {dividendos:0,jcp:0,rendimentosFii:0,aluguelAcoes:0,bonificacoes:[],porEmpresaDividendos:[],porEmpresaJcp:[],porFundoRendimentos:[],porEmpresaAluguel:[]};
   var rows=XLSX.utils.sheet_to_json(ws,{defval:""});
-  var dividendos=0,jcp=0,rendimentosFii=0,bonificacoes=[];
+  var dividendos=0,jcp=0,rendimentosFii=0,aluguelAcoes=0,bonificacoes=[];
   rows.forEach(function(r){
     var mov=String(r["Movimentação"]||""); var val=irNum(r["Valor da Operação"]);
+    var entSai=String(r["Entrada/Saída"]||"");
     if(/jcp|juros sobre capital/i.test(mov)){jcp+=val}
     else if(/dividendo/i.test(mov)){dividendos+=val}
+    /* "Empréstimo" na Movimentação B3 é o crédito de aluguel de ações (BTC) recebido por quem
+       doou os papéis — confirmado batendo com um valor real de referência (soma de todos os
+       créditos de "Empréstimo" = R$ 91,09, igual ao valor citado à parte num guia de declaração
+       real). Só entram os créditos (o doador só recebe, nunca "paga" aluguel de ações; um
+       eventual débito de "Empréstimo" seria outra coisa, ex. devolução de papel emprestado). */
+    else if(/empr[ée]stimo/i.test(mov)&&/credito/i.test(entSai)){aluguelAcoes+=val}
     else if(/rendimento/i.test(mov)){rendimentosFii+=val}
     else if(/bonifica/i.test(mov)){bonificacoes.push({ticker:String(r["TICKER"]||"").trim(),produto:r["Produto"],qtd:irNum(r["Quantidade"]),data:r["Data"]})}
   });
   var porEmpresaDividendos=irAgruparPorEmpresa(rows,/dividendo/i);
   var porEmpresaJcp=irAgruparPorEmpresa(rows,/jcp|juros sobre capital/i);
   var porFundoRendimentos=irAgruparPorEmpresa(rows,/rendimento/i);
-  return {dividendos:dividendos,jcp:jcp,rendimentosFii:rendimentosFii,bonificacoes:bonificacoes,porEmpresaDividendos:porEmpresaDividendos,porEmpresaJcp:porEmpresaJcp,porFundoRendimentos:porFundoRendimentos};
+  var rowsAluguel=rows.filter(function(r){return /empr[ée]stimo/i.test(String(r["Movimentação"]||""))&&/credito/i.test(String(r["Entrada/Saída"]||""))});
+  var porEmpresaAluguel=irAgruparPorEmpresa(rowsAluguel,/./);
+  return {dividendos:dividendos,jcp:jcp,rendimentosFii:rendimentosFii,aluguelAcoes:aluguelAcoes,bonificacoes:bonificacoes,porEmpresaDividendos:porEmpresaDividendos,porEmpresaJcp:porEmpresaJcp,porFundoRendimentos:porFundoRendimentos,porEmpresaAluguel:porEmpresaAluguel};
 }
 
 /* ---------- Parser: Informe de Rendimentos BR (PDF) — Rico/XP, C6, PicPay e genérico ----------
@@ -27376,7 +27385,11 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
   html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">📉 Prejuízos a Compensar (Renda Variável)</h3>';
   html+='<div class="step"><div class="step-text">Se você teve prejuízo em operações de bolsa (comuns ou day-trade) em anos anteriores e ainda não compensou tudo com lucros, esse saldo <b>precisa ser transportado da sua declaração do ano passado</b> — este relatório não tem acesso a ela. Confira na ficha <b>Renda Variável → Operações Comuns/Day-Trade</b> do programa do ano anterior se há prejuízo acumulado, e informe esse valor no campo "Prejuízo a compensar" de janeiro do ano corrente. Lembre-se: prejuízo de operações comuns só compensa lucro de operações comuns; prejuízo de day-trade só compensa lucro de day-trade — os dois não se misturam.</div></div>';
   html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">📄 Aluguel de Ações (BTC)</h3>';
-  html+='<div class="step"><div class="step-text">Se sua carteira tem receita de "aluguel de ações" (BTC — Banco de Títulos, oferecido por várias corretoras, inclusive no exterior), esse valor normalmente vem discriminado à parte no informe de rendimentos, com seu próprio IR retido na fonte. Como o tratamento exato pode variar conforme a corretora e vem descrito de forma diferente em cada informe, confira a linha específica no seu documento e, em caso de dúvida sobre o código exato, confirme com seu contador antes de declarar — esse relatório não presume um valor quando não consegue identificar essa receita com segurança nos arquivos anexados.</div></div>';
+  if(movimentacao&&movimentacao.aluguelAcoes){
+    html+='<div class="step"><div class="step-text">Sua carteira teve receita de "aluguel de ações" (BTC — identificada na Movimentação B3 como "Empréstimo") no valor líquido de <b>'+irFmtR(movimentacao.aluguelAcoes)+'</b> no ano — já extraída automaticamente e detalhada por empresa na seção "Rendimentos do Ano" adiante. Declare em <b>"Rendimentos Sujeitos à Tributação Exclusiva/Definitiva", Código 06 — Rendimentos de Aplicações Financeiras</b> (alíquota regressiva de 15% a 22,5% conforme o prazo do contrato, já retida na fonte pela corretora/B3). O Programa pede o valor bruto da taxa e o IR retido separadamente — como a Movimentação B3 só traz o valor líquido já creditado, confirme esses dois números no informe de rendimentos da corretora antes de lançar.</div></div>';
+  } else {
+    html+='<div class="step"><div class="step-text">Se sua carteira tem receita de "aluguel de ações" (BTC — Banco de Títulos, oferecido por várias corretoras, inclusive no exterior), esse valor normalmente vem discriminado à parte no informe de rendimentos, com seu próprio IR retido na fonte. Declare em "Rendimentos Sujeitos à Tributação Exclusiva/Definitiva", Código 06. Como este relatório não teve a Movimentação B3 do ano anexada (ou nenhuma linha de "Empréstimo" foi identificada), confira a linha específica no seu informe de rendimentos antes de declarar.</div></div>';
+  }
   html+='</div></div>';
 
   /* ===== Resumo dos Informes de Rendimentos (BR) ===== */
@@ -27408,6 +27421,7 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
     html+='<tr><td>Dividendos</td><td class="num">'+irFmtR(movimentacao.dividendos)+'</td><td style="font-size:9px;color:#7a8399">Rendimentos Isentos, Código 09</td></tr>';
     html+='<tr><td>Juros sobre Capital Próprio (JCP)</td><td class="num">'+irFmtR(movimentacao.jcp)+'</td><td style="font-size:9px;color:#7a8399">Tributação Exclusiva, Código 10</td></tr>';
     html+='<tr><td>Rendimentos de FIIs</td><td class="num">'+irFmtR(movimentacao.rendimentosFii)+'</td><td style="font-size:9px;color:#7a8399">Rendimentos Isentos, Código 99</td></tr>';
+    if(movimentacao.aluguelAcoes)html+='<tr><td>Aluguel de Ações (BTC)</td><td class="num">'+irFmtR(movimentacao.aluguelAcoes)+'</td><td style="font-size:9px;color:#7a8399">Tributação Exclusiva, Código 06</td></tr>';
     html+='</tbody></table>';
     /* ---------- Detalhamento por empresa/fundo — pedido explícito do Igor: não só o total, quem pagou
        quanto. Uma tabela por tipo de rendimento (Dividendos / JCP / FIIs-Fiagro-FI-Infra), cada uma só
@@ -27439,6 +27453,16 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
       });
       html+='<tr class="total"><td colspan="2">TOTAL PROVENTOS</td><td class="num">'+irFmtR(movimentacao.rendimentosFii)+'</td></tr>';
       html+='</tbody></table>';
+    }
+    if(movimentacao.porEmpresaAluguel&&movimentacao.porEmpresaAluguel.length){
+      html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">📄 Aluguel de Ações (BTC) por Empresa</h3>';
+      html+='<table><thead><tr><th>Ticker</th><th>Empresa</th><th class="num">Valor Líquido Creditado no Ano</th></tr></thead><tbody>';
+      movimentacao.porEmpresaAluguel.forEach(function(e){
+        html+='<tr><td class="tk">'+(e.ticker||"-")+'</td><td>'+(e.nome||"-")+'</td><td class="num">'+irFmtR(e.valor)+'</td></tr>';
+      });
+      html+='<tr class="total"><td colspan="2">TOTAL ALUGUEL DE AÇÕES</td><td class="num">'+irFmtR(movimentacao.aluguelAcoes)+'</td></tr>';
+      html+='</tbody></table>';
+      html+='<div class="box box-warn"><b>⚠ Este valor é o líquido creditado</b> (identificado na Movimentação B3 como "Empréstimo" — é o crédito de aluguel de ações recebido por quem doou os papéis via BTC). O Programa IRPF pede o <b>valor bruto</b> da taxa mais o <b>IR retido na fonte</b> separadamente — a Movimentação B3 não traz essa retenção discriminada. Confira o valor bruto e o imposto retido no informe de rendimentos da corretora antes de declarar.</div>';
     }
     if(movimentacao.bonificacoes.length)html+='<div class="box box-tip"><b>💡 Bonificações em ativos:</b> '+movimentacao.bonificacoes.length+' evento(s) no ano — aumentam a quantidade de cotas/ações sem custo adicional; ajuste o preço médio proporcionalmente.</div>';
     html+='</div></div>';
@@ -34670,7 +34694,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '458';
+  var SW_VERSION = '459';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
