@@ -27625,8 +27625,26 @@ var AbaRelatorioIR=function({data}){
   var [loadingRelatorios,sLoadingRelatorios]=React.useState(true);
   var [ultimoRelatorioGerado,sUltimoRelatorioGerado]=React.useState(null);
   var [baixandoPdfId,sBaixandoPdfId]=React.useState(null);
+  /* ---------- Envio por e-mail (pedido do Igor) ----------
+     Campo de e-mail único e persistente na tela (não um prompt()), pré-preenchido com o e-mail
+     já cadastrado da pessoa selecionada mas editável — cobre tanto o cliente do Hub (usa o e-mail
+     do cadastro) quanto o avulso (idem, ou digitado na hora se não tiver). Serve tanto pro envio
+     do relatório recém-gerado quanto pra reenviar qualquer relatório já salvo na lista abaixo. */
+  var [emailDestino,sEmailDestino]=React.useState("");
+  var [enviandoEmailId,sEnviandoEmailId]=React.useState(null);
+  React.useEffect(function(){if(pessoaSel)sEmailDestino(pessoaSel.email||"")},[pessoaSel]);
 
   var toast=function(m){sToastMsg(m);setTimeout(function(){sToastMsg(null)},3800)};
+  /* Fallback pro botão "✉️ E-mail" de um relatório já salvo na lista: se o campo de e-mail
+     compartilhado da tela estiver vazio (ex: usuário recarregou a página e foi direto reenviar um
+     relatório antigo sem selecionar a pessoa de novo), busca o e-mail já cadastrado dessa pessoa
+     (cliente do Hub ou avulso) em vez de bloquear o envio. */
+  var emailCadastradoDe=function(pessoaId){
+    var c=clientes.find(function(x){return x.id===pessoaId});
+    if(c&&c.email)return c.email;
+    var a=avulsos.find(function(x){return x.id===pessoaId});
+    return a&&a.email?a.email:"";
+  };
 
   React.useEffect(function(){
     if(!window._fbDB){sLoadingAvulsos(false);sLoadingRelatorios(false);return}
@@ -27778,6 +27796,79 @@ var AbaRelatorioIR=function({data}){
     }
   };
 
+  /* Reusa o mesmo template padrão de e-mail dos relatórios mensais (montarEmailRelatorioHtml +
+     EmailJS já configurado em Configurações → E-mail) — "formato padrão de envio", só trocando o
+     conteúdo pro Relatório Anual de IR: título, texto de introdução, destaque (patrimônio total
+     declarável em vez de patrimônio de gestão) e o PDF anexado é o relatório de IR completo (a
+     mesma função montarRelatorioIRAnualHTML já usada pra abrir/baixar), não o relatório mensal. */
+  var enviarRelatorioIRPorEmail=async function(pessoaFmt,anoBaseRel,dadosRel,idLoading){
+    var cfg=d.config&&d.config.emailjs;
+    if(!cfg||!cfg.publicKey||!cfg.serviceId||!cfg.templateId){toast("⚠️ E-mail automático não configurado — acesse Configurações → E-mail.");return}
+    var email=(emailDestino||"").trim();
+    if(!email){toast("⚠️ Informe o e-mail do destinatário");return}
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){toast("⚠️ E-mail inválido");return}
+    if(typeof montarEmailRelatorioHtml!=="function"||typeof gerarPdfLinkCourinvest!=="function"){toast("⚠️ Envio por e-mail não disponível nesta versão");return}
+    sEnviandoEmailId(idLoading);
+    try{
+      try{
+        if(window.emailjs)window.emailjs.init({publicKey:cfg.publicKey,limitRate:false});
+        else{toast("⚠️ SDK EmailJS não carregou. Recarregue a página e tente novamente.");sEnviandoEmailId(null);return}
+      }catch(e){toast("❌ Erro ao iniciar EmailJS: "+e.message);sEnviandoEmailId(null);return}
+
+      var fmV=function(v){return "R$ "+parseFloat(v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})};
+      var totalPatrimonioBR=(dadosRel.ativosBR||[]).reduce(function(s,a){return s+(a.cT||0)},0);
+      var totalPatrimonioExterior=(dadosRel.ativosExterior||[]).reduce(function(s,a){return s+(a.saldo2025||0)},0);
+      var totalGeral=totalPatrimonioBR+totalPatrimonioExterior+(dadosRel.saldoContaExterior?(dadosRel.saldoContaExterior.atual||0):0);
+      var mesRefStr="Ano-calendário "+anoBaseRel;
+      var introTxt="Segue abaixo o seu <strong>Relatório Anual de IR</strong>, com o passo a passo completo para a declaração do Imposto de Renda "+(anoBaseRel+1)+" (ano-calendário "+anoBaseRel+").";
+      var destaque={icon:"📑",label:"Patrimônio Total Declarável",value:fmV(totalGeral)};
+      var notaExtra=(dadosRel.itensRevisaoManual&&dadosRel.itensRevisaoManual.length)?("⚠️ Este relatório tem "+dadosRel.itensRevisaoManual.length+" item(ns) marcado(s) para revisão manual — confira antes de declarar."):"";
+
+      var reportHtml=montarEmailRelatorioHtml({
+        nome:pessoaFmt.nome,
+        mesRefStr:mesRefStr,
+        tituloTopo:"Relatório Anual de IR",
+        introTxt:introTxt,
+        destaque:destaque,
+        remetente:cfg.remetente||"contato@courinvest.com.br",
+        notaExtra:notaExtra
+      });
+
+      var pdfUrl=null;
+      try{
+        var htmlCompleto=montarRelatorioIRAnualHTML(pessoaFmt,anoBaseRel,dadosRel);
+        var pathStorage="relatorios_ir/"+pessoaFmt.id+"/"+anoBaseRel+".pdf";
+        pdfUrl=await gerarPdfLinkCourinvest(pathStorage,htmlCompleto);
+      }catch(e){console.warn("[RelatórioIR] erro ao gerar PDF para o e-mail:",e)}
+
+      var botaoHtml=pdfUrl
+        ?'<a class="cta-btn" href="'+pdfUrl+'" target="_blank" rel="noopener">📄 Baixar Relatório Completo em PDF</a>'
+        :'<span class="cta-fallback">Entre em contato para receber o relatório completo em PDF.</span>';
+      var reportHtmlFinal=reportHtml.replace("%%PDF_BUTTON%%",botaoHtml);
+
+      var templateParams={
+        to_email:email,
+        to_name:(pessoaFmt.nome||"").split(" ")[0],
+        mes_ref:mesRefStr,
+        patrimonio:fmV(totalGeral),
+        rentabilidade:"—",
+        tipo_servico:"Relatório Anual de IR",
+        titulo_email:"Relatório Anual de IR",
+        report_html:reportHtmlFinal,
+        from_name:cfg.nomeRemetente||"Courinvest",
+        reply_to:cfg.remetente||"",
+      };
+
+      await window.emailjs.send(cfg.serviceId,cfg.templateId,templateParams);
+      toast("✅ Relatório enviado por e-mail para "+email);
+    }catch(e){
+      console.error("[RelatórioIR] erro ao enviar e-mail:",e);
+      toast("❌ Erro ao enviar e-mail: "+(e&&(e.text||e.message)||JSON.stringify(e)));
+    }finally{
+      sEnviandoEmailId(null);
+    }
+  };
+
   var reabrirRelatorio=function(rel){
     var pessoaFmt={id:rel.pessoaId,nome:rel.pessoaNome,cpf:rel.pessoaCpf,tipo:rel.pessoaTipo};
     var html=montarRelatorioIRAnualHTML(pessoaFmt,rel.anoBase,rel);
@@ -27913,6 +28004,26 @@ var AbaRelatorioIR=function({data}){
           )}
           {pessoaSel && <span style={{fontSize:11,color:T.t3}}>para <b style={{color:T.t1}}>{pessoaSel.nome}</b> — ano-calendário {anoBase}</span>}
         </div>
+
+        {/* Envio por e-mail — pedido do Igor: campo persistente na tela (não um prompt()), pra
+            enviar o relatório recém-gerado depois de validar (ex: clicando "Baixar PDF" ou "Abrir"
+            acima pra conferir antes). Também serve pra reenviar qualquer relatório já salvo na
+            lista "Relatórios gerados" abaixo — o botão "✉️ E-mail" de cada linha usa este mesmo
+            campo. */}
+        <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginTop:14,paddingTop:14,borderTop:"1px dashed "+T.bdrL}}>
+          <div style={{flex:"1 1 240px"}}>
+            <div style={{fontSize:10,color:T.t3,fontWeight:700,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>E-mail do destinatário</div>
+            <input type="email" value={emailDestino} onChange={function(e){sEmailDestino(e.target.value)}} placeholder="cliente@email.com"
+              style={{width:"100%",padding:"10px 14px",borderRadius:10,border:"1px solid "+T.bdrL,background:T.w3,color:T.t1,fontSize:13}}/>
+          </div>
+          <Bt v="primary" disabled={!ultimoRelatorioGerado||enviandoEmailId==="__ultimo__"}
+            onClick={function(){enviarRelatorioIRPorEmail(ultimoRelatorioGerado.pessoaFmt,ultimoRelatorioGerado.anoBase,ultimoRelatorioGerado.dadosRel,"__ultimo__")}}>
+            {enviandoEmailId==="__ultimo__"?"⏳ Enviando...":"✉️ Enviar por E-mail"}
+          </Bt>
+        </div>
+        {!(d.config&&d.config.emailjs&&d.config.emailjs.publicKey) && (
+          <div style={{fontSize:10,color:T.orange,marginTop:6}}>⚠️ E-mail automático não configurado — acesse Configurações → E-mail (EmailJS) antes de enviar.</div>
+        )}
       </Cd>
 
       <Cd style={{padding:20}}>
@@ -27933,6 +28044,12 @@ var AbaRelatorioIR=function({data}){
                   </div>
                   <Bt v="secondary" style={{fontSize:11}} onClick={function(){reabrirRelatorio(rel)}}>Abrir</Bt>
                   <Bt v="secondary" style={{fontSize:11}} disabled={baixandoPdfId===rel.id} onClick={function(){baixarRelatorioPdf({id:rel.pessoaId,nome:rel.pessoaNome,cpf:rel.pessoaCpf,tipo:rel.pessoaTipo},rel.anoBase,rel,rel.id)}}>{baixandoPdfId===rel.id?"⏳ PDF...":"📄 PDF"}</Bt>
+                  <Bt v="secondary" style={{fontSize:11}} disabled={enviandoEmailId===rel.id} onClick={function(){
+                    var alvo=(emailDestino||"").trim()||emailCadastradoDe(rel.pessoaId);
+                    if(!alvo){toast("⚠️ Informe o e-mail do destinatário no campo acima antes de enviar");return}
+                    if(alvo!==emailDestino)sEmailDestino(alvo);
+                    enviarRelatorioIRPorEmail({id:rel.pessoaId,nome:rel.pessoaNome,cpf:rel.pessoaCpf,tipo:rel.pessoaTipo},rel.anoBase,rel,rel.id);
+                  }}>{enviandoEmailId===rel.id?"⏳ E-mail...":"✉️ E-mail"}</Bt>
                   <Bt v="ghost" style={{fontSize:11,color:T.red}} onClick={function(){excluirRelatorio(rel)}}>Excluir</Bt>
                 </div>
               );
@@ -34694,7 +34811,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '459';
+  var SW_VERSION = '460';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
