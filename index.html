@@ -311,7 +311,7 @@ const feeMensalBRL=function(c){
    (ex.: 0.01) no container com o conteúdo é capturada pelo html2canvas no render, gerando
    um PDF "lavado"/quase invisível — por isso é o WRAPPER que fica de tamanho zero, não o
    conteúdo que fica com opacidade baixa. */
-const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent){
+const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent,nomeArquivoDownload){
   var wrapper=null;
   try{
     if(typeof window.html2canvas==="undefined"||!window.jspdf||typeof window.jspdf.jsPDF==="undefined"){
@@ -733,6 +733,13 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent){
     try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
     if(pagesOk===0){console.warn("[PDF] Nenhuma página renderizou com sucesso.");return null;}
 
+    /* Modo "download local": quando chamado sem pathStorage (ver baixarPdfCourinvest, usado pelo
+       botão "Baixar PDF" do Relatório Anual de IR), não sobe pro Storage — só salva o PDF direto
+       no navegador do usuário via doc.save(), que dispara o download nativo do arquivo. */
+    if(nomeArquivoDownload){
+      doc.save(nomeArquivoDownload);
+      return true;
+    }
     var blob=doc.output("blob");
     var ref=window._fbStorage.ref().child(pathStorage);
     await ref.put(blob,{contentType:"application/pdf"});
@@ -768,6 +775,27 @@ const gerarPdfLinkCourinvest=function(pathStorage,htmlContent){
     }).catch(function(){
       clearTimeout(timeoutId);
       finish(null);
+    });
+  });
+};
+/* Variante de _gerarPdfLinkCourinvestInner que baixa o PDF direto no navegador do usuário (via
+   doc.save), em vez de subir pro Firebase Storage — usada pelo botão "Baixar PDF" do Relatório
+   Anual de IR, que não precisa de um link compartilhável, só do arquivo na máquina do usuário. */
+const baixarPdfCourinvest=function(htmlContent,nomeArquivo){
+  return new Promise(function(resolve){
+    var settled=false;
+    var finish=function(v){if(settled)return;settled=true;resolve(v);};
+    var timeoutId=setTimeout(function(){
+      console.warn("[PDF] Timeout de 130s atingido — download cancelado.");
+      finish(false);
+    },130000);
+    _gerarPdfLinkCourinvestInner(null,htmlContent,nomeArquivo||"relatorio.pdf").then(function(ok){
+      clearTimeout(timeoutId);
+      finish(!!ok);
+    }).catch(function(e){
+      console.warn("[PDF] Falha ao gerar PDF para download:",e);
+      clearTimeout(timeoutId);
+      finish(false);
     });
   });
 };
@@ -26817,6 +26845,8 @@ var PRODUTOS = [
 var IR_TAXONOMIA={
   acao:{grp:"03",cod:"01",nome:"Ações",loc:"105 - Brasil",ficha:"Bens e Direitos > Grupo 03 > Código 01"},
   fii:{grp:"07",cod:"03",nome:"FIIs",loc:"105 - Brasil",ficha:"Bens e Direitos > Grupo 07 > Código 03"},
+  fiagro:{grp:"07",cod:"02",nome:"Fiagros",loc:"105 - Brasil",ficha:"Bens e Direitos > Grupo 07 > Código 02"},
+  fundo_infra:{grp:"07",cod:"10",nome:"FI-Infra",loc:"105 - Brasil",ficha:"Bens e Direitos > Grupo 07 > Código 10"},
   bdr:{grp:"04",cod:"04",nome:"BDRs",loc:"105 - Brasil",ficha:"Bens e Direitos > Grupo 04 > Código 04"},
   cdb:{grp:"04",cod:"02",nome:"CDB",loc:"105 - Brasil",ficha:"Bens e Direitos > Grupo 04 > Código 02"},
   lci:{grp:"04",cod:"03",nome:"LCI",loc:"105 - Brasil",ficha:"Bens e Direitos > Grupo 04 > Código 03"},
@@ -26829,6 +26859,24 @@ var IR_TAXONOMIA={
   stock_us:{grp:"03",cod:"01",nome:"Stocks EUA",loc:"249 - Estados Unidos",ficha:"Bens e Direitos > Grupo 03 > Código 01"},
   etf_int:{grp:"07",cod:"99",nome:"ETFs / Fundos no Exterior",loc:"249 - Estados Unidos",ficha:"Bens e Direitos > Grupo 07 > Código 99"}
 };
+/* ---------- Fiagro, FI-Infra e FII são três classes de fundo listado diferentes ----------
+   Grupo/Código diferentes na declaração de IR (ver IR_TAXONOMIA acima), mas o extrato de "Posição" da
+   B3 (aba "Fundo de Investimento") não traz nenhuma coluna de segmento — só ticker, CNPJ e
+   administrador. As três listas abaixo (tickers de negociação, código+"11") vêm do cadastro oficial
+   de fundos listados da própria B3 (fundosListados, exportado em 22/09/2026) — substituem uma lista
+   anterior levantada por scraping de agregadores, que tinha pelo menos um erro real (CTEM11 estava
+   marcado como FI-Infra; o cadastro oficial da B3 mostra que é Fiagro) e algumas divergências de
+   fundos novos/renomeados. Ticker fora das três listas (fundo muito novo, ainda não capturado nesta
+   exportação) vira aviso de revisão manual no relatório, em vez de ser presumido como FII. */
+var IR_TICKERS_FIAGRO=["AAGR11","AAZQ11","AGRX11","BBGO11","BRFT11","BTAG11","BTAL11","BTRA11","CPTA11","CPTR11","CRAA11","CTEM11","DCRA11","EGAF11","FAZP11","FGAA11","FLEM11","FTCA11","FZDA11","FZDB11","GCRA11","GRWA11","HCRA11","HGAG11","IAAG11","IAGR11","IDGO11","JGPX11","KDOL11","KNCA11","KOPA11","LAFI11","LSAG11","MBSA11","NEXG11","OIAG11","PLCA11","ROCA11","RURA11","RZAG11","RZEO11","RZNE11","SNAG11","SNFZ11","TRAG11","VCRA11","VGIA11","VHFA11","XPCA11"];
+var IR_TICKERS_FIINFRA=["BCDI11","BDIF11","BIDB11","BINC11","BISE11","BODB11","BODI11","BRZD11","CDII11","CPDI11","CPTI11","DBIN11","DIVS11","EXIF11","IFRA11","IFRI11","INFB11","INFH11","IRIF11","ISEN11","ISET11","ISNN11","ISNT11","ISTT11","JMBI11","JURO11","KDIF11","NUIF11","OGIN11","PREE11","PRIF11","RBIF11","RIFF11","ROOT11","SNID11","SUIN11","VALO11","VANG11","VINF11","XPID11","YVYC11"];
+var IR_TICKERS_FII=["ABCP11","ADSH11","AERO11","AFHF11","AFHI11","AIEC11","AJFI11","ALMI11","ALZC11","ALZR11","ANCR11","APTO11","APXM11","APXR11","APXU11","AQPA11","AROA11","ARRI11","ARTE11","ARXD11","ASRF11","ATCR11","ATSA11","ATWN11","AUMT11","AURB11","AVUR11","AZPE11","AZPL11","AZSG11","BBFO11","BBIG11","BBRC11","BCIA11","BCRI11","BETW11","BFCC11","BGRB11","BGS111","BICE11","BIME11","BINR11","BIPD11","BIPE11","BLCA11","BLMG11","BLMO11","BLOG11","BLUE11","BMLC11","BMLT11","BNFS11","BOAT11","BPDR11","BPLC11","BPML11","BPMW11","BPOF11","BRCD11","BRCO11","BRCQ11","BRCR11","BRCT11","BRGL11","BRHT11","BRIP11","BROF11","BRSE11","BSLT11","BTCI11","BTHF11","BTHI11","BTHR11","BTLG11","BTML11","BTRU11","BTSI11","BTWR11","BTYU11","BVAR11","BZEL11","CACR11","CARE11","CBOP11","CCME11","CCVA11","CDHY11","CEBB11","CENU11","CEOC11","CFHF11","CFII11","CIXF11","CIXM11","CJCT11","CLIN11","CLSM11","CNES11","CPLG11","CPOF11","CPSH11","CPTS11","CPUR11","CRFF11","CSMC11","CTXT11","CVFL11","CVPR11","CXAG11","CXCE11","CXCI11","CXCO11","CXRI11","CXTL11","CYCR11","CYLD11","DAMA11","DAMT11","DAYM11","DEVA11","DLMT11","DOVL11","DPRO11","DRIM11","DVFF11","DVLP11","DVLT11","EAGL11","EBTA11","EDFO11","EDGA11","EDGE11","EGDB11","EGYR11","EIRA11","ELDO11","EMET11","EQIR11","ERCR11","ERPA11","ESTQ11","EURO11","EXES11","FAED11","FAMB11","FATN11","FCFL11","FIGS11","FIIB11","FIIC11","FIIP11","FINF11","FISC11","FISD11","FIVN11","FLCR11","FLMA11","FLNR11","FLRP11","FMOF11","FPAB11","FPNG11","FRRE11","FTCE11","FTRE11","FTRR11","FVPQ11","FYTO11","GAME11","GANT11","GARE11","GCDL11","GCOI11","GCRI11","GFDL11","GGRC11","GLCR11","GLPF11","GRAV11","GRUL11","GSFI11","GSRF11","GTWR11","GZIT11","HAAA11","HABT11","HBCR11","HCRI11","HCST11","HCTB11","HCTR11","HDEL11","HDOF11","HFOF11","HGBL11","HGBS11","HGCR11","HGIC11","HGLG11","HGRE11","HGRU11","HILG11","HIRE11","HJCT11","HLMB11","HLOG11","HOFC11","HOMS11","HOSI11","HPDP11","HRDF11","HREC11","HRES11","HSAF11","HSLG11","HSML11","HTMX11","HUCG11","HUSC11","HUSI11","HYPI11","IBBP11","IBCR11","ICDI11","ICNE11","ICRI11","IDUA11","ILOG11","IMMB11","INDE11","INHF11","INLG11","INRD11","IRIM11","ITIP11","ITIT11","ITRI11","IVBP11","IVCI11","JASC11","JCCJ11","JCDA11","JCDB11","JCSC11","JFLL11","JFLR11","JPPA11","JPRD11","JSAF11","JSCR11","JSRE11","JTPR11","KCRE11","KDLG11","KEVE11","KFEN11","KFOF11","KGUJ11","KISU11","KIVO11","KLOG11","KNCR11","KNGR11","KNHF11","KNHY11","KNIP11","KNPL11","KNPR11","KNRE11","KNRI11","KNSC11","KNUQ11","KOIM11","KONG11","KORE11","KPMR11","KPRP11","KRES11","LASC11","LIFE11","LKDV11","LLAO11","LMAI11","LOFT11","LPLP11","LRDI11","LRED11","LSII11","LSOI11","LSOP11","LTMT11","LVBI11","MAGM11","MANA11","MAXR11","MCCI11","MCLO11","MCMV11","MCRE11","MFII11","MGHT11","MGRI11","MIDW11","MMPD11","MMVE11","MOFF11","MOSO11","MTES11","MTOF11","MXRF11","NAUI11","NAVT11","NCRI11","NEWL11","NEWU11","NMKS11","NSLU11","NVHO11","NVIF11","OBAL11","OCRE11","ONDA11","OUJP11","OXRL11","PABY11","PATA11","PATB11","PATC11","PATL11","PBLV11","PCAS11","PCIP11","PDBM11","PEMA11","PLAG11","PLRI11","PLTB11","PMFO11","PMIS11","PMLL11","PMRL11","PNDL11","PNLM11","PNPR11","PNRC11","PORD11","PQAG11","PQDP11","PRSN11","PRSV11","PSEC11","PVBI11","QTZD11","RBDS11","RBFM11","RBFY11","RBHG11","RBHY11","RBIR11","RBLG11","RBOP11","RBRD11","RBRI11","RBRK11","RBRL11","RBRP11","RBRR11","RBRS11","RBRX11","RBRY11","RBTS11","RBVA11","RCFA11","RCFF11","RCRB11","RCRI11","RDCI11","RDIV11","RDLI11","RECD11","RECM11","RECR11","RECT11","REIT11","REME11","RENV11","RFOF11","RINV11","RJDA11","RMBS11","RNGO11","ROOF11","RPRI11","RRES11","RSPD11","RSRV11","RTEL11","RZAK11","RZAT11","RZLC11","RZRM11","RZTR11","RZZE11","RZZI11","RZZR11","RZZV11","SAIC11","SALI11","SAPI11","SCPF11","SEED11","SEQR11","SHDP11","SHIP11","SHPH11","SHPP11","SJAU11","SLDZ11","SMRE11","SNCI11","SNEL11","SNFF11","SNLG11","SNME11","SOFF11","SOLR11","SPAF11","SPDE11","SPG211","SPGM11","SPMO11","SPTW11","SPVJ11","SPXG11","SPXL11","SPXM11","SPXS11","SPXT11","STRX11","STRY11","STYI11","SURE11","TCIN11","TCPF11","TELD11","TELM11","TEPP11","TGAR11","TINF11","TIOM11","TJKB11","TMPS11","TOPP11","TORD11","TPOS11","TRBL11","TRCO11","TRNT11","TRPL11","TRUE11","TRXB11","TRXF11","TRXY11","TSER11","TSNC11","TVMO11","TVOI11","TVRI11","URHF11","URPR11","VCJR11","VCRI11","VCRR11","VCTH11","VDSV11","VERE11","VGHF11","VGII11","VGIP11","VGIR11","VGRD11","VGRH11","VGRI11","VGRM11","VIDS11","VILG11","VIMO11","VINO11","VIOL11","VISC11","VIUR11","VJFD11","VNSS11","VOTS11","VPPR11","VPSI11","VRTA11","VRTM11","VSHO11","VSLH11","VTPA11","VTPL11","VTVI11","VVCO11","VVCR11","VVDI11","VVMR11","VVRI11","VXXV11","WHGR11","WPLZ11","WTSP11","WTXA11","XLPR11","XPCI11","XPCM11","XPIN11","XPLG11","XPML11","XPSF11","YEES11","YUFI11","ZAGH11","ZAVC11","ZAVI11","ZIFI11"];
+function irClassificarFundoListado(ticker){
+  var tk=String(ticker||"").trim().toUpperCase();
+  if(IR_TICKERS_FIAGRO.indexOf(tk)>=0)return "fiagro";
+  if(IR_TICKERS_FIINFRA.indexOf(tk)>=0)return "fundo_infra";
+  return "fii";
+}
 var IR_CORRETORAS_EXTERIOR=["Vest","Banco Inter Internacional","C6 Global Invest","XP Internacional"];
 var IR_CORRETORAS_EXTERIOR_COM_PARSER=["Vest"];
 
@@ -26925,13 +26973,23 @@ function irParseB3Posicao(wb){
     ativos.push({tp:"bdr",tk:tk,nm:prod.split(" - ").slice(1).join(" - ")||prod,qtd:qtd,cT:ct,pm:qtd?ct/qtd:0,inst:String(r["Instituição"]||"").trim()});
   });
   var fundos=linhas("Fundo de Investimento");
-  if(fundos.length)avisos.push("Fundos de Investimento (aba \"Fundo de Investimento\" da Posição B3): classificados por padrão como FII (Grupo 07/Código 03) — confira se algum é Fiagro (Código 02) ou FI-Infra (Código 10) antes de declarar.");
+  var tickersNaoReconhecidos=[];
   fundos.forEach(function(r){
     var tk=String(r["Código de Negociação"]||"").trim();
     if(!tk||/^total/i.test(tk))return;
     var qtd=irNum(r["Quantidade"]), ct=irNum(r["Valor Atualizado"]);
-    ativos.push({tp:"fii",tk:tk,nm:tk,qtd:qtd,cT:ct,pm:qtd?ct/qtd:0,inst:String(r["Administrador"]||"").trim(),cnpj:String(r["CNPJ do Fundo"]||"").trim()});
+    var tp=irClassificarFundoListado(tk);
+    /* Só entra em revisão manual o ticker que não consta em NENHUMA das três listas oficiais da B3
+       (fundo listado depois do levantamento de set/2026, ou erro de digitação/ticker fora do padrão)
+       — um FII de verdade, já confirmado pela lista oficial, não precisa mais de conferência manual
+       só por não ser Fiagro/FI-Infra (antes o aviso disparava pra toda a aba, mesmo sem nenhum caso
+       de classificação ambígua). */
+    if(IR_TICKERS_FIAGRO.indexOf(tk.toUpperCase())<0 && IR_TICKERS_FIINFRA.indexOf(tk.toUpperCase())<0 && IR_TICKERS_FII.indexOf(tk.toUpperCase())<0 && tickersNaoReconhecidos.indexOf(tk)<0){
+      tickersNaoReconhecidos.push(tk);
+    }
+    ativos.push({tp:tp,tk:tk,nm:tk,qtd:qtd,cT:ct,pm:qtd?ct/qtd:0,inst:String(r["Administrador"]||"").trim(),cnpj:String(r["CNPJ do Fundo"]||"").trim()});
   });
+  if(tickersNaoReconhecidos.length)avisos.push("Fundos de Investimento (aba \"Fundo de Investimento\" da Posição B3) não encontrados no cadastro de FIIs/Fiagros/FI-Infra da B3 usado pelo Hub, classificados como FII por padrão: "+tickersNaoReconhecidos.join(", ")+". Provavelmente um fundo listado depois de set/2026 — confira o Grupo/Código correto (FII: 07/03, Fiagro: 07/02, FI-Infra: 07/10) antes de declarar.");
   linhas("Renda Fixa").forEach(function(r){
     var prod=String(r["Produto"]||"").trim();
     if(!prod||/^total/i.test(prod))return;
@@ -27194,13 +27252,26 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
     +'@media print{.section{page-break-inside:avoid}table{page-break-inside:avoid}}'
     +'</style>';
 
-  var logoSVG='<svg width="36" height="36" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="2" fill="#D4A328"/><circle cx="20" cy="20" r="8" fill="none" stroke="#D4A328" stroke-width="1.5" opacity=".6"/><circle cx="20" cy="20" r="14" fill="none" stroke="#D4A328" stroke-width="1.5"/><path d="M 20 6 A 14 14 0 0 0 20 34" fill="none" stroke="#D4A328" stroke-width="2.5" stroke-linecap="round"/></svg>';
+  /* Logo oficial da Courinvest — mesmo markup usado na capa dos relatórios mensais (logoCapa em
+     gerarRelatorio), pra manter os dois no mesmo padrão visual: arco dourado em "C" + wordmark. */
+  var logoSVG='<div style="display:flex;align-items:center;gap:14px">'
+    +'<svg width="48" height="48" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0">'
+    +'<defs><linearGradient id="lgCapaIR" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">'
+    +'<stop offset="0%" stop-color="#F0D060"/><stop offset="50%" stop-color="#D4A328"/><stop offset="100%" stop-color="#B8891A"/></linearGradient></defs>'
+    +'<circle cx="50" cy="50" r="46" stroke="url(#lgCapaIR)" stroke-width="0.5" opacity=".15" fill="none"/>'
+    +'<path d="M50 6 C18 6,6 26,6 50 C6 74,18 94,50 94" stroke="url(#lgCapaIR)" stroke-width="5" stroke-linecap="round" fill="none"/>'
+    +'<path d="M50 18 C28 18,18 32,18 50 C18 68,28 82,50 82" stroke="url(#lgCapaIR)" stroke-width="4" stroke-linecap="round" fill="none" opacity=".7"/>'
+    +'<circle cx="58" cy="50" r="4" fill="url(#lgCapaIR)"/></svg>'
+    +'<div style="display:flex;flex-direction:column">'
+    +'<div style="font-size:18px;font-weight:800;color:#fff;letter-spacing:1.5px;line-height:1;font-family:Outfit,sans-serif">COURINVEST</div>'
+    +'<div style="font-size:8.5px;font-weight:600;color:#B8C4D6;letter-spacing:3px;margin-top:3px;font-family:Outfit,sans-serif">CONSULTORIA EM INVESTIMENTOS</div>'
+    +'</div></div>';
 
   var html='<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório Anual de IR '+anoDec+' — '+pessoa.nome+'</title>'+css+'</head><body><div class="page">';
 
   /* ===== CAPA ===== */
   html+='<div class="cover"><div class="cover-inner">';
-  html+='<div class="cover-top"><div>'+logoSVG+'<div class="logo-text" style="margin-top:8px">COURINVEST</div><div class="logo-sub">CONSULTORIA EM INVESTIMENTOS</div></div>';
+  html+='<div class="cover-top">'+logoSVG;
   html+='<div style="text-align:right;font-size:9px;color:#8B94A7;letter-spacing:1px"><div>EXERCÍCIO '+anoDec+'</div><div style="margin-top:4px;color:#D4A328;font-weight:700">ANO-CALENDÁRIO '+anoBase+'</div></div></div>';
   html+='<div class="cover-center">';
   html+='<div class="cover-badge">📑 RELATÓRIO ANUAL DE IR</div>';
@@ -27223,11 +27294,14 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
   tiposBR.forEach(function(tp){var info=byTipo[tp].info;html+='<div class="toc-item"><span><b>1.'+idx+'</b>Bens e Direitos — '+info.nome+'</span><span>Grupo '+info.grp+' / Código '+info.cod+'</span></div>';idx++});
   if(resumosInformesBR.length)html+='<div class="toc-item"><span><b>1.'+(idx++)+'</b>Resumo dos Informes de Rendimentos</span><span>Isentos / Tributação Exclusiva</span></div>';
   if(movimentacao)html+='<div class="toc-item"><span><b>1.'+(idx++)+'</b>Rendimentos do Ano (B3) — Dividendos, JCP, Proventos</span><span>Movimentação B3</span></div>';
+  html+='<div class="toc-item"><span><b>1.'+(idx++)+'</b>Exemplos Práticos — Como Declarar Cada Rendimento</span><span>Dividendos / Bonificação / JCP / Proventos</span></div>';
   if(tiposExt.length){
     html+='<div class="toc-section-title">PARTE 2 — INVESTIMENTOS NO EXTERIOR</div>';
     var idx2=1;
     html+='<div class="toc-item"><span><b>2.'+(idx2++)+'</b>Saldo em Conta — Corretora Exterior</span><span>Grupo 06 / Código 99</span></div>';
     tiposExt.forEach(function(tp){var info=byTipoExt[tp].info;html+='<div class="toc-item"><span><b>2.'+idx2+'</b>Bens e Direitos — '+info.nome+'</span><span>Grupo '+info.grp+' / Código '+info.cod+'</span></div>';idx2++});
+    html+='<div class="toc-item"><span><b>2.'+idx2+'</b>Dividendos no Exterior — Onde Declarar</span><span>Lei 14.754/2023</span></div>';
+    idx2++;
     html+='<div class="toc-item"><span><b>2.'+idx2+'</b>Resumo Tributário — Lei 14.754/2023</span><span>Imposto a Pagar</span></div>';
   }
   html+='</div>';
@@ -27251,7 +27325,9 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
     });
     html+='<tr class="total"><td colspan="4">TOTAL '+info.nome.toUpperCase()+'</td><td class="num">'+irFmtR(totalGrupo)+'</td><td></td></tr>';
     html+='</tbody></table>';
-    if(tp==="fii")html+='<div class="box box-tip"><b>💡 DICA:</b> Rendimentos mensais de FIIs são isentos de IR para PF. Declare em "Rendimentos Isentos", Código 26 (FII) ou conforme indicado pela corretora.</div>';
+    if(tp==="fii")html+='<div class="box box-tip"><b>💡 DICA:</b> Rendimentos mensais de FIIs são isentos de IR para PF. Declare em "Rendimentos Isentos", Código 99 (Outros) ou conforme indicado pela corretora.</div>';
+    if(tp==="fiagro")html+='<div class="box box-tip"><b>💡 DICA:</b> Fiagro é uma classe de fundo distinta do FII "tradicional" (agro em vez de imóveis), com código próprio na declaração. Rendimentos mensais também são isentos de IR para PF — declare em "Rendimentos Isentos", Código 99.</div>';
+    if(tp==="fundo_infra")html+='<div class="box box-tip"><b>💡 DICA:</b> FI-Infra (fundo incentivado de infraestrutura) também tem código próprio, diferente do FII. Rendimentos são isentos de IR para PF por lei — declare em "Rendimentos Isentos", Código 99.</div>';
     if(tp==="acao")html+='<div class="box box-tip"><b>💡 DICA:</b> Dividendos são isentos (Código 09). JCP entra em "Tributação Exclusiva" (Código 10). Vendas acima de R$ 20.000/mês exigem apuração mensal de DARF.</div>';
     if(tp==="cdb"||tp==="lc")html+='<div class="box box-tip"><b>💡 DICA:</b> Rendimentos de CDB/LC têm IR retido na fonte (tabela regressiva). Declare em "Tributação Exclusiva", Código 06.</div>';
     if(tp==="lci"||tp==="lca"||tp==="cri"||tp==="cra")html+='<div class="box box-tip"><b>💡 DICA:</b> '+info.nome+' é isento de IR para PF. Declare o rendimento em "Rendimentos Isentos", Código 12.</div>';
@@ -27288,11 +27364,41 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
     html+='<table><thead><tr><th>Tipo de Rendimento</th><th class="num">Total no ano</th><th>Ficha</th></tr></thead><tbody>';
     html+='<tr><td>Dividendos</td><td class="num">'+irFmtR(movimentacao.dividendos)+'</td><td style="font-size:9px;color:#7a8399">Rendimentos Isentos, Código 09</td></tr>';
     html+='<tr><td>Juros sobre Capital Próprio (JCP)</td><td class="num">'+irFmtR(movimentacao.jcp)+'</td><td style="font-size:9px;color:#7a8399">Tributação Exclusiva, Código 10</td></tr>';
-    html+='<tr><td>Rendimentos de FIIs</td><td class="num">'+irFmtR(movimentacao.rendimentosFii)+'</td><td style="font-size:9px;color:#7a8399">Rendimentos Isentos, Código 26</td></tr>';
+    html+='<tr><td>Rendimentos de FIIs</td><td class="num">'+irFmtR(movimentacao.rendimentosFii)+'</td><td style="font-size:9px;color:#7a8399">Rendimentos Isentos, Código 99</td></tr>';
     html+='</tbody></table>';
     if(movimentacao.bonificacoes.length)html+='<div class="box box-tip"><b>💡 Bonificações em ativos:</b> '+movimentacao.bonificacoes.length+' evento(s) no ano — aumentam a quantidade de cotas/ações sem custo adicional; ajuste o preço médio proporcionalmente.</div>';
     html+='</div></div>';
   }
+
+  /* ===== Exemplos práticos — passo a passo por tipo de rendimento (Brasil) =====
+     Conteúdo educativo fixo (não depende dos documentos anexados) — o pedido foi detalhar o passo a
+     passo de CADA tipo de rendimento, não só do ativo em si. Números de exemplo são só ilustrativos
+     (marcados como tal), pra não passar a impressão de que são os valores reais do cliente. */
+  html+='<div class="pagelight"><div class="section">';
+  html+='<div class="section-eyebrow"><span class="section-eyebrow-line"></span><span class="section-eyebrow-text">PARTE 1 · EXEMPLOS PRÁTICOS</span></div>';
+  html+='<h2 class="section-title">Como Declarar Cada Tipo de <i>Rendimento</i></h2>';
+  html+='<div class="section-path">📍 Passo a passo com exemplo numérico ilustrativo pra cada tipo de rendimento recebido no Brasil — os valores abaixo são só de exemplo, use os valores reais do seu informe de rendimentos.</div>';
+
+  html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">💰 Dividendos de Ações</h3>';
+  html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Isentos e Não Tributáveis</b> → Novo → Código <b>09 – Lucros e dividendos recebidos</b>.</div></div>';
+  html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text">Informe o <b>CNPJ da empresa pagadora</b> e o valor total recebido no ano (some todos os pagamentos da mesma empresa).</div></div>';
+  html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu R$ 850,00 de dividendos da empresa XPTO S.A. (CNPJ 12.345.678/0001-90) ao longo de 2025 → lança R$ 850,00 no Código 09, com o CNPJ da XPTO. Totalmente isento, não gera imposto.</div>';
+
+  html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🎁 Bonificação em Ações</h3>';
+  html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Isentos e Não Tributáveis</b> → Código <b>18 – Incorporação de reservas ao capital/Bonificações em ações</b> → CNPJ da empresa → valor de mercado das ações bonificadas (informado pela corretora).</div></div>';
+  html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text">Na ficha <b>Bens e Direitos</b> da mesma ação já declarada: aumente a <b>quantidade</b> pelas ações recebidas e <b>some o valor da bonificação ao custo total</b>, recalculando o preço médio — a bonificação não é vendida nem gera imposto na hora, só muda a base de custo pra um eventual ganho de capital futuro.</div></div>';
+  html+='<div class="box box-tip"><b>💡 Exemplo:</b> Antes: 1.000 ações a R$ 30,00 (custo R$ 30.000,00). Bonificação de 10% (100 ações novas) a R$ 12,00 (custo adicional R$ 1.200,00). Depois: 1.100 ações, custo R$ 31.200,00, novo preço médio = R$ 31.200,00 ÷ 1.100 = <b>R$ 28,36</b>.</div>';
+
+  html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🏦 Juros sobre Capital Próprio (JCP)</h3>';
+  html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Sujeitos à Tributação Exclusiva/Definitiva</b> → Código <b>10 – Juros sobre Capital Próprio</b> → CNPJ da empresa → valor <b>bruto</b> recebido no ano (o Informe de Rendimentos já traz esse total separado dos dividendos).</div></div>';
+  html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu R$ 500,00 brutos de JCP, com R$ 75,00 já retidos na fonte pela empresa (15%) → lança R$ 500,00 (valor bruto) no Código 10. O imposto retido é informativo — já foi pago pela empresa, não gera DARF nem cobrança adicional.</div>';
+
+  html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🏢 Proventos de FII, Fiagro e FI-Infra</h3>';
+  html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Isentos e Não Tributáveis</b> → Código <b>99 – Outros</b> → CNPJ do fundo (administrador) → valor total recebido no ano <b>daquele fundo especificamente</b> (um lançamento por fundo, não um total único).</div></div>';
+  html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text">No campo <b>Discriminação</b>, cite a base legal da isenção: FII — "Lei 11.033/2004, art. 3º, II"; Fiagro — "Lei 14.130/2021"; FI-Infra — "Lei 12.431/2011".</div></div>';
+  html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu R$ 1.200,00 de HGLG11 (FII), R$ 300,00 de BBGO11 (Fiagro) e R$ 450,00 de BDIF11 (FI-Infra) em 2025 → três lançamentos separados no Código 99, cada um com o CNPJ do respectivo fundo.</div>';
+  html+='<div class="box box-warn"><b>⚠ Requisito da isenção:</b> desde jan/2024, a isenção de FII/Fiagro/FI-Infra vale só se o fundo tiver cotas negociadas em bolsa/balcão organizado (efetivamente negociadas, não só admitidas), no mínimo <b>500 cotistas</b> e nenhum cotista com 10% ou mais das cotas recebendo mais de 10% do rendimento distribuído. Praticamente todos os fundos listados na B3 já atendem isso, mas vale conferir no informe de rendimentos se algum fundo pequeno da carteira está fora da regra.</div>';
+  html+='</div></div>';
 
   /* ===== PARTE 2 — EXTERIOR ===== */
   if(tiposExt.length||saldoContaExterior){
@@ -27321,6 +27427,20 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
       html+='</tbody></table></div>';
       i2++;
     });
+
+    /* ===== Como declarar dividendos do exterior — onde declarar e onde NÃO declarar =====
+       Ponto que gera bastante confusão: dividendo do exterior NÃO segue a mesma lógica do dividendo
+       brasileiro (que é isento) nem do carnê-leão mensal antigo (que não existe mais pra isso desde
+       2024) — é um regime próprio, criado pela Lei 14.754/2023, com apuração e alíquota únicas. */
+    html+='<div class="section"><div class="section-eyebrow"><span class="section-eyebrow-line"></span><span class="section-eyebrow-text">PARTE 2 · ITEM 2.'+i2+'</span></div>';
+    html+='<h2 class="section-title" style="color:#7C3AED">Dividendos no Exterior — <i>Onde Declarar</i></h2>';
+    html+='<div class="box box-imp"><b>📌 Diferente do dividendo brasileiro:</b> dividendo de ação/ETF no exterior <b>NÃO é isento</b> — é tributado a <b>15% ao ano</b>, dentro do próprio ajuste anual (Lei 14.754/2023), junto com ganhos de capital e juros de aplicações financeiras no exterior do mesmo ano.</div>';
+    html+='<div class="step"><div class="step-num">ONDE DECLARAR</div><div class="step-text">O Programa IRPF monta sozinho um <b>"Demonstrativo de Apuração — Lei nº 14.754/2023"</b>, somando todos os rendimentos de aplicações financeiras no exterior do ano (dividendos + ganhos de capital + juros), aplicando <b>15%</b> sobre o total e gerando um <b>único DARF (código 0211)</b> — pagável à vista ou parcelado em até 8x, com vencimento junto ao ajuste anual.</div></div>';
+    html+='<div class="step"><div class="step-num">IMPOSTO PAGO LÁ FORA</div><div class="step-text">O imposto retido no exterior (ex.: withholding tax dos EUA) pode ser <b>abatido do imposto devido no Brasil, até o limite de 15%</b> — sem precisar de acordo de reciprocidade específico pra esse regime. Se a retenção lá fora já foi de 15% ou mais sobre aquele valor, não sobra imposto a pagar aqui.</div></div>';
+    html+='<div class="box box-warn"><b>⚠ Onde NÃO declarar:</b> dividendo do exterior <b>não</b> vai em "Rendimentos Isentos e Não Tributáveis" (não é isento) e <b>não</b> passa mais por carnê-leão mensal nem por um GCAP separado — isso valia antes de 2024. Desde a Lei 14.754/2023, o único lugar correto é dentro do demonstrativo de apuração específico da lei, junto com os demais rendimentos de aplicações financeiras no exterior do ano.</div>';
+    html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu US$ 200,00 em dividendos de uma ação americana (≈ R$ 1.100,00 no câmbio do dia do recebimento), com US$ 30,00 retidos na fonte pelos EUA (15%, ≈ R$ 165,00). No demonstrativo da Lei 14.754/2023: imposto devido no Brasil = R$ 1.100,00 × 15% = R$ 165,00; como já foram retidos R$ 165,00 no exterior, o crédito cobre integralmente o imposto devido — <b>nada a pagar adicionalmente aqui</b> sobre esse valor.</div>';
+    html+='</div>';
+    i2++;
 
     html+='<div class="section"><div class="section-eyebrow"><span class="section-eyebrow-line"></span><span class="section-eyebrow-text">PARTE 2 · RESUMO TRIBUTÁRIO</span></div>';
     html+='<h2 class="section-title" style="color:#7C3AED">Resumo Tributário — <i>Lei 14.754/2023</i></h2>';
@@ -27384,6 +27504,8 @@ var AbaRelatorioIR=function({data}){
   var [toastMsg,sToastMsg]=React.useState(null);
   var [relatorios,sRelatorios]=React.useState([]);
   var [loadingRelatorios,sLoadingRelatorios]=React.useState(true);
+  var [ultimoRelatorioGerado,sUltimoRelatorioGerado]=React.useState(null);
+  var [baixandoPdfId,sBaixandoPdfId]=React.useState(null);
 
   var toast=function(m){sToastMsg(m);setTimeout(function(){sToastMsg(null)},3800)};
 
@@ -27492,6 +27614,8 @@ var AbaRelatorioIR=function({data}){
       if(w){w.document.write(html);w.document.close()}
       else toast("⚠️ Pop-up bloqueado — permita pop-ups para abrir o relatório");
 
+      sUltimoRelatorioGerado({pessoaFmt:pessoaFmt,anoBase:anoBase,dadosRel:dadosRel});
+
       if(window._fbDB){
         var docId=pessoaSel.id+"_"+anoBase;
         window._fbDB.collection("ir_relatorios").doc(docId).set({
@@ -27513,6 +27637,25 @@ var AbaRelatorioIR=function({data}){
     }finally{
       sProcessando(false);
       sProgresso("");
+    }
+  };
+
+  /* Reusa o mesmo motor de PDF dos relatórios mensais (_gerarPdfLinkCourinvestInner, via a variante
+     baixarPdfCourinvest que salva local em vez de subir pro Storage) — renderiza o HTML já montado
+     página por página e dispara o download direto no navegador do usuário. */
+  var baixarRelatorioPdf=async function(pessoaFmt,anoBaseRel,dadosRel,idLoading){
+    if(typeof baixarPdfCourinvest!=="function"){toast("⚠️ Geração de PDF não disponível nesta versão");return}
+    sBaixandoPdfId(idLoading);
+    try{
+      var html=montarRelatorioIRAnualHTML(pessoaFmt,anoBaseRel,dadosRel);
+      var nomeArq="Relatorio_IR_"+(anoBaseRel+1)+"_"+(pessoaFmt.nome||"cliente").normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^\w]+/g,"_")+".pdf";
+      var ok=await baixarPdfCourinvest(html,nomeArq);
+      toast(ok?"✅ PDF baixado":"❌ Não foi possível gerar o PDF — tente novamente");
+    }catch(e){
+      console.error("[RelatórioIR] erro ao gerar PDF:",e);
+      toast("❌ Erro ao gerar PDF: "+e.message);
+    }finally{
+      sBaixandoPdfId(null);
     }
   };
 
@@ -27642,8 +27785,13 @@ var AbaRelatorioIR=function({data}){
           <div style={{fontSize:10,color:T.orange,marginBottom:12}}>⚠️ Ainda não há extração automática para {corretoraExterior} — o arquivo será registrado e marcado para revisão manual no relatório.</div>
         )}
 
-        <div style={{display:"flex",gap:10,alignItems:"center",marginTop:8,paddingTop:16,borderTop:"1px solid "+T.bdrL}}>
+        <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginTop:8,paddingTop:16,borderTop:"1px solid "+T.bdrL}}>
           <Bt v="primary" onClick={gerarRelatorio} disabled={processando}>{processando?"⏳ "+(progresso||"Processando..."):"✨ Gerar Relatório Consolidado"}</Bt>
+          {ultimoRelatorioGerado && (
+            <Bt v="secondary" disabled={baixandoPdfId==="__ultimo__"} onClick={function(){baixarRelatorioPdf(ultimoRelatorioGerado.pessoaFmt,ultimoRelatorioGerado.anoBase,ultimoRelatorioGerado.dadosRel,"__ultimo__")}}>
+              {baixandoPdfId==="__ultimo__"?"⏳ Gerando PDF...":"📄 Baixar PDF"}
+            </Bt>
+          )}
           {pessoaSel && <span style={{fontSize:11,color:T.t3}}>para <b style={{color:T.t1}}>{pessoaSel.nome}</b> — ano-calendário {anoBase}</span>}
         </div>
       </Cd>
@@ -27665,6 +27813,7 @@ var AbaRelatorioIR=function({data}){
                     <div style={{fontSize:10,color:T.t3}}>Gerado em {rel.geradoEm?new Date(rel.geradoEm).toLocaleString("pt-BR"):"-"}{rel.itensRevisaoManual&&rel.itensRevisaoManual.length?" · ⚠️ "+rel.itensRevisaoManual.length+" item(ns) p/ revisão":""}</div>
                   </div>
                   <Bt v="secondary" style={{fontSize:11}} onClick={function(){reabrirRelatorio(rel)}}>Abrir</Bt>
+                  <Bt v="secondary" style={{fontSize:11}} disabled={baixandoPdfId===rel.id} onClick={function(){baixarRelatorioPdf({id:rel.pessoaId,nome:rel.pessoaNome,cpf:rel.pessoaCpf,tipo:rel.pessoaTipo},rel.anoBase,rel,rel.id)}}>{baixandoPdfId===rel.id?"⏳ PDF...":"📄 PDF"}</Bt>
                   <Bt v="ghost" style={{fontSize:11,color:T.red}} onClick={function(){excluirRelatorio(rel)}}>Excluir</Bt>
                 </div>
               );
@@ -34428,7 +34577,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '452';
+  var SW_VERSION = '456';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
