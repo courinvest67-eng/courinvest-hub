@@ -26919,8 +26919,18 @@ function irNum(v){
   if(typeof v==="number")return v;
   var s=String(v).trim().replace(/R\$\s?|US\$\s?/g,"");
   if(s==="-"||s==="")return 0;
-  if(s.indexOf(",")>=0 && s.indexOf(".")>=0){s=s.replace(/\./g,"").replace(",",".")}
-  else if(s.indexOf(",")>=0){s=s.replace(",",".")}
+  /* Quando o número tem "," e "." juntos, o separador DECIMAL é sempre o que aparece por último
+     (mais perto do fim) — normalmente "," (padrão BR: "1.234,56"), mas confirmado com um informe
+     real do Santander que às vezes sai um TOTAL isolado em formato americano ("4,961.70", com "."
+     por último) no meio de um documento cujos outros valores são todos BR — provavelmente um bug
+     de localização pontual do sistema de quem emitiu. Detectar pela POSIÇÃO em vez de assumir
+     sempre BR evita interpretar esse total como "4,96170" (errado). */
+  var lastVirgula=s.lastIndexOf(","),lastPonto=s.lastIndexOf(".");
+  if(lastVirgula>=0 && lastPonto>=0){
+    if(lastVirgula>lastPonto){s=s.replace(/\./g,"").replace(",",".")}
+    else{s=s.replace(/,/g,"")}
+  }
+  else if(lastVirgula>=0){s=s.replace(",",".")}
   var n=parseFloat(s);
   return isNaN(n)?0:n;
 }
@@ -27160,6 +27170,8 @@ function irDetectarCorretoraBR(texto){
   if(/C6 BANK|BANCO C6 S\.A|C6 CTVM/i.test(texto))return "C6 Bank";
   if(/PICPAY/i.test(texto))return "PicPay";
   if(/BTG PACTUAL/i.test(texto))return "BTG Pactual";
+  if(/BANCO DO BRASIL/i.test(texto))return "Banco do Brasil";
+  if(/SANTANDER/i.test(texto))return "Santander";
   if(/ITA[UÚ]/i.test(texto))return "Itaú";
   return "Corretora não identificada";
 }
@@ -27209,11 +27221,22 @@ function irParseInformeBR(texto,anoBase){
     resultado[secao].itens.push({label:label,saldoAnt:v1,saldoAtual:v2,rendimento:v3!==null?v3:0,codigo:codeMatch?codeMatch[1]:pendingCodigo,grupo:grpMatch?grpMatch[1]:pendingGrupo,isTotal:isTotalLine});
   });
 
+  /* "isentos"/"exclusiva" são fichas de RENDIMENTO (renda recebida no ano) — o total certo é a
+     coluna "rendimento", não o saldo. "saldoConta"/"dividas"/"bensDireitos" são fichas de SALDO
+     (quanto tem/deve em 31/12) — aí sim o saldo é o total certo. Bug encontrado testando um informe
+     (Santander) cuja seção "Rendimentos Isentos" não tem uma linha "TOTAL" própria: caía no fallback
+     de somar TODOS os itens, mas usando sempre saldoAtual (errado pra ficha de rendimento — somava
+     os SALDOS de cada aplicação, um número bem maior e sem sentido pra essa ficha, em vez de somar
+     o rendimento líquido recebido de cada uma). Quando existe uma linha "TOTAL" com um único valor
+     (formato mais comum), saldoAtual e rendimento saem iguais nela, então a troca não muda nada
+     nesses casos — só corrige o fallback sem total explícito. */
+  var IR_CAMPO_TOTAL_SECAO={isentos:"rendimento",exclusiva:"rendimento",saldoConta:"saldoAtual",dividas:"saldoAtual",bensDireitos:"saldoAtual"};
   ["isentos","exclusiva","saldoConta","dividas","bensDireitos"].forEach(function(sec){
     var itens=resultado[sec].itens;
     var totalLines=itens.filter(function(i){return i.isTotal});
     var fonte=totalLines.length>0?totalLines:itens;
-    resultado[sec].total=fonte.reduce(function(s,i){return s+i.saldoAtual},0);
+    var campo=IR_CAMPO_TOTAL_SECAO[sec];
+    resultado[sec].total=fonte.reduce(function(s,i){return s+i[campo]},0);
   });
   return resultado;
 }
@@ -28186,8 +28209,16 @@ var AbaRelatorioIR=function({data}){
   var [arqInformesBR,sArqInformesBR]=React.useState([]);
   var [arqPosicaoB3,sArqPosicaoB3]=React.useState(null);
   var [arqMovB3,sArqMovB3]=React.useState(null);
-  var [corretoraExterior,sCorretoraExterior]=React.useState("Vest");
-  var [arqExterior,sArqExterior]=React.useState(null);
+  /* Exterior agora é uma LISTA (id+corretora+arquivo) em vez de um par único — pedido do Igor:
+     tem cliente com mais de uma corretora no exterior (ex.: C6 Global Invest + Inter Global Invest
+     no mesmo ano). Cada linha tem sua própria corretora e seu próprio arquivo; o relatório soma o
+     resultado de todas. Começa com 1 linha vazia (mesmo visual de antes pra quem só tem uma). */
+  var [exteriorList,sExteriorList]=React.useState([{id:1,corretora:"Vest",arquivo:null}]);
+  var _exteriorNextId=React.useRef(2);
+  var addExterior=function(){sExteriorList(function(p){var id=_exteriorNextId.current++;return p.concat([{id:id,corretora:"Vest",arquivo:null}])})};
+  var removeExterior=function(id){sExteriorList(function(p){return p.filter(function(x){return x.id!==id})})};
+  var setExteriorCorretora=function(id,corretora){sExteriorList(function(p){return p.map(function(x){return x.id===id?{...x,corretora:corretora}:x})})};
+  var setExteriorArquivo=function(id,arquivo){sExteriorList(function(p){return p.map(function(x){return x.id===id?{...x,arquivo:arquivo}:x})})};
   var [processando,sProcessando]=React.useState(false);
   var [progresso,sProgresso]=React.useState("");
   var [toastMsg,sToastMsg]=React.useState(null);
@@ -28253,7 +28284,7 @@ var AbaRelatorioIR=function({data}){
 
   var gerarRelatorio=async function(){
     if(!pessoaSel){toast("⚠️ Selecione um cliente ou cadastre um avulso");return}
-    var temArquivo=arqInformesBR.length||arqPosicaoB3||arqMovB3||arqExterior;
+    var temArquivo=arqInformesBR.length||arqPosicaoB3||arqMovB3||exteriorList.some(function(x){return x.arquivo});
     if(!temArquivo){toast("⚠️ Anexe ao menos um documento");return}
     sProcessando(true);
     var fontesUsadas=[];
@@ -28295,29 +28326,92 @@ var AbaRelatorioIR=function({data}){
       }
       if(avisosB3.length)avisosB3.forEach(function(a){itensRevisaoManual.push({arquivo:arqPosicaoB3?arqPosicaoB3.name:"Posição B3",motivo:a})});
 
-      if(arqExterior){
+      /* Soma o resultado de TODAS as corretoras do exterior anexadas (ver exteriorList acima).
+         Com 1 corretora só (caso mais comum) o comportamento fica IDÊNTICO a antes — usa o
+         resultado do parser direto, sem nenhum recálculo (preserva exatamente o resumo tributário
+         oficial de cada informe, campo por campo, mesmo que ele inclua algo além de "ganhos de
+         capital + dividendos" que o Hub não saberia recompor sozinho). Só entra em modo "combinar
+         várias corretoras" quando há mais de uma anexada — aí sim: ativos concatenam; saldo em
+         conta soma ant/atual de cada uma; e o Resumo Tributário — Lei 14.754/2023 (que aplica os
+         15% sobre a BASE DE CÁLCULO TOTAL do ano, todas as corretoras juntas, não corretora por
+         corretora) só pode ser remontado somando primeiro Ganhos de Capital + Dividendos + Imposto
+         Pago no Exterior de cada uma e recalculando a Base de Cálculo/Imposto Devido UMA VEZ no
+         total — nesse caso já não dá mais pra preservar o valor "oficial" de cada informe à risca,
+         então o relatório avisa que o total foi recalculado. Se alguma corretora não tiver resumo
+         tributário (nem oficial nem calculável, ex.: falha na extração), o total combinado fica
+         null (preencher manualmente) em vez de somar só o que deu certo e arriscar mostrar um
+         Imposto Devido menor que o real sem avisar. */
+      var exteriorComArquivo=exteriorList.filter(function(x){return x.arquivo});
+      if(exteriorComArquivo.length===1){
+        var itemExtUnico=exteriorComArquivo[0];
         sProgresso("Lendo informe do exterior...");
-        if(IR_CORRETORAS_EXTERIOR_COM_PARSER.indexOf(corretoraExterior)>=0){
+        if(IR_CORRETORAS_EXTERIOR_COM_PARSER.indexOf(itemExtUnico.corretora)>=0){
           try{
-            var rExt;
-            if(corretoraExterior==="XP Internacional"){
-              var itensExt=await irLerPdfItensBrutos(arqExterior);
-              rExt=irParseXPInternacionalPdf(itensExt);
+            var rExtUnico;
+            if(itemExtUnico.corretora==="XP Internacional"){
+              var itensExtUnico=await irLerPdfItensBrutos(itemExtUnico.arquivo);
+              rExtUnico=irParseXPInternacionalPdf(itensExtUnico);
             }else{
-              var textoExt=await irLerPdfTexto(arqExterior);
-              if(corretoraExterior==="C6 Global Invest")rExt=irParseC6GlobalPdf(textoExt);
-              else if(corretoraExterior==="Banco Inter Internacional")rExt=irParseInterGlobalPdf(textoExt);
-              else rExt=irParseVestPdf(textoExt);
+              var textoExtUnico=await irLerPdfTexto(itemExtUnico.arquivo);
+              if(itemExtUnico.corretora==="C6 Global Invest")rExtUnico=irParseC6GlobalPdf(textoExtUnico);
+              else if(itemExtUnico.corretora==="Banco Inter Internacional")rExtUnico=irParseInterGlobalPdf(textoExtUnico);
+              else rExtUnico=irParseVestPdf(textoExtUnico);
             }
-            ativosExterior=rExt.ativos;
-            saldoContaExterior=rExt.saldoContaExterior;
-            resumoTributarioExterior=rExt.resumoTributario;
-            if(rExt.avisos&&rExt.avisos.length)rExt.avisos.forEach(function(a){itensRevisaoManual.push({arquivo:arqExterior.name,motivo:a})});
-            fontesUsadas.push(arqExterior.name+" ("+corretoraExterior+")");
-          }catch(e){console.error(e);itensRevisaoManual.push({arquivo:arqExterior.name,motivo:"Falha ao processar o informe da "+corretoraExterior+": "+e.message})}
+            ativosExterior=rExtUnico.ativos;
+            saldoContaExterior=rExtUnico.saldoContaExterior;
+            resumoTributarioExterior=rExtUnico.resumoTributario;
+            if(rExtUnico.avisos&&rExtUnico.avisos.length)rExtUnico.avisos.forEach(function(a){itensRevisaoManual.push({arquivo:itemExtUnico.arquivo.name,motivo:a})});
+            fontesUsadas.push(itemExtUnico.arquivo.name+" ("+itemExtUnico.corretora+")");
+          }catch(e){console.error(e);itensRevisaoManual.push({arquivo:itemExtUnico.arquivo.name,motivo:"Falha ao processar o informe da "+itemExtUnico.corretora+": "+e.message})}
         } else {
-          itensRevisaoManual.push({arquivo:arqExterior.name,motivo:"Ainda não há parser automático para "+corretoraExterior+" — arquivo registrado, preencha a Parte 2 manualmente com base neste documento."});
-          fontesUsadas.push(arqExterior.name+" ("+corretoraExterior+" — revisão manual)");
+          itensRevisaoManual.push({arquivo:itemExtUnico.arquivo.name,motivo:"Ainda não há parser automático para "+itemExtUnico.corretora+" — arquivo registrado, preencha a Parte 2 manualmente com base neste documento."});
+          fontesUsadas.push(itemExtUnico.arquivo.name+" ("+itemExtUnico.corretora+" — revisão manual)");
+        }
+      } else if(exteriorComArquivo.length>1){
+        var extGanhosCapital=0,extDividendos=0,extImpostoPagoExterior=0,extResumoIncompleto=false,extTemResumo=false;
+        var extSaldoAnt=0,extSaldoAtual=0,extTemSaldo=false;
+        for(var ie=0;ie<exteriorComArquivo.length;ie++){
+          var itemExt=exteriorComArquivo[ie];
+          sProgresso("Lendo informe do exterior ("+(ie+1)+"/"+exteriorComArquivo.length+")...");
+          if(IR_CORRETORAS_EXTERIOR_COM_PARSER.indexOf(itemExt.corretora)>=0){
+            try{
+              var rExt;
+              if(itemExt.corretora==="XP Internacional"){
+                var itensExt=await irLerPdfItensBrutos(itemExt.arquivo);
+                rExt=irParseXPInternacionalPdf(itensExt);
+              }else{
+                var textoExt=await irLerPdfTexto(itemExt.arquivo);
+                if(itemExt.corretora==="C6 Global Invest")rExt=irParseC6GlobalPdf(textoExt);
+                else if(itemExt.corretora==="Banco Inter Internacional")rExt=irParseInterGlobalPdf(textoExt);
+                else rExt=irParseVestPdf(textoExt);
+              }
+              ativosExterior=ativosExterior.concat(rExt.ativos);
+              if(rExt.saldoContaExterior){extTemSaldo=true;extSaldoAnt+=rExt.saldoContaExterior.ant||0;extSaldoAtual+=rExt.saldoContaExterior.atual||0}
+              if(rExt.resumoTributario&&rExt.resumoTributario.baseCalculo!==null){
+                extTemResumo=true;
+                extGanhosCapital+=rExt.resumoTributario.ganhosCapital||0;
+                extDividendos+=rExt.resumoTributario.dividendos||0;
+                extImpostoPagoExterior+=rExt.resumoTributario.impostoPagoExterior||0;
+              }else{
+                extResumoIncompleto=true;
+              }
+              if(rExt.avisos&&rExt.avisos.length)rExt.avisos.forEach(function(a){itensRevisaoManual.push({arquivo:itemExt.arquivo.name,motivo:a})});
+              fontesUsadas.push(itemExt.arquivo.name+" ("+itemExt.corretora+")");
+            }catch(e){console.error(e);itensRevisaoManual.push({arquivo:itemExt.arquivo.name,motivo:"Falha ao processar o informe da "+itemExt.corretora+": "+e.message});extResumoIncompleto=true}
+          } else {
+            itensRevisaoManual.push({arquivo:itemExt.arquivo.name,motivo:"Ainda não há parser automático para "+itemExt.corretora+" — arquivo registrado, preencha a Parte 2 manualmente com base neste documento."});
+            fontesUsadas.push(itemExt.arquivo.name+" ("+itemExt.corretora+" — revisão manual)");
+            extResumoIncompleto=true;
+          }
+        }
+        if(extTemSaldo)saldoContaExterior={ant:extSaldoAnt,atual:extSaldoAtual};
+        if(extTemResumo&&!extResumoIncompleto){
+          var extBaseCalculo=extGanhosCapital+extDividendos;
+          var extImpostoDevido=Math.max(0,Math.round((0.15*extBaseCalculo-extImpostoPagoExterior)*100)/100);
+          resumoTributarioExterior={ganhosCapital:extGanhosCapital,dividendos:extDividendos,baseCalculo:extBaseCalculo,impostoPagoExterior:extImpostoPagoExterior,impostoDevido:extImpostoDevido};
+          itensRevisaoManual.push({arquivo:exteriorComArquivo.map(function(x){return x.arquivo.name}).join(", "),motivo:"Resumo Tributário — Lei 14.754/2023 recalculado pelo Hub somando Ganhos de Capital, Dividendos e Imposto Pago no Exterior de todas as "+exteriorComArquivo.length+" corretoras do exterior anexadas, com os 15% e o crédito de imposto aplicados sobre o TOTAL combinado (não corretora por corretora). Confira antes de declarar."});
+        } else if(extResumoIncompleto){
+          itensRevisaoManual.push({arquivo:exteriorComArquivo.map(function(x){return x.arquivo.name}).join(", "),motivo:"Não foi possível montar um Resumo Tributário único e confiável somando todas as corretoras do exterior (pelo menos uma não trouxe um resumo tributário completo) — confira os ativos e valores de cada corretora nas seções acima e preencha o Resumo Tributário — Lei 14.754/2023 manualmente com o total combinado."});
         }
       }
 
@@ -28562,19 +28656,37 @@ var AbaRelatorioIR=function({data}){
         )}
 
         <div style={{fontSize:10,color:T.t3,fontWeight:700,letterSpacing:.5,textTransform:"uppercase",margin:"6px 0 8px"}}>🌎 Documentos — Exterior (opcional)</div>
-        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-start",marginBottom:8}}>
-          <div style={{minWidth:200}}>
-            <div style={{fontSize:9,color:T.t3,marginBottom:4}}>Corretora</div>
-            <select value={corretoraExterior} onChange={function(e){sCorretoraExterior(e.target.value)}}
-              style={{width:"100%",padding:"10px 12px",borderRadius:10,border:"1px solid "+T.bdrL,background:T.w3,color:T.t1,fontSize:12}}>
-              {IR_CORRETORAS_EXTERIOR.map(function(c){return <option key={c} value={c}>{c}{IR_CORRETORAS_EXTERIOR_COM_PARSER.indexOf(c)<0?" (revisão manual)":""}</option>})}
-            </select>
-          </div>
-          {uploadZone({label:"Informe da Corretora Exterior",icon:"🌐",accept:".pdf",arquivo:arqExterior,onFiles:sArqExterior})}
+        {/* Lista de corretoras do exterior — cliente pode ter mais de uma (ex.: Vest + C6 Global no
+            mesmo ano). Cada linha tem sua própria corretora e seu próprio arquivo; o botão "+" abaixo
+            adiciona outra linha e o "✕" remove. O relatório soma o resultado de todas (ver bloco de
+            processamento que usa exteriorList). */}
+        {exteriorList.map(function(item,idxExt){
+          return (
+            <div key={item.id} style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-start",marginBottom:8}}>
+              <div style={{minWidth:200}}>
+                <div style={{fontSize:9,color:T.t3,marginBottom:4}}>Corretora{exteriorList.length>1?" #"+(idxExt+1):""}</div>
+                <select value={item.corretora} onChange={function(e){setExteriorCorretora(item.id,e.target.value)}}
+                  style={{width:"100%",padding:"10px 12px",borderRadius:10,border:"1px solid "+T.bdrL,background:T.w3,color:T.t1,fontSize:12}}>
+                  {IR_CORRETORAS_EXTERIOR.map(function(c){return <option key={c} value={c}>{c}{IR_CORRETORAS_EXTERIOR_COM_PARSER.indexOf(c)<0?" (revisão manual)":""}</option>})}
+                </select>
+                {IR_CORRETORAS_EXTERIOR_COM_PARSER.indexOf(item.corretora)<0 && (
+                  <div style={{fontSize:9,color:T.orange,marginTop:4}}>⚠️ Ainda não há extração automática para {item.corretora} — o arquivo será registrado e marcado para revisão manual no relatório.</div>
+                )}
+              </div>
+              {uploadZone({label:"Informe da Corretora Exterior",icon:"🌐",accept:".pdf",arquivo:item.arquivo,onFiles:function(f){setExteriorArquivo(item.id,f)}})}
+              {exteriorList.length>1 && (
+                <button onClick={function(){removeExterior(item.id)}} title="Remover"
+                  style={{alignSelf:"center",marginTop:18,padding:"8px 10px",borderRadius:10,border:"1px solid "+T.bdrL,background:T.w3,color:T.red,cursor:"pointer",fontSize:12}}>✕</button>
+              )}
+            </div>
+          );
+        })}
+        <div style={{marginBottom:12}}>
+          <button onClick={addExterior}
+            style={{padding:"8px 14px",borderRadius:10,border:"1px dashed "+T.bdrL,background:"transparent",color:T.t2,cursor:"pointer",fontSize:11,fontWeight:600}}>
+            + Adicionar corretora do exterior
+          </button>
         </div>
-        {IR_CORRETORAS_EXTERIOR_COM_PARSER.indexOf(corretoraExterior)<0 && (
-          <div style={{fontSize:10,color:T.orange,marginBottom:12}}>⚠️ Ainda não há extração automática para {corretoraExterior} — o arquivo será registrado e marcado para revisão manual no relatório.</div>
-        )}
 
         <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginTop:8,paddingTop:16,borderTop:"1px solid "+T.bdrL}}>
           <Bt v="primary" onClick={gerarRelatorio} disabled={processando}>{processando?"⏳ "+(progresso||"Processando..."):"✨ Gerar Relatório Consolidado"}</Bt>
@@ -28641,6 +28753,7 @@ var AbaRelatorioIR=function({data}){
     </div>
   );
 };
+
 var AbaTutoriais = function({data}) {
 var [clienteSel, setClienteSel] = React.useState(null);
 var [instSel, setInstSel] = React.useState([]);
@@ -35380,7 +35493,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '474';
+  var SW_VERSION = '475';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
