@@ -27315,9 +27315,7 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
     +'<div style="font-size:32px;font-weight:800;color:#fff;margin-bottom:'+(pessoa.cpf?'6':'0')+'px;letter-spacing:-0.5px;line-height:1.1">'+pessoa.nome+'</div>'
     +(pessoa.cpf?'<div style="font-size:13px;color:#8B9DC3;letter-spacing:0.3px">CPF '+pessoa.cpf+'</div>':'')
     +'</div>';
-  html+='<div class="cover-info-box">';
-  html+='<div class="cover-info-row"><span class="cover-info-label">Patrimônio Total Declarável</span><span class="cover-info-value">'+irFmtR(totalGeral)+'</span></div>';
-  html+='</div></div>';
+  html+='</div>';
   html+='<div class="cover-bottom"><div class="cover-bottom-text">Elaborado a partir dos informes de rendimentos e posições anexados. Não substitui a orientação de um contador ou profissional tributário.</div><div class="cover-bottom-by">Elaborado por COURINVEST</div></div>';
   html+='</div></div>';
 
@@ -27346,20 +27344,44 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
   tiposBR.forEach(function(tp){
     var info=byTipo[tp].info,ativos=byTipo[tp].ativos;
     var totalGrupo=ativos.reduce(function(s,a){return s+(a.cT||0)},0);
+    /* Fundos listados (FII/Fiagro/FI-Infra): a aba "Fundo de Investimento" da Posição B3 só traz
+       CNPJ + ADMINISTRADORA do fundo (ex.: BTG Pactual DTVM, Vortx, Genial, BRL Trust) — não a
+       corretora onde o cliente tem a custódia das cotas (isso a B3 não exporta nesse arquivo, ao
+       contrário de Ações/BDR/Renda Fixa/Tesouro, que trazem a "Instituição" = corretora real). Por
+       isso a coluna/rótulo muda pra esses tipos, pra não fazer o cliente declarar a administradora
+       como se fosse a corretora (erro apontado pelo Igor). */
+    var ehFundoListado=(tp==="fii"||tp==="fiagro"||tp==="fundo_infra");
+    var unidade=ehFundoListado?"cotas":(tp==="acao")?"ações":(tp==="bdr")?"BDRs":"títulos";
+    var labelInst=ehFundoListado?"Administradora do Fundo":"Corretora";
     html+='<div class="pagelight"><div class="section">';
     html+='<div class="section-eyebrow"><span class="section-eyebrow-line"></span><span class="section-eyebrow-text">PARTE 1 · ITEM 1.'+i1+'</span></div>';
     html+='<h2 class="section-title">Bens e Direitos — <i>'+info.nome+'</i></h2>';
     html+='<div class="section-path">📍 <b>Caminho:</b> Fichas → '+info.ficha+' → Localização: '+info.loc+'</div>';
     html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">No Programa IRPF '+anoDec+', acesse <b>Bens e Direitos</b> → <b>Novo</b> → Grupo <b>'+info.grp+'</b>, Código <b>'+info.cod+'</b>.</div></div>';
     html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text"><b>Localização:</b> '+info.loc+'. Preencha o CNPJ do emissor/empresa/fundo conforme a tabela abaixo.</div></div>';
-    html+='<div class="step"><div class="step-num">PASSO 3</div><div class="step-text">Em <b>Discriminação</b>: "[QUANTIDADE] de [NOME] ([TICKER]), preço médio R$ [PM], custodiado na [CORRETORA]."</div></div>';
+    if(ehFundoListado){
+      html+='<div class="step"><div class="step-num">PASSO 3</div><div class="step-text">Em <b>Discriminação</b>: "[QUANTIDADE] cotas de [NOME] ([TICKER]), preço médio R$ [PM]." Não inclua a administradora do fundo aqui — ela não é a corretora onde você tem a custódia (veja o aviso abaixo).</div></div>';
+    } else {
+      html+='<div class="step"><div class="step-num">PASSO 3</div><div class="step-text">Em <b>Discriminação</b>: "[QUANTIDADE] '+unidade+' de [NOME] ([TICKER]), preço médio R$ [PM], custodiado na [CORRETORA]."</div></div>';
+    }
     html+='<div class="step"><div class="step-num">PASSO 4</div><div class="step-text">Preencha <b>Situação em 31/12/'+(anoBase-1)+'</b> e <b>Situação em 31/12/'+anoBase+'</b> (saldo atual = coluna abaixo).</div></div>';
-    html+='<table><thead><tr><th>Ticker</th><th>Nome</th><th class="num">Qtd</th><th class="num">PM (R$)</th><th class="num">Saldo 31/12/'+anoBase+'</th><th>Corretora</th></tr></thead><tbody>';
+    if(ativos.length){
+      var ex=ativos[0];
+      var exQtd=(ex.qtd||0).toLocaleString("pt-BR",{maximumFractionDigits:4});
+      var exPm=(ex.pm||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+      var exNome=ex.nm||ex.tk||"-";
+      var exemploTexto=ehFundoListado
+        ? exQtd+' cotas de '+exNome+' ('+(ex.tk||"-")+'), preço médio R$ '+exPm+'.'
+        : exQtd+' '+unidade+' de '+exNome+' ('+(ex.tk||"-")+'), preço médio R$ '+exPm+', custodiado na '+(ex.inst||"[nome da sua corretora]")+'.';
+      html+='<div class="box box-tip"><b>✅ Exemplo prático:</b> pegando o primeiro item da sua própria tabela abaixo — <b>'+(ex.tk||"-")+'</b> — a Discriminação ficaria assim:<br/><i>"'+exemploTexto+'"</i></div>';
+    }
+    html+='<table><thead><tr><th>Ticker</th><th>Nome</th><th class="num">Qtd</th><th class="num">PM (R$)</th><th class="num">Saldo 31/12/'+anoBase+'</th><th>'+labelInst+'</th></tr></thead><tbody>';
     ativos.forEach(function(a){
       html+='<tr><td class="tk">'+(a.tk||"-")+'</td><td>'+(a.nm||"-")+'</td><td class="num">'+(a.qtd||0).toLocaleString("pt-BR",{maximumFractionDigits:4})+'</td><td class="num">'+(a.pm||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+'</td><td class="num">'+irFmtR(a.cT)+'</td><td style="font-size:9px;color:#7a8399">'+(a.inst||"-")+'</td></tr>';
     });
     html+='<tr class="total"><td colspan="4">TOTAL '+info.nome.toUpperCase()+'</td><td class="num">'+irFmtR(totalGrupo)+'</td><td></td></tr>';
     html+='</tbody></table>';
+    if(ehFundoListado)html+='<div class="box box-warn"><b>⚠ A coluna "'+labelInst+'" acima NÃO é a sua corretora:</b> o arquivo de Posição da B3, para fundos listados (FIIs/Fiagros/FI-Infra), só traz o CNPJ e a administradora do próprio fundo (ex.: BTG Pactual Serviços Financeiros DTVM, Vortx, Banco Genial, BRL Trust) — essa é a instituição que administra o fundo, igual pra todo mundo que tem aquele mesmo fundo, não tem relação com onde você comprou ou mantém a custódia das cotas. A B3 não exporta a corretora custodiante nesse arquivo para esse tipo de ativo (diferente de Ações/BDR/Renda Fixa/Tesouro, que trazem a corretora real). Se quiser citar sua corretora na Discriminação, confirme o nome direto no extrato dela.</div>';
     if(tp==="fii")html+='<div class="box box-tip"><b>💡 DICA:</b> Rendimentos mensais de FIIs são isentos de IR para PF. Declare em "Rendimentos Isentos", Código 99 (Outros) ou conforme indicado pela corretora.</div>';
     if(tp==="fii")html+='<div class="box box-warn"><b>⚠ Se algum fundo foi incorporado por outro no ano:</b> é comum um FII/Fiagro/FI-Infra ser incorporado por outro (mesmo CNPJ ou CNPJ novo), trocando de ticker. Confira no informe da corretora se algum fundo da tabela acima "sumiu" e virou outro. Se sim: (1) declare o fundo antigo com saldo em 31/12/'+anoBase+' = R$ 0,00; (2) crie um item novo pro fundo que incorporou, com saldo em 31/12/'+(anoBase-1)+' = R$ 0,00 e saldo em 31/12/'+anoBase+' = o custo de aquisição herdado das cotas convertidas; (3) na Discriminação, mencione "recebidas por incorporação do fundo anterior em '+anoBase+'" — o custo de aquisição é herdado, isso não é venda nem gera ganho de capital.</div>';
     if(tp==="fiagro")html+='<div class="box box-tip"><b>💡 DICA:</b> Fiagro é uma classe de fundo distinta do FII "tradicional" (agro em vez de imóveis), com código próprio na declaração. Rendimentos mensais também são isentos de IR para PF — declare em "Rendimentos Isentos", Código 99.</div>';
@@ -34813,7 +34835,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '461';
+  var SW_VERSION = '462';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
