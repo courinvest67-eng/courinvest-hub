@@ -27610,7 +27610,7 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
 
   html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🏢 Proventos de FII, Fiagro e FI-Infra</h3>';
   html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Isentos e Não Tributáveis</b> → Código <b>99 – Outros</b> → CNPJ do fundo (administrador) → valor total recebido no ano <b>daquele fundo especificamente</b> (um lançamento por fundo, não um total único).</div></div>';
-  html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text">No campo <b>Discriminação</b>, cite a base legal da isenção: FII — "Lei 11.033/2004, art. 3º, II"; Fiagro — "Lei 14.130/2021"; FI-Infra — "Lei 12.431/2011".</div></div>';
+  html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text">No campo <b>Discriminação</b>, escreva de forma simples, sem precisar citar lei: "Valor de proventos recebidos do FII [TICKER]", "Valor de proventos recebidos do Fiagro [TICKER]" ou "Valor de proventos recebidos do FI-Infra [TICKER]", conforme o tipo do fundo.</div></div>';
   html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu R$ 1.200,00 de HGLG11 (FII), R$ 300,00 de BBGO11 (Fiagro) e R$ 450,00 de BDIF11 (FI-Infra) em 2025 → três lançamentos separados no Código 99, cada um com o CNPJ do respectivo fundo.</div>';
   html+='<div class="box box-warn"><b>⚠ Requisito da isenção:</b> desde jan/2024, a isenção de FII/Fiagro/FI-Infra vale só se o fundo tiver cotas negociadas em bolsa/balcão organizado (efetivamente negociadas, não só admitidas), no mínimo <b>500 cotistas</b> e nenhum cotista com 10% ou mais das cotas recebendo mais de 10% do rendimento distribuído. Praticamente todos os fundos listados na B3 já atendem isso, mas vale conferir no informe de rendimentos se algum fundo pequeno da carteira está fora da regra.</div>';
   html+='</div></div>';
@@ -34927,7 +34927,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '467';
+  var SW_VERSION = '468';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
