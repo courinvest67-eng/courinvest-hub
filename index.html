@@ -27240,7 +27240,7 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
     +'*{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}'
     +'html,body{background:#F1F3F8;color:#0A1628;font-family:"Outfit",sans-serif;-webkit-font-smoothing:antialiased;font-size:11px;line-height:1.55}'
     +'@page{size:A4;margin:0}'
-    +'.page{max-width:820px;margin:0 auto;padding:0;position:relative}'
+    +'.cover,.pagelight{max-width:820px;margin:0 auto;padding:0;position:relative}'
     +'.cover{min-height:96vh;display:flex;flex-direction:column;justify-content:space-between;padding:52px 44px;page-break-after:always;background:linear-gradient(135deg,#0A1530 0%,#050A14 100%);color:#fff;position:relative;overflow:hidden}'
     +'.cover::before{content:"";position:absolute;inset:0;background-image:radial-gradient(circle at 50% 30%, rgba(212,163,40,0.08) 0%, transparent 60%);pointer-events:none}'
     +'.cover-inner{position:relative;z-index:1;display:flex;flex-direction:column;height:100%}'
@@ -27328,7 +27328,18 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
     +'<div style="font-size:9px;font-weight:600;color:#D4A328;letter-spacing:3px;margin-top:4px;font-family:Outfit,sans-serif">CONSULTORIA EM INVESTIMENTOS</div>'
     +'</div></div>';
 
-  var html='<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório Anual de IR '+anoDec+' — '+pessoa.nome+'</title>'+css+'</head><body><div class="page">';
+  /* SEM wrapper <div class="page"> em volta de tudo (era assim antes) — _gerarPdfLinkCourinvestInner
+     (motor de PDF compartilhado com o relatório mensal e a proposta comercial) olha os filhos
+     DIRETOS do <body> pra decidir onde cortar cada "página" do PDF (ver pageEls ali). Com tudo
+     dentro de UM único wrapper, a capa + todas as seções viravam UMA página só nos olhos desse
+     motor, ou seja, o relatório inteiro era renderizado de uma vez como um canvas gigante (em vez
+     de por página) — exatamente o bug já visto e corrigido antes na Proposta Comercial (ver
+     comentário em cima do gerarPdfLinkCourinvest da proposta). Pra relatórios reais, com várias
+     páginas de ativos/proventos, esse canvas gigante estourava o limite do navegador e o PDF saía
+     null — daí o botão de download sumia do e-mail e caía no fallback "Entre em contato...".
+     Agora .cover e cada .pagelight são irmãos diretos do <body>, cada um vira uma "página" real
+     pro motor de PDF, igual ao relatório mensal e à proposta. */
+  var html='<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório Anual de IR '+anoDec+' — '+pessoa.nome+'</title>'+css+'</head><body>';
 
   /* ===== CAPA ===== */
   html+='<div class="cover"><div class="cover-inner">';
@@ -27714,7 +27725,7 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
   html+='Este relatório é uma ferramenta de apoio e não substitui a orientação de um contador. Os códigos e fichas referem-se ao Programa IRPF '+anoDec+' da Receita Federal.';
   html+='</div></div>';
 
-  html+='</div></body></html>';
+  html+='</body></html>';
   return html;
 }
 
@@ -27914,9 +27925,9 @@ var AbaRelatorioIR=function({data}){
 
   /* Reusa o mesmo template padrão de e-mail dos relatórios mensais (montarEmailRelatorioHtml +
      EmailJS já configurado em Configurações → E-mail) — "formato padrão de envio", só trocando o
-     conteúdo pro Relatório Anual de IR: título, texto de introdução, destaque (patrimônio total
-     declarável em vez de patrimônio de gestão) e o PDF anexado é o relatório de IR completo (a
-     mesma função montarRelatorioIRAnualHTML já usada pra abrir/baixar), não o relatório mensal. */
+     conteúdo pro Relatório Anual de IR: título, texto de introdução (sem card de destaque — só o
+     botão de download, a pedido do Igor) e o PDF anexado é o relatório de IR completo (a mesma
+     função montarRelatorioIRAnualHTML já usada pra abrir/baixar), não o relatório mensal. */
   var enviarRelatorioIRPorEmail=async function(pessoaFmt,anoBaseRel,dadosRel,idLoading){
     var cfg=d.config&&d.config.emailjs;
     if(!cfg||!cfg.publicKey||!cfg.serviceId||!cfg.templateId){toast("⚠️ E-mail automático não configurado — acesse Configurações → E-mail.");return}
@@ -27937,7 +27948,9 @@ var AbaRelatorioIR=function({data}){
       var totalGeral=totalPatrimonioBR+totalPatrimonioExterior+(dadosRel.saldoContaExterior?(dadosRel.saldoContaExterior.atual||0):0);
       var mesRefStr="Ano-calendário "+anoBaseRel;
       var introTxt="Segue abaixo o seu <strong>Relatório Anual de IR</strong>, com o passo a passo completo para a declaração do Imposto de Renda "+(anoBaseRel+1)+" (ano-calendário "+anoBaseRel+").";
-      var destaque={icon:"📑",label:"Patrimônio Total Declarável",value:fmV(totalGeral)};
+      /* Sem card de destaque no corpo do e-mail (pedido do Igor) — o e-mail traz só o texto de
+         introdução e o botão de download do relatório completo, sem exibir nenhum valor de
+         patrimônio ali. */
       var notaExtra=(dadosRel.itensRevisaoManual&&dadosRel.itensRevisaoManual.length)?("⚠️ Este relatório tem "+dadosRel.itensRevisaoManual.length+" item(ns) marcado(s) para revisão manual — confira antes de declarar."):"";
 
       var reportHtml=montarEmailRelatorioHtml({
@@ -27945,7 +27958,7 @@ var AbaRelatorioIR=function({data}){
         mesRefStr:mesRefStr,
         tituloTopo:"Relatório Anual de IR",
         introTxt:introTxt,
-        destaque:destaque,
+        destaque:null,
         remetente:cfg.remetente||"contato@courinvest.com.br",
         notaExtra:notaExtra
       });
@@ -34927,7 +34940,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '468';
+  var SW_VERSION = '469';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
