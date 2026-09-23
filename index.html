@@ -26890,7 +26890,8 @@ var IR_TAXONOMIA={
   tesouro:{grp:"04",cod:"02",nome:"Tesouro Direto",loc:"105 - Brasil",ficha:"Bens e Direitos > Grupo 04 > Código 02"},
   stock_us:{grp:"03",cod:"01",nome:"Stocks EUA",loc:"249 - Estados Unidos",ficha:"Bens e Direitos > Grupo 03 > Código 01"},
   etf_int:{grp:"07",cod:"99",nome:"ETFs / Fundos no Exterior",loc:"249 - Estados Unidos",ficha:"Bens e Direitos > Grupo 07 > Código 99"},
-  deposito_exterior:{grp:"04",cod:"99",nome:"Depósitos e Aplicações no Exterior",loc:"conferir no informe — o país do banco/custodiante varia por produto (ex.: no Inter Global Invest, os \"Time Deposit\" costumam ser 137 - Ilhas Cayman, diferente do resto da conta, que é 249 - Estados Unidos)",ficha:"Bens e Direitos > Grupo 04 > Código 99"}
+  deposito_exterior:{grp:"04",cod:"99",nome:"Depósitos e Aplicações no Exterior",loc:"conferir no informe — o país do banco/custodiante varia por produto (ex.: no Inter Global Invest, os \"Time Deposit\" costumam ser 137 - Ilhas Cayman, diferente do resto da conta, que é 249 - Estados Unidos)",ficha:"Bens e Direitos > Grupo 04 > Código 99"},
+  titulo_exterior:{grp:"04",cod:"02",nome:"Títulos e Renda Fixa no Exterior",loc:"249 - Estados Unidos",ficha:"Bens e Direitos > Grupo 04 > Código 02"}
 };
 /* ---------- Fiagro, FI-Infra e FII são três classes de fundo listado diferentes ----------
    Grupo/Código diferentes na declaração de IR (ver IR_TAXONOMIA acima), mas o extrato de "Posição" da
@@ -26911,7 +26912,7 @@ function irClassificarFundoListado(ticker){
   return "fii";
 }
 var IR_CORRETORAS_EXTERIOR=["Vest","Banco Inter Internacional","C6 Global Invest","XP Internacional"];
-var IR_CORRETORAS_EXTERIOR_COM_PARSER=["Vest","C6 Global Invest","Banco Inter Internacional"];
+var IR_CORRETORAS_EXTERIOR_COM_PARSER=["Vest","C6 Global Invest","Banco Inter Internacional","XP Internacional"];
 
 function irNum(v){
   if(v===undefined||v===null||v==="-"||v==="")return 0;
@@ -26959,6 +26960,40 @@ function irLerPdfTexto(file){
         };
         for(var p=1;p<=pdf.numPages;p++)_loop(p);
         Promise.all(promises).then(function(pages){resolve(pages.join("\n"))}).catch(reject);
+      }).catch(reject);
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+/* Variante que devolve os itens de texto "crus" (x,y,texto,página), sem juntar em linhas —
+   usada quando a página do PDF vem rotacionada (ex.: informe da XP/MyCapital, gerado deitado
+   e com /Rotate 90) e o agrupamento por Y do irLerPdfTexto embaralha/fragmenta as colunas.
+   O pdf.js já aplica a rotação da página no transform de cada item, então x/y aqui refletem
+   a posição "visual" (como renderizado), permitindo um parser dedicado por coordenadas. */
+function irLerPdfItensBrutos(file){
+  return new Promise(function(resolve,reject){
+    if(typeof pdfjsLib==="undefined"){reject(new Error("PDF.js não carregado"));return}
+    var reader=new FileReader();
+    reader.onerror=function(){reject(new Error("Falha ao ler "+file.name))};
+    reader.onload=function(e){
+      var data=new Uint8Array(e.target.result);
+      pdfjsLib.getDocument({data:data}).promise.then(function(pdf){
+        var promises=[];
+        var _loop=function(p){
+          promises.push(pdf.getPage(p).then(function(page){
+            return page.getTextContent().then(function(tc){
+              return tc.items.map(function(it){
+                return {page:p,x:it.transform[4],y:it.transform[5],str:it.str};
+              });
+            });
+          }));
+        };
+        for(var p=1;p<=pdf.numPages;p++)_loop(p);
+        Promise.all(promises).then(function(paginas){
+          var todos=[];
+          paginas.forEach(function(itensPagina){todos=todos.concat(itensPagina)});
+          resolve(todos);
+        }).catch(reject);
       }).catch(reject);
     };
     reader.readAsArrayBuffer(file);
@@ -27468,6 +27503,126 @@ function irParseInterGlobalPdf(texto){
   return {ativos:ativos,saldoContaExterior:saldoContaExterior,resumoTributario:resumoTributario,avisos:avisos};
 }
 
+/* Informe "XP Internacional" — na prática é gerado por uma plataforma terceira ("MyCapital",
+   "Relatório Suporte para IRPF de Investimentos no Exterior") e a página vem deitada (PDF com
+   /Rotate 90: a tabela foi desenhada em paisagem e a página inteira é rotacionada pro PDF ficar
+   em pé). O pdf.js já aplica essa rotação no transform de cada item de texto, então x/y refletem
+   a posição visual — só que, nessa orientação, é X (não Y) quem identifica com segurança a LINHA
+   da tabela (cada ativo tem um X quase fixo, ~20pt de diferença pro próximo), enquanto Y varia um
+   pouco de linha pra linha dentro da mesma coluna (a centralização vertical desloca conforme o
+   texto da Discriminação quebra em mais ou menos linhas). Por isso este parser NÃO usa o texto já
+   "achatado" em linhas pelo irLerPdfTexto (que embaralha/fragmenta essas colunas) — ele recebe os
+   itens crus de irLerPdfItensBrutos e agrupa por X (linha) e depois por faixas de Y (coluna),
+   usando as posições observadas no layout desse informe. */
+function irParseXPInternacionalPdf(itens){
+  var avisos=[];
+  var ativos=[];
+  var saldoContaExterior=null;
+
+  var paginas={};
+  itens.forEach(function(it){(paginas[it.page]=paginas[it.page]||[]).push(it)});
+
+  var bandas=[
+    {campo:"impostoLucrosDividendos",min:790,max:820},
+    {campo:"valorRecebido",min:698,max:730},
+    {campo:"impostoAplicacoes",min:618,max:658},
+    {campo:"lucroPrejuizo",min:543,max:582},
+    {campo:"situacao2025",min:485,max:518},
+    {campo:"situacao2024",min:420,max:458},
+    {campo:"codigoNegociacao",min:355,max:375},
+    {campo:"negociadosBolsa",min:302,max:320},
+    {campo:"localizacao",min:85,max:102},
+    {campo:"codigo",min:55,max:70},
+    {campo:"grupo",min:28,max:42}
+  ];
+
+  Object.keys(paginas).forEach(function(pg){
+    var candidatos=paginas[pg].filter(function(it){return it.x>=205 && it.str && it.str.trim()!==""});
+
+    var clusters=[];
+    candidatos.forEach(function(it){
+      var c=null;
+      for(var i=0;i<clusters.length;i++){if(Math.abs(clusters[i].x-it.x)<=4){c=clusters[i];break}}
+      if(!c){c={x:it.x,itens:[]};clusters.push(c)}
+      c.itens.push(it);
+    });
+    clusters.sort(function(a,b){return a.x-b.x});
+
+    var linhas=clusters.filter(function(c){return c.itens.length>=8});
+    var fragmentos=clusters.filter(function(c){return c.itens.length<8});
+
+    linhas.forEach(function(linha){
+      var campos={};
+      linha.itens.forEach(function(it){
+        var s=(it.str||"").trim();
+        if(!s)return;
+        var banda=bandas.find(function(b){return it.y>=b.min&&it.y<=b.max});
+        if(banda)campos[banda.campo]=s;
+      });
+
+      if(!campos.grupo||!campos.codigo)return;
+
+      var discFrag=fragmentos.filter(function(f){return Math.abs(f.x-linha.x)<=12});
+      discFrag.sort(function(a,b){return a.x-b.x});
+      var discTexto=discFrag.map(function(f){
+        return f.itens.map(function(it){return it.str}).join(" ").trim();
+      }).filter(Boolean).join(" ");
+
+      var grupo=campos.grupo,codigo=campos.codigo;
+      var situacao2024=irNum(campos.situacao2024||"0");
+      var situacao2025=irNum(campos.situacao2025||"0");
+      var lucroPrejuizo=irNum(campos.lucroPrejuizo||"0");
+      var impostoAplicacoes=irNum(campos.impostoAplicacoes||"0");
+      var valorRecebido=irNum(campos.valorRecebido||"0");
+      var impostoLucrosDividendos=irNum(campos.impostoLucrosDividendos||"0");
+      var loc=campos.localizacao||"";
+      var ticker=campos.codigoNegociacao||"";
+
+      if(grupo==="6"){
+        saldoContaExterior={ant:situacao2024,atual:situacao2025};
+        return;
+      }
+
+      var tp;
+      if(grupo==="7"&&codigo==="99")tp="etf_int";
+      else if(grupo==="3"&&codigo==="1")tp="stock_us";
+      else if(grupo==="4"&&codigo==="2")tp="titulo_exterior";
+      else{
+        tp="etf_int";
+        avisos.push("Ativo \""+(discTexto||ticker||"?")+"\" veio com Grupo "+grupo+" / Código "+codigo+" no informe — não reconhecido automaticamente pelo Hub; confira o grupo/código corretos na ficha de Bens e Direitos antes de declarar (foi lançado como ETF/Fundo no Exterior por padrão).");
+      }
+
+      ativos.push({
+        tp:tp,tk:ticker||("ATIVO"+(ativos.length+1)),nm:discTexto||ticker||"Ativo no exterior",
+        saldo2024:situacao2024,saldo2025:situacao2025,
+        ganhosCapital:lucroPrejuizo,impostoGanhos:impostoAplicacoes,lucroPrejuizo:lucroPrejuizo,
+        dividendos:valorRecebido,impostoExterior:impostoLucrosDividendos
+      });
+    });
+  });
+
+  /* Igual ao Inter: esse informe "de suporte" também não traz um Resumo Tributário pronto —
+     o Hub soma "Lucro ou prejuízo" (ganhos de capital) e "Valor Recebido" (dividendos) de cada
+     ativo e aplica os 15% da Lei 14.754/2023, com crédito dos impostos já pagos no exterior. */
+  var ganhosCapital=0,dividendos=0,impostoPagoExterior=0;
+  ativos.forEach(function(a){
+    ganhosCapital+=a.ganhosCapital||0;
+    dividendos+=a.dividendos||0;
+    impostoPagoExterior+=(a.impostoGanhos||0)+(a.impostoExterior||0);
+  });
+  var resumoTributario=null;
+  if(ganhosCapital>0||dividendos>0){
+    var baseCalculo=ganhosCapital+dividendos;
+    var impostoDevido=Math.max(0,Math.round((0.15*baseCalculo-impostoPagoExterior)*100)/100);
+    resumoTributario={ganhosCapital:ganhosCapital,dividendos:dividendos,baseCalculo:baseCalculo,impostoPagoExterior:impostoPagoExterior,impostoDevido:impostoDevido};
+    avisos.push("O Resumo Tributário foi calculado pelo Hub a partir dos valores de \"Lucro ou prejuízo\" e \"Valor Recebido\" de cada ativo do informe (aplicando os 15% da Lei 14.754/2023 com crédito do imposto pago no exterior) — o relatório original (MyCapital) não traz esse total pronto, só os valores por ativo. Confira antes de declarar.");
+  }
+
+  if(!ativos.length)avisos.push("Não foi possível reconhecer nenhum ativo no informe — confira se é o \"Relatório Suporte para IRPF de Investimentos no Exterior\" (gerado pela MyCapital) e preencha a Parte 2 manualmente com base neste documento.");
+
+  return {ativos:ativos,saldoContaExterior:saldoContaExterior,resumoTributario:resumoTributario,avisos:avisos};
+}
+
 /* ---------- Gerador do HTML do relatório consolidado (padrão visual dos relatórios mensais) ---------- */
 function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
   var anoDec=anoBase+1;
@@ -27500,6 +27655,12 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
     byTipoExt[a.tp].ativos.push(a);
   });
   var tiposExt=Object.keys(byTipoExt);
+
+  /* Usados pra filtrar a seção "Como Declarar Cada Tipo de Rendimento" (Parte 1 · Exemplos
+     Práticos) — cada exemplo só deve aparecer se o cliente REALMENTE tem aquele tipo de ativo
+     em carteira (Bens e Direitos), não como conteúdo fixo genérico igual pra todo mundo. */
+  var temAcoesBR=tiposBR.indexOf("acao")>=0;
+  var temFundosImobBR=tiposBR.indexOf("fii")>=0||tiposBR.indexOf("fiagro")>=0||tiposBR.indexOf("fundo_infra")>=0;
 
   var css='<style>'
     +'@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap");'
@@ -27725,24 +27886,29 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
   });
 
   /* ===== Lembretes gerais — itens que não vêm dos arquivos da B3 =====
-     Dois pontos que aparecem com frequência em carteiras reais mas que o parser (baseado só nos
+     Pontos que aparecem com frequência em carteiras reais mas que o parser (baseado só nos
      arquivos de Posição/Movimentação da B3) não consegue capturar automaticamente: fundos de
      investimento tradicionais (não listados em bolsa, custodiados direto no banco/corretora — não
-     aparecem nos arquivos de B3) e prejuízo de anos anteriores a compensar em renda variável (depende
-     da declaração do ano passado, não desse conjunto de documentos). Conteúdo educativo fixo. */
+     aparecem nos arquivos de B3, vale pra qualquer cliente, por isso fica sempre) e prejuízo de anos
+     anteriores a compensar + aluguel de ações — BTC (esses dois só valem pra quem tem renda variável
+     em carteira, por isso ficam condicionados a temAcoesBR logo abaixo). */
   html+='<div class="pagelight"><div class="section">';
   html+='<div class="section-eyebrow"><span class="section-eyebrow-line"></span><span class="section-eyebrow-text">PARTE 1 · LEMBRETES</span></div>';
   html+='<h2 class="section-title">O Que Este Relatório <i>Não</i> Captura Automaticamente</h2>';
-  html+='<div class="section-path">📍 Estes dois itens não vêm dos arquivos de Posição/Movimentação da B3 — confira manualmente se aplicam à sua carteira.</div>';
+  html+='<div class="section-path">📍 Estes itens não vêm dos arquivos de Posição/Movimentação da B3 — confira manualmente se aplicam à sua carteira.</div>';
   html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🏦 Fundos de Investimento Tradicionais (não listados em bolsa)</h3>';
   html+='<div class="step"><div class="step-text">Fundos DI, multimercado ou de renda fixa contratados direto no banco/corretora (sem ticker, não negociados na B3 — ex.: um fundo exclusivo do seu banco) <b>não aparecem nos arquivos de Posição/Movimentação da B3</b>, porque não são ativos negociados em bolsa. Se você tem esse tipo de fundo, declare manualmente com base no extrato do banco/corretora: <b>Bens e Direitos, Grupo 07, Código 01</b> ("Fundos sujeitos a tributação periódica"), CNPJ do fundo (não da instituição), com os saldos de 31/12 de cada ano. O rendimento resgatado no ano, se houver, entra em "Tributação Exclusiva", Código 06.</div></div>';
-  html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">📉 Prejuízos a Compensar (Renda Variável)</h3>';
-  html+='<div class="step"><div class="step-text">Se você teve prejuízo em operações de bolsa (comuns ou day-trade) em anos anteriores e ainda não compensou tudo com lucros, esse saldo <b>precisa ser transportado da sua declaração do ano passado</b> — este relatório não tem acesso a ela. Confira na ficha <b>Renda Variável → Operações Comuns/Day-Trade</b> do programa do ano anterior se há prejuízo acumulado, e informe esse valor no campo "Prejuízo a compensar" de janeiro do ano corrente. Lembre-se: prejuízo de operações comuns só compensa lucro de operações comuns; prejuízo de day-trade só compensa lucro de day-trade — os dois não se misturam.</div></div>';
-  html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">📄 Aluguel de Ações (BTC)</h3>';
-  if(movimentacao&&movimentacao.aluguelAcoes){
-    html+='<div class="step"><div class="step-text">Sua carteira teve receita de "aluguel de ações" (BTC — identificada na Movimentação B3 como "Empréstimo") no valor líquido de <b>'+irFmtR(movimentacao.aluguelAcoes)+'</b> no ano — já extraída automaticamente e detalhada por empresa na seção "Rendimentos do Ano" adiante. Declare em <b>"Rendimentos Sujeitos à Tributação Exclusiva/Definitiva", Código 06 — Rendimentos de Aplicações Financeiras</b> (alíquota regressiva de 15% a 22,5% conforme o prazo do contrato, já retida na fonte pela corretora/B3). O Programa pede o valor bruto da taxa e o IR retido separadamente — como a Movimentação B3 só traz o valor líquido já creditado, confirme esses dois números no informe de rendimentos da corretora antes de lançar.</div></div>';
-  } else {
-    html+='<div class="step"><div class="step-text">Se sua carteira tem receita de "aluguel de ações" (BTC — Banco de Títulos, oferecido por várias corretoras, inclusive no exterior), esse valor normalmente vem discriminado à parte no informe de rendimentos, com seu próprio IR retido na fonte. Declare em "Rendimentos Sujeitos à Tributação Exclusiva/Definitiva", Código 06. Como este relatório não teve a Movimentação B3 do ano anexada (ou nenhuma linha de "Empréstimo" foi identificada), confira a linha específica no seu informe de rendimentos antes de declarar.</div></div>';
+  /* Prejuízo a compensar e Aluguel de Ações (BTC) só fazem sentido pra quem tem ações/renda
+     variável em carteira — antes saíam sempre, mesmo pra cliente 100% renda fixa. */
+  if(temAcoesBR){
+    html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">📉 Prejuízos a Compensar (Renda Variável)</h3>';
+    html+='<div class="step"><div class="step-text">Se você teve prejuízo em operações de bolsa (comuns ou day-trade) em anos anteriores e ainda não compensou tudo com lucros, esse saldo <b>precisa ser transportado da sua declaração do ano passado</b> — este relatório não tem acesso a ela. Confira na ficha <b>Renda Variável → Operações Comuns/Day-Trade</b> do programa do ano anterior se há prejuízo acumulado, e informe esse valor no campo "Prejuízo a compensar" de janeiro do ano corrente. Lembre-se: prejuízo de operações comuns só compensa lucro de operações comuns; prejuízo de day-trade só compensa lucro de day-trade — os dois não se misturam.</div></div>';
+    html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">📄 Aluguel de Ações (BTC)</h3>';
+    if(movimentacao&&movimentacao.aluguelAcoes){
+      html+='<div class="step"><div class="step-text">Sua carteira teve receita de "aluguel de ações" (BTC — identificada na Movimentação B3 como "Empréstimo") no valor líquido de <b>'+irFmtR(movimentacao.aluguelAcoes)+'</b> no ano — já extraída automaticamente e detalhada por empresa na seção "Rendimentos do Ano" adiante. Declare em <b>"Rendimentos Sujeitos à Tributação Exclusiva/Definitiva", Código 06 — Rendimentos de Aplicações Financeiras</b> (alíquota regressiva de 15% a 22,5% conforme o prazo do contrato, já retida na fonte pela corretora/B3). O Programa pede o valor bruto da taxa e o IR retido separadamente — como a Movimentação B3 só traz o valor líquido já creditado, confirme esses dois números no informe de rendimentos da corretora antes de lançar.</div></div>';
+    } else {
+      html+='<div class="step"><div class="step-text">Se sua carteira tem receita de "aluguel de ações" (BTC — Banco de Títulos, oferecido por várias corretoras, inclusive no exterior), esse valor normalmente vem discriminado à parte no informe de rendimentos, com seu próprio IR retido na fonte. Declare em "Rendimentos Sujeitos à Tributação Exclusiva/Definitiva", Código 06. Como este relatório não teve a Movimentação B3 do ano anexada (ou nenhuma linha de "Empréstimo" foi identificada), confira a linha específica no seu informe de rendimentos antes de declarar.</div></div>';
+    }
   }
   html+='</div></div>';
 
@@ -27772,9 +27938,12 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
     html+='<h2 class="section-title">Dividendos, JCP e <i>Proventos</i></h2>';
     html+='<div class="section-path">📍 Consolidado a partir da Movimentação B3 do ano-calendário '+anoBase+'.</div>';
     html+='<table><thead><tr><th>Tipo de Rendimento</th><th class="num">Total no ano</th><th>Ficha</th></tr></thead><tbody>';
-    html+='<tr><td>Dividendos</td><td class="num">'+irFmtR(movimentacao.dividendos)+'</td><td style="font-size:9px;color:#7a8399">Rendimentos Isentos, Código 09</td></tr>';
-    html+='<tr><td>Juros sobre Capital Próprio (JCP)</td><td class="num">'+irFmtR(movimentacao.jcp)+'</td><td style="font-size:9px;color:#7a8399">Tributação Exclusiva, Código 10</td></tr>';
-    html+='<tr><td>Rendimentos de FIIs</td><td class="num">'+irFmtR(movimentacao.rendimentosFii)+'</td><td style="font-size:9px;color:#7a8399">Rendimentos Isentos, Código 99</td></tr>';
+    /* Cada linha do resumo só aparece se o cliente REALMENTE tem aquele tipo de ativo em Bens e
+       Direitos (temAcoesBR/temFundosImobBR) — evita mostrar "Dividendos: R$ 0,00" ou "JCP: R$ 0,00"
+       pra quem nem tem ação em carteira, por exemplo. */
+    if(temAcoesBR)html+='<tr><td>Dividendos</td><td class="num">'+irFmtR(movimentacao.dividendos)+'</td><td style="font-size:9px;color:#7a8399">Rendimentos Isentos, Código 09</td></tr>';
+    if(temAcoesBR)html+='<tr><td>Juros sobre Capital Próprio (JCP)</td><td class="num">'+irFmtR(movimentacao.jcp)+'</td><td style="font-size:9px;color:#7a8399">Tributação Exclusiva, Código 10</td></tr>';
+    if(temFundosImobBR)html+='<tr><td>Rendimentos de FIIs</td><td class="num">'+irFmtR(movimentacao.rendimentosFii)+'</td><td style="font-size:9px;color:#7a8399">Rendimentos Isentos, Código 99</td></tr>';
     if(movimentacao.aluguelAcoes)html+='<tr><td>Aluguel de Ações (BTC)</td><td class="num">'+irFmtR(movimentacao.aluguelAcoes)+'</td><td style="font-size:9px;color:#7a8399">Tributação Exclusiva, Código 06</td></tr>';
     if(movimentacao.fracaoAcoes)html+='<tr><td>Frações de Ações (Leilão)</td><td class="num">'+irFmtR(movimentacao.fracaoAcoes)+'</td><td style="font-size:9px;color:#7a8399">Rendimentos Isentos, Código 99</td></tr>';
     html+='</tbody></table>';
@@ -27851,46 +28020,54 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
   }
 
   /* ===== Exemplos práticos — passo a passo por tipo de rendimento (Brasil) =====
-     Conteúdo educativo fixo (não depende dos documentos anexados) — o pedido foi detalhar o passo a
-     passo de CADA tipo de rendimento, não só do ativo em si. Números de exemplo são só ilustrativos
-     (marcados como tal), pra não passar a impressão de que são os valores reais do cliente. */
-  html+='<div class="pagelight"><div class="section">';
-  html+='<div class="section-eyebrow"><span class="section-eyebrow-line"></span><span class="section-eyebrow-text">PARTE 1 · EXEMPLOS PRÁTICOS</span></div>';
-  html+='<h2 class="section-title">Como Declarar Cada Tipo de <i>Rendimento</i></h2>';
-  html+='<div class="section-path">📍 Passo a passo com exemplo numérico ilustrativo pra cada tipo de rendimento recebido no Brasil — os valores abaixo são só de exemplo, use os valores reais do seu informe de rendimentos.</div>';
+     Cada exemplo só entra se o cliente REALMENTE tem aquele tipo de ativo em Bens e Direitos
+     (temAcoesBR/temFundosImobBR, calculados a partir de tiposBR) — antes esse conteúdo era fixo
+     e saía igual pra todo cliente (ex.: exemplo de dividendo de ação mesmo pra quem só tem renda
+     fixa), o que não fazia sentido. Números de exemplo continuam ilustrativos (marcados como tal),
+     pra não passar a impressão de que são os valores reais do cliente. */
+  if(temAcoesBR||temFundosImobBR){
+    html+='<div class="pagelight"><div class="section">';
+    html+='<div class="section-eyebrow"><span class="section-eyebrow-line"></span><span class="section-eyebrow-text">PARTE 1 · EXEMPLOS PRÁTICOS</span></div>';
+    html+='<h2 class="section-title">Como Declarar Cada Tipo de <i>Rendimento</i></h2>';
+    html+='<div class="section-path">📍 Passo a passo com exemplo numérico ilustrativo pra cada tipo de rendimento recebido no Brasil — os valores abaixo são só de exemplo, use os valores reais do seu informe de rendimentos.</div>';
 
-  html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">💰 Dividendos de Ações</h3>';
-  html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Isentos e Não Tributáveis</b> → Novo → Código <b>09 – Lucros e dividendos recebidos</b>.</div></div>';
-  html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text">Informe o <b>CNPJ da empresa pagadora</b> e o valor total recebido no ano (some todos os pagamentos da mesma empresa).</div></div>';
-  html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu R$ 850,00 de dividendos da empresa XPTO S.A. (CNPJ 12.345.678/0001-90) ao longo de 2025 → lança R$ 850,00 no Código 09, com o CNPJ da XPTO. Totalmente isento, não gera imposto.</div>';
+    if(temAcoesBR){
+      html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">💰 Dividendos de Ações</h3>';
+      html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Isentos e Não Tributáveis</b> → Novo → Código <b>09 – Lucros e dividendos recebidos</b>.</div></div>';
+      html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text">Informe o <b>CNPJ da empresa pagadora</b> e o valor total recebido no ano (some todos os pagamentos da mesma empresa).</div></div>';
+      html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu R$ 850,00 de dividendos da empresa XPTO S.A. (CNPJ 12.345.678/0001-90) ao longo de 2025 → lança R$ 850,00 no Código 09, com o CNPJ da XPTO. Totalmente isento, não gera imposto.</div>';
 
-  html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🎁 Bonificação em Ações</h3>';
-  html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Isentos e Não Tributáveis</b> → Código <b>18 – Incorporação de reservas ao capital/Bonificações em ações</b> → CNPJ da empresa → valor de mercado das ações bonificadas (divulgado pela própria empresa no Fato Relevante/Aviso aos Acionistas da bonificação — a corretora às vezes traz esse valor no informe de rendimentos, mas nem sempre).</div></div>';
-  html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text">Na ficha <b>Bens e Direitos</b> da mesma ação já declarada: aumente a <b>quantidade</b> pelas ações recebidas e <b>some o valor da bonificação ao custo total</b>, recalculando o preço médio — a bonificação não é vendida nem gera imposto na hora, só muda a base de custo pra um eventual ganho de capital futuro.</div></div>';
-  html+='<div class="box box-tip"><b>💡 Exemplo:</b> Antes: 1.000 ações a R$ 30,00 (custo R$ 30.000,00). Bonificação de 10% (100 ações novas) a R$ 12,00 (custo adicional R$ 1.200,00). Depois: 1.100 ações, custo R$ 31.200,00, novo preço médio = R$ 31.200,00 ÷ 1.100 = <b>R$ 28,36</b>.</div>';
-  if(movimentacao&&movimentacao.porEmpresaBonificacao&&movimentacao.porEmpresaBonificacao.length){
-    html+='<div class="box box-warn"><b>⚠ Identificamos '+movimentacao.porEmpresaBonificacao.length+' ativo(s) com bonificação neste ano</b> ('+movimentacao.porEmpresaBonificacao.map(function(e){return e.ticker}).join(", ")+') — veja a quantidade recebida de cada um na tabela "Bonificações em Ações no Ano", na seção de Rendimentos do Ano. Falta só o valor de mercado de cada uma (a B3 não traz esse valor) para aplicar a fórmula do exemplo acima com os números reais.</div>';
+      html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🎁 Bonificação em Ações</h3>';
+      html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Isentos e Não Tributáveis</b> → Código <b>18 – Incorporação de reservas ao capital/Bonificações em ações</b> → CNPJ da empresa → valor de mercado das ações bonificadas (divulgado pela própria empresa no Fato Relevante/Aviso aos Acionistas da bonificação — a corretora às vezes traz esse valor no informe de rendimentos, mas nem sempre).</div></div>';
+      html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text">Na ficha <b>Bens e Direitos</b> da mesma ação já declarada: aumente a <b>quantidade</b> pelas ações recebidas e <b>some o valor da bonificação ao custo total</b>, recalculando o preço médio — a bonificação não é vendida nem gera imposto na hora, só muda a base de custo pra um eventual ganho de capital futuro.</div></div>';
+      html+='<div class="box box-tip"><b>💡 Exemplo:</b> Antes: 1.000 ações a R$ 30,00 (custo R$ 30.000,00). Bonificação de 10% (100 ações novas) a R$ 12,00 (custo adicional R$ 1.200,00). Depois: 1.100 ações, custo R$ 31.200,00, novo preço médio = R$ 31.200,00 ÷ 1.100 = <b>R$ 28,36</b>.</div>';
+      if(movimentacao&&movimentacao.porEmpresaBonificacao&&movimentacao.porEmpresaBonificacao.length){
+        html+='<div class="box box-warn"><b>⚠ Identificamos '+movimentacao.porEmpresaBonificacao.length+' ativo(s) com bonificação neste ano</b> ('+movimentacao.porEmpresaBonificacao.map(function(e){return e.ticker}).join(", ")+') — veja a quantidade recebida de cada um na tabela "Bonificações em Ações no Ano", na seção de Rendimentos do Ano. Falta só o valor de mercado de cada uma (a B3 não traz esse valor) para aplicar a fórmula do exemplo acima com os números reais.</div>';
+      }
+
+      html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🪙 Frações de Ações (Leilão)</h3>';
+      html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Uma posição não pode ter fração de ação/cota. Quando uma bonificação, desdobramento ou outro evento societário gera uma fração (ex.: 0,36 ação), a corretora retira essa fração da posição e vende em leilão — o valor em dinheiro é creditado na sua conta.</div></div>';
+      html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text">Ficha <b>Rendimentos Isentos e Não Tributáveis</b> → Código <b>99 – Outros</b> → CNPJ da empresa → valor recebido no leilão. Discriminação sugerida: "Sobras de frações de ações bonificadas pela empresa [Nome], CNPJ [número]".</div></div>';
+      html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você tinha 1.000 ações e uma bonificação de 10% geraria 100,4 ações — a B3 credita as 100 ações inteiras e retira a fração de 0,4, vendendo-a em leilão por R$ 4,52 → lança R$ 4,52 no Código 99, com o CNPJ da empresa. Não afeta o preço médio da posição nem exige apuração de ganho de capital.</div>';
+      if(movimentacao&&movimentacao.porEmpresaFracao&&movimentacao.porEmpresaFracao.length){
+        html+='<div class="box box-warn"><b>⚠ Identificamos '+movimentacao.porEmpresaFracao.length+' leilão(ões) de fração neste ano</b> — veja o valor recebido de cada empresa na tabela "Frações de Ações (Leilão) por Empresa", na seção de Rendimentos do Ano. Diferente da bonificação, aqui a B3 já informa o valor certinho — não precisa buscar nada com a empresa.</div>';
+      }
+
+      html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🏦 Juros sobre Capital Próprio (JCP)</h3>';
+      html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Sujeitos à Tributação Exclusiva/Definitiva</b> → Código <b>10 – Juros sobre Capital Próprio</b> → CNPJ da empresa → valor <b>bruto</b> recebido no ano (o Informe de Rendimentos já traz esse total separado dos dividendos).</div></div>';
+      html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu R$ 500,00 brutos de JCP, com R$ 75,00 já retidos na fonte pela empresa (15%) → lança R$ 500,00 (valor bruto) no Código 10. O imposto retido é informativo — já foi pago pela empresa, não gera DARF nem cobrança adicional.</div>';
+      html+='<div class="box box-warn"><b>⚠ JCP "em trânsito" (creditado mas ainda não pago):</b> se a empresa <b>creditou</b> o JCP contabilmente até 31/12/'+anoBase+' mas só efetuou o <b>pagamento</b> em '+(anoBase+1)+', esse valor não entra na Tributação Exclusiva deste ano (só quando for pago) — mas precisa aparecer como <b>Bens e Direitos, Grupo 99, Código 07</b> ("Outros bens e direitos"), com o saldo credor em 31/12/'+anoBase+' e zerado no ano anterior. Confira no informe de rendimentos da corretora se há uma linha de "JCP a receber" ou "JCP declarado e não pago".</div>';
+    }
+
+    if(temFundosImobBR){
+      html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🏢 Proventos de FII, Fiagro e FI-Infra</h3>';
+      html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Isentos e Não Tributáveis</b> → Código <b>99 – Outros</b> → CNPJ do fundo (administrador) → valor total recebido no ano <b>daquele fundo especificamente</b> (um lançamento por fundo, não um total único).</div></div>';
+      html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text">No campo <b>Discriminação</b>, escreva de forma simples, sem precisar citar lei: "Valor de proventos recebidos do FII [TICKER]", "Valor de proventos recebidos do Fiagro [TICKER]" ou "Valor de proventos recebidos do FI-Infra [TICKER]", conforme o tipo do fundo.</div></div>';
+      html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu R$ 1.200,00 de HGLG11 (FII), R$ 300,00 de BBGO11 (Fiagro) e R$ 450,00 de BDIF11 (FI-Infra) em 2025 → três lançamentos separados no Código 99, cada um com o CNPJ do respectivo fundo.</div>';
+      html+='<div class="box box-warn"><b>⚠ Requisito da isenção:</b> desde jan/2024, a isenção de FII/Fiagro/FI-Infra vale só se o fundo tiver cotas negociadas em bolsa/balcão organizado (efetivamente negociadas, não só admitidas), no mínimo <b>500 cotistas</b> e nenhum cotista com 10% ou mais das cotas recebendo mais de 10% do rendimento distribuído. Praticamente todos os fundos listados na B3 já atendem isso, mas vale conferir no informe de rendimentos se algum fundo pequeno da carteira está fora da regra.</div>';
+    }
+    html+='</div></div>';
   }
-
-  html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🪙 Frações de Ações (Leilão)</h3>';
-  html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Uma posição não pode ter fração de ação/cota. Quando uma bonificação, desdobramento ou outro evento societário gera uma fração (ex.: 0,36 ação), a corretora retira essa fração da posição e vende em leilão — o valor em dinheiro é creditado na sua conta.</div></div>';
-  html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text">Ficha <b>Rendimentos Isentos e Não Tributáveis</b> → Código <b>99 – Outros</b> → CNPJ da empresa → valor recebido no leilão. Discriminação sugerida: "Sobras de frações de ações bonificadas pela empresa [Nome], CNPJ [número]".</div></div>';
-  html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você tinha 1.000 ações e uma bonificação de 10% geraria 100,4 ações — a B3 credita as 100 ações inteiras e retira a fração de 0,4, vendendo-a em leilão por R$ 4,52 → lança R$ 4,52 no Código 99, com o CNPJ da empresa. Não afeta o preço médio da posição nem exige apuração de ganho de capital.</div>';
-  if(movimentacao&&movimentacao.porEmpresaFracao&&movimentacao.porEmpresaFracao.length){
-    html+='<div class="box box-warn"><b>⚠ Identificamos '+movimentacao.porEmpresaFracao.length+' leilão(ões) de fração neste ano</b> — veja o valor recebido de cada empresa na tabela "Frações de Ações (Leilão) por Empresa", na seção de Rendimentos do Ano. Diferente da bonificação, aqui a B3 já informa o valor certinho — não precisa buscar nada com a empresa.</div>';
-  }
-
-  html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🏦 Juros sobre Capital Próprio (JCP)</h3>';
-  html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Sujeitos à Tributação Exclusiva/Definitiva</b> → Código <b>10 – Juros sobre Capital Próprio</b> → CNPJ da empresa → valor <b>bruto</b> recebido no ano (o Informe de Rendimentos já traz esse total separado dos dividendos).</div></div>';
-  html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu R$ 500,00 brutos de JCP, com R$ 75,00 já retidos na fonte pela empresa (15%) → lança R$ 500,00 (valor bruto) no Código 10. O imposto retido é informativo — já foi pago pela empresa, não gera DARF nem cobrança adicional.</div>';
-  html+='<div class="box box-warn"><b>⚠ JCP "em trânsito" (creditado mas ainda não pago):</b> se a empresa <b>creditou</b> o JCP contabilmente até 31/12/'+anoBase+' mas só efetuou o <b>pagamento</b> em '+(anoBase+1)+', esse valor não entra na Tributação Exclusiva deste ano (só quando for pago) — mas precisa aparecer como <b>Bens e Direitos, Grupo 99, Código 07</b> ("Outros bens e direitos"), com o saldo credor em 31/12/'+anoBase+' e zerado no ano anterior. Confira no informe de rendimentos da corretora se há uma linha de "JCP a receber" ou "JCP declarado e não pago".</div>';
-
-  html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🏢 Proventos de FII, Fiagro e FI-Infra</h3>';
-  html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Isentos e Não Tributáveis</b> → Código <b>99 – Outros</b> → CNPJ do fundo (administrador) → valor total recebido no ano <b>daquele fundo especificamente</b> (um lançamento por fundo, não um total único).</div></div>';
-  html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text">No campo <b>Discriminação</b>, escreva de forma simples, sem precisar citar lei: "Valor de proventos recebidos do FII [TICKER]", "Valor de proventos recebidos do Fiagro [TICKER]" ou "Valor de proventos recebidos do FI-Infra [TICKER]", conforme o tipo do fundo.</div></div>';
-  html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu R$ 1.200,00 de HGLG11 (FII), R$ 300,00 de BBGO11 (Fiagro) e R$ 450,00 de BDIF11 (FI-Infra) em 2025 → três lançamentos separados no Código 99, cada um com o CNPJ do respectivo fundo.</div>';
-  html+='<div class="box box-warn"><b>⚠ Requisito da isenção:</b> desde jan/2024, a isenção de FII/Fiagro/FI-Infra vale só se o fundo tiver cotas negociadas em bolsa/balcão organizado (efetivamente negociadas, não só admitidas), no mínimo <b>500 cotistas</b> e nenhum cotista com 10% ou mais das cotas recebendo mais de 10% do rendimento distribuído. Praticamente todos os fundos listados na B3 já atendem isso, mas vale conferir no informe de rendimentos se algum fundo pequeno da carteira está fora da regra.</div>';
-  html+='</div></div>';
 
   /* ===== PARTE 2 — EXTERIOR ===== */
   if(tiposExt.length||saldoContaExterior){
@@ -28122,11 +28299,16 @@ var AbaRelatorioIR=function({data}){
         sProgresso("Lendo informe do exterior...");
         if(IR_CORRETORAS_EXTERIOR_COM_PARSER.indexOf(corretoraExterior)>=0){
           try{
-            var textoExt=await irLerPdfTexto(arqExterior);
             var rExt;
-            if(corretoraExterior==="C6 Global Invest")rExt=irParseC6GlobalPdf(textoExt);
-            else if(corretoraExterior==="Banco Inter Internacional")rExt=irParseInterGlobalPdf(textoExt);
-            else rExt=irParseVestPdf(textoExt);
+            if(corretoraExterior==="XP Internacional"){
+              var itensExt=await irLerPdfItensBrutos(arqExterior);
+              rExt=irParseXPInternacionalPdf(itensExt);
+            }else{
+              var textoExt=await irLerPdfTexto(arqExterior);
+              if(corretoraExterior==="C6 Global Invest")rExt=irParseC6GlobalPdf(textoExt);
+              else if(corretoraExterior==="Banco Inter Internacional")rExt=irParseInterGlobalPdf(textoExt);
+              else rExt=irParseVestPdf(textoExt);
+            }
             ativosExterior=rExt.ativos;
             saldoContaExterior=rExt.saldoContaExterior;
             resumoTributarioExterior=rExt.resumoTributario;
@@ -28459,7 +28641,6 @@ var AbaRelatorioIR=function({data}){
     </div>
   );
 };
-
 var AbaTutoriais = function({data}) {
 var [clienteSel, setClienteSel] = React.useState(null);
 var [instSel, setInstSel] = React.useState([]);
@@ -28814,6 +28995,7 @@ function ApresentacaoView(){
   var hoje=new Date();
   const[apres,sApres]=React.useState("institucional");
   const[gerandoPPTX,setGerandoPPTX]=React.useState(false);
+  const[gerandoPDFView,setGerandoPDFView]=React.useState(false);
 
   var tabs=[
     {id:"institucional",l:"📊 Apresentação Institucional",d:"Pitch genérico da CourInvest"},
@@ -30311,53 +30493,28 @@ var ApresentacaoGP=function(){
     setGerandoPPTX(false);
   }
 }}>{gerandoPPTX?"⏳ Gerando...":"📊 Gerar PowerPoint"}</Bt>
-        <Bt onClick={function(){
+        <Bt disabled={gerandoPDFView} onClick={async function(){
+  /* HISTÓRICO: antes usava window.print() com um <iframe/popup> e um @page{size:820px <altura
+     total>px} calculado dinamicamente pra virar "uma página só, do tamanho exato do conteúdo" —
+     funciona no Chrome desktop, mas o motor de impressão do celular (relatado: Safari/iOS) ignora
+     esse tamanho de página customizado e força um papel padrão, espremendo a apresentação inteira
+     (todas as seções) numa página minúscula só — texto ilegível sem dar zoom extremo. CORREÇÃO:
+     usa o mesmo motor de PDF (html2canvas + jsPDF) já validado no Relatório de IR/mensal e no
+     PDF enviado por e-mail da Proposta — cada <div className="pp-page"> (Capa, Sócios, etc., já
+     existentes no HTML) vira uma página de verdade no PDF, sem depender do motor de impressão do
+     navegador/SO, então funciona igual em qualquer aparelho. */
   var el=document.getElementById("gf-apresentacao")||document.getElementById("proposta-print");
   if(!el){alert("Apresentação não encontrada");return;}
-  var clone=el.cloneNode(true);
-  // Documento único e contínuo — sem quebras de página nem sobra em branco, igual à tela
-  clone.style.minHeight="";
-  clone.style.height="auto";
-  Array.from(clone.querySelectorAll("*")).forEach(function(n){
-    n.style.minHeight="";
-    n.style.pageBreakBefore="";
-    n.style.pageBreakAfter="";
-    n.style.breakBefore="";
-    n.style.breakAfter="";
-    if(n.style.height&&n.style.height.indexOf("vh")>-1)n.style.height="auto";
-  });
-  var printCSS=[
-    "@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap');",
-    "*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important;box-sizing:border-box!important;font-family:'Outfit',sans-serif!important}",
-    "body{margin:0!important;padding:0!important;background:#fff}",
-    "@page{margin:0}",
-    "html,body{height:auto!important;overflow:visible!important}"
-  ].join("");
-  var autoPrintScript=[
-    "window.addEventListener('load',function(){",
-    "  var wait=(document.fonts&&document.fonts.ready)?document.fonts.ready:Promise.resolve();",
-    "  wait.then(function(){",
-    "    setTimeout(function(){",
-    "      var h=Math.ceil(document.body.getBoundingClientRect().height)||document.body.scrollHeight;",
-    "      var st=document.createElement('style');",
-    "      st.textContent='@page{margin:0;size:820px '+h+'px}';",
-    "      document.head.appendChild(st);",
-    "      setTimeout(function(){ try{ window.print(); }catch(e){} },80);",
-    "    },200);",
-    "  });",
-    "});"
-  ].join("\n");
-  var fullHtml=[
-    "<!DOCTYPE html><html><head><meta charset=\"utf-8\">",
-    "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">",
-    "<link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap\">",
-    "<style>",printCSS,"</style>",
-    "</head><body>",clone.outerHTML,"<scr"+"ipt>",autoPrintScript,"</scr"+"ipt></body></html>"
-  ].join("");
-  var blob=new Blob([fullHtml],{type:"text/html"});
-  var url=URL.createObjectURL(blob);
-  window.open(url,"_blank");
-}}>🖨 Imprimir / Salvar PDF</Bt>
+  setGerandoPDFView(true);
+  try{
+    var nomeTab={institucional:"institucional",gp:"gestao-patrimonio",gf:"gestao-financeira",gfpj:"gestao-financeira-pj",cf:"consultoria-financeira",cpj:"consultoria-pj"}[apres]||"comercial";
+    var fullHtml="<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}body{margin:0;padding:0}@page{margin:0;size:820px auto}</style></head><body>"+el.innerHTML+"</body></html>";
+    var ok=await baixarPdfCourinvest(fullHtml,"courinvest-apresentacao-"+nomeTab+".pdf");
+    if(!ok)alert("❌ Não foi possível gerar o PDF — tente novamente");
+  }finally{
+    setGerandoPDFView(false);
+  }
+}}>{gerandoPDFView?"⏳ Gerando...":"📄 Baixar PDF"}</Bt>
         </div>
       </div>
 
@@ -30748,6 +30905,7 @@ function PropostasView({data,dispatch}){
   const[wizard,sWizard]=useState(1);
   const[form,sForm]=useState(null);
   const[gerandoPPTX,setGerandoPPTX]=useState(false);
+  const[gerandoPDFProposta,setGerandoPDFProposta]=useState(false);
   const[enviandoEmailProposta,setEnviandoEmailProposta]=useState(false);
   const propostas=data.propostas||[];
   
@@ -31037,14 +31195,25 @@ function PropostasView({data,dispatch}){
   }
 }}>{gerandoPPTX?"⏳ Gerando...":"📊 Gerar PowerPoint"}</Bt>
             <Bt v="secondary" disabled={enviandoEmailProposta} onClick={enviarPropostaPorEmail} title={form.clienteEmail?"Enviar pro e-mail: "+form.clienteEmail:"Informe o e-mail do cliente na etapa 1 antes de enviar"}>{enviandoEmailProposta?"⏳ Enviando...":"📧 Enviar por E-mail"}</Bt>
-            <Bt onClick={function(){
+            <Bt disabled={gerandoPDFProposta} onClick={async function(){
+  /* Mesmo motor de PDF (html2canvas + jsPDF) já usado no Relatório de IR/mensal e no PDF enviado
+     por e-mail da própria Proposta (ver enviarPropostaPorEmail acima) — antes esse botão usava
+     window.print() numa janela popup, que no celular (motor de impressão do Safari/iOS) ignora o
+     @page customizado e espreme a proposta inteira numa página só, minúscula e ilegível. innerHTML
+     (não outerHTML) pelo mesmo motivo do e-mail: cada .pp-page precisa ficar como filho direto do
+     body pra virar uma página de verdade no PDF, em vez de tudo virar UM canvas gigante só. */
   var el=document.getElementById("proposta-print");
   if(!el){alert("Apresentação não encontrada");return;}
-  var w=window.open("","_blank");
-  w.document.write("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}body{margin:0;padding:0}@page{margin:0;size:820px auto}</style></head><body>"+el.outerHTML+"</body></html>");
-  w.document.close();
-  setTimeout(function(){w.print();},1200);
-}}>🖨 Imprimir / Salvar PDF</Bt>
+  setGerandoPDFProposta(true);
+  try{
+    var nomeCliente=(form.clienteNome||"proposta").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
+    var fullHtml="<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}body{margin:0;padding:0}@page{margin:0;size:820px auto}</style></head><body>"+el.innerHTML+"</body></html>";
+    var ok=await baixarPdfCourinvest(fullHtml,"courinvest-proposta-"+(nomeCliente||"cliente")+".pdf");
+    if(!ok)alert("❌ Não foi possível gerar o PDF — tente novamente");
+  }finally{
+    setGerandoPDFProposta(false);
+  }
+}}>{gerandoPDFProposta?"⏳ Gerando...":"📄 Baixar PDF"}</Bt>
           </div>
         </div>
 
@@ -35211,7 +35380,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '471';
+  var SW_VERSION = '474';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
