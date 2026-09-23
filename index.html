@@ -27026,11 +27026,30 @@ function irAgruparPorEmpresa(rows,filtroRegex){
   });
   return Object.keys(porTicker).map(function(k){return porTicker[k]}).sort(function(a,b){return b.valor-a.valor});
 }
+/* Bonificação em ativos: a B3 credita a QUANTIDADE de ações/cotas novas na Movimentação, mas não traz
+   "Preço unitário" nem "Valor da Operação" pra esse tipo de evento (confirmado com arquivo real — os
+   dois campos vêm "-"). O valor de mercado usado pra apurar o novo custo é divulgado pela própria
+   empresa (Fato Relevante/Aviso aos Acionistas), não pela B3 — por isso agrupamos só a quantidade por
+   ticker aqui; o valor em R$ precisa ser buscado à parte (ver aviso no relatório). */
+function irAgruparBonificacaoPorEmpresa(bonificacoes){
+  var porTicker={};
+  (bonificacoes||[]).forEach(function(b){
+    var tk=String(b.ticker||"").trim();
+    var prod=String(b.produto||"").trim();
+    var nome=prod?(prod.split(" - ").slice(1).join(" - ")||prod):(tk||"-");
+    var chave=tk||prod||nome;
+    if(!chave)return;
+    if(!porTicker[chave])porTicker[chave]={ticker:tk||chave,nome:nome,qtd:0,datas:[]};
+    porTicker[chave].qtd+=(b.qtd||0);
+    if(b.data)porTicker[chave].datas.push(String(b.data));
+  });
+  return Object.keys(porTicker).map(function(k){return porTicker[k]}).sort(function(a,b){return b.qtd-a.qtd});
+}
 function irParseB3Movimentacao(wb){
   var ws=wb.Sheets["Movimentação"];
-  if(!ws)return {dividendos:0,jcp:0,rendimentosFii:0,aluguelAcoes:0,bonificacoes:[],porEmpresaDividendos:[],porEmpresaJcp:[],porFundoRendimentos:[],porEmpresaAluguel:[]};
+  if(!ws)return {dividendos:0,jcp:0,rendimentosFii:0,aluguelAcoes:0,fracaoAcoes:0,bonificacoes:[],porEmpresaDividendos:[],porEmpresaJcp:[],porFundoRendimentos:[],porEmpresaAluguel:[],porEmpresaBonificacao:[],porEmpresaFracao:[]};
   var rows=XLSX.utils.sheet_to_json(ws,{defval:""});
-  var dividendos=0,jcp=0,rendimentosFii=0,aluguelAcoes=0,bonificacoes=[];
+  var dividendos=0,jcp=0,rendimentosFii=0,aluguelAcoes=0,fracaoAcoes=0,bonificacoes=[];
   rows.forEach(function(r){
     var mov=String(r["Movimentação"]||""); var val=irNum(r["Valor da Operação"]);
     var entSai=String(r["Entrada/Saída"]||"");
@@ -27042,6 +27061,13 @@ function irParseB3Movimentacao(wb){
        real). Só entram os créditos (o doador só recebe, nunca "paga" aluguel de ações; um
        eventual débito de "Empréstimo" seria outra coisa, ex. devolução de papel emprestado). */
     else if(/empr[ée]stimo/i.test(mov)&&/credito/i.test(entSai)){aluguelAcoes+=val}
+    /* "Fração em Ativos" é o DÉBITO que remove a fração de ação/cota que sobrou de um evento
+       societário (bonificação, desdobramento) — a posição não pode ter fração, então a B3/corretora
+       tira essa fração e vende em leilão. "Leilão de Fração" é o CRÉDITO correspondente, com
+       Preço unitário e Valor da Operação preenchidos de verdade (diferente da Bonificação, que não
+       traz valor) — confirmado com arquivo real (ex.: ALUP11 0,36 ação a R$30,079 = R$10,82). Só
+       entram os créditos do leilão; o débito da fração em si não tem valor monetário próprio. */
+    else if(/leil[ãa]o de fra[çc][ãa]o/i.test(mov)&&/credito/i.test(entSai)){fracaoAcoes+=val}
     else if(/rendimento/i.test(mov)){rendimentosFii+=val}
     else if(/bonifica/i.test(mov)){bonificacoes.push({ticker:String(r["TICKER"]||"").trim(),produto:r["Produto"],qtd:irNum(r["Quantidade"]),data:r["Data"]})}
   });
@@ -27050,7 +27076,10 @@ function irParseB3Movimentacao(wb){
   var porFundoRendimentos=irAgruparPorEmpresa(rows,/rendimento/i);
   var rowsAluguel=rows.filter(function(r){return /empr[ée]stimo/i.test(String(r["Movimentação"]||""))&&/credito/i.test(String(r["Entrada/Saída"]||""))});
   var porEmpresaAluguel=irAgruparPorEmpresa(rowsAluguel,/./);
-  return {dividendos:dividendos,jcp:jcp,rendimentosFii:rendimentosFii,aluguelAcoes:aluguelAcoes,bonificacoes:bonificacoes,porEmpresaDividendos:porEmpresaDividendos,porEmpresaJcp:porEmpresaJcp,porFundoRendimentos:porFundoRendimentos,porEmpresaAluguel:porEmpresaAluguel};
+  var rowsFracao=rows.filter(function(r){return /leil[ãa]o de fra[çc][ãa]o/i.test(String(r["Movimentação"]||""))&&/credito/i.test(String(r["Entrada/Saída"]||""))});
+  var porEmpresaFracao=irAgruparPorEmpresa(rowsFracao,/./);
+  var porEmpresaBonificacao=irAgruparBonificacaoPorEmpresa(bonificacoes);
+  return {dividendos:dividendos,jcp:jcp,rendimentosFii:rendimentosFii,aluguelAcoes:aluguelAcoes,fracaoAcoes:fracaoAcoes,bonificacoes:bonificacoes,porEmpresaDividendos:porEmpresaDividendos,porEmpresaJcp:porEmpresaJcp,porFundoRendimentos:porFundoRendimentos,porEmpresaAluguel:porEmpresaAluguel,porEmpresaBonificacao:porEmpresaBonificacao,porEmpresaFracao:porEmpresaFracao};
 }
 
 /* ---------- Parser: Informe de Rendimentos BR (PDF) — Rico/XP, C6, PicPay e genérico ----------
@@ -27326,7 +27355,7 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
   tiposBR.forEach(function(tp){var info=byTipo[tp].info;html+='<div class="toc-item"><span><b>1.'+idx+'</b>Bens e Direitos — '+info.nome+'</span><span>Grupo '+info.grp+' / Código '+info.cod+'</span></div>';idx++});
   html+='<div class="toc-item"><span><b>1.'+(idx++)+'</b>O Que Este Relatório Não Captura Automaticamente</span><span>Fundos não listados / Prejuízos / Aluguel de ações</span></div>';
   if(resumosInformesBR.length)html+='<div class="toc-item"><span><b>1.'+(idx++)+'</b>Resumo dos Informes de Rendimentos</span><span>Isentos / Tributação Exclusiva</span></div>';
-  if(movimentacao)html+='<div class="toc-item"><span><b>1.'+(idx++)+'</b>Rendimentos do Ano (B3) — Dividendos, JCP, Proventos</span><span>Movimentação B3</span></div>';
+  if(movimentacao)html+='<div class="toc-item"><span><b>1.'+(idx++)+'</b>Rendimentos do Ano (B3) — Dividendos, JCP, Proventos, Bonificações, Frações</span><span>Movimentação B3</span></div>';
   html+='<div class="toc-item"><span><b>1.'+(idx++)+'</b>Exemplos Práticos — Como Declarar Cada Rendimento</span><span>Dividendos / Bonificação / JCP / Proventos</span></div>';
   if(tiposExt.length){
     html+='<div class="toc-section-title">PARTE 2 — INVESTIMENTOS NO EXTERIOR</div>';
@@ -27356,6 +27385,13 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
        médio" nesse sentido (o parser já grava pm:0 pra esses tipos), então a coluna e o texto de
        Discriminação não devem mencionar isso pra eles (pedido do Igor). */
     var rendaVariavel=(tp==="acao"||tp==="bdr"||ehFundoListado);
+    /* CDB/LC/LCI/LCA/CRI/CRA/Debênture vêm todos da mesma aba "Renda Fixa" da Posição B3, cuja coluna
+       "Quantidade" reflete unidades de valor nominal (normalmente R$ 1,00 cada) — não uma quantidade
+       de títulos com sentido próprio como em ações/fundos, e é redundante com o valor total. Já o
+       Tesouro Direto tem "quantidade de títulos" fracionária com sentido real (ex.: 0,12 título), por
+       isso continua mostrando quantidade normalmente. Pedido do Igor: tirar "quantidade" do texto e
+       da tabela pra CDB (estendido aos outros tipos da mesma aba, pela mesma razão). */
+    var semQuantidade=(tp==="cdb"||tp==="lc"||tp==="lci"||tp==="lca"||tp==="cri"||tp==="cra"||tp==="deb");
     var unidade=ehFundoListado?"cotas":(tp==="acao")?"ações":(tp==="bdr")?"BDRs":"títulos";
     var labelInst=ehFundoListado?"Administradora do Fundo":"Corretora";
     html+='<div class="pagelight"><div class="section">';
@@ -27368,6 +27404,8 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
       html+='<div class="step"><div class="step-num">PASSO 3</div><div class="step-text">Em <b>Discriminação</b>: "[QUANTIDADE] cotas de [NOME] ([TICKER]), preço médio R$ [PM], valor total R$ [VALOR], custodiado na [CORRETORA]." Atenção: [CORRETORA] aqui é a corretora onde <b>você</b> tem a custódia das cotas — não é a administradora do fundo que aparece na tabela abaixo (veja o aviso).</div></div>';
     } else if(rendaVariavel){
       html+='<div class="step"><div class="step-num">PASSO 3</div><div class="step-text">Em <b>Discriminação</b>: "[QUANTIDADE] '+unidade+' de [NOME] ([TICKER]), preço médio R$ [PM], valor total R$ [VALOR], custodiado na [CORRETORA]."</div></div>';
+    } else if(semQuantidade){
+      html+='<div class="step"><div class="step-num">PASSO 3</div><div class="step-text">Em <b>Discriminação</b>: "[NOME] ([TICKER]), valor total R$ [VALOR], custodiado na [CORRETORA]." (Quantidade e preço médio não se aplicam a esse tipo de produto — o valor total já representa a posição.)</div></div>';
     } else {
       html+='<div class="step"><div class="step-num">PASSO 3</div><div class="step-text">Em <b>Discriminação</b>: "[QUANTIDADE] '+unidade+' de [NOME] ([TICKER]), valor total R$ [VALOR], custodiado na [CORRETORA]." (Preço médio não se aplica a produtos de renda fixa/Tesouro.)</div></div>';
     }
@@ -27383,16 +27421,18 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
         exemploTexto=exQtd+' cotas de '+exNome+' ('+(ex.tk||"-")+'), preço médio R$ '+exPm+', valor total '+exValor+', custodiado na [nome da sua corretora].';
       } else if(rendaVariavel){
         exemploTexto=exQtd+' '+unidade+' de '+exNome+' ('+(ex.tk||"-")+'), preço médio R$ '+exPm+', valor total '+exValor+', custodiado na '+(ex.inst||"[nome da sua corretora]")+'.';
+      } else if(semQuantidade){
+        exemploTexto=exNome+' ('+(ex.tk||"-")+'), valor total '+exValor+', custodiado na '+(ex.inst||"[nome da sua corretora]")+'.';
       } else {
         exemploTexto=exQtd+' '+unidade+' de '+exNome+' ('+(ex.tk||"-")+'), valor total '+exValor+', custodiado na '+(ex.inst||"[nome da sua corretora]")+'.';
       }
       html+='<div class="box box-tip"><b>✅ Exemplo prático:</b> pegando o primeiro item da sua própria tabela abaixo — <b>'+(ex.tk||"-")+'</b> — a Discriminação ficaria assim:<br/><i>"'+exemploTexto+'"</i></div>';
     }
-    html+='<table><thead><tr><th>Ticker</th><th>Nome</th><th class="num">Qtd</th>'+(rendaVariavel?'<th class="num">PM (R$)</th>':'')+'<th class="num">Saldo 31/12/'+anoBase+'</th><th>'+labelInst+'</th></tr></thead><tbody>';
+    html+='<table><thead><tr><th>Ticker</th><th>Nome</th>'+(semQuantidade?'':'<th class="num">Qtd</th>')+(rendaVariavel?'<th class="num">PM (R$)</th>':'')+'<th class="num">Saldo 31/12/'+anoBase+'</th><th>'+labelInst+'</th></tr></thead><tbody>';
     ativos.forEach(function(a){
-      html+='<tr><td class="tk">'+(a.tk||"-")+'</td><td>'+(a.nm||"-")+'</td><td class="num">'+(a.qtd||0).toLocaleString("pt-BR",{maximumFractionDigits:4})+'</td>'+(rendaVariavel?'<td class="num">'+(a.pm||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+'</td>':'')+'<td class="num">'+irFmtR(a.cT)+'</td><td style="font-size:9px;color:#7a8399">'+(a.inst||"-")+'</td></tr>';
+      html+='<tr><td class="tk">'+(a.tk||"-")+'</td><td>'+(a.nm||"-")+'</td>'+(semQuantidade?'':'<td class="num">'+(a.qtd||0).toLocaleString("pt-BR",{maximumFractionDigits:4})+'</td>')+(rendaVariavel?'<td class="num">'+(a.pm||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})+'</td>':'')+'<td class="num">'+irFmtR(a.cT)+'</td><td style="font-size:9px;color:#7a8399">'+(a.inst||"-")+'</td></tr>';
     });
-    html+='<tr class="total"><td colspan="'+(rendaVariavel?4:3)+'">TOTAL '+info.nome.toUpperCase()+'</td><td class="num">'+irFmtR(totalGrupo)+'</td><td></td></tr>';
+    html+='<tr class="total"><td colspan="'+(2+(semQuantidade?0:1)+(rendaVariavel?1:0))+'">TOTAL '+info.nome.toUpperCase()+'</td><td class="num">'+irFmtR(totalGrupo)+'</td><td></td></tr>';
     html+='</tbody></table>';
     if(ehFundoListado)html+='<div class="box box-warn"><b>⚠ A coluna "'+labelInst+'" acima NÃO é a sua corretora:</b> o arquivo de Posição da B3, para fundos listados (FIIs/Fiagros/FI-Infra), só traz o CNPJ e a administradora do próprio fundo (ex.: BTG Pactual Serviços Financeiros DTVM, Vortx, Banco Genial, BRL Trust) — essa é a instituição que administra o fundo, igual pra todo mundo que tem aquele mesmo fundo, não tem relação com onde você comprou ou mantém a custódia das cotas. A B3 não exporta a corretora custodiante nesse arquivo para esse tipo de ativo (diferente de Ações/BDR/Renda Fixa/Tesouro, que trazem a corretora real). Como a Discriminação (Passo 3) pede o nome da corretora, confirme direto no extrato/app da sua corretora antes de preencher — não copie o nome da administradora acima.</div>';
     if(tp==="fii")html+='<div class="box box-tip"><b>💡 DICA:</b> Rendimentos mensais de FIIs são isentos de IR para PF. Declare em "Rendimentos Isentos", Código 99 (Outros) ou conforme indicado pela corretora.</div>';
@@ -27459,6 +27499,7 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
     html+='<tr><td>Juros sobre Capital Próprio (JCP)</td><td class="num">'+irFmtR(movimentacao.jcp)+'</td><td style="font-size:9px;color:#7a8399">Tributação Exclusiva, Código 10</td></tr>';
     html+='<tr><td>Rendimentos de FIIs</td><td class="num">'+irFmtR(movimentacao.rendimentosFii)+'</td><td style="font-size:9px;color:#7a8399">Rendimentos Isentos, Código 99</td></tr>';
     if(movimentacao.aluguelAcoes)html+='<tr><td>Aluguel de Ações (BTC)</td><td class="num">'+irFmtR(movimentacao.aluguelAcoes)+'</td><td style="font-size:9px;color:#7a8399">Tributação Exclusiva, Código 06</td></tr>';
+    if(movimentacao.fracaoAcoes)html+='<tr><td>Frações de Ações (Leilão)</td><td class="num">'+irFmtR(movimentacao.fracaoAcoes)+'</td><td style="font-size:9px;color:#7a8399">Rendimentos Isentos, Código 99</td></tr>';
     html+='</tbody></table>';
     /* ---------- Detalhamento por empresa/fundo — pedido explícito do Igor: não só o total, quem pagou
        quanto. Uma tabela por tipo de rendimento (Dividendos / JCP / FIIs-Fiagro-FI-Infra), cada uma só
@@ -27501,7 +27542,34 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
       html+='</tbody></table>';
       html+='<div class="box box-warn"><b>⚠ Este valor é o líquido creditado</b> (identificado na Movimentação B3 como "Empréstimo" — é o crédito de aluguel de ações recebido por quem doou os papéis via BTC). O Programa IRPF pede o <b>valor bruto</b> da taxa mais o <b>IR retido na fonte</b> separadamente — a Movimentação B3 não traz essa retenção discriminada. Confira o valor bruto e o imposto retido no informe de rendimentos da corretora antes de declarar.</div>';
     }
-    if(movimentacao.bonificacoes.length)html+='<div class="box box-tip"><b>💡 Bonificações em ativos:</b> '+movimentacao.bonificacoes.length+' evento(s) no ano — aumentam a quantidade de cotas/ações sem custo adicional; ajuste o preço médio proporcionalmente.</div>';
+    if(movimentacao.porEmpresaBonificacao&&movimentacao.porEmpresaBonificacao.length){
+      html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🎁 Bonificações em Ações no Ano</h3>';
+      html+='<table><thead><tr><th>Ticker</th><th>Empresa</th><th>Data(s)</th><th class="num">Qtd. Recebida no Ano</th><th class="num">Qtd. Atual (já com a bonificação)</th></tr></thead><tbody>';
+      movimentacao.porEmpresaBonificacao.forEach(function(e){
+        var atual=ativosBR.filter(function(a){return String(a.tk||"").trim().toUpperCase()===String(e.ticker||"").trim().toUpperCase()});
+        var qtdAtual=atual.length?atual[0].qtd:null;
+        html+='<tr><td class="tk">'+(e.ticker||"-")+'</td><td>'+(e.nome||"-")+'</td><td style="font-size:9px;color:#7a8399">'+e.datas.join(", ")+'</td><td class="num">'+e.qtd.toLocaleString("pt-BR",{maximumFractionDigits:4})+'</td><td class="num">'+(qtdAtual!==null?qtdAtual.toLocaleString("pt-BR",{maximumFractionDigits:4}):"—")+'</td></tr>';
+      });
+      html+='</tbody></table>';
+      html+='<div class="box box-warn"><b>⚠ Ajuste obrigatório no preço médio — a B3 só informa a quantidade, não o valor:</b> a Movimentação B3 confirma <b>quantas</b> ações/cotas novas cada empresa acima creditou (coluna "Qtd. Recebida no Ano" — a "Qtd. Atual" já soma isso ao que você tinha antes), mas <b>não</b> traz o valor de mercado usado para calcular o novo custo — esse dado só a própria empresa divulga (Fato Relevante ou Aviso aos Acionistas da bonificação; às vezes também aparece no informe de rendimentos da corretora). Com esse valor em mãos: <b>Novo Custo Total = Custo Total Atual + (Quantidade Recebida × Valor Unitário divulgado)</b>; <b>Novo Preço Médio = Novo Custo Total ÷ Quantidade Atual</b>. Esse recálculo é isento de IR na hora (Rendimentos Isentos, Código 18 — ver exemplo prático adiante), mas é obrigatório: sem ele, o preço médio fica sub-declarado e o imposto de um eventual ganho de capital numa venda futura sairia calculado a maior.</div>';
+    }
+    /* Frações de Ações (Leilão de Fração): uma posição não pode ter fração de ação/cota — quando um
+       evento societário (bonificação, desdobramento) gera fração, a corretora tira essa fração da
+       posição ("Fração em Ativos", débito, sem valor) e vende em leilão, creditando o dinheiro
+       ("Leilão de Fração", crédito, com valor real). Diferente da Bonificação, aqui a B3 já traz o
+       valor certinho — não precisa de dado externo. Pedido do Igor: declarar como Rendimentos
+       Isentos e Não Tributáveis, Código 99 (Outros) — confirmado via pesquisa (impostoderendarestituicao.com.br
+       e fórum Bastter convergem no mesmo tratamento prático). */
+    if(movimentacao.porEmpresaFracao&&movimentacao.porEmpresaFracao.length){
+      html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🪙 Frações de Ações (Leilão) por Empresa</h3>';
+      html+='<table><thead><tr><th>Ticker</th><th>Empresa</th><th class="num">Valor Recebido no Ano</th></tr></thead><tbody>';
+      movimentacao.porEmpresaFracao.forEach(function(e){
+        html+='<tr><td class="tk">'+(e.ticker||"-")+'</td><td>'+(e.nome||"-")+'</td><td class="num">'+irFmtR(e.valor)+'</td></tr>';
+      });
+      html+='<tr class="total"><td colspan="2">TOTAL FRAÇÕES DE AÇÕES</td><td class="num">'+irFmtR(movimentacao.fracaoAcoes)+'</td></tr>';
+      html+='</tbody></table>';
+      html+='<div class="box box-tip"><b>💡 De onde vem:</b> uma posição não pode ter fração de ação/cota — quando um evento como bonificação ou desdobramento gera uma fração (ex.: 0,36 ação), a corretora retira essa fração da posição e vende em leilão, creditando o valor em dinheiro (é por isso que a quantidade da tabela de Bens e Direitos às vezes é um número "redondo" mesmo após uma bonificação fracionária). Declare cada empresa em <b>"Rendimentos Isentos e Não Tributáveis"</b>, <b>Código 99 — Outros</b>, com a Discriminação "Sobras de frações de ações bonificadas pela empresa [Nome], CNPJ [número]". Não afeta o preço médio da posição remanescente nem exige apuração de ganho de capital.</div>';
+    }
     html+='</div></div>';
   }
 
@@ -27520,9 +27588,20 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
   html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu R$ 850,00 de dividendos da empresa XPTO S.A. (CNPJ 12.345.678/0001-90) ao longo de 2025 → lança R$ 850,00 no Código 09, com o CNPJ da XPTO. Totalmente isento, não gera imposto.</div>';
 
   html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🎁 Bonificação em Ações</h3>';
-  html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Isentos e Não Tributáveis</b> → Código <b>18 – Incorporação de reservas ao capital/Bonificações em ações</b> → CNPJ da empresa → valor de mercado das ações bonificadas (informado pela corretora).</div></div>';
+  html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Isentos e Não Tributáveis</b> → Código <b>18 – Incorporação de reservas ao capital/Bonificações em ações</b> → CNPJ da empresa → valor de mercado das ações bonificadas (divulgado pela própria empresa no Fato Relevante/Aviso aos Acionistas da bonificação — a corretora às vezes traz esse valor no informe de rendimentos, mas nem sempre).</div></div>';
   html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text">Na ficha <b>Bens e Direitos</b> da mesma ação já declarada: aumente a <b>quantidade</b> pelas ações recebidas e <b>some o valor da bonificação ao custo total</b>, recalculando o preço médio — a bonificação não é vendida nem gera imposto na hora, só muda a base de custo pra um eventual ganho de capital futuro.</div></div>';
   html+='<div class="box box-tip"><b>💡 Exemplo:</b> Antes: 1.000 ações a R$ 30,00 (custo R$ 30.000,00). Bonificação de 10% (100 ações novas) a R$ 12,00 (custo adicional R$ 1.200,00). Depois: 1.100 ações, custo R$ 31.200,00, novo preço médio = R$ 31.200,00 ÷ 1.100 = <b>R$ 28,36</b>.</div>';
+  if(movimentacao&&movimentacao.porEmpresaBonificacao&&movimentacao.porEmpresaBonificacao.length){
+    html+='<div class="box box-warn"><b>⚠ Identificamos '+movimentacao.porEmpresaBonificacao.length+' ativo(s) com bonificação neste ano</b> ('+movimentacao.porEmpresaBonificacao.map(function(e){return e.ticker}).join(", ")+') — veja a quantidade recebida de cada um na tabela "Bonificações em Ações no Ano", na seção de Rendimentos do Ano. Falta só o valor de mercado de cada uma (a B3 não traz esse valor) para aplicar a fórmula do exemplo acima com os números reais.</div>';
+  }
+
+  html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🪙 Frações de Ações (Leilão)</h3>';
+  html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Uma posição não pode ter fração de ação/cota. Quando uma bonificação, desdobramento ou outro evento societário gera uma fração (ex.: 0,36 ação), a corretora retira essa fração da posição e vende em leilão — o valor em dinheiro é creditado na sua conta.</div></div>';
+  html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text">Ficha <b>Rendimentos Isentos e Não Tributáveis</b> → Código <b>99 – Outros</b> → CNPJ da empresa → valor recebido no leilão. Discriminação sugerida: "Sobras de frações de ações bonificadas pela empresa [Nome], CNPJ [número]".</div></div>';
+  html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você tinha 1.000 ações e uma bonificação de 10% geraria 100,4 ações — a B3 credita as 100 ações inteiras e retira a fração de 0,4, vendendo-a em leilão por R$ 4,52 → lança R$ 4,52 no Código 99, com o CNPJ da empresa. Não afeta o preço médio da posição nem exige apuração de ganho de capital.</div>';
+  if(movimentacao&&movimentacao.porEmpresaFracao&&movimentacao.porEmpresaFracao.length){
+    html+='<div class="box box-warn"><b>⚠ Identificamos '+movimentacao.porEmpresaFracao.length+' leilão(ões) de fração neste ano</b> — veja o valor recebido de cada empresa na tabela "Frações de Ações (Leilão) por Empresa", na seção de Rendimentos do Ano. Diferente da bonificação, aqui a B3 já informa o valor certinho — não precisa buscar nada com a empresa.</div>';
+  }
 
   html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🏦 Juros sobre Capital Próprio (JCP)</h3>';
   html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Sujeitos à Tributação Exclusiva/Definitiva</b> → Código <b>10 – Juros sobre Capital Próprio</b> → CNPJ da empresa → valor <b>bruto</b> recebido no ano (o Informe de Rendimentos já traz esse total separado dos dividendos).</div></div>';
@@ -34848,7 +34927,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '464';
+  var SW_VERSION = '467';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
