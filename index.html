@@ -26889,7 +26889,8 @@ var IR_TAXONOMIA={
   deb:{grp:"04",cod:"03",nome:"Debêntures",loc:"105 - Brasil",ficha:"Bens e Direitos > Grupo 04 > Código 03"},
   tesouro:{grp:"04",cod:"02",nome:"Tesouro Direto",loc:"105 - Brasil",ficha:"Bens e Direitos > Grupo 04 > Código 02"},
   stock_us:{grp:"03",cod:"01",nome:"Stocks EUA",loc:"249 - Estados Unidos",ficha:"Bens e Direitos > Grupo 03 > Código 01"},
-  etf_int:{grp:"07",cod:"99",nome:"ETFs / Fundos no Exterior",loc:"249 - Estados Unidos",ficha:"Bens e Direitos > Grupo 07 > Código 99"}
+  etf_int:{grp:"07",cod:"99",nome:"ETFs / Fundos no Exterior",loc:"249 - Estados Unidos",ficha:"Bens e Direitos > Grupo 07 > Código 99"},
+  deposito_exterior:{grp:"04",cod:"99",nome:"Depósitos e Aplicações no Exterior",loc:"conferir no informe — o país do banco/custodiante varia por produto (ex.: no Inter Global Invest, os \"Time Deposit\" costumam ser 137 - Ilhas Cayman, diferente do resto da conta, que é 249 - Estados Unidos)",ficha:"Bens e Direitos > Grupo 04 > Código 99"}
 };
 /* ---------- Fiagro, FI-Infra e FII são três classes de fundo listado diferentes ----------
    Grupo/Código diferentes na declaração de IR (ver IR_TAXONOMIA acima), mas o extrato de "Posição" da
@@ -26910,7 +26911,7 @@ function irClassificarFundoListado(ticker){
   return "fii";
 }
 var IR_CORRETORAS_EXTERIOR=["Vest","Banco Inter Internacional","C6 Global Invest","XP Internacional"];
-var IR_CORRETORAS_EXTERIOR_COM_PARSER=["Vest"];
+var IR_CORRETORAS_EXTERIOR_COM_PARSER=["Vest","C6 Global Invest","Banco Inter Internacional"];
 
 function irNum(v){
   if(v===undefined||v===null||v==="-"||v==="")return 0;
@@ -27232,6 +27233,239 @@ function irParseVestPdf(texto){
     };
   }
   return {ativos:ativos,saldoContaExterior:saldoContaExterior,resumoTributario:resumoTributario};
+}
+
+/* ---------- Parser: Informe C6 Global Invest (exterior) ----------
+   Formato bem diferente do Vest: em vez de já vir com "Ganhos de capital"/"Dividendos" prontos por
+   ativo, o C6 separa o informe em 3 seções com lógica própria:
+   1. "Relatório de Recebimentos" — um lançamento por PAGAMENTO de dividendo/cupom ao longo do ano
+      (várias linhas pro mesmo ticker) — precisa SOMAR por ticker pra chegar no total anual.
+   2. "Modelo Opaco" — fundos/títulos emitidos pelo próprio C6 (ex.: "TD C6 Prefixado"), com
+      tributação AGREGADA (não por ativo) — o C6 já calcula sozinho a Base de Cálculo e o Imposto
+      Devido dessa parte, com uma metodologia própria (o crédito de imposto pago no exterior é
+      abatido ANTES de aplicar os 15%, não depois do imposto calculado, como no crédito padrão da
+      Lei 14.754/2023) — por isso os números dessa seção são usados exatamente como vieram, sem
+      recalcular.
+   3. "Modelo Transparente" — a tabela "Declaração IRPF ... Modelo Transparente" traz o saldo
+      (Custo 2024/2025) de TODOS os ativos do ano (inclusive os títulos do Modelo Opaco e a linha
+      "SALDO", que é caixa da conta — não é um ativo) — e a tabela de vendas/vencimentos, quando tem
+      linhas, traz ganho de capital já realizado no ano. */
+function irParseC6GlobalPdf(texto){
+  var linhasTx=texto.split("\n").map(function(l){return l.replace(/\s+/g," ").trim()}).filter(Boolean);
+  var avisos=[];
+
+  /* 1) Recebimento de Dividendos e de Cupons (Juros) — soma por ticker ao longo do ano.
+     Dividendos: "DD/MM/AAAA TICKER valorLíqUSD withholding% valorBrutoUSD ptax valorBrutoBRL impPagoExtUSD compImpPagoExtBRL" (7 campos após o ticker).
+     Cupons: "DD/MM/AAAA TICKER valorUSD ptax valorBRL" (3 campos após o ticker, sem imposto). */
+  var reDiv=/^\d{2}\/\d{2}\/\d{4}\s+([A-Z0-9]+)\s+([\d.,\-]+)\s+([\d.,\-]+)\s+([\d.,\-]+)\s+([\d.,\-]+)\s+([\d.,\-]+)\s+([\d.,\-]+)\s+([\d.,\-]+)\s*$/;
+  var reCupom=/^\d{2}\/\d{2}\/\d{4}\s+([A-Z0-9]+)\s+([\d.,\-]+)\s+([\d.,\-]+)\s+([\d.,\-]+)\s*$/;
+  var divPorTicker={};
+  var addDiv=function(tk,brutoBRL,impExtBRL){
+    if(!divPorTicker[tk])divPorTicker[tk]={brutoBRL:0,impExtBRL:0};
+    divPorTicker[tk].brutoBRL+=brutoBRL;
+    divPorTicker[tk].impExtBRL+=impExtBRL;
+  };
+  linhasTx.forEach(function(linha){
+    var m=linha.match(reDiv);
+    if(m){addDiv(m[1],irNum(m[6]),irNum(m[8]));return}
+    var mc=linha.match(reCupom);
+    if(mc)addDiv(mc[1],irNum(mc[4]),0);
+  });
+
+  /* 2) Declaração IRPF ... Modelo Transparente — saldo (custo) de cada ativo em 2024/2025.
+     Linha: "TICKER Nome do Ativo (pode ter espaços) custo2024 custo2025" — como "Nome do Ativo" tem
+     espaços, casa pelo ÚLTIMO PAR de números da linha (a âncora "$" no fim evita pegar números do
+     meio do nome, ex.: "Alpha Architect 1 - 3 Month Box Etf"). */
+  var reSaldo=/^([A-Z0-9]+)\s+(.+?)\s+([\d.,\-]+)\s+([\d.,\-]+)\s*$/;
+  var idxDecl=linhasTx.findIndex(function(l){return /Declara[cç][aã]o IRPF.*Modelo Transparente/i.test(l)});
+  var saldoContaExterior=null;
+  var ativosMap={};
+  if(idxDecl>=0){
+    for(var i=idxDecl+1;i<linhasTx.length;i++){
+      var linha=linhasTx[i];
+      if(/^As informa[cç][oõ]es apresentadas/i.test(linha))break;
+      var m=linha.match(reSaldo);
+      if(!m)continue;
+      var tk=m[1],nm=m[2].trim(),s24=irNum(m[3]),s25=irNum(m[4]);
+      if(tk==="SALDO"){saldoContaExterior={ant:s24,atual:s25};continue}
+      ativosMap[tk]={nm:nm,saldo2024:s24,saldo2025:s25};
+    }
+  }
+
+  /* 2b) Vendas/vencimentos do Modelo Transparente (ganho de capital já realizado no ano), quando
+     o informe tiver linhas nessa tabela (fica vazia na maioria dos casos, sem antecipação). Usa só
+     o último número da linha (Total Rendimentos Tributáveis em BRL). */
+  var totalGanhosVendasBRL=0;
+  var idxVendas=linhasTx.findIndex(function(l){return /Rendimento das vendas e vencimentos de ativos/i.test(l)});
+  if(idxVendas>=0&&idxDecl>idxVendas){
+    for(var iv=idxVendas+1;iv<idxDecl;iv++){
+      var mv=linhasTx[iv].match(/^\d{2}\/\d{2}\/\d{4}\s+[A-Z0-9]+\s+.+\s+([\d.,\-]+)\s*$/);
+      if(mv)totalGanhosVendasBRL+=irNum(mv[1]);
+    }
+  }
+
+  /* 3) Rendimento anual | Modelo Opaco — resumo agregado dos títulos/fundos do próprio C6, com
+     metodologia própria (ver comentário no topo da função) — usa os valores como vieram. */
+  var idxOpaco=linhasTx.findIndex(function(l){return /Rendimento anual.*Modelo Opaco/i.test(l)});
+  var opaco=null;
+  if(idxOpaco>=0){
+    var blocoOp=linhasTx.slice(idxOpaco,idxOpaco+16).join(" | ");
+    var getOp=function(label){
+      var re=new RegExp(label+"[^|]*?BRL\\s*(-?\\s?[\\d.,]+)","i");
+      var mm=blocoOp.match(re);
+      return mm?irNum(mm[1].replace(/\s+/g,"")):null;
+    };
+    var rendBrutoBRL=getOp("Rendimento Bruto");
+    var compImpBRL=getOp("Comp\\. Imposto Pago no Exterior");
+    var baseCalc=getOp("Base de C[aá]lculo");
+    var impDevido=getOp("Imposto Devido");
+    if(rendBrutoBRL!==null||baseCalc!==null){
+      opaco={rendimentoBrutoBRL:rendBrutoBRL||0,impostoPagoExteriorBRL:Math.abs(compImpBRL||0),baseCalculo:baseCalc||0,impostoDevido:impDevido||0};
+    }
+  }
+
+  /* Monta a lista de ativos: parte da tabela de saldo (Modelo Transparente, tem TODOS os ativos,
+     inclusive os títulos do Modelo Opaco) e completa dividendos/imposto de quem recebeu (seção 1). */
+  var ativos=[];
+  Object.keys(ativosMap).forEach(function(tk){
+    var a=ativosMap[tk];
+    var div=divPorTicker[tk];
+    ativos.push({
+      tp:"etf_int",tk:tk,nm:a.nm,
+      saldo2024:a.saldo2024,saldo2025:a.saldo2025,
+      dividendos:div?div.brutoBRL:0,impostoExterior:div?div.impExtBRL:0
+    });
+  });
+  /* ticker que recebeu dividendo/cupom mas não apareceu na tabela de saldo (ex.: vendido no ano) */
+  Object.keys(divPorTicker).forEach(function(tk){
+    if(ativosMap[tk])return;
+    var div=divPorTicker[tk];
+    ativos.push({tp:"etf_int",tk:tk,nm:tk,saldo2024:0,saldo2025:0,dividendos:div.brutoBRL,impostoExterior:div.impExtBRL});
+    avisos.push("Ticker "+tk+" recebeu dividendos/cupons no informe do C6 mas não aparece na tabela \"Declaração IRPF | Modelo Transparente\" — confira se foi vendido/encerrado no ano.");
+  });
+
+  /* Resumo tributário combinado: soma o bloco "Modelo Opaco" (metodologia própria do C6, usada como
+     veio) com os dividendos/cupons + vendas do "Modelo Transparente" (tributados a 15% com crédito
+     do imposto pago no exterior, mesma regra da Lei 14.754/2023 usada no informe da Vest). Como são
+     DUAS metodologias diferentes somadas numa linha só, fica registrado um aviso pra revisão manual
+     sempre que houver valor nas duas partes ao mesmo tempo. */
+  var totalDivBRL=0,totalImpDivBRL=0;
+  Object.keys(divPorTicker).forEach(function(tk){totalDivBRL+=divPorTicker[tk].brutoBRL;totalImpDivBRL+=divPorTicker[tk].impExtBRL});
+  var ganhosTransparente=totalGanhosVendasBRL;
+  var resumoTributario=null;
+  if(opaco||totalDivBRL>0||ganhosTransparente>0){
+    var impDevidoTransparente=Math.max(0,Math.round((0.15*(totalDivBRL+ganhosTransparente)-totalImpDivBRL)*100)/100);
+    resumoTributario={
+      ganhosCapital:(opaco?opaco.rendimentoBrutoBRL:0)+ganhosTransparente,
+      dividendos:totalDivBRL,
+      baseCalculo:(opaco?opaco.baseCalculo:0)+totalDivBRL+ganhosTransparente,
+      impostoPagoExterior:(opaco?opaco.impostoPagoExteriorBRL:0)+totalImpDivBRL,
+      impostoDevido:(opaco?opaco.impostoDevido:0)+impDevidoTransparente
+    };
+    if(opaco&&(totalDivBRL>0||ganhosTransparente>0))avisos.push("O Resumo Tributário combina duas metodologias diferentes do informe do C6: o \"Modelo Opaco\" (títulos do próprio C6, ex.: TD C6 Prefixado — Base de Cálculo e Imposto Devido usados exatamente como o C6 calculou) somado aos dividendos/cupons/vendas do \"Modelo Transparente\" (ETFs — recalculados a 15% com crédito do imposto pago no exterior, mesma regra da Lei 14.754/2023). Confira o total antes de declarar.");
+  }
+
+  return {ativos:ativos,saldoContaExterior:saldoContaExterior,resumoTributario:resumoTributario,avisos:avisos};
+}
+
+/* ---------- Parser: Informe Banco Inter Internacional / Inter Global Invest (exterior) ----------
+   Formato "por ativo" (cada ETF vem com um card próprio: dados de posição + "Aplicação financeira"
+   + "Lucros e dividendos"), bem diferente do Vest/C6. Particularidades:
+   - "Rendimento ou perda" (Aplicação financeira) é o ganho/perda do ano marcado a mercado (câmbio +
+     variação do ativo) — entra como "ganhos de capital" no resumo tributário da Lei 14.754/2023.
+   - "Valor recebido" (Lucros e dividendos) é dividendo/rendimento efetivamente PAGO no ano — entra
+     como "dividendos".
+   - O relatório do Inter é só um "auxiliar" (o próprio documento diz que não calcula Base de
+     Cálculo/Imposto Devido) — o Hub calcula esse resumo agregado a partir dos valores por ativo,
+     aplicando os 15% da Lei 14.754/2023 com crédito do imposto pago no exterior.
+   - Além dos ETFs, o informe pode trazer "Saldo em Conta" (caixa, sem tributação — vira
+     saldoContaExterior) e "Time Deposit" (CDBs/depósitos a prazo no exterior — rendimento entra
+     como ganho de capital, saldo entra em Bens e Direitos como um tipo próprio). */
+var IR_NOMES_ETF_EXTERIOR_CONHECIDOS={
+  BND:"Vanguard Total Bond Market ETF",VCLT:"Vanguard Long-Term Corporate Bond ETF",
+  SHY:"iShares 1-3 Year Treasury Bond ETF",TFLO:"iShares Treasury Floating Rate Bond ETF",
+  VGK:"Vanguard FTSE Europe ETF",IAU:"iShares Gold Trust",IBIT:"iShares Bitcoin Trust",
+  BOXX:"Alpha Architect 1-3 Month Box ETF",BND2:"Vanguard Total Bond Market ETF"
+};
+function irParseInterGlobalPdf(texto){
+  var linhasTx=texto.split("\n").map(function(l){return l.replace(/\s+/g," ").trim()}).filter(Boolean);
+  var avisos=[];
+
+  /* Saldo em Conta (caixa) — soma todas as sub-contas ("Saldo na Conta Global ...", "Saldo
+     DriveWealth ...") num único saldoContaExterior, igual ao conceito usado pro Vest/C6. */
+  var reSaldoConta=/^Saldo\s+(?:na Conta|DriveWealth)\S*.*?R\$\s*([\d.,\-]+)\s+R\$\s*([\d.,\-]+)\s*$/i;
+  var saldoAnt=0,saldoAtual=0,temSaldoConta=false;
+  linhasTx.forEach(function(linha){
+    var m=linha.match(reSaldoConta);
+    if(!m)return;
+    temSaldoConta=true;saldoAnt+=irNum(m[1]);saldoAtual+=irNum(m[2]);
+  });
+  var saldoContaExterior=temSaldoConta?{ant:saldoAnt,atual:saldoAtual}:null;
+
+  /* ETFs — cada ativo é uma linha "TICKER [Empresa opcional] Qtde US$ custo R$ ptax R$ sit24 R$ sit25",
+     seguida (em algum ponto nas próximas linhas) das duas linhas de "Aplicação financeira"/"Lucros e
+     dividendos". Nome da empresa pode vir grudado na mesma linha (ex.: "IAU Gold Trust (ETF) iShares
+     2,38214 ...") ou quebrado em 2 linhas ao redor da linha numérica (ex.: "BND" sozinho na linha, com
+     "VANGUARD TOTAL BOND" antes e "MARKET ETF" depois) — como o nome não afeta nenhum cálculo, usa um
+     dicionário de tickers conhecidos como referência e cai pro texto da própria linha (ou pro ticker)
+     quando o ativo não está no dicionário. */
+  var reAtivo=/^([A-Z]{1,6})\s+(.*?)\s*([\d]+[\d.,]*)\s+US\$\s*([\d.,]+)\s+R\$\s*([\d.,]+)\s+R\$\s*([\d.,\-]+)\s+R\$\s*([\d.,\-]+)\s*$/;
+  var reRendPerda=/Rendimento ou perda\s+R\$\s*([\d.,\-]+)\s+Valor recebido\s+R\$\s*([\d.,\-]+)/i;
+  var reImpostos=/Imposto pago no exterior\s+R\$\s*([\d.,\-]+)\s+Imposto pago Exterior\/IRRF Brasil\s+R\$\s*([\d.,\-]+)/i;
+  var ativos=[];
+  var totalGanhosEtfBRL=0,totalDivEtfBRL=0,totalImpGanhosBRL=0,totalImpDivBRL=0;
+  linhasTx.forEach(function(linha,idx){
+    var m=linha.match(reAtivo);
+    if(!m)return;
+    var tk=m[1];
+    if(tk==="US"||tk==="R")return; /* evita casar pedaço de "US$"/"R$" isolado por engano */
+    var nomeInline=m[2].trim();
+    var nm=nomeInline||IR_NOMES_ETF_EXTERIOR_CONHECIDOS[tk]||tk;
+    var saldo2024=irNum(m[6]),saldo2025=irNum(m[7]);
+    var ganhoPerda=0,valorRecebido=0,impGanho=0,impRecebido=0;
+    var janela=linhasTx.slice(idx,idx+8).join(" | ");
+    var mRP=janela.match(reRendPerda);
+    if(mRP){ganhoPerda=irNum(mRP[1]);valorRecebido=irNum(mRP[2])}
+    var mImp=janela.match(reImpostos);
+    if(mImp){impGanho=irNum(mImp[1]);impRecebido=irNum(mImp[2])}
+    totalGanhosEtfBRL+=ganhoPerda;totalDivEtfBRL+=valorRecebido;
+    totalImpGanhosBRL+=impGanho;totalImpDivBRL+=impRecebido;
+    ativos.push({tp:"etf_int",tk:tk,nm:nm,saldo2024:saldo2024,saldo2025:saldo2025,dividendos:valorRecebido,impostoExterior:impRecebido});
+  });
+
+  /* Time Deposit — CDBs/depósitos a prazo no exterior. O próprio informe avisa: o valor de
+     "Rendimentos" entra como "Rendimento ou Perda" (ganho de capital), e "Valor recebido"/"Imposto"
+     ficam zerados pra esse tipo de ativo. */
+  var reTD=/^(Investimentos\s+em\s+.+?)\s+R\$\s*([\d.,\-]+)\s+R\$\s*([\d.,\-]+)\s+R\$\s*([\d.,\-]+)\s*$/i;
+  var totalRendimentosTD=0,tdCount=0;
+  linhasTx.forEach(function(linha){
+    var m=linha.match(reTD);
+    if(!m)return;
+    tdCount++;
+    var rendimento=irNum(m[2]),s24=irNum(m[3]),s25=irNum(m[4]);
+    totalRendimentosTD+=rendimento;
+    ativos.push({tp:"deposito_exterior",tk:"TD"+tdCount,nm:m[1].trim(),saldo2024:s24,saldo2025:s25,dividendos:0,impostoExterior:0});
+  });
+  if(tdCount)avisos.push("O informe do Inter tem "+tdCount+" \"Time Deposit\" (depósito a prazo no exterior) — confira a Localização (País) de cada um na ficha de Bens e Direitos: geralmente é diferente do resto da conta (no informe original, normalmente 137 - Ilhas Cayman em vez de 249 - Estados Unidos).");
+
+  /* Resumo tributário: o Inter não calcula Base de Cálculo/Imposto Devido no informe (é só
+     "auxiliar") — o Hub soma os "Rendimento ou perda" (ETFs) + "Rendimentos" (Time Deposit) como
+     ganhos de capital, os "Valor recebido" como dividendos, e aplica os 15% da Lei 14.754/2023 com
+     crédito do imposto pago no exterior, igual à explicação que o próprio relatório já dá ao cliente. */
+  var ganhosCapital=totalGanhosEtfBRL+totalRendimentosTD;
+  var dividendos=totalDivEtfBRL;
+  var impostoPagoExterior=totalImpGanhosBRL+totalImpDivBRL;
+  var resumoTributario=null;
+  if(ganhosCapital>0||dividendos>0){
+    var baseCalculo=ganhosCapital+dividendos;
+    var impostoDevido=Math.max(0,Math.round((0.15*baseCalculo-impostoPagoExterior)*100)/100);
+    resumoTributario={ganhosCapital:ganhosCapital,dividendos:dividendos,baseCalculo:baseCalculo,impostoPagoExterior:impostoPagoExterior,impostoDevido:impostoDevido};
+    avisos.push("O Resumo Tributário foi calculado pelo Hub a partir dos valores de \"Rendimento ou perda\"/\"Valor recebido\" de cada ativo do informe do Inter (aplicando os 15% da Lei 14.754/2023 com crédito do imposto pago no exterior) — o próprio informe do Inter não traz esse total pronto, só os valores por ativo. Confira antes de declarar.");
+  }
+
+  if(!ativos.length)avisos.push("Não foi possível reconhecer nenhum ativo no informe do Inter — confira se é o \"Relatório Auxiliar\" (Declaração de Imposto de Renda) da Inter Global Invest e preencha a Parte 2 manualmente com base neste documento.");
+
+  return {ativos:ativos,saldoContaExterior:saldoContaExterior,resumoTributario:resumoTributario,avisos:avisos};
 }
 
 /* ---------- Gerador do HTML do relatório consolidado (padrão visual dos relatórios mensais) ---------- */
@@ -27676,7 +27910,7 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
       var totalGrupo=ativos.reduce(function(s,a){return s+(a.saldo2025||0)},0);
       html+='<div class="section"><div class="section-eyebrow"><span class="section-eyebrow-line"></span><span class="section-eyebrow-text">PARTE 2 · ITEM 2.'+i2+'</span></div>';
       html+='<h2 class="section-title" style="color:#7C3AED">Bens e Direitos — <i>'+info.nome+'</i></h2>';
-      html+='<div class="section-path">📍 Grupo <b>'+info.grp+'</b>, Código <b>'+info.cod+'</b>. Localização: 249 - Estados Unidos. Deixe o CNPJ em branco (empresa estrangeira).</div>';
+      html+='<div class="section-path">📍 Grupo <b>'+info.grp+'</b>, Código <b>'+info.cod+'</b>. Localização: '+info.loc+'. Deixe o CNPJ em branco (empresa estrangeira).</div>';
       html+='<table><thead><tr><th>Ticker</th><th>Nome</th><th class="num">Saldo 31/12/'+(anoBase-1)+'</th><th class="num">Saldo 31/12/'+anoBase+'</th><th class="num">Dividendos</th><th class="num">Imp. Exterior</th></tr></thead><tbody>';
       ativos.forEach(function(a){
         html+='<tr><td class="tk" style="color:#7C3AED">'+(a.tk||"-")+'</td><td>'+(a.nm||"-")+'</td><td class="num">'+irFmtR(a.saldo2024)+'</td><td class="num">'+irFmtR(a.saldo2025)+'</td><td class="num">'+irFmtR(a.dividendos)+'</td><td class="num">'+irFmtR(a.impostoExterior)+'</td></tr>';
@@ -27889,10 +28123,14 @@ var AbaRelatorioIR=function({data}){
         if(IR_CORRETORAS_EXTERIOR_COM_PARSER.indexOf(corretoraExterior)>=0){
           try{
             var textoExt=await irLerPdfTexto(arqExterior);
-            var rExt=irParseVestPdf(textoExt);
+            var rExt;
+            if(corretoraExterior==="C6 Global Invest")rExt=irParseC6GlobalPdf(textoExt);
+            else if(corretoraExterior==="Banco Inter Internacional")rExt=irParseInterGlobalPdf(textoExt);
+            else rExt=irParseVestPdf(textoExt);
             ativosExterior=rExt.ativos;
             saldoContaExterior=rExt.saldoContaExterior;
             resumoTributarioExterior=rExt.resumoTributario;
+            if(rExt.avisos&&rExt.avisos.length)rExt.avisos.forEach(function(a){itensRevisaoManual.push({arquivo:arqExterior.name,motivo:a})});
             fontesUsadas.push(arqExterior.name+" ("+corretoraExterior+")");
           }catch(e){console.error(e);itensRevisaoManual.push({arquivo:arqExterior.name,motivo:"Falha ao processar o informe da "+corretoraExterior+": "+e.message})}
         } else {
@@ -28221,6 +28459,7 @@ var AbaRelatorioIR=function({data}){
     </div>
   );
 };
+
 var AbaTutoriais = function({data}) {
 var [clienteSel, setClienteSel] = React.useState(null);
 var [instSel, setInstSel] = React.useState([]);
@@ -34972,7 +35211,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '470';
+  var SW_VERSION = '471';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
