@@ -8108,7 +8108,10 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
             .then(function(d){
               if(d.results){d.results.forEach(function(r){
                 if(r.regularMarketPrice){
-                  sAtivos(function(p){return p.map(function(a){return a.tk===r.symbol?Object.assign({},a,{pa:r.regularMarketPrice}):a})});
+                  /* Atualiza posR junto com pa — o valor atual exibido (vA, calculado mais acima)
+                     prioriza posR sobre qtd*pa, então só atualizar pa deixava a cotação nova
+                     buscada aqui sem nenhum efeito visível no patrimônio/rentabilidade do cliente. */
+                  sAtivos(function(p){return p.map(function(a){return a.tk===r.symbol?Object.assign({},a,{pa:r.regularMarketPrice,posR:(a.qtd||0)*r.regularMarketPrice}):a})});
                   updated++;
                 }
               })}
@@ -8130,7 +8133,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                 var tkLow=a.tk.toLowerCase().replace(/\+/g,"");
                 if(nome.indexOf(tkLow.replace(/\s\d{4}/,""))>=0){
                   if(t.puVenda||t.puCompra){
-                    sAtivos(function(p){return p.map(function(x){return x.tk===a.tk?Object.assign({},x,{pa:t.puVenda||t.puCompra}):x})});
+                    var puNovo=t.puVenda||t.puCompra;
+                    sAtivos(function(p){return p.map(function(x){return x.tk===a.tk?Object.assign({},x,{pa:puNovo,posR:(x.qtd||0)*puNovo}):x})});
                     updated++;
                   }
                 }
@@ -8152,7 +8156,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
             cryptoAtivos.forEach(function(a){
               var geckoId=cryptoMap[a.tk];
               if(d[geckoId]&&d[geckoId].brl){
-                sAtivos(function(p){return p.map(function(x){return x.tk===a.tk?Object.assign({},x,{pa:d[geckoId].brl}):x})});
+                var precoBrl=d[geckoId].brl;
+                sAtivos(function(p){return p.map(function(x){return x.tk===a.tk?Object.assign({},x,{pa:precoBrl,posR:(x.qtd||0)*precoBrl}):x})});
                 updated++;
               }
             });
@@ -8185,7 +8190,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                 
                 if(a.pa===0||a.pa===a.pm){novoPA=a.pm*fator}
                 else{novoPA=a.pa*Math.pow(1+cdiDiario,1)}
-                sAtivos(function(p){return p.map(function(x){return x.tk===a.tk?Object.assign({},x,{pa:Math.round(novoPA*100)/100}):x})});
+                var paArred=Math.round(novoPA*100)/100;
+                sAtivos(function(p){return p.map(function(x){return x.tk===a.tk?Object.assign({},x,{pa:paArred,posR:(x.qtd||0)*paArred}):x})});
                 updated++;
               }
             });
@@ -35506,7 +35512,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '479';
+  var SW_VERSION = '480';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
