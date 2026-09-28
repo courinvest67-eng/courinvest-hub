@@ -29125,7 +29125,6 @@ function ApresentacaoView(){
   var tabs=[
     {id:"institucional",l:"📊 Apresentação Institucional",d:"Pitch genérico da CourInvest"},
     {id:"gp",l:"💎 Gestão de Patrimônio",d:"Apresentação específica do serviço GP"},
-    {id:"gpCaptacao",l:"🧲 Captação · Patrimônio",d:"Versão enxuta (6 slides), sem preço — objetivo é o potencial cliente se reconhecer no problema e agendar o Diagnóstico Patrimonial"},
     {id:"gf",l:"📈 Gestão Financeira",d:"Apresentação do serviço de organização financeira"},
     {id:"gfpj",l:"🏢 Gestão Financeira PJ",d:"Apresentação do serviço de organização financeira para empresas"},
     {id:"cpj",l:"🧭 Consultoria PJ",d:"Apresentação do serviço de consultoria financeira pontual para empresas"},
@@ -30597,183 +30596,6 @@ var ApresentacaoGP=function(){
   };/* end ApresentacaoGP */
 
   /* ═══════════════════════════════════════
-     APRESENTAÇÃO DE CAPTAÇÃO — GESTÃO DE PATRIMÔNIO (v1.0)
-     Pedido do Igor (26/09/2026, a partir de observações de um chat externo colado na conversa):
-     apresentação BEM mais enxuta que a comercial completa (ApresentacaoGP, 11 páginas) — só 6
-     slides. A função dela não é explicar tudo sobre a Courinvest; é fazer o potencial cliente de
-     patrimônio relevante se reconhecer no problema e querer conversar. Por decisão explícita do
-     Igor: SEM preço e SEM "a partir de R$ X de patrimônio" nesta apresentação — o objetivo aqui é
-     vender o Diagnóstico Patrimonial, não a mensalidade/taxa da gestão (a qualificação de
-     patrimônio fica para uma peça futura: formulário de qualificação, ainda não construído).
-  ═══════════════════════════════════════ */
-  var ApresentacaoCaptacaoGP=function(){
-    var wa_diag="https://wa.me/5532988414085?text=" + encodeURIComponent("Olá! Gostaria de agendar meu Diagnóstico Patrimonial com a Courinvest.");
-    return (
-      <div id="proposta-print" style={{background:"#fff",color:"#1a1a2e",padding:0,borderRadius:12,overflow:"hidden",boxShadow:"0 20px 60px rgba(0,0,0,0.3)",maxWidth:820,margin:"0 auto",fontFamily:"'Outfit',sans-serif"}}>
-
-        {/* ── SLIDE 1: VOCÊ JÁ CONSTRUIU PATRIMÔNIO. E AGORA? (capa) ── */}
-        <div className="pp-page" style={{padding:"70px 60px",minHeight:"100vh",display:"flex",flexDirection:"column",justifyContent:"center",background:"radial-gradient(ellipse 70% 60% at 25% 15%,rgba(212,163,40,0.18) 0%,transparent 60%),linear-gradient(135deg,#060E1F 0%,#0C1A33 45%,#142B52 100%)",color:"#fff",position:"relative",overflow:"hidden"}}>
-          <div style={{position:"absolute",top:-100,right:-100,opacity:0.06,pointerEvents:"none"}}><CourinvestPattern opacity={0.6} size={480} color="#F5C94B"/></div>
-          <div style={{position:"absolute",top:0,left:0,zIndex:2}}><CourinvestLogo width={160} darkMode={true}/></div>
-          <div style={{position:"relative",zIndex:1,maxWidth:640,marginTop:72}}>
-            <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:26}}>
-              <div style={{height:1,width:40,background:"linear-gradient(90deg,transparent,#D4A328)"}}/>
-              <span style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:4}}>GESTÃO DE PATRIMÔNIO · COURINVEST</span>
-            </div>
-            <div style={{fontSize:50,fontWeight:900,lineHeight:1.05,letterSpacing:-2,marginBottom:28,background:"linear-gradient(135deg,#fff 0%,#C8D4E8 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
-              Você já construiu<br/>patrimônio. <span style={{background:"linear-gradient(135deg,#F5C94B,#D4A328)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>E agora?</span>
-            </div>
-            <div style={{fontSize:18,color:"rgba(255,255,255,0.90)",lineHeight:1.6,marginBottom:8,fontWeight:500}}>Seu patrimônio cresceu.</div>
-            <div style={{fontSize:18,color:"rgba(255,255,255,0.90)",lineHeight:1.6,marginBottom:34,fontWeight:500}}>Sua estratégia financeira acompanhou esse crescimento?</div>
-            <div style={{fontSize:15,color:"#8B9DC3",lineHeight:1.75,marginBottom:14,maxWidth:560}}>À medida que o patrimônio aumenta, administrar investimentos deixa de ser apenas escolher bons produtos.</div>
-            <div style={{fontSize:15,color:"#8B9DC3",lineHeight:1.75,marginBottom:38,maxWidth:560}}>É preciso ter uma visão consolidada, definir prioridades, controlar riscos e tomar decisões de forma coordenada.</div>
-            <div style={{fontSize:21,fontWeight:800,color:"#F5C94B",letterSpacing:-0.3}}>A Cour Invest transforma patrimônio em estratégia.</div>
-          </div>
-        </div>
-
-        {/* ── SLIDE 2: QUANDO O PATRIMÔNIO CRESCE, A COMPLEXIDADE TAMBÉM ── */}
-        <PageLight>
-          <SectionLabel txt="O DIAGNÓSTICO"/>
-          <div style={{fontSize:38,fontWeight:900,color:"#0A1628",lineHeight:1.1,letterSpacing:-1.5,marginBottom:28,maxWidth:680}}>Quando o patrimônio cresce, <span style={{color:"#D4A328"}}>a complexidade também.</span></div>
-          <div style={{fontSize:13,color:"#5a5a6e",marginBottom:18,fontWeight:700,letterSpacing:0.3}}>É comum encontrar situações como:</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:11,marginBottom:32}}>
-            {[
-              "Investimentos espalhados entre diferentes instituições",
-              "Excesso de concentração em determinados produtos ou mercados",
-              "Decisões tomadas de forma isolada, sem uma estratégia central",
-              "Dificuldade para acompanhar toda a carteira",
-              "Recursos sem uma finalidade claramente definida",
-              "Falta de uma visão consolidada do patrimônio",
-              "Dúvidas sobre diversificação, liquidez e exposição internacional",
-              "Necessidade de conciliar crescimento, preservação e objetivos familiares"
-            ].map(function(t,i){return (
-              <div key={i} style={{display:"flex",gap:10,alignItems:"flex-start",padding:"13px 15px",background:"#fff",borderRadius:12,boxShadow:"0 4px 16px rgba(10,22,40,0.06)"}}>
-                <span style={{color:"#D4A328",fontSize:13,marginTop:2,flexShrink:0}}>●</span>
-                <span style={{fontSize:12,color:"#3a3a4e",lineHeight:1.5}}>{t}</span>
-              </div>
-            )})}
-          </div>
-          <div style={{padding:"20px 26px",background:"linear-gradient(135deg,#0A1628,#142B52)",borderRadius:14,textAlign:"center"}}>
-            <div style={{fontSize:16,color:"#fff",fontWeight:700,lineHeight:1.55}}>O problema nem sempre é <span style={{color:"#F5C94B"}}>quanto</span> você investe.</div>
-            <div style={{fontSize:16,color:"#fff",fontWeight:700,lineHeight:1.55}}>É <span style={{color:"#F5C94B"}}>como</span> todo o patrimônio está organizado.</div>
-          </div>
-        </PageLight>
-
-        {/* ── SLIDE 3: UMA VISÃO COMPLETA DO SEU PATRIMÔNIO (4 etapas) ── */}
-        <PageDark>
-          <SectionLabel txt="NOSSA METODOLOGIA"/>
-          <div style={{fontSize:38,fontWeight:900,lineHeight:1.1,letterSpacing:-1.5,marginBottom:16,maxWidth:640,background:"linear-gradient(135deg,#fff 0%,#C8D4E8 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>Uma visão completa do seu patrimônio</div>
-          <div style={{fontSize:15,color:"#8B9DC3",lineHeight:1.7,marginBottom:34,maxWidth:600}}>Na Cour Invest, o patrimônio é analisado como um todo.</div>
-          <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:30}}>
-            {[
-              {t:"Diagnóstico",d:"Entendemos sua situação patrimonial, seus objetivos, necessidades e prioridades."},
-              {t:"Estratégia",d:"Construímos uma estratégia de alocação de acordo com seus objetivos e horizonte de tempo."},
-              {t:"Execução",d:"Acompanhamos a implementação das decisões e a organização dos investimentos."},
-              {t:"Acompanhamento",d:"Monitoramos continuamente o patrimônio e fazemos os ajustes necessários ao longo do tempo."}
-            ].map(function(m,i){return (
-              <div key={i} style={{display:"flex",gap:18,alignItems:"center"}}>
-                <div style={{width:48,height:48,flexShrink:0,background:"linear-gradient(135deg,#D4A328,#D4A328CC)",color:"#fff",borderRadius:14,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:900,boxShadow:"0 8px 24px rgba(212,163,40,0.35)"}}>{(i+1).toString().padStart(2,"0")}</div>
-                <div style={{flex:1,padding:"14px 18px",background:"rgba(212,163,40,0.06)",border:"1px solid rgba(212,163,40,0.15)",borderRadius:12}}>
-                  <div style={{fontSize:16,fontWeight:800,color:"#fff",marginBottom:3}}>{m.t}</div>
-                  <div style={{fontSize:12.5,color:"#8B9DC3",lineHeight:1.5}}>{m.d}</div>
-                </div>
-              </div>
-            )})}
-          </div>
-          <div style={{fontSize:14,color:"#8B9DC3",lineHeight:1.6,marginBottom:6}}>O objetivo é simples:</div>
-          <div style={{fontSize:18,fontWeight:800,color:"#F5C94B",lineHeight:1.5}}>Você ter clareza sobre onde está seu patrimônio, por que ele está alocado dessa forma e quais são os próximos passos.</div>
-        </PageDark>
-
-        {/* ── SLIDE 4: PATRIMÔNIO NÃO PRECISA ESTAR LIMITADO A UM ÚNICO MERCADO ── */}
-        <PageLight>
-          <SectionLabel txt="ALCANCE GLOBAL"/>
-          <div style={{fontSize:36,fontWeight:900,color:"#0A1628",lineHeight:1.15,letterSpacing:-1.3,marginBottom:26,maxWidth:660}}>Patrimônio não precisa estar limitado a <span style={{color:"#D4A328"}}>um único mercado.</span></div>
-          <div style={{fontSize:14,color:"#5a5a6e",lineHeight:1.7,marginBottom:24,maxWidth:600}}>Uma estratégia patrimonial pode considerar diferentes mercados, moedas e classes de ativos.</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:28}}>
-            {[
-              {f:"🇧🇷",n:"Brasil"},
-              {f:"🇺🇸",n:"Estados Unidos"},
-              {f:"🇪🇺",n:"Europa"}
-            ].map(function(m,i){return (
-              <div key={i} style={{textAlign:"center",padding:"22px 12px",background:"#fff",borderRadius:14,boxShadow:"0 4px 20px rgba(10,22,40,0.07)"}}>
-                <div style={{fontSize:32,marginBottom:8}}>{m.f}</div>
-                <div style={{fontSize:13.5,fontWeight:800,color:"#0A1628"}}>{m.n}</div>
-              </div>
-            )})}
-          </div>
-          <div style={{fontSize:12.5,color:"#5a5a6e",marginBottom:14,fontWeight:700,letterSpacing:0.3}}>A diversificação internacional pode fazer parte da estratégia para:</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:28}}>
-            {["Diversificar geograficamente","Diversificar moedas","Acessar diferentes mercados","Reduzir a concentração em um único país"].map(function(t,i){return (
-              <div key={i} style={{display:"flex",gap:9,alignItems:"flex-start"}}>
-                <span style={{color:"#D4A328",fontSize:12,marginTop:2}}>●</span>
-                <span style={{fontSize:12,color:"#3a3a4e",lineHeight:1.5}}>{t}</span>
-              </div>
-            )})}
-          </div>
-          <div style={{padding:"18px 24px",background:"linear-gradient(135deg,#0A1628,#142B52)",borderRadius:14}}>
-            <div style={{fontSize:13,color:"rgba(255,255,255,0.6)",lineHeight:1.6}}>Diversificação não é simplesmente investir fora.</div>
-            <div style={{fontSize:15,color:"#F5C94B",fontWeight:800,lineHeight:1.6}}>É construir uma estratégia coerente com o patrimônio como um todo.</div>
-          </div>
-        </PageLight>
-
-        {/* ── SLIDE 5: PARA QUEM É A GESTÃO DE PATRIMÔNIO? ── */}
-        <PageDark>
-          <SectionLabel txt="PARA QUEM É"/>
-          <div style={{fontSize:36,fontWeight:900,lineHeight:1.15,letterSpacing:-1.3,marginBottom:20,maxWidth:660,background:"linear-gradient(135deg,#fff 0%,#C8D4E8 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>Para quem é a Gestão de Patrimônio?</div>
-          <div style={{fontSize:14,color:"#8B9DC3",lineHeight:1.7,marginBottom:26,maxWidth:640}}>A Gestão de Patrimônio da Cour Invest é voltada para quem já construiu patrimônio e quer profissionalizar a forma como ele é administrado. Especialmente para quem:</div>
-          <div style={{display:"flex",flexDirection:"column",gap:9,marginBottom:32}}>
-            {[
-              "Possui investimentos em diferentes instituições",
-              "Deseja consolidar e organizar seu patrimônio",
-              "Quer tomar decisões com uma estratégia central",
-              "Busca acompanhamento contínuo dos investimentos",
-              "Deseja diversificar seus investimentos no Brasil e no exterior",
-              "Quer transformar seus objetivos financeiros em um planejamento patrimonial estruturado"
-            ].map(function(t,i){return (
-              <div key={i} style={{display:"flex",gap:12,alignItems:"center",padding:"11px 16px",background:"rgba(212,163,40,0.06)",border:"1px solid rgba(212,163,40,0.15)",borderRadius:10}}>
-                <span style={{color:"#D4A328",fontSize:14,fontWeight:900,flexShrink:0}}>✓</span>
-                <span style={{fontSize:12.5,color:"#E8ECF4",lineHeight:1.5}}>{t}</span>
-              </div>
-            )})}
-          </div>
-          <div style={{textAlign:"center"}}>
-            <div style={{fontSize:15,color:"#8B9DC3",fontWeight:600,marginBottom:5}}>Mais patrimônio exige mais organização.</div>
-            <div style={{fontSize:17,color:"#F5C94B",fontWeight:800}}>E quanto maior a complexidade, maior a importância de ter uma estratégia.</div>
-          </div>
-        </PageDark>
-
-        {/* ── SLIDE 6: CTA — DIAGNÓSTICO PATRIMONIAL (sem preço, propositalmente) ── */}
-        <div className="pp-page" style={{padding:"76px 60px 50px",background:"radial-gradient(ellipse 70% 50% at 50% 30%,rgba(212,163,40,0.25) 0%,transparent 60%),linear-gradient(135deg,#060E1F 0%,#0C1A33 50%,#142B52 100%)",color:"#fff",pageBreakBefore:"always",position:"relative",overflow:"hidden",textAlign:"center"}}>
-          <div style={{position:"absolute",top:-100,left:"50%",transform:"translateX(-50%)",opacity:0.04,pointerEvents:"none"}}><CourinvestPattern opacity={0.6} size={600} color="#F5C94B"/></div>
-          <div style={{position:"relative",zIndex:1}}>
-            <div style={{fontSize:11,color:"#D4A328",fontWeight:700,letterSpacing:4,marginBottom:22}}>✦ O PRÓXIMO PASSO</div>
-            <div style={{fontSize:42,fontWeight:900,lineHeight:1.15,letterSpacing:-1.5,marginBottom:34,maxWidth:600,margin:"0 auto 34px",background:"linear-gradient(135deg,#fff 0%,#C8D4E8 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>Seu patrimônio merece <span style={{background:"linear-gradient(135deg,#F5C94B,#D4A328)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>uma estratégia à altura.</span></div>
-            <div style={{display:"inline-block",padding:"22px 30px",background:"rgba(212,163,40,0.06)",border:"1px solid rgba(212,163,40,0.2)",borderRadius:16,marginBottom:38,textAlign:"left",maxWidth:480}}>
-              <div style={{fontSize:14,fontWeight:800,color:"#F5C94B",marginBottom:14,letterSpacing:0.8}}>DIAGNÓSTICO PATRIMONIAL COUR INVEST</div>
-              <div style={{fontSize:12.5,color:"#B8C4D6",marginBottom:12}}>Uma conversa inicial para entender:</div>
-              <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                {["Onde seu patrimônio está hoje","Quais são seus objetivos","Quais pontos podem ser aprimorados","Como podemos estruturar uma estratégia para o seu patrimônio"].map(function(t,i){return (
-                  <div key={i} style={{display:"flex",gap:9,alignItems:"flex-start"}}>
-                    <span style={{color:"#D4A328",fontSize:12,marginTop:2,flexShrink:0}}>›</span>
-                    <span style={{fontSize:12,color:"#E8ECF4",lineHeight:1.5}}>{t}</span>
-                  </div>
-                )})}
-              </div>
-            </div>
-            <div>
-              <a href={wa_diag} target="_blank" rel="noopener noreferrer" style={{display:"inline-block",padding:"20px 42px",background:"linear-gradient(135deg,#D4A328,#F5C94B)",color:"#0A1628",borderRadius:100,fontSize:15,fontWeight:900,letterSpacing:0.5,boxShadow:"0 20px 60px rgba(212,163,40,0.4)",marginBottom:42,textDecoration:"none",cursor:"pointer"}}>✦ AGENDE SEU DIAGNÓSTICO PATRIMONIAL ✦</a>
-            </div>
-            <div style={{fontSize:13.5,color:"#8B9DC3",lineHeight:1.6,maxWidth:520,margin:"0 auto 38px",fontWeight:300}}>Cuidamos do patrimônio com uma visão independente, personalizada e de longo prazo.</div>
-            <div style={{display:"flex",justifyContent:"center",marginBottom:14}}><CourinvestLogo width={220} darkMode={true}/></div>
-            <div style={{fontSize:9,color:"#4a5f82",letterSpacing:2.5}}>CONSULTORIA EM INVESTIMENTOS · CVM · ANBIMA<br/>© {hoje.getFullYear()} CourInvest · Todos os direitos reservados</div>
-          </div>
-        </div>
-
-      </div>
-    );
-  };/* end ApresentacaoCaptacaoGP */
-
-  /* ═══════════════════════════════════════
      WRAPPER PRINCIPAL
   ═══════════════════════════════════════ */
   return (
@@ -30790,7 +30612,7 @@ var ApresentacaoGP=function(){
   if(!el){alert("Apresentação não encontrada");return;}
   setGerandoPPTX(true);
   try{
-    var nomeTab={institucional:"institucional",gp:"gestao-patrimonio",gpCaptacao:"captacao-gestao-patrimonio",gf:"gestao-financeira",gfpj:"gestao-financeira-pj",cf:"consultoria-financeira",cpj:"consultoria-pj"}[apres]||"comercial";
+    var nomeTab={institucional:"institucional",gp:"gestao-patrimonio",gf:"gestao-financeira",gfpj:"gestao-financeira-pj",cf:"consultoria-financeira",cpj:"consultoria-pj"}[apres]||"comercial";
     await gerarPPTXDeSlides(el,"courinvest-apresentacao-"+nomeTab+".pptx");
   }finally{
     setGerandoPPTX(false);
@@ -30810,7 +30632,7 @@ var ApresentacaoGP=function(){
   if(!el){alert("Apresentação não encontrada");return;}
   setGerandoPDFView(true);
   try{
-    var nomeTab={institucional:"institucional",gp:"gestao-patrimonio",gpCaptacao:"captacao-gestao-patrimonio",gf:"gestao-financeira",gfpj:"gestao-financeira-pj",cf:"consultoria-financeira",cpj:"consultoria-pj"}[apres]||"comercial";
+    var nomeTab={institucional:"institucional",gp:"gestao-patrimonio",gf:"gestao-financeira",gfpj:"gestao-financeira-pj",cf:"consultoria-financeira",cpj:"consultoria-pj"}[apres]||"comercial";
     var fullHtml="<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}body{margin:0;padding:0}@page{margin:0;size:820px auto}</style></head><body>"+el.innerHTML+"</body></html>";
     var ok=await baixarPdfCourinvest(fullHtml,"courinvest-apresentacao-"+nomeTab+".pdf");
     if(!ok)alert("❌ Não foi possível gerar o PDF — tente novamente");
@@ -30825,11 +30647,7 @@ var ApresentacaoGP=function(){
       <div className="no-print" style={{padding:14,background:"rgba(212,163,40,0.06)",border:"1px solid rgba(212,163,40,0.15)",borderRadius:12,marginBottom:20,display:"flex",gap:12,alignItems:"flex-start"}}>
         <span style={{fontSize:20}}>💡</span>
         <div style={{flex:1,fontSize:12,color:T.t2,lineHeight:1.6}}>
-          {apres==="gpCaptacao" ? (
-            <>Esta é uma apresentação <strong style={{color:T.gold}}>de captação</strong>, propositalmente enxuta (6 slides) — a função dela não é explicar tudo sobre a Courinvest, é fazer o potencial cliente de patrimônio relevante se reconhecer no problema e querer conversar. Por isso não tem preço nem "a partir de R$ X de patrimônio": o objetivo é vender o <strong style={{color:T.gold}}>Diagnóstico Patrimonial</strong>, não a mensalidade/taxa da gestão — a qualificação de patrimônio fica pra depois, num formulário/conversa. Para a apresentação completa da Gestão de Patrimônio (com metodologia, tabela de taxas e exemplos), use a aba <strong style={{color:T.gold}}>💎 Gestão de Patrimônio</strong>.</>
-          ) : (
-            <>Esta é uma apresentação <strong style={{color:T.gold}}>genérica</strong> da CourInvest, ideal para enviar em primeiros contatos, reuniões comerciais ou apresentar a empresa a potenciais clientes. Para propostas personalizadas com valores e análise específica, use a aba <strong style={{color:T.gold}}>Propostas Comerciais</strong>.</>
-          )}
+          Esta é uma apresentação <strong style={{color:T.gold}}>genérica</strong> da CourInvest, ideal para enviar em primeiros contatos, reuniões comerciais ou apresentar a empresa a potenciais clientes. Para propostas personalizadas com valores e análise específica, use a aba <strong style={{color:T.gold}}>Propostas Comerciais</strong>.
         </div>
       </div>
 
@@ -30847,8 +30665,6 @@ var ApresentacaoGP=function(){
 
       {/* ── Conteúdo selecionado ── */}
       {apres==="gp" && <ApresentacaoGP/>}
-
-      {apres==="gpCaptacao" && <ApresentacaoCaptacaoGP/>}
 
       {apres==="gf" && <ApresentacaoGF/>}
 
@@ -35689,7 +35505,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '477';
+  var SW_VERSION = '478';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
