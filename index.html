@@ -11669,17 +11669,16 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         +'<path d="M 200,140 A 60,60 0 0 0 140,200" stroke-width="10" opacity="0.50"/>'
         +'<path d="M 200,170 A 30,30 0 0 0 170,200" stroke-width="6" opacity="0.65"/></g></svg>';
       
+      /* Logo oficial da Courinvest — ícone RASTER real (COURINVEST_ICON_URI, o mesmo PNG usado no
+         componente Logo do menu lateral e já padronizado na capa do Relatório Anual de IR), em vez
+         do SVG desenhado à mão que só imitava o formato do "C". */
       var logoCapa='<div style="display:flex;align-items:center;gap:14px">'
         +'<svg width="48" height="48" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0">'
-        +'<defs><linearGradient id="lgCapa" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">'
-        +'<stop offset="0%" stop-color="#F0D060"/><stop offset="50%" stop-color="#D4A328"/><stop offset="100%" stop-color="#B8891A"/></linearGradient></defs>'
-        +'<circle cx="50" cy="50" r="46" stroke="url(#lgCapa)" stroke-width="0.5" opacity=".15" fill="none"/>'
-        +'<path d="M50 6 C18 6,6 26,6 50 C6 74,18 94,50 94" stroke="url(#lgCapa)" stroke-width="5" stroke-linecap="round" fill="none"/>'
-        +'<path d="M50 18 C28 18,18 32,18 50 C18 68,28 82,50 82" stroke="url(#lgCapa)" stroke-width="4" stroke-linecap="round" fill="none" opacity=".7"/>'
-        +'<circle cx="58" cy="50" r="4" fill="url(#lgCapa)"/></svg>'
+        +'<image href="'+COURINVEST_ICON_URI+'" x="22.6" y="4" width="54.8" height="92" preserveAspectRatio="xMidYMid meet"/>'
+        +'</svg>'
         +'<div style="display:flex;flex-direction:column">'
         +'<div style="font-size:18px;font-weight:800;color:#fff;letter-spacing:1.5px;line-height:1;font-family:Outfit,sans-serif">COURINVEST</div>'
-        +'<div style="font-size:8.5px;font-weight:600;color:#B8C4D6;letter-spacing:3px;margin-top:3px;font-family:Outfit,sans-serif">CONSULTORIA EM INVESTIMENTOS</div>'
+        +'<div style="font-size:8.5px;font-weight:600;color:#D4A328;letter-spacing:3px;margin-top:3px;font-family:Outfit,sans-serif">CONSULTORIA EM INVESTIMENTOS</div>'
         +'</div></div>';
       
       var eyebrowCapa=function(t){return '<div class="cv-eyebrow"><span class="cv-eyebrow-line"></span><span class="cv-eyebrow-text">'+t+'</span></div>'};
@@ -11866,7 +11865,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
        Para outros tipos mantém layout único. */
     if(isDarkReport && isPat && (tipo==="mensal"||tipo==="anual"||tipo==="trimestral"||tipo==="completo")){
       
-      var miniHdr='<div class="cv-page-header-mini">'        +'<div class="cv-logo-mini-pdf"><span class="gold">◐</span> COURINVEST</div>'        +'<div class="cv-page-meta-mini">'+periodoLabel.toUpperCase()+'<br/><strong>'+c.nome+'</strong></div>'        +'</div>';
+      /* Logo oficial (mesmo ícone RASTER da capa) em vez do "◐" — um caractere Unicode qualquer
+         que só fazia às vezes de logo nas páginas internas do relatório. */
+      var miniHdr='<div class="cv-page-header-mini">'        +'<div class="cv-logo-mini-pdf" style="display:flex;align-items:center;gap:7px"><svg width="19" height="19" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0"><image href="'+COURINVEST_ICON_URI+'" x="22.6" y="4" width="54.8" height="92" preserveAspectRatio="xMidYMid meet"/></svg>COURINVEST</div>'        +'<div class="cv-page-meta-mini">'+periodoLabel.toUpperCase()+'<br/><strong>'+c.nome+'</strong></div>'        +'</div>';
       
       var miniFtr=function(pgNum,pgTotal){        return '<div class="cv-page-footer-mini">'          +'<div class="cv-footer-left-mini">COURINVEST · CONFIDENCIAL</div>'          +'<div class="cv-footer-pagenum-mini">'          +'<div class="cv-pagenum-line-mini"></div>'          +'<span class="cv-pagenum-mini">'+String(pgNum).padStart(2,"0")+'</span>'          +'<span class="cv-pagenum-total-mini">/ '+pgTotal+'</span>'          +'</div></div>';      };
       
@@ -35505,7 +35506,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '478';
+  var SW_VERSION = '479';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
