@@ -6076,8 +6076,20 @@ function CL({data:d,onSel:os,dispatch:dp}){
     });
     var ativosAtuais=(cliente._ativosImport||[]).filter(function(a){return a._fonteImportacao!=="efg"});
     var novoArray=ativosAtuais.concat(novasPosicoes);
-    dp({t:"UC",p:{id:cliente.id,_ativosImport:novoArray,_ativosTs:Date.now(),_efgCarteiraId:parsed.carteiraId}});
-    sGMsg("✅ Extrato EFG importado • "+novasPosicoes.length+" posições • "+cliente.nome);
+    /* === Soma no PATRIMÔNIO TOTAL exibido ===
+       O "patrimônio total" da ficha/dashboard/relatórios é lido de c.patGorila (campo
+       preenchido pela última importação Gorila) em ~30 pontos diferentes do código — não
+       é recalculado a partir de _ativosImport na maioria dos lugares. Sem atualizar esse
+       campo aqui, os ativos da EFG ficam "invisíveis" no total mesmo aparecendo certinho
+       na Carteira. Guardamos quanto do total já era EFG (_patrimonioEFG) pra poder
+       substituir sem duplicar quando o extrato for reimportado depois (valor atualizado). */
+    var totalEFGNovo=novasPosicoes.reduce(function(s,p){return s+(p.posR||0)},0);
+    var totalEFGAntigo=cliente._patrimonioEFG||0;
+    var totalAntigoEmUso=cliente.patGorila||cliente.pat||0;
+    var totalSemEFG=Math.max(0,totalAntigoEmUso-totalEFGAntigo);
+    var novoPatGorila=totalSemEFG+totalEFGNovo;
+    dp({t:"UC",p:{id:cliente.id,_ativosImport:novoArray,_ativosTs:Date.now(),_efgCarteiraId:parsed.carteiraId,_patrimonioEFG:totalEFGNovo,patGorila:novoPatGorila}});
+    sGMsg("✅ Extrato EFG importado • "+novasPosicoes.length+" posições • "+cliente.nome+" • Patrimônio total atualizado para "+fm(novoPatGorila));
     sExtPreview(null);
     setTimeout(function(){sGMsg("")},6000);
   };
@@ -35860,7 +35872,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '481';
+  var SW_VERSION = '482';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
