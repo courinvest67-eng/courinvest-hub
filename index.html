@@ -5966,17 +5966,26 @@ function CL({data:d,onSel:os,dispatch:dp}){
       if(!descricao)descricao="Posição "+(isin||mk.carteira);
 
       var isCash=/IBAN/i.test(bloco);
-      var valorEUR=0,pctCarteira=0;
+      var valorEUR=0,pctCarteira=0,custoCompraMoeda="",custoCompraValor=0;
       if(isCash){
         if(mk.moeda==="EUR")valorEUR=mk.nominal;
         else if(mk.moeda==="USD"&&taxaEurUsd)valorEUR=mk.nominal/taxaEurUsd;
         /* outras moedas de caixa (GBP/CHF): sem taxa cruzada confiável no texto — fica 0 pra revisão manual */
+        /* Caixa não tem "custo de compra" — o próprio saldo é o custo (sem ganho/perda) */
+        custoCompraMoeda=mk.moeda;custoCompraValor=mk.nominal;
       }else{
         /* Âncora: custo de compra (currency-tagged, ex "USD 513.696,68") é seguido por
            preço de mercado (unitário, descartado) e então valor de mercado EUR (o que queremos).
-           Juros acumulados EUR é opcional (só aparece em bonds, ausente em fundos sem cupom). */
-        var valM=bloco.match(/(?:USD|EUR|GBP|CHF)\s*[\d.,]+\s+[\d.,]+\s+([\d.,]+)(?:\s+[\d.,]+)?\s+(\d{1,3},\d{2})%/);
-        if(valM){valorEUR=parseNumBR(valM[1]);pctCarteira=parseNumBR(valM[2]);}
+           Juros acumulados EUR é opcional (só aparece em bonds, ausente em fundos sem cupom).
+           A moeda/valor do custo de compra (grupos 1/2) é a moeda de referência da carteira
+           (ex USD pra 214080-1), não necessariamente a mesma moeda do nominal da posição. */
+        var valM=bloco.match(/(USD|EUR|GBP|CHF)\s*([\d.,]+)\s+[\d.,]+\s+([\d.,]+)(?:\s+[\d.,]+)?\s+(\d{1,3},\d{2})%/);
+        if(valM){
+          custoCompraMoeda=valM[1];
+          custoCompraValor=parseNumBR(valM[2]);
+          valorEUR=parseNumBR(valM[3]);
+          pctCarteira=parseNumBR(valM[4]);
+        }
       }
 
       var tp;
@@ -5985,7 +5994,7 @@ function CL({data:d,onSel:os,dispatch:dp}){
       else if(/EQUITIES/i.test(classeAtual))tp="stock_us";
       else tp="fundo_mm_intl"; /* Investment Funds - Cash (SICAV money market) e demais fundos */
 
-      posicoes.push({carteira:mk.carteira,moeda:mk.moeda,nominal:mk.nominal,descricao:descricao,isin:isin,classe:classeAtual,valorEUR:valorEUR,pctCarteira:pctCarteira,tp:tp});
+      posicoes.push({carteira:mk.carteira,moeda:mk.moeda,nominal:mk.nominal,descricao:descricao,isin:isin,classe:classeAtual,valorEUR:valorEUR,pctCarteira:pctCarteira,custoCompraMoeda:custoCompraMoeda,custoCompraValor:custoCompraValor,tp:tp});
     }
     return {carteiraId:carteiraId,croNome:croNome,taxaEurUsd:taxaEurUsd,moedaAvaliacao:moedaAvaliacao,posicoes:posicoes};
   };
@@ -6046,6 +6055,23 @@ function CL({data:d,onSel:os,dispatch:dp}){
     reader.readAsArrayBuffer(file);
   };
 
+  /* Converte um valor de uma moeda (EUR/USD/GBP/CHF) pra outra, usando a taxa cruzada
+     EUR/USD do próprio extrato (mais precisa, do dia da avaliação) e, como fallback pra
+     BRL ou quando a taxa do extrato não está disponível, a tabela de câmbio aproximada
+     já usada em outros pontos do Hub (EXCHANGE_TO_BRL). GBP/CHF sem taxa cruzada no
+     extrato: aproxima 1:1 com EUR (raro nesses extratos, mas evita jogar fora o valor). */
+  var converterMoedaEFG=function(valor,moedaOrigem,moedaDestino,taxaEurUsd){
+    if(!valor)return 0;
+    if(moedaOrigem===moedaDestino)return valor;
+    var valorEUR;
+    if(moedaOrigem==="EUR")valorEUR=valor;
+    else if(moedaOrigem==="USD"&&taxaEurUsd)valorEUR=valor/taxaEurUsd;
+    else valorEUR=valor;
+    if(moedaDestino==="EUR")return valorEUR;
+    if(moedaDestino==="USD"&&taxaEurUsd)return valorEUR*taxaEurUsd;
+    return valorEUR*(EXCHANGE_TO_BRL.EUR||5.50);
+  };
+
   var confirmarImportExtratoExterior=function(){
     if(!extPreview||!extPreview.clienteId){sGMsg("⚠ Selecione o cliente antes de confirmar");return}
     var cliente=(d.cl||[]).find(function(c){return c.id===extPreview.clienteId});
@@ -6053,22 +6079,28 @@ function CL({data:d,onSel:os,dispatch:dp}){
     var moedaCliente=moedaCli(cliente).code;
     var parsed=extPreview.parsed;
     var novasPosicoes=parsed.posicoes.map(function(p,i){
-      var posR;
-      if(moedaCliente==="EUR")posR=p.valorEUR;
-      else if(moedaCliente==="USD"&&parsed.taxaEurUsd)posR=p.valorEUR*parsed.taxaEurUsd;
-      else posR=p.valorEUR*(EXCHANGE_TO_BRL.EUR||5.50);
+      var posR=converterMoedaEFG(p.valorEUR,"EUR",moedaCliente,parsed.taxaEurUsd);
+      /* Custo de aquisição: converte o "custo de compra" extraído (na moeda de referência
+         da carteira, ex USD) pra moeda do cliente, depois divide pelo nominal pra chegar
+         num preço médio por unidade — consistente com como cT=qtd*pm é calculado no resto
+         do app. Se não deu pra extrair custo (raro), fica 0 e o ganho/perda mostra o valor
+         cheio, como já era antes — sem regressão, só melhora quando a extração funciona. */
+      var custoTotalConvertido=p.custoCompraValor?converterMoedaEFG(p.custoCompraValor,p.custoCompraMoeda||"USD",moedaCliente,parsed.taxaEurUsd):0;
+      var pm=(p.nominal>0 && custoTotalConvertido>0)?(custoTotalConvertido/p.nominal):0;
       return{
         tk:p.isin||("EFG-"+i),
         nm:p.descricao,
         tp:p.tp,
         qtd:p.nominal,
-        pm:0,
-        pa:0,
+        pm:pm,
+        pa:posR&&p.nominal>0?(posR/p.nominal):0,
         posR:posR,
         inst:"EFG Bank (Luxembourg)",
         _isin:p.isin,
         _moedaOriginal:p.moeda,
         _valorEUR:p.valorEUR,
+        _custoCompraOriginal:p.custoCompraValor,
+        _custoCompraMoeda:p.custoCompraMoeda,
         _fonteImportacao:"efg",
         _carteiraEFG:parsed.carteiraId,
         _importadoEm:Date.now()
@@ -6966,6 +6998,7 @@ function CL({data:d,onSel:os,dispatch:dp}){
                     <th style={{padding:8,textAlign:"left"}}>Ativo</th>
                     <th style={{padding:8,textAlign:"left"}}>Classe</th>
                     <th style={{padding:8,textAlign:"right"}}>Qtd/Nominal</th>
+                    <th style={{padding:8,textAlign:"right"}}>Custo (compra)</th>
                     <th style={{padding:8,textAlign:"right"}}>Valor (EUR)</th>
                   </tr></thead>
                   <tbody>
@@ -6974,6 +7007,7 @@ function CL({data:d,onSel:os,dispatch:dp}){
                         <td style={{padding:8}}><div style={{fontWeight:700,color:T.t1}}>{p.descricao}</div>{p.isin && <div style={{fontSize:9,color:T.t3}}>{p.isin}</div>}</td>
                         <td style={{padding:8,color:T.t3,fontSize:10}}>{p.tp==="caixa"?"Caixa":p.tp==="bond_intl"?"Bond":p.tp==="fundo_mm_intl"?"Fundo MM":p.tp}</td>
                         <td style={{padding:8,textAlign:"right",fontFamily:"'JetBrains Mono'"}}>{p.nominal.toLocaleString("pt-BR")} {p.moeda}</td>
+                        <td style={{padding:8,textAlign:"right",fontFamily:"'JetBrains Mono'",color:p.custoCompraValor>0?T.t3:T.orange}}>{p.custoCompraValor>0?fmM(p.custoCompraValor,p.custoCompraMoeda||"USD"):"— ⚠"}</td>
                         <td style={{padding:8,textAlign:"right",fontFamily:"'JetBrains Mono'",color:p.valorEUR>0?T.t1:T.red}}>{fmM(p.valorEUR,"EUR")}{p.valorEUR<=0?" ⚠":""}</td>
                       </tr>
                     )})}
@@ -6981,7 +7015,7 @@ function CL({data:d,onSel:os,dispatch:dp}){
                 </table>
               </div>
               <div style={{fontSize:10,color:T.t3,marginTop:10,lineHeight:1.5}}>
-                Linhas com ⚠ não tiveram o valor identificado automaticamente — confira e ajuste na ficha do cliente após importar. O câmbio usado pra converter EUR na moeda do cliente é aproximado; revise se necessário.
+                Linhas com ⚠ não tiveram o valor (ou o custo de compra) identificado automaticamente — confira e ajuste na ficha do cliente após importar. O câmbio usado pra converter EUR/custo na moeda do cliente é aproximado; revise se necessário.
               </div>
               <div style={{display:"flex",gap:8,marginTop:14,paddingTop:14,borderTop:"1px solid "+T.bdrL}}>
                 <Bt v="secondary" onClick={function(){sExtPreview(null)}} style={{flex:1}}>Cancelar</Bt>
@@ -35872,7 +35906,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '482';
+  var SW_VERSION = '483';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
