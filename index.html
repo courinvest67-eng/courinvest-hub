@@ -1409,7 +1409,7 @@ const valorAtivosPrevidencia=function(c){
   return c._ativosImport.filter(function(a){return a.tp==="prev"})
     .reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
 };
-var RF_TIPOS=["cdb","lci","lca","lc","cri","cra","tesouro","deb","debi","fundo_rf","fundo_mm","fundo_camb","coe","poupanca"];
+var RF_TIPOS=["cdb","lci","lca","lc","cri","cra","tesouro","deb","debi","fundo_rf","fundo_mm","fundo_camb","coe","poupanca","bond_intl","fundo_mm_intl"];
 const valorAtivosRF=function(c){if(!c||!c._ativosImport)return 0;return c._ativosImport.filter(function(a){return RF_TIPOS.indexOf(a.tp)>=0}).reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);};
 const valorAtivosCaixa=function(c){if(!c||!c._ativosImport)return 0;return c._ativosImport.filter(function(a){return a.tp==="caixa"}).reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);};
 const valorAtivosCripto=function(c){if(!c||!c._ativosImport)return 0;return c._ativosImport.filter(function(a){return a.tp==="cripto"}).reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);};
@@ -5270,10 +5270,14 @@ function CL({data:d,onSel:os,dispatch:dp}){
   const bulkRef=React.useRef(null);
   const bulkFolderRef=React.useRef(null);
   const vestRef=React.useRef(null);
+  const extRef=React.useRef(null);
   const[gMsg,sGMsg]=useState("");
   const[bulkProgress,sBulkProgress]=useState(null);
   const[showBulkMenu,sShowBulkMenu]=useState(false);
   const[showAuditoria,sShowAuditoria]=useState(false);
+  const[showDup,sShowDup]=useState(false);
+  const[dupManterEscolha,sDupManterEscolha]=useState({});
+  const[extPreview,sExtPreview]=useState(null);
 
   /* === FERRAMENTA DE AUDITORIA — detecta clientes com ativos potencialmente mal classificados ===
      Roda as regras de classificação ATUALIZADAS contra os ativos importados e mostra divergências.
@@ -5327,6 +5331,59 @@ function CL({data:d,onSel:os,dispatch:dp}){
       }
     });
     return problemas;
+  };
+
+  /* === LIMPAR CLIENTES — detecção de duplicados ===
+     Agrupa clientes com nome idêntico (ignorando acentos/maiúsculas) ou muito parecido
+     (>=75% das palavras em comum, mínimo 2 palavras). Nunca apaga sozinho — só sugere
+     o grupo e qual ficha parece mais completa pra manter; quem decide é o usuário. */
+  var normalizarNomeCli=function(s){
+    return String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/\s+/g," ").trim();
+  };
+  var patrimonioDeCli=function(c){
+    var p=c.patGorila||c.pat||0;
+    if(!p && c._ativosImport && c._ativosImport.length>0){
+      p=c._ativosImport.reduce(function(s,at){return s+(at.posR||at.qtd*at.pa||0)},0);
+    }
+    return p||0;
+  };
+  var ordenarGrupoDup=function(grupo){
+    return grupo.slice().sort(function(a,b){
+      var pa=patrimonioDeCli(a),pb=patrimonioDeCli(b);
+      if(pb!==pa)return pb-pa;
+      var na=(a._ativosImport||[]).length,nb=(b._ativosImport||[]).length;
+      if(nb!==na)return nb-na;
+      return (b._ativosTs||0)-(a._ativosTs||0);
+    });
+  };
+  var detectarDuplicados=function(){
+    var lista=d.cl||[];
+    var grupos=[];
+    var usados={};
+    for(var i=0;i<lista.length;i++){
+      if(usados[lista[i].id])continue;
+      var base=lista[i];
+      var baseNorm=normalizarNomeCli(base.nome);
+      var baseWords=baseNorm.split(" ").filter(function(w){return w.length>1});
+      var grupo=[base];
+      usados[base.id]=1;
+      for(var j=i+1;j<lista.length;j++){
+        var outro=lista[j];
+        if(usados[outro.id])continue;
+        var outroNorm=normalizarNomeCli(outro.nome);
+        var mesmo=false;
+        if(outroNorm===baseNorm && baseNorm){mesmo=true;}
+        else{
+          var outroWords=outroNorm.split(" ").filter(function(w){return w.length>1});
+          var comuns=baseWords.filter(function(w){return outroWords.indexOf(w)>=0}).length;
+          var maiorSet=Math.max(baseWords.length,outroWords.length);
+          if(maiorSet>0 && comuns>=2 && (comuns/maiorSet)>=0.75)mesmo=true;
+        }
+        if(mesmo){grupo.push(outro);usados[outro.id]=1;}
+      }
+      if(grupo.length>1)grupos.push(grupo);
+    }
+    return grupos;
   };
 
   /* === Helper: extrai metadados do nome do arquivo ===
@@ -5848,6 +5905,181 @@ function CL({data:d,onSel:os,dispatch:dp}){
       }).catch(function(err){sGMsg("⚠ Erro PDF Vest: "+err.message);console.error(err)});
     };
     reader.readAsArrayBuffer(file);
+  };
+
+  /* === IMPORTADOR DE EXTRATO DE POSIÇÃO NO EXTERIOR (multi-formato) ===
+     Substitui o importador exclusivo da Vest. Detecta automaticamente o banco/corretora
+     pelo conteúdo do PDF e roteia pro parser certo. Hoje: EFG Bank (posição detalhada,
+     linha a linha) e Vest (mantido, formato de resumo de rentabilidade já existente).
+     Pra adicionar um novo banco (ex: Interactive Brokers) no futuro: criar um novo
+     parserXXX(fullText) e um novo "else if" em detectarFormatoExtratoExterior. */
+  var parseNumBR=function(s){
+    if(s==null||s==="")return 0;
+    var t=String(s).trim().replace(/\./g,"").replace(",",".");
+    var n=parseFloat(t);
+    return isNaN(n)?0:n;
+  };
+
+  var detectarFormatoExtratoExterior=function(fullText){
+    if(/EFG/.test(fullText) && /(POSI[ÇC][ÕO]ES DETALHADAS|AVALIA[ÇC][ÃA]O DE CARTEIRA)/i.test(fullText))return "efg";
+    if(/Account Name/i.test(fullText) && /Vest/i.test(fullText))return "vest";
+    if(/Interactive Brokers|IBKR|Activity Statement/i.test(fullText))return "ibkr_nao_suportado";
+    return null;
+  };
+
+  /* Parser EFG Bank (Luxembourg) — extrato "Avaliação de Carteira Consolidada".
+     O extrato NÃO traz o nome do cliente (só nº de carteira + nome do CRO/gestor),
+     por isso a tela de revisão sempre pede confirmação manual do cliente na 1ª importação
+     — nas próximas, a carteira já fica memorizada no cadastro do cliente (c._efgCarteiraId). */
+  var parseEFGExtrato=function(fullText){
+    var carteiraM=fullText.match(/Carteira\(s\)[:\s]+(\d{4,8})/i);
+    var carteiraId=carteiraM?carteiraM[1]:"";
+    var croM=fullText.match(/\bCRO\s+([A-ZÀ-Ü][A-ZÀ-Üa-zà-ü'\s]{3,40}?)(?:\s+DESEMP|\s+\d|\s+TOTAL|\n|$)/);
+    var croNome=croM?croM[1].replace(/\s+/g," ").trim():"";
+    var taxaM=fullText.match(/EUR\s*\/\s*USD\s+([\d.,]+)/i);
+    var taxaEurUsd=taxaM?parseNumBR(taxaM[1]):null;
+    var moedaAvalM=fullText.match(/Moeda de Avalia[çc][ãa]o[:\s]+([A-Z]{3})/i);
+    var moedaAvaliacao=moedaAvalM?moedaAvalM[1]:"EUR";
+
+    var marcadores=[];
+    var reClasse=/(CASH AND CASH EQUIVALENTS|BONDS|EQUITIES|STRUCTURED PRODUCTS|ALTERNATIVE INVESTMENTS)/g;
+    var mc;
+    while((mc=reClasse.exec(fullText))){marcadores.push({idx:mc.index,tipo:"classe",val:mc[1]});}
+    var reRow=/(\d{4,8}-\d)\s+(USD|EUR|GBP|CHF)\s+([\d.,]+)\s+/g;
+    var mr;
+    while((mr=reRow.exec(fullText))){marcadores.push({idx:mr.index,tipo:"row",carteira:mr[1],moeda:mr[2],nominal:parseNumBR(mr[3]),fim:reRow.lastIndex});}
+    marcadores.sort(function(a,b){return a.idx-b.idx});
+
+    var posicoes=[];
+    var classeAtual="";
+    for(var i=0;i<marcadores.length;i++){
+      var mk=marcadores[i];
+      if(mk.tipo==="classe"){classeAtual=mk.val;continue;}
+      var proximoIdx=(i+1<marcadores.length)?marcadores[i+1].idx:fullText.length;
+      var bloco=fullText.slice(mk.fim,proximoIdx);
+      var isinM=bloco.match(/ISIN\s+([A-Z]{2}[A-Z0-9]{9}\d)/);
+      var isin=isinM?isinM[1]:"";
+      var descM=bloco.match(/^(.*?)(?:Start of year price|Yield to maturity|Rating\s|ISIN\s|IBAN\s|$)/);
+      var descricao=descM?descM[1].replace(/\s+/g," ").trim():bloco.slice(0,60).trim();
+      descricao=descricao.replace(/\s*-\s*$/,"").trim();
+      if(descricao.length>90)descricao=descricao.slice(0,90).trim();
+      if(!descricao)descricao="Posição "+(isin||mk.carteira);
+
+      var isCash=/IBAN/i.test(bloco);
+      var valorEUR=0,pctCarteira=0;
+      if(isCash){
+        if(mk.moeda==="EUR")valorEUR=mk.nominal;
+        else if(mk.moeda==="USD"&&taxaEurUsd)valorEUR=mk.nominal/taxaEurUsd;
+        /* outras moedas de caixa (GBP/CHF): sem taxa cruzada confiável no texto — fica 0 pra revisão manual */
+      }else{
+        /* Âncora: custo de compra (currency-tagged, ex "USD 513.696,68") é seguido por
+           preço de mercado (unitário, descartado) e então valor de mercado EUR (o que queremos).
+           Juros acumulados EUR é opcional (só aparece em bonds, ausente em fundos sem cupom). */
+        var valM=bloco.match(/(?:USD|EUR|GBP|CHF)\s*[\d.,]+\s+[\d.,]+\s+([\d.,]+)(?:\s+[\d.,]+)?\s+(\d{1,3},\d{2})%/);
+        if(valM){valorEUR=parseNumBR(valM[1]);pctCarteira=parseNumBR(valM[2]);}
+      }
+
+      var tp;
+      if(isCash)tp="caixa";
+      else if(/BONDS/i.test(classeAtual))tp="bond_intl";
+      else if(/EQUITIES/i.test(classeAtual))tp="stock_us";
+      else tp="fundo_mm_intl"; /* Investment Funds - Cash (SICAV money market) e demais fundos */
+
+      posicoes.push({carteira:mk.carteira,moeda:mk.moeda,nominal:mk.nominal,descricao:descricao,isin:isin,classe:classeAtual,valorEUR:valorEUR,pctCarteira:pctCarteira,tp:tp});
+    }
+    return {carteiraId:carteiraId,croNome:croNome,taxaEurUsd:taxaEurUsd,moedaAvaliacao:moedaAvaliacao,posicoes:posicoes};
+  };
+
+  var importExtratoExterior=function(file){
+    if(!file)return;
+    if(!file.name.match(/\.pdf$/i)){sGMsg("⚠ Selecione um arquivo PDF do extrato");return}
+    var reader=new FileReader();
+    reader.onload=function(e){
+      var data=new Uint8Array(e.target.result);
+      if(typeof pdfjsLib==="undefined"){sGMsg("⚠ PDF.js não carregado");return}
+      pdfjsLib.getDocument({data:data}).promise.then(function(pdf){
+        var promises=[];
+        for(var p=1;p<=pdf.numPages;p++){
+          promises.push(pdf.getPage(p).then(function(page){
+            return page.getTextContent().then(function(tc){
+              return tc.items.map(function(it){return it.str}).join(" ");
+            });
+          }));
+        }
+        return Promise.all(promises);
+      }).then(function(pages){
+        var fullText=pages.join("\n");
+        var formato=detectarFormatoExtratoExterior(fullText);
+        if(formato==="vest"){
+          importVestPDF(file);
+          return;
+        }
+        if(formato==="ibkr_nao_suportado"){
+          sGMsg("⚠ Reconheci um extrato da Interactive Brokers, mas esse formato ainda não está configurado. Me manda um extrato de exemplo (pode tampar os valores) que eu configuro o parser.");
+          return;
+        }
+        if(formato!=="efg"){
+          sGMsg("⚠ Formato de extrato não reconhecido. Hoje o importador reconhece: EFG Bank (Luxembourg) e Vest. Novos bancos/corretoras podem ser adicionados sob pedido.");
+          return;
+        }
+        var parsed=parseEFGExtrato(fullText);
+        if(!parsed.posicoes||parsed.posicoes.length===0){
+          sGMsg("⚠ Não encontrei posições no extrato EFG. O formato pode ter mudado — me avise pra eu ajustar o parser.");
+          return;
+        }
+        var sugeridoId="";
+        var porCarteira=(d.cl||[]).find(function(c){return c._efgCarteiraId&&c._efgCarteiraId===parsed.carteiraId});
+        if(porCarteira)sugeridoId=porCarteira.id;
+        else if(parsed.croNome){
+          var croNorm=parsed.croNome.toLowerCase().replace(/\s+/g," ").trim();
+          var croWords=croNorm.split(/\s+/).filter(function(w){return w.length>2});
+          var porNome=(d.cl||[]).find(function(c){
+            var cn=(c.nome||"").toLowerCase().replace(/\s+/g," ").trim();
+            var hits=croWords.filter(function(w){return cn.indexOf(w)>=0}).length;
+            return hits>=2;
+          });
+          if(porNome)sugeridoId=porNome.id;
+        }
+        sExtPreview({parsed:parsed,clienteId:sugeridoId,fileName:file.name});
+      }).catch(function(err){sGMsg("⚠ Erro ao ler PDF do extrato: "+err.message);console.error(err)});
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  var confirmarImportExtratoExterior=function(){
+    if(!extPreview||!extPreview.clienteId){sGMsg("⚠ Selecione o cliente antes de confirmar");return}
+    var cliente=(d.cl||[]).find(function(c){return c.id===extPreview.clienteId});
+    if(!cliente){sGMsg("⚠ Cliente não encontrado");return}
+    var moedaCliente=moedaCli(cliente).code;
+    var parsed=extPreview.parsed;
+    var novasPosicoes=parsed.posicoes.map(function(p,i){
+      var posR;
+      if(moedaCliente==="EUR")posR=p.valorEUR;
+      else if(moedaCliente==="USD"&&parsed.taxaEurUsd)posR=p.valorEUR*parsed.taxaEurUsd;
+      else posR=p.valorEUR*(EXCHANGE_TO_BRL.EUR||5.50);
+      return{
+        tk:p.isin||("EFG-"+i),
+        nm:p.descricao,
+        tp:p.tp,
+        qtd:p.nominal,
+        pm:0,
+        pa:0,
+        posR:posR,
+        inst:"EFG Bank (Luxembourg)",
+        _isin:p.isin,
+        _moedaOriginal:p.moeda,
+        _valorEUR:p.valorEUR,
+        _fonteImportacao:"efg",
+        _carteiraEFG:parsed.carteiraId,
+        _importadoEm:Date.now()
+      };
+    });
+    var ativosAtuais=(cliente._ativosImport||[]).filter(function(a){return a._fonteImportacao!=="efg"});
+    var novoArray=ativosAtuais.concat(novasPosicoes);
+    dp({t:"UC",p:{id:cliente.id,_ativosImport:novoArray,_ativosTs:Date.now(),_efgCarteiraId:parsed.carteiraId}});
+    sGMsg("✅ Extrato EFG importado • "+novasPosicoes.length+" posições • "+cliente.nome);
+    sExtPreview(null);
+    setTimeout(function(){sGMsg("")},6000);
   };
 
   var importGorilaCliente=function(file){
@@ -6575,8 +6807,11 @@ function CL({data:d,onSel:os,dispatch:dp}){
             </div>
           )}
         </div>
-        <input ref={vestRef} type="file" accept=".pdf,application/pdf" onChange={function(e){if(e.target.files[0])importVestPDF(e.target.files[0]);e.target.value=""}} style={{display:"none"}}/>
-        <Bt v="secondary" onClick={function(){vestRef.current&&vestRef.current.click()}} style={{fontSize:11,padding:"10px 14px",background:"rgba(37,99,235,0.08)",color:"#2563EB",border:"1px solid rgba(37,99,235,0.25)"}}>🇺🇸 Importar Extrato Vest</Bt>
+        {/* input oculto da Vest — mantido pro parser antigo (_vestRent), agora roteado automaticamente pelo detector de formato abaixo */}
+        <input ref={vestRef} type="file" accept=".pdf,application/pdf" style={{display:"none"}}/>
+        <input ref={extRef} type="file" accept=".pdf,application/pdf" onChange={function(e){if(e.target.files[0])importExtratoExterior(e.target.files[0]);e.target.value=""}} style={{display:"none"}}/>
+        <Bt v="secondary" onClick={function(){extRef.current&&extRef.current.click()}} style={{fontSize:11,padding:"10px 14px",background:"rgba(37,99,235,0.08)",color:"#2563EB",border:"1px solid rgba(37,99,235,0.25)"}}>🌐 Extrato Posição Exterior</Bt>
+        <Bt v="secondary" onClick={function(){sShowDup(true)}} style={{fontSize:11,padding:"10px 14px",background:"rgba(239,100,97,0.08)",color:T.red,border:"1px solid rgba(239,100,97,0.25)"}}>🧹 Limpar Clientes</Bt>
 
 
       </div>
@@ -6631,6 +6866,119 @@ function CL({data:d,onSel:os,dispatch:dp}){
         </Cd>
       )}
       {gMsg && <div style={{padding:10,marginBottom:12,borderRadius:10,fontSize:12,fontWeight:600,background:gMsg.indexOf("✅")>=0?T.greenD:T.orangeD,color:gMsg.indexOf("✅")>=0?T.green:T.orange,textAlign:"center"}}>{gMsg}</div>}
+
+      {/* === MODAL LIMPAR CLIENTES (remoção de duplicados) === */}
+      <Mo open={showDup} onClose={function(){sShowDup(false);sDupManterEscolha({})}} title="🧹 Limpar Clientes Duplicados" wide>
+        {(function(){
+          var grupos=detectarDuplicados();
+          if(grupos.length===0){
+            return (
+              <div style={{padding:30,textAlign:"center"}}>
+                <div style={{fontSize:48,marginBottom:12}}>✅</div>
+                <div style={{fontSize:16,fontWeight:700,color:T.green,marginBottom:6}}>Nenhum duplicado encontrado</div>
+                <div style={{fontSize:12,color:T.t3,maxWidth:400,margin:"0 auto",lineHeight:1.6}}>Todos os {(d.cl||[]).length} clientes cadastrados têm nomes únicos.</div>
+              </div>
+            );
+          }
+          return (
+            <div>
+              <div style={{fontSize:12,color:T.t3,marginBottom:14,lineHeight:1.6}}>
+                Encontrei {grupos.length} grupo{grupos.length>1?"s":""} de clientes com nomes iguais ou muito parecidos. Escolha qual ficha manter em cada grupo — as demais serão apagadas permanentemente (ativos importados e interações incluídos). Pré-selecionei a ficha com mais patrimônio/dados, mas você pode trocar.
+              </div>
+              {grupos.map(function(grupo,gi){
+                var ordenado=ordenarGrupoDup(grupo);
+                var manterId=(dupManterEscolha[gi]!==undefined)?dupManterEscolha[gi]:ordenado[0].id;
+                return (
+                  <Cd key={gi} style={{padding:14,marginBottom:12}}>
+                    <div style={{fontSize:12,fontWeight:700,color:T.gold,marginBottom:8}}>Grupo {gi+1} — "{grupo[0].nome}" ({grupo.length} fichas)</div>
+                    {ordenado.map(function(c){
+                      var manter=c.id===manterId;
+                      return (
+                        <div key={c.id} onClick={function(){var nx=Object.assign({},dupManterEscolha);nx[gi]=c.id;sDupManterEscolha(nx)}} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",borderRadius:8,cursor:"pointer",marginBottom:6,background:manter?T.greenD:"rgba(239,100,97,0.06)",border:"1px solid "+(manter?"rgba(45,212,160,0.35)":"rgba(239,100,97,0.2)")}}>
+                          <span style={{fontSize:16}}>{manter?"✅":"🗑"}</span>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:12,fontWeight:700,color:T.t1}}>{c.nome}</div>
+                            <div style={{fontSize:10,color:T.t3}}>{fm(patrimonioDeCli(c))} · {(c._ativosImport||[]).length} ativos importados{c._ativosTs?(" · atualizado "+new Date(c._ativosTs).toLocaleDateString("pt-BR")):" · sem importação"}</div>
+                          </div>
+                          <div style={{fontSize:10,fontWeight:700,color:manter?T.green:T.red}}>{manter?"MANTER":"EXCLUIR"}</div>
+                        </div>
+                      );
+                    })}
+                  </Cd>
+                );
+              })}
+              <div style={{display:"flex",gap:8,marginTop:14,paddingTop:14,borderTop:"1px solid "+T.bdrL}}>
+                <Bt v="secondary" onClick={function(){sShowDup(false);sDupManterEscolha({})}} style={{flex:1}}>Cancelar</Bt>
+                <Bt onClick={function(){
+                  var aExcluir=[];
+                  grupos.forEach(function(grupo,gi){
+                    var ordenado=ordenarGrupoDup(grupo);
+                    var manterId=(dupManterEscolha[gi]!==undefined)?dupManterEscolha[gi]:ordenado[0].id;
+                    grupo.forEach(function(c){if(c.id!==manterId)aExcluir.push(c);});
+                  });
+                  if(aExcluir.length===0)return;
+                  if(window.confirm("Excluir "+aExcluir.length+" cliente(s) duplicado(s) permanentemente?\n\n"+aExcluir.map(function(c){return "• "+c.nome}).join("\n")+"\n\nEsta ação NÃO pode ser desfeita.")){
+                    aExcluir.forEach(function(c){dp({t:"DC",p:c.id})});
+                    sShowDup(false);sDupManterEscolha({});
+                    sGMsg("✅ "+aExcluir.length+" cliente(s) duplicado(s) removido(s)");
+                    setTimeout(function(){sGMsg("")},4000);
+                  }
+                }} style={{flex:1,background:T.red}}>🗑 Excluir Selecionados</Bt>
+              </div>
+            </div>
+          );
+        })()}
+      </Mo>
+
+      {/* === MODAL REVISÃO — IMPORTAÇÃO DE EXTRATO DE POSIÇÃO NO EXTERIOR === */}
+      <Mo open={!!extPreview} onClose={function(){sExtPreview(null)}} title="🌐 Revisar Extrato de Posição no Exterior" wide>
+        {extPreview && (function(){
+          var parsed=extPreview.parsed;
+          var totalEUR=parsed.posicoes.reduce(function(s,p){return s+(p.valorEUR||0)},0);
+          return (
+            <div>
+              <div style={{fontSize:12,color:T.t3,marginBottom:12,lineHeight:1.6}}>
+                Extrato <strong style={{color:T.t1}}>EFG Bank</strong>{parsed.carteiraId?(" · Carteira "+parsed.carteiraId):""}{parsed.croNome?(" · CRO: "+parsed.croNome):""} · {parsed.posicoes.length} posições · Total {fmM(totalEUR,"EUR")}
+              </div>
+              <div style={{marginBottom:14}}>
+                <div style={{fontSize:11,fontWeight:700,color:T.t2,marginBottom:6}}>Este extrato pertence a qual cliente?</div>
+                <select value={extPreview.clienteId} onChange={function(e){sExtPreview(Object.assign({},extPreview,{clienteId:e.target.value}))}} style={{...inpS,width:"100%"}}>
+                  <option value="">— Selecione o cliente —</option>
+                  {(d.cl||[]).map(function(c){return <option key={c.id} value={c.id}>{c.nome}</option>})}
+                </select>
+                {!extPreview.clienteId && <div style={{fontSize:10,color:T.orange,marginTop:6}}>⚠ O extrato EFG não traz o nome do cliente — escolha manualmente. Da próxima vez a carteira {parsed.carteiraId||"—"} já vem pré-selecionada automaticamente.</div>}
+              </div>
+              <div style={{maxHeight:340,overflow:"auto",border:"1px solid "+T.bdrL,borderRadius:10}}>
+                <table style={{width:"100%",fontSize:11,borderCollapse:"collapse"}}>
+                  <thead><tr style={{background:"rgba(255,255,255,0.03)"}}>
+                    <th style={{padding:8,textAlign:"left"}}>Ativo</th>
+                    <th style={{padding:8,textAlign:"left"}}>Classe</th>
+                    <th style={{padding:8,textAlign:"right"}}>Qtd/Nominal</th>
+                    <th style={{padding:8,textAlign:"right"}}>Valor (EUR)</th>
+                  </tr></thead>
+                  <tbody>
+                    {parsed.posicoes.map(function(p,i){return(
+                      <tr key={i} style={{borderTop:"1px solid "+T.bdrL}}>
+                        <td style={{padding:8}}><div style={{fontWeight:700,color:T.t1}}>{p.descricao}</div>{p.isin && <div style={{fontSize:9,color:T.t3}}>{p.isin}</div>}</td>
+                        <td style={{padding:8,color:T.t3,fontSize:10}}>{p.tp==="caixa"?"Caixa":p.tp==="bond_intl"?"Bond":p.tp==="fundo_mm_intl"?"Fundo MM":p.tp}</td>
+                        <td style={{padding:8,textAlign:"right",fontFamily:"'JetBrains Mono'"}}>{p.nominal.toLocaleString("pt-BR")} {p.moeda}</td>
+                        <td style={{padding:8,textAlign:"right",fontFamily:"'JetBrains Mono'",color:p.valorEUR>0?T.t1:T.red}}>{fmM(p.valorEUR,"EUR")}{p.valorEUR<=0?" ⚠":""}</td>
+                      </tr>
+                    )})}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{fontSize:10,color:T.t3,marginTop:10,lineHeight:1.5}}>
+                Linhas com ⚠ não tiveram o valor identificado automaticamente — confira e ajuste na ficha do cliente após importar. O câmbio usado pra converter EUR na moeda do cliente é aproximado; revise se necessário.
+              </div>
+              <div style={{display:"flex",gap:8,marginTop:14,paddingTop:14,borderTop:"1px solid "+T.bdrL}}>
+                <Bt v="secondary" onClick={function(){sExtPreview(null)}} style={{flex:1}}>Cancelar</Bt>
+                <Bt onClick={confirmarImportExtratoExterior} style={{flex:1}}>✅ Confirmar Importação ({parsed.posicoes.length} posições)</Bt>
+              </div>
+            </div>
+          );
+        })()}
+      </Mo>
 
       {/* === MODAL AUDITORIA DE CLASSIFICAÇÕES === */}
       <Mo open={showAuditoria} onClose={function(){sShowAuditoria(false)}} title="🔍 Auditoria de Classificações" wide>
@@ -7342,7 +7690,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
     if(aportesManual)return;
     if(!enr||enr.length===0)return;
     
-    var TP2M={cdb:"rf",lci:"rf",lca:"rf",lc:"rf",cri:"rf",cra:"rf",tesouro:"rf",deb:"rf",debi:"rf",fundo_rf:"rf",fundo_mm:"rf",fundo_camb:"rf",coe:"rf",poupanca:"rf",acao:"rv",fii:"rv",fiagro:"rv",fip:"rv",etf_br:"rv",bdr:"rv",fundo_acoes:"rv",ouro:"rv",fundo_infra:"rv",stock_us:"ext",etf_int:"ext",etf_eu:"ext",reit:"ext",caixa:"caixa",cripto:"cripto",prev:"prev"};
+    var TP2M={cdb:"rf",lci:"rf",lca:"rf",lc:"rf",cri:"rf",cra:"rf",tesouro:"rf",deb:"rf",debi:"rf",fundo_rf:"rf",fundo_mm:"rf",fundo_camb:"rf",coe:"rf",poupanca:"rf",acao:"rv",fii:"rv",fiagro:"rv",fip:"rv",etf_br:"rv",bdr:"rv",fundo_acoes:"rv",ouro:"rv",fundo_infra:"rv",stock_us:"ext",etf_int:"ext",etf_eu:"ext",reit:"ext",bond_intl:"ext",fundo_mm_intl:"ext",caixa:"caixa",cripto:"cripto",prev:"prev"};
     var MACROS_K=["rf","rv","ext","caixa","prev"];
     var atualMacro={},atualSub={};
     enr.forEach(function(a){
@@ -8936,7 +9284,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       
       var secAtiva=function(k){return sec[k]!==false};
       /* Mapeamento macro-classe reusado em várias seções (Currency, Composição Detalhada) */
-      var TP_MACRO={cdb:"rf",lci:"rf",lca:"rf",lc:"rf",cri:"rf",cra:"rf",tesouro:"rf",deb:"rf",debi:"rf",fundo_rf:"rf",fundo_mm:"rf",fundo_camb:"rf",coe:"rf",poupanca:"rf",acao:"rv",fii:"rv",fiagro:"rv",fip:"rv",etf_br:"rv",bdr:"rv",fundo_acoes:"rv",ouro:"rv",fundo_infra:"rv",stock_us:"ext",etf_int:"ext",etf_eu:"ext",reit:"ext",caixa:"caixa",cripto:"cripto",prev:"prev"};
+      var TP_MACRO={cdb:"rf",lci:"rf",lca:"rf",lc:"rf",cri:"rf",cra:"rf",tesouro:"rf",deb:"rf",debi:"rf",fundo_rf:"rf",fundo_mm:"rf",fundo_camb:"rf",coe:"rf",poupanca:"rf",acao:"rv",fii:"rv",fiagro:"rv",fip:"rv",etf_br:"rv",bdr:"rv",fundo_acoes:"rv",ouro:"rv",fundo_infra:"rv",stock_us:"ext",etf_int:"ext",etf_eu:"ext",reit:"ext",bond_intl:"ext",fundo_mm_intl:"ext",caixa:"caixa",cripto:"cripto",prev:"prev"};
       var MACRO_ORDEM=["rf","rv","ext","prev","caixa","cripto","outros"];
       var MACRO_LBL={rf:{l:"Renda Fixa",c:"#38BDF8"},rv:{l:"Renda Variável",c:"#2DD4A0"},ext:{l:"Exterior",c:"#A78BFA"},prev:{l:"Previdência",c:"#F472B6"},caixa:{l:"Caixa",c:"#FBBF24"},cripto:{l:"Cripto",c:"#F59E0B"},outros:{l:"Outros",c:"#94A3B8"}};
       var tituloRel=tipo==="anual"?"Relatório Anual":(tipo==="trimestral"?"Relatório Trimestral":(tipo==="completo"?"Relatório Completo":"Relatório Mensal"));
@@ -14032,7 +14380,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         var TP_TO_MACRO_VG={
           cdb:"rf",lci:"rf",lca:"rf",lc:"rf",cri:"rf",cra:"rf",tesouro:"rf",deb:"rf",debi:"rf",fundo_rf:"rf",fundo_mm:"rf",fundo_camb:"rf",coe:"rf",poupanca:"rf",
           acao:"rv",fii:"rv",fiagro:"rv",fip:"rv",etf_br:"rv",bdr:"rv",fundo_acoes:"rv",ouro:"rv",fundo_infra:"rv",
-          stock_us:"ext",etf_int:"ext",etf_eu:"ext",reit:"ext",
+          stock_us:"ext",etf_int:"ext",etf_eu:"ext",reit:"ext",bond_intl:"ext",fundo_mm_intl:"ext",
           caixa:"caixa",cripto:"cripto",
           prev:"prev"
         };
@@ -15504,7 +15852,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                 var TP_TO_MACRO={
                   cdb:"rf",lci:"rf",lca:"rf",lc:"rf",cri:"rf",cra:"rf",tesouro:"rf",deb:"rf",debi:"rf",fundo_rf:"rf",fundo_mm:"rf",fundo_camb:"rf",coe:"rf",poupanca:"rf",
                   acao:"rv",fii:"rv",fiagro:"rv",fip:"rv",etf_br:"rv",bdr:"rv",fundo_acoes:"rv",ouro:"rv",fundo_infra:"rv",
-                  stock_us:"ext",etf_int:"ext",etf_eu:"ext",reit:"ext",
+                  stock_us:"ext",etf_int:"ext",etf_eu:"ext",reit:"ext",bond_intl:"ext",fundo_mm_intl:"ext",
                   caixa:"caixa",cripto:"cripto",
                   prev:"prev"
                 };
@@ -17782,7 +18130,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       {tab==="aportes" && (isPat||isFin) && (function(){
         /* ===== REBALANCEAMENTO INTELIGENTE ===== */
         
-        var TP2M={cdb:"rf",lci:"rf",lca:"rf",lc:"rf",cri:"rf",cra:"rf",tesouro:"rf",deb:"rf",debi:"rf",fundo_rf:"rf",fundo_mm:"rf",fundo_camb:"rf",coe:"rf",poupanca:"rf",acao:"rv",fii:"rv",fiagro:"rv",fip:"rv",etf_br:"rv",bdr:"rv",fundo_acoes:"rv",ouro:"rv",fundo_infra:"rv",stock_us:"ext",etf_int:"ext",etf_eu:"ext",reit:"ext",caixa:"caixa",cripto:"cripto",prev:"prev"};
+        var TP2M={cdb:"rf",lci:"rf",lca:"rf",lc:"rf",cri:"rf",cra:"rf",tesouro:"rf",deb:"rf",debi:"rf",fundo_rf:"rf",fundo_mm:"rf",fundo_camb:"rf",coe:"rf",poupanca:"rf",acao:"rv",fii:"rv",fiagro:"rv",fip:"rv",etf_br:"rv",bdr:"rv",fundo_acoes:"rv",ouro:"rv",fundo_infra:"rv",stock_us:"ext",etf_int:"ext",etf_eu:"ext",reit:"ext",bond_intl:"ext",fundo_mm_intl:"ext",caixa:"caixa",cripto:"cripto",prev:"prev"};
         var MACRO_L={rf:"Renda Fixa",rv:"Renda Variável",ext:"Exterior",caixa:"Caixa",cripto:"Cripto",prev:"Previdência",outros:"Outros"};
         var MACRO_C={rf:"#38BDF8",rv:"#2DD4A0",ext:"#A78BFA",caixa:"#FBBF24",cripto:"#F59E0B",prev:"#F472B6",outros:"#94A3B8"};
         
@@ -20034,7 +20382,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                ================================================================ */
             (function(){
               /* Detecta se o cliente tem ativos do exterior — afeta se mostramos a Parte 2 */
-              var TP_MACRO_IRPF={cdb:"rf",lci:"rf",lca:"rf",lc:"rf",cri:"rf",cra:"rf",tesouro:"rf",deb:"rf",debi:"rf",fundo_rf:"rf",fundo_mm:"rf",fundo_camb:"rf",coe:"rf",poupanca:"rf",acao:"rv",fii:"rv",fiagro:"rv",fip:"rv",etf_br:"rv",bdr:"rv",fundo_acoes:"rv",ouro:"rv",fundo_infra:"rv",stock_us:"ext",etf_int:"ext",etf_eu:"ext",reit:"ext",caixa:"caixa",cripto:"cripto",prev:"prev"};
+              var TP_MACRO_IRPF={cdb:"rf",lci:"rf",lca:"rf",lc:"rf",cri:"rf",cra:"rf",tesouro:"rf",deb:"rf",debi:"rf",fundo_rf:"rf",fundo_mm:"rf",fundo_camb:"rf",coe:"rf",poupanca:"rf",acao:"rv",fii:"rv",fiagro:"rv",fip:"rv",etf_br:"rv",bdr:"rv",fundo_acoes:"rv",ouro:"rv",fundo_infra:"rv",stock_us:"ext",etf_int:"ext",etf_eu:"ext",reit:"ext",bond_intl:"ext",fundo_mm_intl:"ext",caixa:"caixa",cripto:"cripto",prev:"prev"};
               var temExterior=enr.some(function(a){return TP_MACRO_IRPF[a.tp]==="ext"});
               var anoBase=irpfAnoBase;
               var anoDec=anoBase+1;
@@ -35512,7 +35860,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '480';
+  var SW_VERSION = '481';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
