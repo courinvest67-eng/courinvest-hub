@@ -35528,6 +35528,15 @@ function App({authUser}){
             <span style={{fontSize:15,fontWeight:800,color:T.gold}}>COURINVEST</span>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
+            {/* Botão de atualização do PWA — antes só existia no header desktop (!isMobile),
+               então no celular a nova versão nunca tinha um jeito visível de ser aplicada
+               (ficava esperando o navegador atualizar sozinho, o que pode demorar ou nem
+               acontecer de forma confiável). Ver correção completa no service worker abaixo. */}
+            {pwaUpdate && (
+              <button onClick={atualizarPWA} title="Nova versão disponível — toque pra atualizar" style={{display:"flex",alignItems:"center",gap:4,fontSize:9,color:T.gold,padding:"3px 8px",background:T.goldD,border:"1px solid "+T.gold+"33",borderRadius:20,fontWeight:700,cursor:"pointer",animation:"pulse 2s ease-in-out infinite"}}>
+                ⚡
+              </button>
+            )}
             <div title={syncState==="synced"?"Sincronizado":syncState==="loading"?"Sincronizando":"Offline"} style={{width:8,height:8,borderRadius:"50%",background:syncState==="synced"?T.green:syncState==="loading"?T.gold:T.orange,animation:syncState==="loading"?"pulse 1.5s ease-in-out infinite":"none"}}/>
             <div style={{position:"relative"}}>
               <button onClick={function(){sShowN(!showN)}} style={{background:"none",border:"none",fontSize:17,cursor:"pointer",padding:4}}>🔔
@@ -35906,7 +35915,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '483';
+  var SW_VERSION = '484';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
@@ -35936,8 +35945,16 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     '  if(e.request.method!=="GET")return;',
     '  var url=e.request.url;',
     '  if(url.indexOf("firestore.googleapis.com")>-1||url.indexOf("firebase")>-1)return;',
+    /* CORREÇÃO (v484): a página principal (o HTML/JS do app) podia ficar "presa" numa versão
+       velha porque esse fetch() não pedia explicitamente pra pular o cache HTTP do navegador —
+       se o servidor onde o Hub tá hospedado manda qualquer cache-control na resposta, o celular
+       podia devolver uma cópia antiga sem nem chegar a checar se tem versão nova, e o mecanismo
+       de auto-update do service worker nunca tinha a chance de disparar. Pra navegação (a própria
+       página) e o manifest, força bypass total do cache HTTP; os demais assets ficam como antes. */
+    '  var ehDocumento=(e.request.mode==="navigate")||url.indexOf("manifest.json")>-1;',
+    '  var pedido=ehDocumento?new Request(url,{cache:"no-store"}):e.request;',
     '  e.respondWith(',
-    '    fetch(e.request).then(function(res){',
+    '    fetch(pedido).then(function(res){',
     '      if(res&&res.status===200&&res.type==="basic"){',
     '        var clone=res.clone();',
     '        caches.open(CACHE).then(function(c){ c.put(e.request,clone); });',
@@ -35978,7 +35995,16 @@ ReactDOM.createRoot(document.getElementById("root")).render(
         reg.waiting.postMessage({type: 'SKIP_WAITING'});
       }
 
-      setInterval(function(){ reg.update(); }, 30 * 60 * 1000);
+      /* CORREÇÃO (v484): antes só checava por versão nova a cada 30min de aba aberta —
+         no celular, onde o app fica minimizado/em segundo plano a maior parte do tempo, isso
+         quase nunca chegava a rodar de fato. Agora checa: (1) assim que a página carrega,
+         (2) toda vez que o app volta pro primeiro plano (ex: usuário abre depois de minimizado
+         — o gatilho mais comum no celular), e (3) a cada 15min como rede de segurança. */
+      reg.update();
+      document.addEventListener('visibilitychange', function(){
+        if(document.visibilityState === 'visible') reg.update();
+      });
+      setInterval(function(){ reg.update(); }, 15 * 60 * 1000);
 
     }).catch(function(err){
       console.warn('[PWA] Falha ao registrar SW:', err);
