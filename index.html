@@ -14524,9 +14524,14 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           premium:  {capa:true, resumoExec:true, saude:true, orcamento:true, despesas:true, raiox:true, visaoCasal:true, metasOrc:true, carteira:true, rentabilidade:true, metas:true, objetivos:true, analise:true, trabalho:true, observacoes:true, historico:false, proximosPassos:true},
           simples:  {capa:true, resumoExec:true, saude:true, orcamento:false,despesas:false,raiox:false,visaoCasal:false,metasOrc:false,carteira:true, rentabilidade:true, metas:false,objetivos:false,analise:false,trabalho:false,observacoes:false,historico:false, proximosPassos:false},
           completo: {capa:true, resumoExec:true, saude:true, orcamento:true, despesas:true, raiox:true, visaoCasal:true, metasOrc:true, carteira:true, rentabilidade:true, metas:true, objetivos:true, analise:true, trabalho:true, observacoes:true, historico:true,  proximosPassos:true},
-          custom:   rel.secoes||{capa:true, resumoExec:true, saude:true, orcamento:false,despesas:false,raiox:false,visaoCasal:false,metasOrc:false,carteira:true, rentabilidade:false,metas:false,objetivos:false,analise:false,trabalho:false,observacoes:true,historico:false, proximosPassos:true}
+          custom:   {capa:true, resumoExec:true, saude:true, orcamento:false,despesas:false,raiox:false,visaoCasal:false,metasOrc:false,carteira:true, rentabilidade:false,metas:false,objetivos:false,analise:false,trabalho:false,observacoes:true,historico:false, proximosPassos:true}
         };
-        var sec=tpl==="custom" ? (rel.secoes||TEMPLATE_DEFAULTS.custom) : TEMPLATE_DEFAULTS[tpl];
+        /* Proteção: um rel.secoes salvo pelo configurador de PATRIMÔNIO (chaves "overview"/"instituicao",
+           sem "saude") não serve pra esse motor — cai no default custom da Financeira em vez de deixar
+           tudo indefinido (que o !==false trataria como "ligado", divergindo do que o cliente marcou). */
+        var secoesSalvo=rel.secoes;
+        var secoesCompativel=secoesSalvo && ("saude" in secoesSalvo);
+        var sec=tpl==="custom" ? (secoesCompativel ? secoesSalvo : TEMPLATE_DEFAULTS.custom) : TEMPLATE_DEFAULTS[tpl];
         /* Concatena seções respeitando a configuração — variáveis vazias quando seção desligada */
         var partes="";
         if(sec.capa!==false) partes+=capa;
@@ -21278,19 +21283,25 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                 </>
               )}
 
-            {/* === SEÇÃO RELATÓRIO MENSAL — Templates + seções configuráveis === */}
+            {/* === SEÇÃO RELATÓRIO MENSAL — Templates + seções configuráveis ===
+               Duas famílias de template, porque Patrimônio e Gestão Financeira têm motores de
+               relatório totalmente diferentes (exportarRelatorioFinPDF x gerarRelatorio/isPat).
+               Cliente só-Financeira (sem Patrimônio) precisa ver as seções que o relatório dele
+               REALMENTE tem (Saúde Financeira, Raio-X, Visão do Casal, Metas e Orçamento...),
+               nunca os rótulos do relatório de investimentos (Carteira/Proventos/Instituições). */}
             {(function(){
               var rel=((c.particularidades&&typeof c.particularidades==="object"?c.particularidades:{}).relatorio)||{};
               var tpl=rel.template||"premium";
-              /* === DEFINIÇÃO DOS 4 TEMPLATES === */
-              var TEMPLATES={
+              var usaFin = isFin && !isPat;
+
+              /* === FAMÍLIA PATRIMÔNIO (cliente com Gestão de Patrimônio, mesmo que tenha Financeira também) === */
+              var TEMPLATES_PAT={
                 premium:  {l:"Premium",   ic:"⭐", cor:T.gold,   desc:"Tudo: carteira completa + proventos + métricas estratégicas + objetivos"},
                 simples:  {l:"Simples",   ic:"📃", cor:T.cyan,   desc:"Essencial: capa + resumo + benchmarks + carteira (sem proventos, sem instituições)"},
                 completo: {l:"Completo",  ic:"📚", cor:T.purple, desc:"Idêntico ao Premium (atualmente — em breve incluirá histórico)"},
                 custom:   {l:"Custom",    ic:"🎛️", cor:T.green,  desc:"Você escolhe seção por seção abaixo"}
               };
-              /* === 10 SEÇÕES CONFIGURÁVEIS — alinhadas ao que o PDF realmente gera === */
-              var SECOES=[
+              var SECOES_PAT=[
                 {k:"capa",            l:"Capa personalizada",       ic:"🎨", desc:"Página de abertura com logo Courinvest e nome do cliente"},
                 {k:"overview",        l:"Resumo de Mercado",         ic:"📰", desc:"Panorama macro do mês (Ibovespa, Selic, Copom, cenário) — só relatório mensal"},
                 {k:"resumoExec",      l:"Resumo executivo",          ic:"📋", desc:"KPIs principais (patrimônio, rentabilidade, vs IPCA) + narrativa"},
@@ -21305,15 +21316,58 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                 {k:"pullquote",        l:"Análise editorial",          ic:"💬", desc:"Frase de destaque com análise da composição da carteira (aparece no Resumo Executivo)"}
               ];
               /* === DEFAULTS POR TEMPLATE — devem bater com _TEMPLATE_DEFAULTS no gerarRelatorio === */
-              var TEMPLATE_DEFAULTS={
+              var TEMPLATE_DEFAULTS_PAT={
                 premium:  {capa:true, overview:true,  resumoExec:true, evolucao:true,  rentabilidade:true,  carteira:true, proventos:true,  instituicao:true,  metas:true,  objetivos:true, analise:true,  pullquote:true},
                 simples:  {capa:true, overview:true,  resumoExec:true, evolucao:false, rentabilidade:true,  carteira:true, proventos:false, instituicao:false, metas:false, objetivos:false,analise:false, pullquote:true},
                 completo: {capa:true, overview:true,  resumoExec:true, evolucao:true,  rentabilidade:true,  carteira:true, proventos:true,  instituicao:true,  metas:true,  objetivos:true, analise:true,  pullquote:true},
                 custom:   {capa:true, overview:true,  resumoExec:true, evolucao:true,  rentabilidade:false, carteira:true, proventos:false, instituicao:false, metas:false, objetivos:false,analise:false, pullquote:true}
               };
-              /* Resolve seções ativas — se template != custom, usa default; se custom, usa rel.secoes salvo */
-              var secoes=tpl==="custom" ? (rel.secoes||TEMPLATE_DEFAULTS.custom) : TEMPLATE_DEFAULTS[tpl];
-              
+
+              /* === FAMÍLIA GESTÃO FINANCEIRA (cliente só-Financeira, sem Patrimônio) ===
+                 Alinhada 1:1 com o TEMPLATE_DEFAULTS de dentro do exportarRelatorioFinPDF —
+                 mesmas chaves, pra marcar/desmarcar aqui realmente mudar o PDF gerado. */
+              var TEMPLATES_FIN={
+                premium:  {l:"Premium",   ic:"⭐", cor:T.gold,   desc:"Relatório completo: indicadores do mês, saúde financeira, raio-x de gastos, visão do casal, metas e diagnóstico"},
+                simples:  {l:"Simples",   ic:"📃", cor:T.cyan,   desc:"Essencial: capa + indicadores do mês + saúde financeira (sem raio-x, sem visão do casal, sem diagnóstico)"},
+                completo: {l:"Completo",  ic:"📚", cor:T.purple, desc:"Idêntico ao Premium + evolução histórica dos últimos meses"},
+                custom:   {l:"Custom",    ic:"🎛️", cor:T.green,  desc:"Você escolhe seção por seção abaixo"}
+              };
+              var SECOES_FIN=[
+                {k:"capa",           l:"Capa personalizada",            ic:"🎨", desc:"Página de abertura com logo Courinvest e nome do cliente"},
+                {k:"resumoExec",     l:"Indicadores do Mês",            ic:"📋", desc:"Receitas x despesas, taxa de poupança e evolução do mês"},
+                {k:"saude",          l:"Saúde Financeira",              ic:"❤️", desc:"Nota geral (0-100) com os 6 indicadores: poupança, reserva, orçamento, investimento, custos fixos e dívida"},
+                {k:"despesas",       l:"Distribuição de Gastos",        ic:"🥧", desc:"Gastos por categoria + maiores despesas do mês"},
+                {k:"raiox",          l:"Raio-X dos Gastos",             ic:"🔍", desc:"Custos fixos vs variáveis por R$100 gasto + comparativo com o mesmo mês do ano anterior"},
+                {k:"visaoCasal",     l:"Visão do Casal",                ic:"👫", desc:"Divisão de receitas e despesas entre os dois integrantes (só aparece com 2+ integrantes)"},
+                {k:"metasOrc",       l:"Metas e Orçamento",             ic:"🎯", desc:"Previsto x realizado por categoria, com status de aderência ao orçamento"},
+                {k:"carteira",       l:"Resumo do Patrimônio",          ic:"💰", desc:"Carteira de investimentos do cliente, se houver ativos importados"},
+                {k:"metas",          l:"Aportes do Mês",                ic:"📥", desc:"Movimentações e aportes registrados no período"},
+                {k:"objetivos",      l:"Reserva e Objetivos",           ic:"🌟", desc:"Progresso da reserva de emergência e de cada objetivo cadastrado"},
+                {k:"analise",        l:"Diagnóstico Inteligente",       ic:"🧠", desc:"Pontos fortes, alertas e recomendações automáticas com base no mês"},
+                {k:"trabalho",       l:"Nosso Trabalho por Você",       ic:"🤝", desc:"Registro do que foi feito pela Courinvest pelo cliente no mês"},
+                {k:"observacoes",    l:"Observações e Próximos Passos", ic:"💬", desc:"Pontos de atenção e plano de ação pro próximo mês (com apoio de IA)"},
+                {k:"historico",      l:"Evolução Histórica",            ic:"📈", desc:"Gráfico com o histórico de meses anteriores importados"},
+                {k:"proximosPassos", l:"Página de Encerramento",        ic:"🙏", desc:"Página final de agradecimento"}
+              ];
+              var TEMPLATE_DEFAULTS_FIN={
+                premium:  {capa:true, resumoExec:true, saude:true, despesas:true, raiox:true, visaoCasal:true, metasOrc:true, carteira:true, metas:true, objetivos:true, analise:true, trabalho:true, observacoes:true, historico:false, proximosPassos:true},
+                simples:  {capa:true, resumoExec:true, saude:true, despesas:false,raiox:false,visaoCasal:false,metasOrc:false,carteira:true, metas:false,objetivos:false,analise:false,trabalho:false,observacoes:false,historico:false, proximosPassos:false},
+                completo: {capa:true, resumoExec:true, saude:true, despesas:true, raiox:true, visaoCasal:true, metasOrc:true, carteira:true, metas:true, objetivos:true, analise:true, trabalho:true, observacoes:true, historico:true,  proximosPassos:true},
+                custom:   {capa:true, resumoExec:true, saude:true, despesas:false,raiox:false,visaoCasal:false,metasOrc:false,carteira:true, metas:false,objetivos:false,analise:false,trabalho:false,observacoes:true, historico:false, proximosPassos:true}
+              };
+
+              var TEMPLATES = usaFin ? TEMPLATES_FIN : TEMPLATES_PAT;
+              var SECOES = usaFin ? SECOES_FIN : SECOES_PAT;
+              var TEMPLATE_DEFAULTS = usaFin ? TEMPLATE_DEFAULTS_FIN : TEMPLATE_DEFAULTS_PAT;
+
+              /* Resolve seções ativas — se template != custom, usa default; se custom, usa rel.secoes salvo.
+                 Proteção: se o rel.secoes salvo for de OUTRA família (ex: cliente que virou só-Financeira
+                 mas tinha um custom antigo com chaves de Patrimônio), ignora e usa o default custom da
+                 família certa — evita checklist "tudo desmarcado" mostrando chaves que não existem mais. */
+              var secoesSalvo=rel.secoes;
+              var secoesCompativel=secoesSalvo && (usaFin ? ("saude" in secoesSalvo) : ("overview" in secoesSalvo || "instituicao" in secoesSalvo));
+              var secoes=tpl==="custom" ? (secoesCompativel ? secoesSalvo : TEMPLATE_DEFAULTS.custom) : TEMPLATE_DEFAULTS[tpl];
+
               /* Garante que particularidades seja sempre um objeto (pode vir como "" do Gorila) */
               var partBase=(c.particularidades&&typeof c.particularidades==="object")?c.particularidades:{};
 
@@ -21344,7 +21398,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                   <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
                     <span style={{fontSize:18}}>📄</span>
                     <div style={{flex:1}}>
-                      <h4 style={{margin:0,fontSize:14,fontWeight:800,color:T.gold}}>Layout do Relatório Mensal</h4>
+                      <h4 style={{margin:0,fontSize:14,fontWeight:800,color:T.gold}}>Layout do Relatório Mensal {usaFin?"— Gestão Financeira":"— Gestão de Patrimônio"}</h4>
                       <div style={{fontSize:10,color:T.t3,marginTop:2}}>Escolha o template ou personalize seção por seção</div>
                     </div>
                     <span style={{fontSize:10,padding:"3px 8px",background:T.goldD,border:"1px solid "+T.gold+"33",borderRadius:5,color:T.gold,fontWeight:700}}>{totalAtivas} {totalAtivas===1?"seção":"seções"}</span>
@@ -36311,7 +36365,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '489';
+  var SW_VERSION = '490';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
