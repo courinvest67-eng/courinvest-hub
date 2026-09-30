@@ -1784,7 +1784,7 @@ const MACRO_CATS={
   impostos:{l:"Impostos & Tarifas",ic:"📋",cor:"#FBBF24",tipo:"d",fixo:false,kw:"imposto|ir\\.|irpf|carn[êe].le[ãa]o|darf|gps\\.|inss|fgts|icms|iss\\.|tarifa banc[áa]ria|tar\\.banc|tarifa.*conta|anuidade.*cart[ãa]o|pacote.*servi[çc]o|cesta.*servi[çc]o|tarifa.*ted|tarifa.*doc|tarifa.*pix|cart[óo]rio|registro|reconhecimento de firma|certid[ãa]o|alvar[áa]|taxa municipal|taxa estadual|taxa federal|multa.*receita|juros.*atraso"},
   investimentos:{l:"Investimentos",ic:"📈",cor:"#D4A328",tipo:"d",kw:"investimento|aporte|compra.*a[çc][ãa]o|compra.*a[çc][õo]es|compra.*fii|compra.*tesouro|compra.*cdb|compra.*lci|compra.*lca|compra.*cri|compra.*cra|compra.*deb|compra.*previd|aplica[çc][ãa]o|b3\\.|xp.*invest|btg.*invest|nuinvest|nu invest|rico\\.|clear\\.|inter invest|easynvest|easy invest|warren|toro\\.|genial.*invest|safra invest|itau invest|itaucorr|itauunibanco invest|btg pactual|santander invest|previd[êe]ncia.*priv|pgbl|vgbl|aporte previd"},
   dividas:{l:"Dívidas & Cartão",ic:"💳",cor:"#F87171",tipo:"d",fixo:true,kw:"fatura.*cart[ãa]o|fatura cc|cart[ãa]o.*cr[ée]dito|pagamento cart[ãa]o|cc visa|cc master|cc elo|cc amex|cc hiper|amex|american express|nubank|nu pagamentos|inter\\.|c6 bank|c6.bank|will bank|will.bank|original\\.|next\\.|neon\\.|pan\\.|pic pay|picpay|mercadopago|mercado pago|pagseguro|pagbank|cred[áa]rio|cr[ée]dito direto|cdc\\.|empr[ée]stim|consignad|consigna|financiamento|cheque especial|juros cheque|juros rotativ|rotativo cart|antecipa[çc][ãa]o sal[áa]rio|peer.*to.*peer|p2p"},
-  pets:{l:"Pets",ic:"🐾",cor:"#6EE7B7",tipo:"d",fixo:false,kw:"pet shop|petshop|petz|petlove|cobasi|veterin[áa]rio|veterinari[ao]|vet\\.|ra[çc][ãa]o|biscoito.*c[ãa]o|biscoito.*gato|antipulgas|vermifugo|vacin.*pet|banho.*tosa|tosa\\.|hotelzinho.*pet|creche.*pet"},
+  pets:{l:"Pets",ic:"🐾",cor:"#6EE7B7",tipo:"d",fixo:false,kw:"pet shop|petshop|petz|petlove|cobasi|veterin[áa]rio|veterinari[ao]|vet\\.|ra[çc][ãa]o|biscoito.*c[ãa]o|biscoito.*gato|antipulgas|vermifugo|vacin.*pet|banho.*tosa|tosa\\.|hotelzinho.*pet|creche.*pet|anima.*estima[çc][ãa]o|animal de estimacao"},
   outros:{l:"Outros",ic:"📦",cor:"#8B9DC3",tipo:"d",fixo:false,kw:""}
 };
 
@@ -12624,13 +12624,26 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
 
                 /* Estrutura: Estimado(0) RealMensal(1) [Qtd inteiro] Total(pode ser 3 ou 2) %Est %Real
                    O campo Qtd é inteiro sem vírgula, então não aparece nos nums BRL.
-                   Logo: nums[0]=Estimado, nums[1]=RealMensal, nums[2]=Total (quando existe)
-                   Para período mensal (nMeses=1): RealMensal == Total.
-                   PRIORIDADE: usar nums[2] (Total explícito) se existir, senão nums[1] (RealMensal) */
-                var estimado=nums.length>0?parseNum(nums[0]):0;
-                var realizadoMensal=nums.length>1?parseNum(nums[1]):0;
-                /* Total: 3º valor BRL quando existe (ex: 21.315,00 aparece 2x: RealMensal e Total) */
-                var total=nums.length>2?parseNum(nums[2]):realizadoMensal;
+                   PROBLEMA: quando a categoria NÃO TEM orçamento definido (Estimado em branco),
+                   só sobram 2 números BRL (RealMensal + Total, iguais no mensal) — e olhando só a
+                   quantidade de números não dá pra saber se o [0] é Estimado ou RealMensal.
+                   SOLUÇÃO: o Meu Vista só imprime "% Estimativa" quando existe Estimado. Então o
+                   número de percentuais (numsPct) desambigua:
+                   - 2 percentuais (%Estimativa + %Realizado) → TEM Estimado: nums=[Estimado,RealMensal,Total?]
+                   - 1 percentual (só %Realizado) → SEM Estimado: nums=[RealMensal,Total?]
+                   - 0 percentuais → sem lançamento no mês (Realizado=0): se sobrou 1 número, é o
+                     próprio Estimado parado (ex: orçamento de R$500 com 0 gasto este mês) */
+                var estimado=0,realizadoMensal=0,total=0;
+                if(numsPct.length>=2){
+                  estimado=nums.length>0?parseNum(nums[0]):0;
+                  realizadoMensal=nums.length>1?parseNum(nums[1]):0;
+                  total=nums.length>2?parseNum(nums[2]):realizadoMensal;
+                }else if(numsPct.length===1){
+                  realizadoMensal=nums.length>0?parseNum(nums[0]):0;
+                  total=nums.length>1?parseNum(nums[1]):realizadoMensal;
+                }else{
+                  estimado=nums.length>0?parseNum(nums[0]):0;
+                }
 
                 /* Para períodos mensais (nMeses=1), Total e RealMensal são idênticos — OK.
                    Para trimestral: total = soma do período, realizadoMensal = média.
@@ -33589,7 +33602,7 @@ function PropostasView({data,dispatch}){
   return null;
 }
 
-const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"interacoes",l:"Interações",i:"📡"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"parceiros",l:"Parceiros",i:"🤝"},{id:"fiscal",l:"Fiscal",i:"🧾"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"irAnual",l:"Relatório IR",i:"📑"}];
+const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"interacoes",l:"Interações",i:"📡"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"parceiros",l:"Parceiros",i:"🤝"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"irAnual",l:"Relatório IR",i:"📑"}];
 
 /* ============ AUTH + FIRESTORE SYNC ============ */
 
@@ -36298,7 +36311,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '487';
+  var SW_VERSION = '489';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
