@@ -1618,8 +1618,8 @@ const receitaTotalBRL=function(c){
   return total;
 };
 
-const SL={patrimonio:"Gestão de Patrimônio",planejamento:"Gestão Financeira",milhas:"Couri Mile$"};
-const SC={patrimonio:"gold",planejamento:"cyan",milhas:"purple"};
+const SL={patrimonio:"Gestão de Patrimônio",planejamento:"Gestão Financeira",milhas:"Couri Mile$",consultoria:"Consultoria"};
+const SC={patrimonio:"gold",planejamento:"cyan",milhas:"purple",consultoria:"orange"};
 const RC=r=>r==="Conservador"?"green":r==="Conservador/Moderado"?"green":r==="Moderado"?"gold":r==="Moderado/Arrojado"?"orange":"red";
 
 /* === HELPERS DE DETECÇÃO DE DADOS DO CLIENTE ===
@@ -1773,19 +1773,19 @@ const findVistaCatMap=function(desc){
 
 const MACRO_CATS={
   receita:{l:"Receita",ic:"💰",cor:"#34D399",tipo:"r",kw:"sal[áa]rio|sal[áa]rios|holerite|holer|pr[óo]labore|pr[óo].labore|freelan|free.lance|aut[oô]nomo|honor[áa]rio|comiss[ãa]o|bon[uú]s|bonifica|13[ºo°]|d[ée]cimo terceiro|f[ée]rias|adiantamento|reembolso|restitui[çc][ãa]o|restituicao|pgto.*recebido|aluguel.*receb|loca[çc][ãa]o.*receb|dividendo|jcp|juros sobre|jur sob|rendimento|rendto|rend\\.|lucro|distribui[çc][ãa]o|venda.*ativo|resgate|prov[êe]m"},
-  moradia:{l:"Moradia",ic:"🏠",cor:"#F87171",tipo:"d",kw:"aluguel|alug\\.|loca[çc][ãa]o|condom[íi]nio|cond\\.|iptu|iptu.*\\d|luz|energia|enel|cemig|cpfl|coelba|light|copel|el[ée]tric|[áa]gua|saneamento|sabesp|cedae|copasa|caesb|g[áa]s|comgas|gasco|internet|net\\.|claro net|vivo fibra|oi fibra|tim live|sky|telefon|conta de.*tel|fix.*tel|seguro residencial|seguro.*casa|reforma|manuten[çc][ãa]o casa|conserto|jardinagem|piscineiro|empregad|dom[ée]stic|diarista|caseiro|porteiro|sind[íi]co|m[óo]veis|decora[çc][ãa]o|leroy|tok stok|etna|telhanorte"},
-  alimentacao:{l:"Alimentação",ic:"🍽️",cor:"#FBBF24",tipo:"d",kw:"mercado|supermercad|extra|carrefour|p[ãa]o de a[çc][úu]car|assa[íi]|atacad[ãa]o|sams club|sam.s club|hortifrut|sacol[ãa]o|fei?ra|a[çc]ougue|padaria|panific|confeitaria|restaurante|rest\\.|lanchonete|lanche|cantina|bistr[oô]|churrasc|pizz|hambur|burger|mcdonald|bk\\.|burger king|subway|outback|spoleto|china in box|hashi|sushi|comida japonesa|comida chinesa|comida [áa]rabe|pizzaria|brasserie|cafeteria|caf[ée]|starbucks|kopenhagen|cacau show|brigaderia|sorveteria|gelato|dessert|delivery|ifood|i.food|rappi|uber eats|james delivery|99food"},
-  transporte:{l:"Transporte",ic:"🚗",cor:"#38BDF8",tipo:"d",kw:"uber|99|99 pop|99pop|cab[iy]fy|in.driver|indriver|t[áa]xi|taxi|combust[íi]vel|gasolina|etanol|alcool|[áa]lcool|diesel|posto.*shell|posto.*ipiranga|posto.*br|posto.*ale|abastec|estacionamento|estac\\.|zona azul|rotativo|pedagio|ped[áa]gio|sem.parar|conectcar|veloe|move mais|metr[oô]|trem|cptm|onibus|[ôo]nibus|bilhete [úu]nico|bu\\.|cart[ãa]o transporte|riocard|vem\\.|aluguel.*carro|loca[çc][ãa]o.*carro|localiza|movida|unidas|hertz|avis|seguro.*ve[íi]culo|seguro.*auto|seguro.*carro|seguro.*moto|ipva|licenciamento|dpvat|multa.*tr[âa]nsito|detran|mec[âa]nic|oficina|funilaria|pneu|borracharia|lava.*r[áa]pido|lavagem.*carro"},
-  saude:{l:"Saúde",ic:"⚕️",cor:"#34D399",tipo:"d",kw:"plano.*sa[úu]de|conv[êe]nio|unimed|amil|bradesco sa[úu]de|sul am[ée]rica|sulamerica|notre dame|notredame|hapvida|prevent senior|porto seguro sa[úu]de|m[ée]dic|m[ée]dico|consulta|exame|laborat[óo]rio|fleury|dasa|delboni|lavoisier|hospital|hosp\\.|cl[íi]nica|farm[áa]cia|farma|drogasil|drogaria|pacheco|raia|rd[\\.,]|panvel|nissei|venancio|medicament|rem[ée]dio|dentista|odonto|psic[óo]log|psicanal|terapia|fisioterap|nutricionist|nutri\\.|academia|gym\\.|gympass|smartfit|smart fit|bodytech|bio ritmo|bioritmo|crossfit|pilates|yoga|spa|massagem|massoterapia|[óo]tica|oculista|lentes? de contato"},
-  educacao:{l:"Educação",ic:"📚",cor:"#A78BFA",tipo:"d",kw:"mensalidade.*escola|mensalidade.*colegio|mensalidade.*col[ée]gio|mensalidade.*faculdade|mensalidade.*universidade|escola|col[ée]gio|colegio|faculdade|universidade|posgrad|p[óo]s.gradua|mba|fgv|usp|insper|ibmec|saint paul|berlitz|cna|ccaa|wizard|wise up|wiseup|fisk|cultura inglesa|english live|duolingo|babbel|curso|udemy|coursera|alura|hotmart|kiwify|workshop|bootcamp|treinament|capacita|certifica|livro|amazon livr|saraiva|cultura\\.|martins fontes|material escolar|kit escolar|escolinha|cursinho|enem|vestibular|preparat[óo]rio|prof\\. particular|aula particular|tutor"},
-  lazer:{l:"Lazer & Viagem",ic:"🎬",cor:"#F0D060",tipo:"d",kw:"cinema|ingresso|teatro|show|concert|festival|rolezinho|balada|night|barzinho|bar |bar\\.|cervejaria|chopperia|drinks?|drinque|streaming|netflix|spotify|amazon prime|prime video|disney|disney\\+|hbo|max\\.|globoplay|globo play|deezer|tidal|youtube premium|apple music|paramount|star\\+|playstation|xbox|nintendo|steam|epic games|game pass|game.pass|jogo|console|videogame|brinquedo|presente|gift|hobby|colecion|viagem|hotel|pousada|hostel|airbnb|booking|decolar|cvc|latam|gol\\.|azul\\.|tap\\.|emirates|qatar|ita\\.|smiles|latam pass|tudo azul|aluguel.*carro.*viagem|disney.*park|orlando|miami|nova york|europa|paris|londres|lisboa|porto|cancun|punta cana|caribbean|cruzeiro mar[íi]timo"},
-  vestuario:{l:"Vestuário",ic:"👕",cor:"#F472B6",tipo:"d",kw:"roupa|vestu[áa]rio|cal[çc]ad|sapato|t[êe]nis|sneaker|nike|adidas|puma|asics|new balance|reserva|osklen|farm|animale|zara|h&m|hm\\.|c&a|ca\\.|renner|riachuelo|marisa|hering|melissa|arezzo|schutz|santa lolla|carmim|track field|track.field|colcci|forum|ellus|salinas|cia mar[íi]tima|lupo|pucket|le lis blanc|nk store|nk\\.|gucci|prada|louis vuitton|hermes|chanel|dior|burberry|tory burch|coach\\.|michael kors|kate spade|pandora|tiffany|swarovski|vivara|h\\.stern|joia|j[óo]ia|relogio|rel[óo]gio|perfume|cosm[ée]tic|maquiagem|sephora|the body shop|body shop|granado|natura|boticario|botic[áa]rio|eudora|avon"},
-  assinaturas:{l:"Assinaturas & Apps",ic:"📱",cor:"#A78BFA",tipo:"d",kw:"icloud|google one|google play|app store|microsoft 365|office 365|adobe|creative cloud|notion|evernote|dropbox|onedrive|zoom\\.|chat gpt|chatgpt|openai|claude pro|midjourney|github|figma|canva|linkedin premium|grammarly|kindle|audible|skoob|the new york times|nyt|estad[ãa]o|folha\\.|valor econ[ôo]mico|exame\\.|isto[ée]|veja\\.|globoplay|globo play|sky\\.|claro tv|vivo tv|tim play"},
-  impostos:{l:"Impostos & Tarifas",ic:"📋",cor:"#FBBF24",tipo:"d",kw:"imposto|ir\\.|irpf|carn[êe].le[ãa]o|darf|gps\\.|inss|fgts|icms|iss\\.|tarifa banc[áa]ria|tar\\.banc|tarifa.*conta|anuidade.*cart[ãa]o|pacote.*servi[çc]o|cesta.*servi[çc]o|tarifa.*ted|tarifa.*doc|tarifa.*pix|cart[óo]rio|registro|reconhecimento de firma|certid[ãa]o|alvar[áa]|taxa municipal|taxa estadual|taxa federal|multa.*receita|juros.*atraso"},
+  moradia:{l:"Moradia",ic:"🏠",cor:"#F87171",tipo:"d",fixo:true,kw:"aluguel|alug\\.|loca[çc][ãa]o|condom[íi]nio|cond\\.|iptu|iptu.*\\d|luz|energia|enel|cemig|cpfl|coelba|light|copel|el[ée]tric|[áa]gua|saneamento|sabesp|cedae|copasa|caesb|g[áa]s|comgas|gasco|internet|net\\.|claro net|vivo fibra|oi fibra|tim live|sky|telefon|conta de.*tel|fix.*tel|seguro residencial|seguro.*casa|reforma|manuten[çc][ãa]o casa|conserto|jardinagem|piscineiro|empregad|dom[ée]stic|diarista|caseiro|porteiro|sind[íi]co|m[óo]veis|decora[çc][ãa]o|leroy|tok stok|etna|telhanorte"},
+  alimentacao:{l:"Alimentação",ic:"🍽️",cor:"#FBBF24",tipo:"d",fixo:false,kw:"mercado|supermercad|extra|carrefour|p[ãa]o de a[çc][úu]car|assa[íi]|atacad[ãa]o|sams club|sam.s club|hortifrut|sacol[ãa]o|fei?ra|a[çc]ougue|padaria|panific|confeitaria|restaurante|rest\\.|lanchonete|lanche|cantina|bistr[oô]|churrasc|pizz|hambur|burger|mcdonald|bk\\.|burger king|subway|outback|spoleto|china in box|hashi|sushi|comida japonesa|comida chinesa|comida [áa]rabe|pizzaria|brasserie|cafeteria|caf[ée]|starbucks|kopenhagen|cacau show|brigaderia|sorveteria|gelato|dessert|delivery|ifood|i.food|rappi|uber eats|james delivery|99food"},
+  transporte:{l:"Transporte",ic:"🚗",cor:"#38BDF8",tipo:"d",fixo:false,kw:"uber|99|99 pop|99pop|cab[iy]fy|in.driver|indriver|t[áa]xi|taxi|combust[íi]vel|gasolina|etanol|alcool|[áa]lcool|diesel|posto.*shell|posto.*ipiranga|posto.*br|posto.*ale|abastec|estacionamento|estac\\.|zona azul|rotativo|pedagio|ped[áa]gio|sem.parar|conectcar|veloe|move mais|metr[oô]|trem|cptm|onibus|[ôo]nibus|bilhete [úu]nico|bu\\.|cart[ãa]o transporte|riocard|vem\\.|aluguel.*carro|loca[çc][ãa]o.*carro|localiza|movida|unidas|hertz|avis|seguro.*ve[íi]culo|seguro.*auto|seguro.*carro|seguro.*moto|ipva|licenciamento|dpvat|multa.*tr[âa]nsito|detran|mec[âa]nic|oficina|funilaria|pneu|borracharia|lava.*r[áa]pido|lavagem.*carro"},
+  saude:{l:"Saúde",ic:"⚕️",cor:"#34D399",tipo:"d",fixo:true,kw:"plano.*sa[úu]de|conv[êe]nio|unimed|amil|bradesco sa[úu]de|sul am[ée]rica|sulamerica|notre dame|notredame|hapvida|prevent senior|porto seguro sa[úu]de|m[ée]dic|m[ée]dico|consulta|exame|laborat[óo]rio|fleury|dasa|delboni|lavoisier|hospital|hosp\\.|cl[íi]nica|farm[áa]cia|farma|drogasil|drogaria|pacheco|raia|rd[\\.,]|panvel|nissei|venancio|medicament|rem[ée]dio|dentista|odonto|psic[óo]log|psicanal|terapia|fisioterap|nutricionist|nutri\\.|academia|gym\\.|gympass|smartfit|smart fit|bodytech|bio ritmo|bioritmo|crossfit|pilates|yoga|spa|massagem|massoterapia|[óo]tica|oculista|lentes? de contato"},
+  educacao:{l:"Educação",ic:"📚",cor:"#A78BFA",tipo:"d",fixo:true,kw:"mensalidade.*escola|mensalidade.*colegio|mensalidade.*col[ée]gio|mensalidade.*faculdade|mensalidade.*universidade|escola|col[ée]gio|colegio|faculdade|universidade|posgrad|p[óo]s.gradua|mba|fgv|usp|insper|ibmec|saint paul|berlitz|cna|ccaa|wizard|wise up|wiseup|fisk|cultura inglesa|english live|duolingo|babbel|curso|udemy|coursera|alura|hotmart|kiwify|workshop|bootcamp|treinament|capacita|certifica|livro|amazon livr|saraiva|cultura\\.|martins fontes|material escolar|kit escolar|escolinha|cursinho|enem|vestibular|preparat[óo]rio|prof\\. particular|aula particular|tutor"},
+  lazer:{l:"Lazer & Viagem",ic:"🎬",cor:"#F0D060",tipo:"d",fixo:false,kw:"cinema|ingresso|teatro|show|concert|festival|rolezinho|balada|night|barzinho|bar |bar\\.|cervejaria|chopperia|drinks?|drinque|streaming|netflix|spotify|amazon prime|prime video|disney|disney\\+|hbo|max\\.|globoplay|globo play|deezer|tidal|youtube premium|apple music|paramount|star\\+|playstation|xbox|nintendo|steam|epic games|game pass|game.pass|jogo|console|videogame|brinquedo|presente|gift|hobby|colecion|viagem|hotel|pousada|hostel|airbnb|booking|decolar|cvc|latam|gol\\.|azul\\.|tap\\.|emirates|qatar|ita\\.|smiles|latam pass|tudo azul|aluguel.*carro.*viagem|disney.*park|orlando|miami|nova york|europa|paris|londres|lisboa|porto|cancun|punta cana|caribbean|cruzeiro mar[íi]timo"},
+  vestuario:{l:"Vestuário",ic:"👕",cor:"#F472B6",tipo:"d",fixo:false,kw:"roupa|vestu[áa]rio|cal[çc]ad|sapato|t[êe]nis|sneaker|nike|adidas|puma|asics|new balance|reserva|osklen|farm|animale|zara|h&m|hm\\.|c&a|ca\\.|renner|riachuelo|marisa|hering|melissa|arezzo|schutz|santa lolla|carmim|track field|track.field|colcci|forum|ellus|salinas|cia mar[íi]tima|lupo|pucket|le lis blanc|nk store|nk\\.|gucci|prada|louis vuitton|hermes|chanel|dior|burberry|tory burch|coach\\.|michael kors|kate spade|pandora|tiffany|swarovski|vivara|h\\.stern|joia|j[óo]ia|relogio|rel[óo]gio|perfume|cosm[ée]tic|maquiagem|sephora|the body shop|body shop|granado|natura|boticario|botic[áa]rio|eudora|avon"},
+  assinaturas:{l:"Assinaturas & Apps",ic:"📱",cor:"#A78BFA",tipo:"d",fixo:true,kw:"icloud|google one|google play|app store|microsoft 365|office 365|adobe|creative cloud|notion|evernote|dropbox|onedrive|zoom\\.|chat gpt|chatgpt|openai|claude pro|midjourney|github|figma|canva|linkedin premium|grammarly|kindle|audible|skoob|the new york times|nyt|estad[ãa]o|folha\\.|valor econ[ôo]mico|exame\\.|isto[ée]|veja\\.|globoplay|globo play|sky\\.|claro tv|vivo tv|tim play"},
+  impostos:{l:"Impostos & Tarifas",ic:"📋",cor:"#FBBF24",tipo:"d",fixo:false,kw:"imposto|ir\\.|irpf|carn[êe].le[ãa]o|darf|gps\\.|inss|fgts|icms|iss\\.|tarifa banc[áa]ria|tar\\.banc|tarifa.*conta|anuidade.*cart[ãa]o|pacote.*servi[çc]o|cesta.*servi[çc]o|tarifa.*ted|tarifa.*doc|tarifa.*pix|cart[óo]rio|registro|reconhecimento de firma|certid[ãa]o|alvar[áa]|taxa municipal|taxa estadual|taxa federal|multa.*receita|juros.*atraso"},
   investimentos:{l:"Investimentos",ic:"📈",cor:"#D4A328",tipo:"d",kw:"investimento|aporte|compra.*a[çc][ãa]o|compra.*a[çc][õo]es|compra.*fii|compra.*tesouro|compra.*cdb|compra.*lci|compra.*lca|compra.*cri|compra.*cra|compra.*deb|compra.*previd|aplica[çc][ãa]o|b3\\.|xp.*invest|btg.*invest|nuinvest|nu invest|rico\\.|clear\\.|inter invest|easynvest|easy invest|warren|toro\\.|genial.*invest|safra invest|itau invest|itaucorr|itauunibanco invest|btg pactual|santander invest|previd[êe]ncia.*priv|pgbl|vgbl|aporte previd"},
-  dividas:{l:"Dívidas & Cartão",ic:"💳",cor:"#F87171",tipo:"d",kw:"fatura.*cart[ãa]o|fatura cc|cart[ãa]o.*cr[ée]dito|pagamento cart[ãa]o|cc visa|cc master|cc elo|cc amex|cc hiper|amex|american express|nubank|nu pagamentos|inter\\.|c6 bank|c6.bank|will bank|will.bank|original\\.|next\\.|neon\\.|pan\\.|pic pay|picpay|mercadopago|mercado pago|pagseguro|pagbank|cred[áa]rio|cr[ée]dito direto|cdc\\.|empr[ée]stim|consignad|consigna|financiamento|cheque especial|juros cheque|juros rotativ|rotativo cart|antecipa[çc][ãa]o sal[áa]rio|peer.*to.*peer|p2p"},
-  pets:{l:"Pets",ic:"🐾",cor:"#6EE7B7",tipo:"d",kw:"pet shop|petshop|petz|petlove|cobasi|veterin[áa]rio|veterinari[ao]|vet\\.|ra[çc][ãa]o|biscoito.*c[ãa]o|biscoito.*gato|antipulgas|vermifugo|vacin.*pet|banho.*tosa|tosa\\.|hotelzinho.*pet|creche.*pet"},
-  outros:{l:"Outros",ic:"📦",cor:"#8B9DC3",tipo:"d",kw:""}
+  dividas:{l:"Dívidas & Cartão",ic:"💳",cor:"#F87171",tipo:"d",fixo:true,kw:"fatura.*cart[ãa]o|fatura cc|cart[ãa]o.*cr[ée]dito|pagamento cart[ãa]o|cc visa|cc master|cc elo|cc amex|cc hiper|amex|american express|nubank|nu pagamentos|inter\\.|c6 bank|c6.bank|will bank|will.bank|original\\.|next\\.|neon\\.|pan\\.|pic pay|picpay|mercadopago|mercado pago|pagseguro|pagbank|cred[áa]rio|cr[ée]dito direto|cdc\\.|empr[ée]stim|consignad|consigna|financiamento|cheque especial|juros cheque|juros rotativ|rotativo cart|antecipa[çc][ãa]o sal[áa]rio|peer.*to.*peer|p2p"},
+  pets:{l:"Pets",ic:"🐾",cor:"#6EE7B7",tipo:"d",fixo:false,kw:"pet shop|petshop|petz|petlove|cobasi|veterin[áa]rio|veterinari[ao]|vet\\.|ra[çc][ãa]o|biscoito.*c[ãa]o|biscoito.*gato|antipulgas|vermifugo|vacin.*pet|banho.*tosa|tosa\\.|hotelzinho.*pet|creche.*pet"},
+  outros:{l:"Outros",ic:"📦",cor:"#8B9DC3",tipo:"d",fixo:false,kw:""}
 };
 
 /* ===== ANÁLISE FINANCEIRA INTELIGENTE — função pura, reaproveitável fora da ficha do cliente =====
@@ -1867,8 +1867,9 @@ const calcularAnaliseFinanceira=function(histMensal,receitasAtual,despesasAtual,
     snapAtual.despesas.forEach(function(d){
       var k=d.macro||"outros";
       if(k==="investimentos")return;
-      if(!atualPorMacro[k])atualPorMacro[k]={tot:0,n:0,itens:[]};
+      if(!atualPorMacro[k])atualPorMacro[k]={tot:0,n:0,itens:[],orc:0};
       atualPorMacro[k].tot+=d.valor;atualPorMacro[k].n++;
+      atualPorMacro[k].orc+=(d.orc||0);
       atualPorMacro[k].itens.push(d);
     });
     var antPorMacro={};
@@ -1977,6 +1978,102 @@ const calcularAnaliseFinanceira=function(histMensal,receitasAtual,despesasAtual,
       topDesp:topDesp,
       historico:hist.slice(0,12)
     };
+};
+
+/* ===== SAÚDE FINANCEIRA — nota composta 0-100 a partir de 6 indicadores =====
+   Função pura: recebe o objeto retornado por calcularAnaliseFinanceira (an) e o valor atual
+   acumulado de reserva de emergência (normalmente o acumulado de um objetivo chamado
+   "Reserva de Emergência" em c.objetivos, calculado pelo chamador via calcAcumObj — aqui a
+   função só recebe o número pronto, sem se preocupar de onde veio).
+   Pesos e metas usados no Relatório Mensal de Gestão Financeira (modelo padrão, 09/2026):
+   Taxa de poupança (25%, meta ≥20%), Reserva de emergência (20%, meta ≥6 meses),
+   Aderência ao orçamento (20%, meta ≤100%), Taxa de investimento (15%, meta ≥15%),
+   Despesas fixas/renda (10%, meta ≤50%), Encargos de dívida/renda (10%, meta ≤10%). */
+const calcularSaudeFinanceira=function(an,reservaAtual){
+  an=an||{};
+  var tRec=(an.snapAtual&&an.snapAtual.tRec)||0;
+  var tDespPuro=(an.snapAtual&&an.snapAtual.tDespPuro)||0;
+  var apm=an.atualPorMacro||{};
+  var scoreMaior=function(atual,meta){return meta<=0?100:Math.max(0,Math.min(100,(atual/meta)*100))};
+  var scoreMenor=function(atual,meta){return atual<=meta?100:Math.max(0,100-((atual-meta)/Math.max(meta,0.0001))*100)};
+
+  var poupAtual=(an.kpis&&typeof an.kpis.txPoupAtual==="number")?an.kpis.txPoupAtual:0;
+  var indPoup={key:"poupanca",l:"Taxa de poupança",peso:25,atual:poupAtual,meta:20,unidade:"%",dir:"maior",score:scoreMaior(poupAtual,20)};
+
+  var mesesReserva=tDespPuro>0?(reservaAtual||0)/tDespPuro:0;
+  var indReserva={key:"reserva",l:"Reserva de emergência",peso:20,atual:mesesReserva,meta:6,unidade:"meses",dir:"maior",score:scoreMaior(mesesReserva,6)};
+
+  var totPrev=0,totReal=0;
+  Object.keys(apm).forEach(function(k){
+    if(k==="investimentos")return;
+    var m=apm[k];
+    if(m&&m.orc>0){totPrev+=m.orc;totReal+=m.tot;}
+  });
+  var aderencia=totPrev>0?(totReal/totPrev)*100:100;
+  var indOrc={key:"orcamento",l:"Aderência ao orçamento",peso:20,atual:aderencia,meta:100,unidade:"%",dir:"menor",score:scoreMenor(aderencia,100)};
+
+  var invTot=(apm["investimentos"]&&apm["investimentos"].tot)||(Array.isArray(an.atualInv)?an.atualInv.reduce(function(s,d){return s+(d.valor||0)},0):(an.atualInv||0));
+  var txInv=tRec>0?(invTot/tRec)*100:0;
+  var indInv={key:"investimento",l:"Taxa de investimento",peso:15,atual:txInv,meta:15,unidade:"%",dir:"maior",score:scoreMaior(txInv,15)};
+
+  var fixasTot=0;
+  Object.keys(apm).forEach(function(k){
+    if(k==="investimentos")return;
+    var mc=MACRO_CATS[k];
+    if(mc&&mc.fixo)fixasTot+=(apm[k]&&apm[k].tot)||0;
+  });
+  var pctFixas=tRec>0?(fixasTot/tRec)*100:0;
+  var indFixas={key:"fixas",l:"Despesas fixas / renda",peso:10,atual:pctFixas,meta:50,unidade:"%",dir:"menor",score:scoreMenor(pctFixas,50)};
+
+  var divTot=(apm["dividas"]&&apm["dividas"].tot)||0;
+  var pctDiv=tRec>0?(divTot/tRec)*100:0;
+  var indDiv={key:"divida",l:"Encargos de dívida / renda",peso:10,atual:pctDiv,meta:10,unidade:"%",dir:"menor",score:scoreMenor(pctDiv,10)};
+
+  var indicadores=[indPoup,indReserva,indOrc,indInv,indFixas,indDiv];
+  var somaPesos=indicadores.reduce(function(s,i){return s+i.peso},0)||1;
+  var notaFinal=indicadores.reduce(function(s,i){return s+i.score*i.peso},0)/somaPesos;
+  indicadores.forEach(function(i){i.status=i.score>=80?"Ótimo":i.score>=60?"Atenção":"Crítico"});
+  var faixa=notaFinal>=85?"Excelente":notaFinal>=70?"Boa":notaFinal>=55?"Atenção":"Crítica";
+  var piorIndicador=indicadores.slice().sort(function(a,b){return a.score-b.score})[0];
+  return {nota:Math.round(notaFinal),faixa:faixa,indicadores:indicadores,piorIndicador:piorIndicador};
+};
+
+/* ===== VISÃO DO CASAL — participação na renda e divisão das despesas por integrante =====
+   Função pura: recebe o "an" (retorno de calcularAnaliseFinanceira) e o nome do titular
+   (usado como fallback pra lançamentos sem integrante marcado, igual ao padrão já usado em
+   gerarRelatorioTrimestral pra receitas). Despesas SEM integrante marcado são tratadas como
+   "compartilhadas" (conta/gasto do casal); despesas COM integrante são "individuais" daquela
+   pessoa. Como o extrato não registra qual conta de fato pagou cada gasto compartilhado, a
+   "parte proporcional" é sempre uma sugestão de divisão por participação na renda — não uma
+   reconstrução de quem pagou o quê (isso fica explícito no texto do relatório). */
+const calcularVisaoCasal=function(an,nomeTitular){
+  var snap=(an&&an.snapAtual)||{receitas:[],despesas:[]};
+  var recPorPessoa={};
+  (snap.receitas||[]).forEach(function(r){
+    var who=r.integrante||nomeTitular;
+    recPorPessoa[who]=(recPorPessoa[who]||0)+(r.valor||0);
+  });
+  var despIndPorPessoa={};
+  var despCompartilhada=0;
+  (snap.despesas||[]).forEach(function(d){
+    if((d.macro||"")==="investimentos")return;
+    if(d.integrante){despIndPorPessoa[d.integrante]=(despIndPorPessoa[d.integrante]||0)+(d.valor||0);}
+    else{despCompartilhada+=(d.valor||0);}
+  });
+  var nomes={};
+  Object.keys(recPorPessoa).forEach(function(n){nomes[n]=true});
+  Object.keys(despIndPorPessoa).forEach(function(n){nomes[n]=true});
+  var rendaTotal=Object.keys(recPorPessoa).reduce(function(s,n){return s+recPorPessoa[n]},0);
+  var pessoas=Object.keys(nomes).map(function(n){
+    var renda=recPorPessoa[n]||0;
+    var pctRenda=rendaTotal>0?(renda/rendaTotal)*100:0;
+    var individual=despIndPorPessoa[n]||0;
+    var parteProporc=despCompartilhada*(pctRenda/100);
+    return {nome:n,renda:renda,pctRenda:pctRenda,individual:individual,parteProporc:parteProporc,totalEstimado:individual+parteProporc};
+  }).sort(function(a,b){return b.renda-a.renda});
+  var despIndTotal=Object.keys(despIndPorPessoa).reduce(function(s,n){return s+despIndPorPessoa[n]},0);
+  var despTotal=despCompartilhada+despIndTotal;
+  return {pessoas:pessoas,rendaTotal:rendaTotal,despCompartilhada:despCompartilhada,despIndTotal:despIndTotal,despTotal:despTotal};
 };
 
 const normVista=function(s){return String(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim()};
@@ -5265,7 +5362,7 @@ function InteracoesView({data:d, dispatch:dp, onGoClient:goClient}){
 }
 
 function CL({data:d,onSel:os,dispatch:dp}){
-  const[se,sSe]=useState("");const[fi,sFi]=useState("todos");const[showAdd,sShowAdd]=useState(false);
+  const[se,sSe]=useState("");const[fi,sFi]=useState("patrimonio");const[showAdd,sShowAdd]=useState(false);
   const gorilaRef=React.useRef(null);
   const bulkRef=React.useRef(null);
   const bulkFolderRef=React.useRef(null);
@@ -6756,12 +6853,13 @@ function CL({data:d,onSel:os,dispatch:dp}){
     reader.readAsArrayBuffer(file);
   };
 
-  const fl=d.cl.filter(c=>(fi==="todos"||c.sv.includes(fi))&&c.nome.toLowerCase().includes(se.toLowerCase()));
+  const fl=d.cl.filter(c=>c.sv.includes(fi)&&c.nome.toLowerCase().includes(se.toLowerCase()));
+  const fiCores={patrimonio:{c:T.gold,bg:T.goldD},planejamento:{c:T.cyan,bg:T.cyanD},consultoria:{c:T.orange,bg:T.orangeD}};
   return (
     <div>
       <div style={{display:"flex",gap:8,marginBottom:18,flexWrap:"wrap",alignItems:"center"}}>
         <input value={se} onChange={e=>sSe(e.target.value)} placeholder="Buscar cliente..." style={{...inpS,flex:1,minWidth:180,borderRadius:14}}/>
-        {["todos","patrimonio","planejamento","milhas"].map(f=><button key={f} onClick={()=>sFi(f)} style={{padding:"10px 16px",borderRadius:12,fontSize:12,fontWeight:600,cursor:"pointer",border:fi===f?"1.5px solid "+T.gold:"1px solid "+T.bdrL,background:fi===f?T.goldD:"transparent",color:fi===f?T.gold:T.t3}}>{f==="todos"?"Todos":SL[f]}</button>)}
+        {["patrimonio","planejamento","consultoria"].map(f=><button key={f} onClick={()=>sFi(f)} style={{padding:"10px 16px",borderRadius:12,fontSize:12,fontWeight:600,cursor:"pointer",border:fi===f?"1.5px solid "+fiCores[f].c:"1px solid "+T.bdrL,background:fi===f?fiCores[f].bg:"transparent",color:fi===f?fiCores[f].c:T.t3}}>{SL[f]}</button>)}
         <Bt onClick={()=>sShowAdd(true)} style={{fontSize:12,padding:"10px 18px"}}>＋ Novo</Bt>
         <input ref={gorilaRef} type="file" accept=".xlsx,.xls,.csv,.pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf,text/csv,text/plain,*/*" onChange={function(e){if(e.target.files[0])importGorilaCliente(e.target.files[0]);e.target.value=""}} style={{display:"none"}}/>
         <Bt v="secondary" onClick={function(){gorilaRef.current&&gorilaRef.current.click()}} style={{fontSize:11,padding:"10px 14px"}}>📥 Importar Gorila</Bt>
@@ -6774,7 +6872,7 @@ function CL({data:d,onSel:os,dispatch:dp}){
             for(var xi=0;xi<lista.length;xi++){
               var xc=lista[xi];if(!xc)continue;
               var xsv="";
-              if(Array.isArray(xc.sv)){var sp=[];for(var si=0;si<xc.sv.length;si++){var ss=xc.sv[si];sp.push(ss==="patrimonio"?"Gestao Patrimonio":ss==="planejamento"?"Gestao Financeira":ss==="milhas"?"Couri Miles":S(ss));};xsv=sp.join("|");}
+              if(Array.isArray(xc.sv)){var sp=[];for(var si=0;si<xc.sv.length;si++){var ss=xc.sv[si];sp.push(ss==="patrimonio"?"Gestao Patrimonio":ss==="planejamento"?"Gestao Financeira":ss==="milhas"?"Couri Miles":ss==="consultoria"?"Consultoria":S(ss));};xsv=sp.join("|");}
               else xsv=S(xc.sv);
               rows.push([S(xc.nome),xsv,S(xc.risco),N(xc.patGorila||xc.pat),N(xc.feeFixo),N(xc.txGestao),S(xc.email),S(xc.tel),S(xc.cidade),S(xc.baseIpca),S(xc.aniversario)]);
             }
@@ -7194,7 +7292,7 @@ function CL({data:d,onSel:os,dispatch:dp}){
 function NewClientForm({onSave,onClose}){
   const[f,sF]=useState({nome:"",email:"",tel:"",risco:"Moderado",sv:["patrimonio"],pat:0,rend:0,notas:"",txGestao:0.083,feeFixo:1200,feeBase:"",pais:"BR",investExterior:false,tipoCli:"individual",integrantes:[],isPJ:false});
   const u=(k,v)=>sF(p=>({...p,[k]:v}));
-  const setSvc=s=>{const nSv=f.sv.filter(x=>x!=="patrimonio"&&x!=="planejamento");nSv.push(s);sF(p=>({...p,sv:nSv}))};
+  const setSvc=s=>{const nSv=f.sv.filter(x=>x!=="patrimonio"&&x!=="planejamento"&&x!=="consultoria");nSv.push(s);sF(p=>({...p,sv:nSv}))};
   const togMilhas=()=>{const nSv=f.sv.includes("milhas")?f.sv.filter(x=>x!=="milhas"):[...f.sv,"milhas"];sF(p=>({...p,sv:nSv}))};
 
   /* Helper: definir tipo de cliente e auto-ajustar fee Gestão Financeira (+55% para casal/família) */
@@ -7249,7 +7347,7 @@ function NewClientForm({onSave,onClose}){
       </div>
       <div><div style={{fontSize:10,fontWeight:700,color:T.t3,marginBottom:4}}>SERVIÇO PRINCIPAL</div>
         <div style={{display:"flex",gap:6,marginBottom:8}}>
-          {[["patrimonio","Gestão de Patrimônio"],["planejamento","Gestão Financeira"]].map(([k,v])=><button key={k} onClick={()=>setSvc(k)} style={{flex:1,padding:"10px",borderRadius:10,fontSize:12,fontWeight:600,cursor:"pointer",border:f.sv.includes(k)?"1.5px solid "+T.gold:"1px solid "+T.bdrL,background:f.sv.includes(k)?T.goldD:"transparent",color:f.sv.includes(k)?T.gold:T.t3}}>{v}</button>)}
+          {[["patrimonio","Gestão de Patrimônio",T.gold,T.goldD],["planejamento","Gestão Financeira",T.cyan,T.cyanD],["consultoria","Consultoria",T.orange,T.orangeD]].map(([k,v,cor,corD])=><button key={k} onClick={()=>setSvc(k)} style={{flex:1,padding:"10px",borderRadius:10,fontSize:12,fontWeight:600,cursor:"pointer",border:f.sv.includes(k)?"1.5px solid "+cor:"1px solid "+T.bdrL,background:f.sv.includes(k)?corD:"transparent",color:f.sv.includes(k)?cor:T.t3}}>{v}</button>)}
         </div>
         <button onClick={togMilhas} style={{padding:"8px 14px",borderRadius:10,fontSize:12,fontWeight:600,cursor:"pointer",border:f.sv.includes("milhas")?"1.5px solid "+T.purple:"1px solid "+T.bdrL,background:f.sv.includes("milhas")?T.purpleD:"transparent",color:f.sv.includes("milhas")?T.purple:T.t3}}>✈️ Couri Mile$ (adicional)</button>
       </div>
@@ -12111,6 +12209,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       if(ehGP)servicos.push("Gestão de Patrimônio");
       if(ehGF)servicos.push("Gestão Financeira");
       if(c.sv.includes("milhas"))servicos.push("Couri Mile$");
+      if(c.sv.includes("consultoria"))servicos.push("Consultoria");
       capaPat='<div class="cv-cover" style="width:210mm;min-height:297mm;page-break-after:always;position:relative;overflow:hidden">'
         +patternSvgPat
         +'<div class="cv-cover-pattern"></div>'
@@ -13510,7 +13609,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       +'</body></html>';
   };
 
-  const exportarRelatorioFinPDF=function(){
+  const exportarRelatorioFinPDF=async function(){
     var an=gerarAnaliseFinanceira();
     if(!an){alert("Sem dados para gerar relatório.");return}
     var w=window.open("","_blank","width=900,height=1200");
@@ -13572,13 +13671,38 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         +'<path d="M 200,170 A 30,30 0 0 0 170,200" stroke-width="6"/></g></svg>';
     };
 
-    
+
     var eyebrow=function(txt){
       return '<div class="eyebrow"><span class="eyebrow-line"></span><span class="eyebrow-text">'+txt+'</span></div>';
     };
 
+    /* ====== Reserva de emergência atual (pra Saúde Financeira + Reserva e Objetivos) ======
+       Procura um objetivo chamado "Reserva de Emergência" (case-insensitive) e usa o mesmo
+       cálculo de acumulado usado em calcAcumObjPDF mais abaixo (duplicado aqui de propósito,
+       pra não precisar reordenar o restante da função — var permite redeclarar sem erro). */
+    var carteiraReserva=(function(){
+      if(!(c.tipoCli==="casal"||c.tipoCli==="familia"||!!c.conjuge))return c._ativosImport||[];
+      if(viewCasal==="conjuge")return (c.conjuge&&c.conjuge._ativosImport)||[];
+      if(viewCasal==="titular")return c._ativosImport||[];
+      var t=c._ativosImport||[];
+      var cj=(c.conjuge&&c.conjuge._ativosImport)||[];
+      return t.concat(cj);
+    })();
+    var objetivoReserva=(c.objetivos||[]).find(function(o){return /reserva/i.test(o.nome||"")&&/emerg/i.test(o.nome||"")});
+    var reservaAtual=0;
+    if(objetivoReserva){
+      if(objetivoReserva.modo==="manual")reservaAtual=objetivoReserva.acumuladoManual||0;
+      else if(objetivoReserva.ativosVinculados&&objetivoReserva.ativosVinculados.length>0){
+        objetivoReserva.ativosVinculados.forEach(function(tk){
+          carteiraReserva.filter(function(x){return x.tk===tk||x.nm===tk}).forEach(function(a){reservaAtual+=(a.posR||a.qtd*a.pa||0)});
+        });
+      }
+    }
+    var saude=calcularSaudeFinanceira(an,reservaAtual);
+    var visaoCasalDados=(c.tipoCli==="casal"||c.tipoCli==="familia")?calcularVisaoCasal(an,c.nome):null;
+
     /* ====== CAPA ====== */
-    
+
     var tipoCli=c.tipoCli||"individual";
     var integrantes=c.integrantes||[];
     var ehMultiplo=(tipoCli==="casal"||tipoCli==="familia") && integrantes.length>0;
@@ -13667,6 +13791,40 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       +'<div class="page-footer">Página 1 · Indicadores e Comparativo</div>'
       +'</section>';
 
+    /* ====== PÁGINA: Saúde Financeira (nota composta 0-100) ====== */
+    var corFaixa=function(f){return f==="Excelente"?"#0F9D58":f==="Boa"?"#34D399":f==="Atenção"?"#E8810C":"#D93025"};
+    var corStatus=function(s){return s==="Ótimo"?"#0F9D58":s==="Atenção"?"#E8810C":"#D93025"};
+    var fmtIndVal=function(i){return i.unidade==="meses"?i.atual.toFixed(1)+" meses":i.atual.toFixed(1)+"%"};
+    var fmtIndMeta=function(i){return (i.dir==="maior"?"≥ ":"≤ ")+i.meta+(i.unidade==="meses"?" meses":"%")};
+    var secSaude='<section class="page page-light">'
+      +'<div class="bg-pattern" style="position:absolute;top:-40px;left:-90px;opacity:0.04">'+patternSvg(360,0.4)+'</div>'
+      +'<div class="page-header">'+logoSvg(160,false)+'<div class="page-meta">'+esc(c.nome)+' · '+mesNome+'</div></div>'
+      +eyebrow("SAÚDE FINANCEIRA")
+      +'<h2 class="page-title">Um termômetro da sua <span class="gold-highlight">vida financeira</span>.</h2>'
+      +'<p class="page-lead">Seis indicadores combinados em uma nota de 0 a 100, acompanhada mês a mês.</p>'
+      +'<div style="display:flex;gap:24px;align-items:center;background:#fff;border-radius:14px;padding:22px 26px;box-shadow:0 4px 16px rgba(10,22,40,0.04);margin-bottom:18px">'
+      +'<div style="flex-shrink:0;text-align:center;width:150px">'
+      +'<div style="font-size:44px;font-weight:900;font-family:Outfit,sans-serif;color:'+corFaixa(saude.faixa)+'">'+saude.nota+'</div>'
+      +'<div style="font-size:11px;color:#8B9DC3;font-weight:700;margin-top:-6px">/100</div>'
+      +'<div style="margin-top:8px;display:inline-block;padding:4px 12px;border-radius:20px;background:'+corFaixa(saude.faixa)+'1a;color:'+corFaixa(saude.faixa)+';font-size:11px;font-weight:800">● '+saude.faixa+'</div>'
+      +'</div>'
+      +'<div style="flex:1">'
+      +'<div style="height:14px;background:#F1F3F8;border-radius:7px;overflow:hidden;margin-bottom:10px"><div style="height:100%;width:'+Math.min(100,saude.nota)+'%;background:'+corFaixa(saude.faixa)+';border-radius:7px"></div></div>'
+      +'<div style="font-size:12px;color:#5a5a6e;line-height:1.6">Ponto que mais puxa a nota para baixo: <strong style="color:#0A1628">'+saude.piorIndicador.l+'</strong> ('+fmtIndVal(saude.piorIndicador)+' · meta '+fmtIndMeta(saude.piorIndicador)+').</div>'
+      +'</div></div>'
+      +'<table class="cv-table">'
+      +'<thead><tr><th>INDICADOR</th><th class="ta-right">ATUAL</th><th class="ta-right">META</th><th class="ta-right">STATUS</th></tr></thead><tbody>'
+      +saude.indicadores.map(function(i){
+        return '<tr><td class="td-bold">'+i.l+' <span style="font-size:9px;color:#8B9DC3;font-weight:500">(peso '+i.peso+'%)</span></td>'
+          +'<td class="ta-right mono bold">'+fmtIndVal(i)+'</td>'
+          +'<td class="ta-right mono" style="color:#8B9DC3">'+fmtIndMeta(i)+'</td>'
+          +'<td class="ta-right"><span class="macro-pill" style="background:'+corStatus(i.status)+'1f;color:'+corStatus(i.status)+'">'+i.status+'</span></td></tr>';
+      }).join("")
+      +'</tbody></table>'
+      +'<div style="margin-top:14px;padding:10px 14px;background:#EFF6FC;border:1px solid #38BDF833;border-radius:8px;font-size:10px;color:#5a5a6e;line-height:1.5">💡 <strong>Como a nota é calculada:</strong> cada indicador recebe de 0 a 100 conforme a proximidade da meta, e a nota final é a média ponderada pelos pesos acima. Faixas: Excelente (≥85), Boa (≥70), Atenção (≥55) e Crítica (&lt;55).</div>'
+      +'<div class="page-footer">Saúde Financeira</div>'
+      +'</section>';
+
     /* ====== PÁGINA 2: Categorias ====== */
     var macroOrdered=Object.keys(an.atualPorMacro).map(function(k){return{k:k,tot:an.atualPorMacro[k].tot,n:an.atualPorMacro[k].n}}).sort(function(a,b){return b.tot-a.tot});
     var totDespAtual=an.snapAtual.tDespPuro||1;
@@ -13708,6 +13866,108 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       }).join("")
       +'</tbody></table></div>'
       +'<div class="page-footer">Página 2 · Categorias e Maiores Despesas</div>'
+      +'</section>';
+
+    /* ====== PÁGINA: Raio-X dos Gastos (fixo x variável + comparativo com mesmo mês do ano anterior) ====== */
+    var fixasTotalRX=0,variaveisTotalRX=0;
+    macroOrdered.forEach(function(mo){
+      var mc=MACRO_CATS[mo.k];
+      if(mc&&mc.fixo)fixasTotalRX+=mo.tot;else variaveisTotalRX+=mo.tot;
+    });
+    var mesRefAnoAnt=(function(){var pp=an.mesRef.split("-");if(pp.length!==2)return null;return (+pp[0]-1)+"-"+pp[1]})();
+    var snapAnoAnt=(an.historico||[]).find(function(h){return h.mes===mesRefAnoAnt});
+    var secRaioX='<section class="page page-light">'
+      +'<div class="bg-pattern" style="position:absolute;top:60px;right:-90px;opacity:0.04">'+patternSvg(340,0.4)+'</div>'
+      +'<div class="page-header">'+logoSvg(160,false)+'<div class="page-meta">'+esc(c.nome)+' · '+mesNome+'</div></div>'
+      +eyebrow("RAIO-X DOS GASTOS")
+      +'<h2 class="page-title">Para onde vai <span class="gold-highlight">cada real</span>.</h2>'
+      +'<p class="page-lead">Para onde vai o dinheiro, quanto é compromisso fixo e como estamos em relação a um ano atrás.</p>'
+      +'<div style="background:#fff;border-radius:14px;padding:18px 20px;box-shadow:0 4px 16px rgba(10,22,40,0.04);margin-bottom:16px">'
+      +'<div style="display:flex;height:22px;border-radius:11px;overflow:hidden;margin-bottom:14px">'
+      +macroOrdered.map(function(mo){var m=MACRO_CATS[mo.k]||{cor:"#5F6368"};var pct=totDespAtual>0?(mo.tot/totDespAtual*100):0;return '<div style="width:'+pct+'%;background:'+m.cor+'"></div>'}).join("")
+      +'</div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 24px">'
+      +macroOrdered.map(function(mo){
+        var m=MACRO_CATS[mo.k]||{l:mo.k,ic:"📦",cor:"#5F6368"};
+        var por100=an.snapAtual.tRec>0?(mo.tot/an.snapAtual.tRec*100):0;
+        return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;padding:3px 0"><div style="width:9px;height:9px;border-radius:3px;background:'+m.cor+';flex-shrink:0"></div><div style="flex:1;color:#0A1628">'+m.ic+' '+m.l+'</div><div class="mono" style="color:#5a5a6e">R$ '+por100.toFixed(1)+'</div></div>';
+      }).join("")
+      +'<div style="display:flex;align-items:center;gap:8px;font-size:11px;padding:3px 0;font-weight:800"><div style="width:9px;height:9px;border-radius:3px;background:#0F9D58;flex-shrink:0"></div><div style="flex:1;color:#0F9D58">Sobra (poupança)</div><div class="mono" style="color:#0F9D58">R$ '+(an.snapAtual.tRec>0?(an.kpis.saldoAtual/an.snapAtual.tRec*100):0).toFixed(1)+'</div></div>'
+      +'</div></div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">'
+      +'<div class="kpi-card"><div class="kpi-label">CUSTOS FIXOS</div><div class="kpi-value" style="color:#0A1628">'+fmt(fixasTotalRX)+'</div><div class="kpi-sub" style="color:#5a5a6e">'+(an.snapAtual.tRec>0?(fixasTotalRX/an.snapAtual.tRec*100).toFixed(1):"0")+'% da renda · '+(totDespAtual>0?(fixasTotalRX/totDespAtual*100).toFixed(1):"0")+'% das despesas</div></div>'
+      +'<div class="kpi-card"><div class="kpi-label">CUSTOS VARIÁVEIS</div><div class="kpi-value" style="color:#0A1628">'+fmt(variaveisTotalRX)+'</div><div class="kpi-sub" style="color:#5a5a6e">'+(an.snapAtual.tRec>0?(variaveisTotalRX/an.snapAtual.tRec*100).toFixed(1):"0")+'% da renda · onde há mais margem de ajuste</div></div>'
+      +'</div>'
+      +(snapAnoAnt?eyebrow("COMPARATIVO COM O MESMO MÊS DO ANO ANTERIOR")
+        +'<table class="cv-table"><thead><tr><th></th><th class="ta-right">'+mesRefAnoAnt+'</th><th class="ta-right">'+an.mesRef+'</th><th class="ta-right">VAR.</th></tr></thead><tbody>'
+        +(function(){
+          var rAnt=snapAnoAnt.tRec||0,dAnt=snapAnoAnt.tDesp||0,sAnt=rAnt-dAnt;
+          var rows=[["Receitas",rAnt,an.snapAtual.tRec],["Despesas",dAnt,an.snapAtual.tDespPuro],["Saldo do mês",sAnt,an.kpis.saldoAtual]];
+          return rows.map(function(r){var v=r[1]>0?((r[2]-r[1])/r[1]*100):0;return '<tr><td class="td-bold">'+r[0]+'</td><td class="ta-right">'+fmtCol(r[1])+'</td><td class="ta-right bold">'+fmtCol(r[2])+'</td><td class="ta-right mono bold" style="color:'+(v>=0?"#0F9D58":"#D93025")+'">'+(v>=0?"+":"")+v.toFixed(1)+'%</td></tr>';}).join("");
+        })()
+        +'</tbody></table>':'')
+      +'<div class="page-footer">Raio-X dos Gastos</div>'
+      +'</section>';
+
+    /* ====== PÁGINA: Visão do Casal (condicional — só pra clientes tipo casal/família) ====== */
+    var secCasal='';
+    if(visaoCasalDados && visaoCasalDados.pessoas.length>=2){
+      var vc=visaoCasalDados;
+      secCasal='<section class="page page-light">'
+        +'<div class="bg-pattern" style="position:absolute;top:-40px;right:-90px;opacity:0.04">'+patternSvg(340,0.4)+'</div>'
+        +'<div class="page-header">'+logoSvg(160,false)+'<div class="page-meta">'+esc(c.nome)+' · '+mesNome+'</div></div>'
+        +eyebrow("VISÃO DO CASAL")
+        +'<h2 class="page-title">Quem contribui com <span class="gold-highlight">o quê</span>.</h2>'
+        +'<p class="page-lead">Renda, gastos individuais e a divisão sugerida das despesas compartilhadas — proporcional à participação de cada um na renda.</p>'
+        +'<div style="display:flex;height:22px;border-radius:11px;overflow:hidden;margin-bottom:10px">'
+        +vc.pessoas.map(function(p,i){return '<div style="width:'+p.pctRenda+'%;background:'+(i===0?"#0A1628":"#D4A328")+'"></div>'}).join("")
+        +'</div>'
+        +'<div style="display:flex;gap:18px;margin-bottom:18px;font-size:11px">'
+        +vc.pessoas.map(function(p,i){return '<div><span style="display:inline-block;width:9px;height:9px;border-radius:3px;background:'+(i===0?"#0A1628":"#D4A328")+';margin-right:5px"></span>'+esc(p.nome)+' <strong>'+p.pctRenda.toFixed(1)+'%</strong></div>'}).join("")
+        +'</div>'
+        +'<div style="display:grid;grid-template-columns:repeat('+(1+vc.pessoas.length)+',1fr);gap:12px;margin-bottom:18px">'
+        +'<div class="kpi-card"><div class="kpi-label">DESPESAS COMPARTILHADAS</div><div class="kpi-value" style="color:#0A1628">'+fmt(vc.despCompartilhada)+'</div><div class="kpi-sub" style="color:#5a5a6e">'+(vc.despTotal>0?(vc.despCompartilhada/vc.despTotal*100).toFixed(1):"0")+'% do total</div></div>'
+        +vc.pessoas.map(function(p){return '<div class="kpi-card"><div class="kpi-label">INDIVIDUAIS · '+esc(p.nome).toUpperCase()+'</div><div class="kpi-value" style="color:#0A1628">'+fmt(p.individual)+'</div><div class="kpi-sub" style="color:#5a5a6e">'+(vc.despTotal>0?(p.individual/vc.despTotal*100).toFixed(1):"0")+'% do total</div></div>'}).join("")
+        +'</div>'
+        +'<table class="cv-table"><thead><tr><th>TITULAR</th><th class="ta-right">RENDA</th><th class="ta-right">% RENDA</th><th class="ta-right">INDIVIDUAIS</th><th class="ta-right">PARTE PROPORCIONAL*</th></tr></thead><tbody>'
+        +vc.pessoas.map(function(p){
+          return '<tr><td class="td-bold">'+esc(p.nome)+'</td><td class="ta-right">'+fmtCol(p.renda)+'</td><td class="ta-right mono">'+p.pctRenda.toFixed(1)+'%</td><td class="ta-right">'+fmtCol(p.individual)+'</td><td class="ta-right bold" style="color:#D4A328">'+fmtCol(p.parteProporc)+'</td></tr>';
+        }).join("")
+        +'</tbody></table>'
+        +'<div style="margin-top:14px;padding:10px 14px;background:#FFF8E7;border:1px solid #D4A32833;border-radius:8px;font-size:10px;color:#5a5a6e;line-height:1.5">*Sugestão de divisão das despesas compartilhadas proporcional à renda de cada um — o extrato não identifica de qual conta cada gasto compartilhado saiu, então este não é um registro de quem de fato pagou, e sim um ponto de partida para o acerto entre vocês.</div>'
+        +'<div class="page-footer">Visão do Casal</div>'
+        +'</section>';
+    }
+
+    /* ====== PÁGINA: Metas e Orçamento (previsto x realizado por categoria) ====== */
+    var gruposComOrc=macroOrdered.filter(function(mo){return an.atualPorMacro[mo.k]&&an.atualPorMacro[mo.k].orc>0});
+    var totPrevMetas=gruposComOrc.reduce(function(s,mo){return s+an.atualPorMacro[mo.k].orc},0);
+    var totRealMetas=gruposComOrc.reduce(function(s,mo){return s+mo.tot},0);
+    var secMetas='<section class="page page-light">'
+      +'<div class="bg-pattern" style="position:absolute;top:-40px;left:-90px;opacity:0.04">'+patternSvg(340,0.4)+'</div>'
+      +'<div class="page-header">'+logoSvg(160,false)+'<div class="page-meta">'+esc(c.nome)+' · '+mesNome+'</div></div>'
+      +eyebrow("METAS E ORÇAMENTO")
+      +'<h2 class="page-title">Previsto <span class="gold-highlight">x</span> realizado.</h2>'
+      +'<p class="page-lead">Previsto × realizado por grupo de orçamento no mês.</p>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:18px">'
+      +'<div class="kpi-card"><div class="kpi-label">PREVISTO</div><div class="kpi-value" style="color:#0A1628">'+fmt(totPrevMetas)+'</div><div class="kpi-sub" style="color:#5a5a6e">orçamento do mês</div></div>'
+      +'<div class="kpi-card"><div class="kpi-label">REALIZADO</div><div class="kpi-value" style="color:#D93025">'+fmt(totRealMetas)+'</div><div class="kpi-sub" style="color:#5a5a6e">despesas do mês</div></div>'
+      +'<div class="kpi-card"><div class="kpi-label">DESVIO</div><div class="kpi-value" style="color:'+(totRealMetas<=totPrevMetas?"#0F9D58":"#D93025")+'">'+((totPrevMetas-totRealMetas)>=0?"+":"")+fmt(totPrevMetas-totRealMetas)+'</div><div class="kpi-sub" style="color:#5a5a6e">previsto - realizado</div></div>'
+      +'</div>'
+      +(gruposComOrc.length>0?gruposComOrc.map(function(mo){
+        var m=MACRO_CATS[mo.k]||{l:mo.k,ic:"📦",cor:"#5F6368"};
+        var orc=an.atualPorMacro[mo.k].orc;
+        var pct=orc>0?(mo.tot/orc*100):0;
+        var status=pct<=100?"Dentro":pct<=115?"Atenção":"Estourou";
+        var corSt=status==="Dentro"?"#0F9D58":status==="Atenção"?"#E8810C":"#D93025";
+        return '<div style="margin-bottom:14px">'
+          +'<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px"><span style="font-weight:700;color:#0A1628">'+m.ic+' '+m.l+'</span><span class="mono">'+fmtCol(mo.tot)+' <span style="color:#8B9DC3">/ '+fmt(orc)+'</span></span></div>'
+          +'<div style="height:9px;background:#F1F3F8;border-radius:5px;overflow:hidden"><div style="height:100%;width:'+Math.min(100,pct)+'%;background:'+corSt+'"></div></div>'
+          +'<div style="display:flex;justify-content:space-between;margin-top:3px"><span class="macro-pill" style="background:'+corSt+'1f;color:'+corSt+';font-size:9px">'+status+'</span><span style="font-size:10px;color:#8B9DC3">'+pct.toFixed(0)+'% do previsto</span></div>'
+          +'</div>';
+      }).join(""):'<div style="padding:30px;text-align:center;background:#fff;border-radius:14px;color:#8B9DC3;font-size:13px">Nenhuma categoria com orçamento definido neste mês.</div>')
+      +'<div style="margin-top:6px;font-size:10px;color:#8B9DC3">Grupos sem valor previsto não entram nesta comparação, mas compõem o total realizado.</div>'
+      +'<div class="page-footer">Metas e Orçamento</div>'
       +'</section>';
 
     /* ====== PATRIMÔNIO + APORTES + OBJETIVOS — 3 páginas integradas ====== */
@@ -13891,9 +14151,22 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
     var secObjs=objs.length>0?'<section class="page page-light">'
       +'<div class="bg-pattern" style="position:absolute;top:-40px;left:-90px;opacity:0.05">'+patternSvg(380,0.5)+'</div>'
       +'<div class="page-header">'+logoSvg(160,false)+'<div class="page-meta">'+esc(c.nome)+' · '+mesNome+'</div></div>'
-      +eyebrow("EVOLUÇÃO DOS OBJETIVOS")
-      +'<h2 class="page-title">Caminhando até <span class="gold-highlight">cada meta</span>.</h2>'
+      +eyebrow("RESERVA E OBJETIVOS")
+      +'<h2 class="page-title">Segurança hoje e os <span class="gold-highlight">sonhos de amanhã</span>.</h2>'
       +'<p class="page-lead">Progresso de cada objetivo financeiro com base na carteira atual e aportes do mês. Donuts indicam % atingido da meta.</p>'
+      +(objetivoReserva?(function(){
+        var metaReserva=objetivoReserva.alvo||(an.snapAtual.tDesp*6);
+        var mesesAtual=an.snapAtual.tDesp>0?(reservaAtual/an.snapAtual.tDesp):0;
+        var pctReserva=metaReserva>0?Math.min(100,reservaAtual/metaReserva*100):0;
+        var statusReserva=mesesAtual>=6?"Completa":mesesAtual>=3?"Em construção":"Atenção";
+        var corReserva=mesesAtual>=6?"#0F9D58":mesesAtual>=3?"#E8810C":"#D93025";
+        return '<div style="background:#fff;border-radius:14px;padding:16px 20px;box-shadow:0 4px 16px rgba(10,22,40,0.04);margin-bottom:18px">'
+          +'<div style="font-size:9px;color:#D4A328;font-weight:800;letter-spacing:2px;margin-bottom:6px">🛟 RESERVA DE EMERGÊNCIA</div>'
+          +'<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px"><span style="font-size:16px;font-weight:800;color:#0A1628">'+mesesAtual.toFixed(1)+' meses de despesas</span><span class="mono" style="color:#5a5a6e;font-size:11px">'+fmt(reservaAtual)+' / meta '+fmt(metaReserva)+'</span></div>'
+          +'<div style="height:10px;background:#F1F3F8;border-radius:5px;overflow:hidden;margin-bottom:6px"><div style="height:100%;width:'+pctReserva+'%;background:'+corReserva+'"></div></div>'
+          +'<div style="display:flex;justify-content:space-between"><span class="macro-pill" style="background:'+corReserva+'1f;color:'+corReserva+'">'+statusReserva+'</span>'+(reservaAtual<metaReserva?'<span style="font-size:10px;color:#8B9DC3">faltam '+fmt(metaReserva-reservaAtual)+' para a meta</span>':'')+'</div>'
+          +'</div>';
+      })():'')
       +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'
       +objs.map(function(obj){
         var acum=calcAcumObjPDF(obj);
@@ -13936,7 +14209,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           +'</div>';
       }).join("")
       +'</div>'
-      +'<div class="page-footer">Página 5 · Evolução dos Objetivos</div>'
+      +'<div class="page-footer">Reserva e Objetivos</div>'
       +'</section>':'';
 
     /* ====== PÁGINA 4: Diagnóstico ====== */
@@ -13965,6 +14238,87 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       +'<div class="diag-list">'+an.pontos.recomendacoes.map(function(p){return '<div class="diag-item"><span class="diag-dot" style="background:#D4A328"></span><span>'+esc(p)+'</span></div>'}).join("")+'</div>'
       +'</div>'
       +'<div class="page-footer page-footer-dark">Página 6 · Diagnóstico Inteligente</div>'
+      +'</section>';
+
+    /* ====== PÁGINA: Nosso Trabalho por Você ======
+       Lista ações REAIS feitas pela Courinvest pelo cliente no mês (com economia gerada).
+       Isso não pode ser inventado por IA nem derivado do extrato — é um registro factual do
+       trabalho da equipe. Por enquanto fica como espaço reservado, preenchido manualmente
+       (c.particularidades.acoesMes), até decidirmos com o Igor a melhor forma de alimentar isso. */
+    var acoesMes=(c.particularidades&&c.particularidades.acoesMes)||[];
+    var impacto12m=acoesMes.reduce(function(s,a){return s+((a.valor||0)*(a.recorrente!==false?12:1))},0);
+    var secTrabalho='<section class="page page-light">'
+      +'<div class="bg-pattern" style="position:absolute;top:-40px;right:-90px;opacity:0.04">'+patternSvg(340,0.4)+'</div>'
+      +'<div class="page-header">'+logoSvg(160,false)+'<div class="page-meta">'+esc(c.nome)+' · '+mesNome+'</div></div>'
+      +eyebrow("NOSSO TRABALHO POR VOCÊ")
+      +'<h2 class="page-title">O que fizemos <span class="gold-highlight">por você</span>.</h2>'
+      +'<p class="page-lead">O que a Courinvest fez neste mês para proteger e fazer render o seu dinheiro.</p>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px">'
+      +'<div class="kpi-card"><div class="kpi-label">IMPACTO ESTIMADO EM 12M</div><div class="kpi-value" style="color:#0F9D58">'+fmt(impacto12m)+'</div><div class="kpi-sub" style="color:#5a5a6e">economia recorrente + ganhos únicos</div></div>'
+      +'<div class="kpi-card"><div class="kpi-label">AÇÕES NO MÊS</div><div class="kpi-value" style="color:#0A1628">'+acoesMes.length+'</div><div class="kpi-sub" style="color:#5a5a6e">melhorias implementadas</div></div>'
+      +'</div>'
+      +(acoesMes.length>0?
+        eyebrow("O QUE FIZEMOS POR VOCÊ")
+        +'<div style="display:flex;flex-direction:column;gap:8px">'
+        +acoesMes.map(function(a){
+          return '<div style="display:flex;align-items:center;gap:12px;background:#fff;border-radius:10px;padding:12px 16px;box-shadow:0 2px 10px rgba(10,22,40,0.04)">'
+            +'<span style="width:22px;height:22px;border-radius:50%;background:#0F9D5822;color:#0F9D58;display:flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0">✓</span>'
+            +'<div style="flex:1"><div style="font-weight:700;color:#0A1628;font-size:12px">'+esc(a.titulo||a.desc||"")+'</div>'+(a.detalhe?'<div style="font-size:10px;color:#8B9DC3">'+esc(a.detalhe)+'</div>':'')+'</div>'
+            +'<div class="mono bold" style="color:#0F9D58;text-align:right">'+(a.valor?fmt(a.valor)+(a.recorrente!==false?"/mês":" (único)"):"")+'</div>'
+            +'</div>';
+        }).join("")
+        +'</div>'
+        :'<div style="padding:30px;text-align:center;background:#fff;border-radius:14px;color:#8B9DC3;font-size:13px">Nenhuma ação registrada para este mês ainda — espaço reservado para o resumo do trabalho da equipe Courinvest.</div>')
+      +'<div class="page-footer">Nosso Trabalho por Você</div>'
+      +'</section>';
+
+    /* ====== Observações e Próximos Passos — via IA (Claude API), com fallback local ======
+       Reaproveita a chave já configurada em Dashboard → Configurações (d.config.anthropicKey),
+       mesmo padrão de chamada usado no Overview de Mercado (melhorarComIA). Se não houver chave,
+       a chamada falhar ou demorar mais que 12s, cai no fallback local (an.pontos, sem IA). */
+    var gerarObservacoesIA=async function(){
+      var apiKey=(d&&d.config&&d.config.anthropicKey)||"";
+      if(!apiKey)return null;
+      try{
+        var resumo="Mês de referência: "+mesNome+". Receita: "+fmt(an.snapAtual.tRec)+". Despesas: "+fmt(an.snapAtual.tDespPuro)+". Saldo: "+fmt(an.kpis.saldoAtual)+". Taxa de poupança: "+an.kpis.txPoupAtual.toFixed(1)+"%. Nota de Saúde Financeira: "+saude.nota+"/100 ("+saude.faixa+"), indicador mais fraco: "+saude.piorIndicador.l+" ("+fmtIndVal(saude.piorIndicador)+", meta "+fmtIndMeta(saude.piorIndicador)+"). Alertas identificados: "+an.pontos.alertas.join(" | ")+". Categorias com estouro de orçamento: "+gruposComOrc.filter(function(mo){return an.atualPorMacro[mo.k].orc>0&&mo.tot>an.atualPorMacro[mo.k].orc}).map(function(mo){return MACRO_CATS[mo.k].l+" ("+(mo.tot/an.atualPorMacro[mo.k].orc*100).toFixed(0)+"% do previsto)"}).join(", ")+".";
+        var prompt="Você é um analista financeiro sênior da Courinvest Consultoria em Investimentos, escrevendo a seção final de um relatório mensal de Gestão Financeira para um cliente. Com base SOMENTE nos dados abaixo (nunca invente números), responda em JSON estrito, sem markdown, no formato exato: {\"pontosAtencao\":[{\"titulo\":\"...\",\"texto\":\"...\"}],\"planoAcao\":[{\"acao\":\"...\",\"responsavel\":\"Cliente|Courinvest|Ambos\",\"prazo\":\"...\"}]}. Gere de 2 a 3 pontos de atenção (concisos, cada um com título curto e 1 frase de explicação) e de 3 a 4 itens de plano de ação pro próximo mês (ações concretas e curtas). Português do Brasil, tom institucional e direto.\n\nDados do mês:\n"+resumo;
+        var ctrl=new AbortController();
+        var tid=setTimeout(function(){ctrl.abort()},12000);
+        var r=await fetch("https://api.anthropic.com/v1/messages",{
+          method:"POST",signal:ctrl.signal,
+          headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+          body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1200,messages:[{role:"user",content:prompt}]})
+        });
+        clearTimeout(tid);
+        if(!r.ok)return null;
+        var data2=await r.json();
+        var txt=data2&&data2.content&&data2.content[0]&&data2.content[0].text||"";
+        txt=txt.replace(/^```json\s*|```\s*$/g,"").trim();
+        var parsed=JSON.parse(txt);
+        if(!parsed||!Array.isArray(parsed.pontosAtencao))return null;
+        return parsed;
+      }catch(e){return null;}
+    };
+    var obsIA=await gerarObservacoesIA();
+    var pontosAtencaoFinal=obsIA?obsIA.pontosAtencao:an.pontos.alertas.slice(0,3).map(function(a){return {titulo:"Ponto de atenção",texto:a}});
+    var planoAcaoFinal=obsIA?obsIA.planoAcao:an.pontos.recomendacoes.slice(0,4).map(function(r){return {acao:r,responsavel:"Ambos",prazo:"Próximo mês"}});
+    var secObs='<section class="page page-light">'
+      +'<div class="bg-pattern" style="position:absolute;top:-40px;left:-90px;opacity:0.04">'+patternSvg(340,0.4)+'</div>'
+      +'<div class="page-header">'+logoSvg(160,false)+'<div class="page-meta">'+esc(c.nome)+' · '+mesNome+'</div></div>'
+      +eyebrow("OBSERVAÇÕES E PRÓXIMOS PASSOS"+(obsIA?"":" · GERADO LOCALMENTE"))
+      +'<h2 class="page-title">O que vem <span class="gold-highlight">pela frente</span>.</h2>'
+      +'<div style="background:#fff;border-radius:14px;padding:16px 20px;box-shadow:0 4px 16px rgba(10,22,40,0.04);margin-bottom:18px">'
+      +eyebrow("PONTOS DE ATENÇÃO")
+      +pontosAtencaoFinal.map(function(p,i){return '<div style="padding:10px 0;'+(i<pontosAtencaoFinal.length-1?"border-bottom:1px solid #F0F0F4;":"")+'"><div style="font-weight:700;color:#0A1628;font-size:12px;margin-bottom:3px">'+esc(p.titulo)+'</div><div style="font-size:11px;color:#5a5a6e;line-height:1.5">'+esc(p.texto)+'</div></div>'}).join("")
+      +'</div>'
+      +eyebrow("PLANO DE AÇÃO PARA O PRÓXIMO MÊS")
+      +'<table class="cv-table"><thead><tr><th>AÇÃO</th><th class="ta-right">RESPONSÁVEL</th><th class="ta-right">PRAZO</th></tr></thead><tbody>'
+      +planoAcaoFinal.map(function(p){
+        var corResp=p.responsavel==="Cliente"?"#E8810C":p.responsavel==="Courinvest"?"#0F9D58":"#D4A328";
+        return '<tr><td>'+esc(p.acao)+'</td><td class="ta-right"><span class="macro-pill" style="background:'+corResp+'1f;color:'+corResp+'">'+esc(p.responsavel)+'</span></td><td class="ta-right" style="color:#5a5a6e">'+esc(p.prazo)+'</td></tr>';
+      }).join("")
+      +'</tbody></table>'
+      +'<div class="page-footer">Observações e Próximos Passos</div>'
       +'</section>';
 
     /* ====== PÁGINA 4: Histórico ====== */
@@ -14154,21 +14508,27 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         var rel=(c.particularidades&&c.particularidades.relatorio)||{};
         var tpl=rel.template||"premium";
         var TEMPLATE_DEFAULTS={
-          premium:  {capa:true, resumoExec:true, orcamento:true, despesas:true, carteira:true, rentabilidade:true, metas:true, objetivos:true, analise:true, historico:false, proximosPassos:true},
-          simples:  {capa:true, resumoExec:true, orcamento:false,despesas:false,carteira:true, rentabilidade:true, metas:false,objetivos:false,analise:false,historico:false, proximosPassos:false},
-          completo: {capa:true, resumoExec:true, orcamento:true, despesas:true, carteira:true, rentabilidade:true, metas:true, objetivos:true, analise:true, historico:true,  proximosPassos:true},
-          custom:   rel.secoes||{capa:true, resumoExec:true, orcamento:false,despesas:false,carteira:true, rentabilidade:false,metas:false,objetivos:false,analise:false,historico:false, proximosPassos:true}
+          premium:  {capa:true, resumoExec:true, saude:true, orcamento:true, despesas:true, raiox:true, visaoCasal:true, metasOrc:true, carteira:true, rentabilidade:true, metas:true, objetivos:true, analise:true, trabalho:true, observacoes:true, historico:false, proximosPassos:true},
+          simples:  {capa:true, resumoExec:true, saude:true, orcamento:false,despesas:false,raiox:false,visaoCasal:false,metasOrc:false,carteira:true, rentabilidade:true, metas:false,objetivos:false,analise:false,trabalho:false,observacoes:false,historico:false, proximosPassos:false},
+          completo: {capa:true, resumoExec:true, saude:true, orcamento:true, despesas:true, raiox:true, visaoCasal:true, metasOrc:true, carteira:true, rentabilidade:true, metas:true, objetivos:true, analise:true, trabalho:true, observacoes:true, historico:true,  proximosPassos:true},
+          custom:   rel.secoes||{capa:true, resumoExec:true, saude:true, orcamento:false,despesas:false,raiox:false,visaoCasal:false,metasOrc:false,carteira:true, rentabilidade:false,metas:false,objetivos:false,analise:false,trabalho:false,observacoes:true,historico:false, proximosPassos:true}
         };
         var sec=tpl==="custom" ? (rel.secoes||TEMPLATE_DEFAULTS.custom) : TEMPLATE_DEFAULTS[tpl];
         /* Concatena seções respeitando a configuração — variáveis vazias quando seção desligada */
         var partes="";
         if(sec.capa!==false) partes+=capa;
-        if(sec.orcamento!==false || sec.resumoExec!==false) partes+=sec1; 
+        if(sec.orcamento!==false || sec.resumoExec!==false) partes+=sec1;
+        if(sec.saude!==false) partes+=secSaude;
         if(sec.despesas!==false) partes+=sec2;
-        if(sec.carteira!==false || sec.rentabilidade!==false) partes+=secPat; 
+        if(sec.raiox!==false) partes+=secRaioX;
+        if(sec.visaoCasal!==false) partes+=secCasal;
+        if(sec.metasOrc!==false) partes+=secMetas;
+        if(sec.carteira!==false || sec.rentabilidade!==false) partes+=secPat;
         if(sec.metas!==false) partes+=secAportes;
         if(sec.objetivos!==false) partes+=secObjs;
         if(sec.analise!==false) partes+=sec3;
+        if(sec.trabalho!==false) partes+=secTrabalho;
+        if(sec.observacoes!==false) partes+=secObs;
         if(sec.historico!==false) partes+=sec4;
         if(sec.proximosPassos!==false) partes+=fechamento;
         return partes;
@@ -14303,21 +14663,21 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       {}
       <Mo open={showSvcChange} onClose={()=>sShowSvcChange(false)} title="Alterar Serviço">
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <div style={{fontSize:12,color:T.t2,marginBottom:4}}>Selecione o serviço principal do cliente. Gestão de Patrimônio e Gestão Financeira são exclusivos.</div>
+          <div style={{fontSize:12,color:T.t2,marginBottom:4}}>Selecione o serviço principal do cliente. Gestão de Patrimônio, Gestão Financeira e Consultoria são exclusivos.</div>
           <div style={{display:"flex",gap:8}}>
-            {[["patrimonio","Gestão de Patrimônio","💎",T.gold],["planejamento","Gestão Financeira","📊",T.cyan]].map(function(arr){
+            {[["patrimonio","Gestão de Patrimônio","💎",T.gold],["planejamento","Gestão Financeira","📊",T.cyan],["consultoria","Consultoria","🗂️",T.orange]].map(function(arr){
               var k=arr[0],label=arr[1],ic=arr[2],cor=arr[3];
               var ativo=c.sv.includes(k);
               return (
                 <button key={k} onClick={function(){
-                  var newSv=c.sv.filter(function(s){return s!=="patrimonio"&&s!=="planejamento"});
+                  var newSv=c.sv.filter(function(s){return s!=="patrimonio"&&s!=="planejamento"&&s!=="consultoria"});
                   newSv.push(k);
                   dp({t:"UC",p:{id:c.id,sv:newSv}});
                   sTab("geral");
                 }} style={{flex:1,padding:"16px",borderRadius:14,border:ativo?"2px solid "+cor:"1px solid "+T.bdrL,background:ativo?cor+"12":"transparent",cursor:"pointer",textAlign:"center"}}>
                   <div style={{fontSize:28,marginBottom:6}}>{ic}</div>
                   <div style={{fontSize:14,fontWeight:700,color:ativo?cor:T.t2}}>{label}</div>
-                  <div style={{fontSize:10,color:T.t3,marginTop:4}}>{k==="patrimonio"?"Taxa % a.m. sobre patrimônio":"Valor fixo mensal + IPCA"}</div>
+                  <div style={{fontSize:10,color:T.t3,marginTop:4}}>{k==="patrimonio"?"Taxa % a.m. sobre patrimônio":k==="planejamento"?"Valor fixo mensal + IPCA":"Serviço pontual, não recorrente"}</div>
                   {ativo && <div style={{marginTop:6,fontSize:10,fontWeight:700,color:cor}}>✓ Ativo</div>}
                 </button>
               );
@@ -20818,9 +21178,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                     <Cd onClick={function(){
                       var an=gerarAnaliseFinanceira();
                       if(!an||!an.snapAtual){alert("Sem dados financeiros. Importe o Meu Vista primeiro.");return;}
-                      var w=window.open("","_blank");
-                      w.document.write(exportarRelatorioFinPDF());
-                      w.document.close();
+                      exportarRelatorioFinPDF();
                     }} style={{padding:20,cursor:"pointer",background:"linear-gradient(145deg,rgba(56,189,248,0.06),rgba(56,189,248,0.02))",border:"1px solid "+T.cyan+"33"}}>
                       <div style={{display:"flex",alignItems:"center",gap:12}}>
                         <div style={{fontSize:32}}>📄</div>
@@ -25262,7 +25620,7 @@ function PipelineView({data:d,dispatch:dp}){
               <div>
                 <div style={{fontSize:10,fontWeight:700,color:T.t3,marginBottom:3}}>SERVIÇO</div>
                 <select value={selLead.servico} onChange={function(e){sSelLead(Object.assign({},selLead,{servico:e.target.value}));sLeads(function(p){return p.map(function(l){return l.id===selLead.id?Object.assign({},l,{servico:e.target.value}):l})})}} style={inpS}>
-                  <option value="patrimonio">Gestão de Patrimônio</option><option value="planejamento">Gestão Financeira</option><option value="milhas">Couri Mile$</option>
+                  <option value="patrimonio">Gestão de Patrimônio</option><option value="planejamento">Gestão Financeira</option><option value="consultoria">Consultoria</option><option value="milhas">Couri Mile$</option>
                 </select>
               </div>
               <div>
@@ -25371,7 +25729,7 @@ function PipelineView({data:d,dispatch:dp}){
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                 <div><div style={{fontSize:10,fontWeight:700,color:T.t3,marginBottom:3}}>SERVIÇO DE INTERESSE</div>
                   <select value={ldForm.servico} onChange={function(e){sLdForm({...ldForm,servico:e.target.value})}} style={inpS}>
-                    <option value="patrimonio">Gestão de Patrimônio</option><option value="planejamento">Gestão Financeira</option><option value="milhas">Couri Mile$</option>
+                    <option value="patrimonio">Gestão de Patrimônio</option><option value="planejamento">Gestão Financeira</option><option value="consultoria">Consultoria</option><option value="milhas">Couri Mile$</option>
                   </select></div>
                 <div><div style={{fontSize:10,fontWeight:700,color:T.t3,marginBottom:3}}>PATRIMÔNIO ESTIMADO</div>
                   <input type="number" value={ldForm.patEst} onChange={function(e){sLdForm({...ldForm,patEst:+e.target.value||0})}} style={{...inpS,fontFamily:"'JetBrains Mono'"}}/></div>
@@ -35915,7 +36273,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '484';
+  var SW_VERSION = '486';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
