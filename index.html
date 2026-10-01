@@ -374,6 +374,36 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent,nomeAr
     var pageW=doc.internal.pageSize.getWidth();
     var pageH=doc.internal.pageSize.getHeight();
     var pagesOk=0;
+    /* LINKS CLICÁVEIS (adicionado pra corrigir "Ver apresentação completa" da Apresentação
+       Institucional saindo sem link no PDF baixado): como essa função rasteriza cada página em
+       imagem (html2canvas) pro jsPDF montar o PDF, qualquer <a href> da página vira só pixel —
+       nenhum link sobrevive à captura, mesmo que o HTML de origem tenha o href certinho. Corrige
+       de forma genérica (não só pra esse card específico): depois de desenhar a imagem de uma
+       página que COUBE inteira numa folha (sem fatiamento), procura por <a href> reais dentro
+       dela e desenha uma anotação de link do jsPDF (invisível, só a área clicável) por cima da
+       posição exata de cada um, usando a proporção entre o tamanho renderizado na tela (CSS px)
+       e o tamanho final da página no PDF (pt) pra acertar a posição. Só cobre o caso mais comum
+       (página que cabe inteira); páginas fatiadas em várias folhas (bloco de conteúdo mais alto
+       que uma A4) não recebem essa proteção — nenhum conteúdo desse tipo hoje tem links, então
+       não é uma perda prática. */
+    var adicionarLinksClicaveis=function(pageEl,imgHeightPt){
+      try{
+        var pr=pageEl.getBoundingClientRect();
+        if(!pr||pr.width<=0)return;
+        var k=pageW/pr.width;
+        var anchors=pageEl.querySelectorAll("a[href]");
+        for(var ai=0;ai<anchors.length;ai++){
+          var a=anchors[ai];
+          var href=a.getAttribute("href");
+          if(!href||href.charAt(0)==="#")continue;
+          var ar=a.getBoundingClientRect();
+          if(!ar||ar.width<=0||ar.height<=0)continue;
+          var lx=(ar.left-pr.left)*k,ly=(ar.top-pr.top)*k,lw=ar.width*k,lh=ar.height*k;
+          if(ly>imgHeightPt||ly+lh<0)continue;
+          try{doc.link(lx,ly,lw,lh,{url:href})}catch(_lnkErr){}
+        }
+      }catch(_linksErr){console.warn("[PDF] Falha ao adicionar links clicáveis:",_linksErr)}
+    };
     /* CINTO DE SEGURANÇA contra o "InvalidStateError: createPattern...width or height of 0":
        mesmo com o relatório dividido em páginas normais (v395), esse erro específico ainda pode
        acontecer em certos navegadores/placas de vídeo — o html2canvas cria um canvas
@@ -464,6 +494,7 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent,nomeAr
           }
           doc.addImage(canvas.toDataURL("image/jpeg",0.95),"JPEG",0,0,pageW,imgH);
           pagesOk++;
+          adicionarLinksClicaveis(pageEls[pi],imgH);
         }else{
           /* Página de conteúdo mais alta que uma folha A4 (comum em Objetivos com várias metas
              vinculadas, ou Composição Detalhada com muitos ativos). Mede a posição de cada bloco
@@ -7992,6 +8023,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
   const corrFileRef=useRef(null);
   const gorilaConjRef=useRef(null); 
   const perf12mRef=useRef(null); /* Import exclusivo de performance 12m — NÃO altera ativos/pat */
+  const gorilaRelRef=useRef(null); /* Import do Gorila direto pela aba Relatório (cliente de GF que também tem investimentos) */
   const[corrMsg,sCorrMsg]=useState("");
 
   /* Importa SOMENTE os dados de rentabilidade/benchmarks do Gorila anual.
@@ -8270,7 +8302,205 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
     reader.readAsArrayBuffer(file);
   };
 
-  
+  /* ====== IMPORTAR GORILA DO TITULAR DIRETO PELA ABA RELATÓRIO ======
+     Pedido do Igor: a aba de gerar o relatório mensal de Gestão Financeira precisa ter onde
+     importar tanto o Meu Vista quanto o relatório do Gorila (pro cliente de GF que também tem
+     investimentos geridos por nós — o resumo do patrimônio entra no relatório mensal de GF via
+     secPat/secAportes em exportarRelatorioFinPDF). Até aqui, importar o Gorila do titular só era
+     possível pela lista de clientes (importGorilaCliente, que faz busca por nome em d.cl porque
+     lá ainda não se sabe qual cliente é) — aqui dentro da ficha já sabemos exatamente quem é (c),
+     então é só ler a planilha e gravar direto em c, sem precisar desse passo de busca. Lógica de
+     parsing idêntica à do importarGorilaConjuge (mesma função, só que gravando em c em vez de
+     c.conjuge) — ver comentários lá pra detalhes de cada campo lido da planilha do Gorila. */
+  var importarGorilaRelatorio=function(file){
+    if(!file)return;
+    var reader=new FileReader();
+    reader.onload=function(ev){
+      try{
+        var wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array",cellDates:true});
+        var ws=wb.Sheets[wb.SheetNames[0]];
+        var jsonRows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:""});
+        var pv=function(v){if(typeof v==="number")return v;var s=String(v||"0").trim().replace(/R\$\s*/g,"").replace(/%/g,"").replace(/\s/g,"");if(s.match(/,\d{3}\./)){s=s.replace(/,/g,"")}else if(s.match(/\.\d{3},/)){s=s.replace(/\./g,"").replace(",",".")}else if(s.match(/,\d{1,2}$/)){s=s.replace(",",".")}return parseFloat(s)||0};
+        var toISO=function(v){if(v instanceof Date)return v.toISOString().split("T")[0];if(typeof v==="number"&&v>40000&&v<60000)return new Date(Math.round((v-25569)*86400000)).toISOString().split("T")[0];return String(v||"").substring(0,10);};
+
+        var patTit=0,resultadoTit=0,dI="",dF="",aportesTit=0,retiradasTit=0,captacaoTit=0;
+        for(var li=0;li<Math.min(jsonRows.length,30);li++){
+          var lbl=String((jsonRows[li]||[])[0]||"").toLowerCase().trim();
+          var rawVal=(jsonRows[li]||[])[1];
+          if(!lbl)continue;
+          if(lbl.indexOf("patrim")>=0 && patTit===0)patTit=typeof rawVal==="number"?rawVal:pv(rawVal);
+          else if(lbl.indexOf("resultado")>=0 && resultadoTit===0)resultadoTit=typeof rawVal==="number"?rawVal:pv(rawVal);
+          else if(lbl.indexOf("data inicial")>=0)dI=toISO(rawVal);
+          else if(lbl.indexOf("data final")>=0)dF=toISO(rawVal);
+          else if(lbl.indexOf("aporte")>=0||lbl.indexOf("aplica")>=0||lbl.indexOf("depos")>=0)aportesTit=typeof rawVal==="number"?rawVal:pv(rawVal);
+          else if(lbl.indexOf("resgate")>=0||lbl.indexOf("retirad")>=0||lbl.indexOf("saqu")>=0)retiradasTit=typeof rawVal==="number"?rawVal:pv(rawVal);
+          else if(lbl.indexOf("capta")>=0||lbl.indexOf("fluxo")>=0)captacaoTit=typeof rawVal==="number"?rawVal:pv(rawVal);
+        }
+        if(captacaoTit===0)captacaoTit=aportesTit-retiradasTit;
+
+        var gRentTit={periods:[],atribuicao:[],aportes:aportesTit,retiradas:retiradasTit,captacao:captacaoTit};
+        var rentSectionRow=-1;
+        for(var i=0;i<Math.min(jsonRows.length,30);i++){
+          var c0=String((jsonRows[i]||[])[0]||"").toLowerCase();
+          if(c0.indexOf("rentabilidade da carteira")>=0){rentSectionRow=i;break}
+        }
+        if(rentSectionRow>=0){
+          for(var i=rentSectionRow+2;i<Math.min(rentSectionRow+10,jsonRows.length);i++){
+            var r=jsonRows[i];if(!r)continue;
+            var per=String(r[0]||"").trim();
+            if(!per||per.toLowerCase().indexOf("atribui")>=0||per.toLowerCase().indexOf("posição")>=0)break;
+            var rent=typeof r[3]==="number"?r[3]:pv(r[3]);
+            var ibov=typeof r[4]==="number"?r[4]:pv(r[4]);
+            var cdi=typeof r[5]==="number"?r[5]:pv(r[5]);
+            var ipca=typeof r[6]==="number"?r[6]:pv(r[6]);
+            gRentTit.periods.push({p:per,rent:rent,ibov:ibov,cdi:cdi,ipca:ipca});
+          }
+        }
+        var atribRow=-1;
+        for(var i=0;i<Math.min(jsonRows.length,35);i++){
+          var c0=String((jsonRows[i]||[])[0]||"").toLowerCase();
+          if(c0.indexOf("atribuição de performance")>=0||c0.indexOf("atribuicao de performance")>=0){atribRow=i;break}
+        }
+        if(atribRow>=0){
+          for(var i=atribRow+2;i<Math.min(atribRow+15,jsonRows.length);i++){
+            var r=jsonRows[i];if(!r)continue;
+            var classe=String(r[0]||"").trim();
+            if(!classe||classe.toLowerCase()==="posição"||classe.toLowerCase()==="total")break;
+            var pct=typeof r[1]==="number"?r[1]:pv(r[1]);
+            if(classe&&classe.toLowerCase()!=="classe")gRentTit.atribuicao.push({classe:classe,pct:pct});
+          }
+        }
+
+        var headerRow=-1;
+        for(var i=0;i<Math.min(jsonRows.length,50);i++){
+          var joined=(jsonRows[i]||[]).join("|").toLowerCase();
+          if(joined.indexOf("corretora")>=0&&joined.indexOf("ativo")>=0&&joined.indexOf("classe")>=0){headerRow=i;break}
+        }
+
+        var ativosTit=[];
+        if(headerRow>=0){
+          var hdr=(jsonRows[headerRow]||[]).map(function(h){return String(h).toLowerCase().trim()});
+          var ci=function(pats){for(var p=0;p<pats.length;p++){for(var j=0;j<hdr.length;j++){if(hdr[j].indexOf(pats[p])>=0)return j}}return-1};
+          var iC=ci(["corretora"]),iA=ci(["ativo"]),iSC=ci(["sub-classe","sub classe","subclasse"]);
+          var iCl=-1;for(var hi=0;hi<hdr.length;hi++){if(hdr[hi]==="classe"){iCl=hi;break}}
+          if(iCl<0)iCl=ci(["classe"]);
+          if(iCl===iSC){for(var hi=0;hi<hdr.length;hi++){if(hdr[hi]==="classe"&&hi!==iSC){iCl=hi;break}}}
+          var iQ=ci(["quantidade"]),iP=ci(["posição","posicao"]),iPr=ci(["preço (r","cotação"]),iPM=ci(["preço médio","preco medio"]),iV=ci(["vencimento"]);
+          var idxsPeriodo=[];
+          for(var hi=0;hi<hdr.length;hi++){if(hdr[hi]==="periodo"||hdr[hi]==="período")idxsPeriodo.push(hi);}
+          var pctStart=idxsPeriodo[0]>=0?idxsPeriodo[0]:-1;
+          var rsStart=idxsPeriodo.length>=2?idxsPeriodo[1]:-1;
+          var COL_LABELS=["periodo","ano","12m","24m","início da carteira"];
+
+          for(var i=headerRow+1;i<jsonRows.length;i++){
+            var row=jsonRows[i];if(!row||row.length<6)continue;
+            var nm2=iA>=0?String(row[iA]||"").trim():"";
+            var cl=iCl>=0?String(row[iCl]||"").trim():"";
+            if(!nm2||!cl)continue;
+            var inst2=iC>=0?String(row[iC]||"").trim():"";
+            var subCl=iSC>=0?String(row[iSC]||"").trim().toLowerCase():"";
+            var qtd2=iQ>=0?pv(row[iQ]):0;
+            var pos2=iP>=0?pv(row[iP]):0;
+            var preco2=iPr>=0?pv(row[iPr]):0;
+            var pm2=iPM>=0?pv(row[iPM]):0;
+            var venc2=iV>=0?row[iV]:"";
+
+            var CLASSES_VALIDAS=["Renda Fixa","Renda Variável","Renda Variavel","Investimento No Exterior","Previdência","Previdencia","Criptomoeda","Caixa","Multimercado","Outros"];
+            var isClasseValida=CLASSES_VALIDAS.some(function(cv){return cl.indexOf(cv)>=0||cv.indexOf(cl)>=0});
+            var isHeader=cl==="Classe"||cl===""||nm2==="Ativo"||nm2===""||nm2.toLowerCase()==="total"||!isClasseValida;
+            if(isHeader||isNaN(pos2)||pos2<=0.01||nm2.length<=1)continue;
+
+            var tp2="outros";
+            if(cl==="Renda Fixa"){
+              if(subCl.indexOf("prefixado")>=0||subCl.indexOf("inflação")>=0||subCl.indexOf("inflacao")>=0)tp2="tesouro";
+              else if(subCl.indexOf("fund")>=0)tp2="fundo_rf";
+              else if(subCl.indexOf("prev")>=0)tp2="prev";
+              else tp2="cdb";
+            }else if(cl.indexOf("Renda Variável")>=0||cl.indexOf("Renda Variavel")>=0){
+              if(subCl.indexOf("fii")>=0||(/^[A-Z]{4}11$/).test(nm2.replace(/\s/g,"")))tp2="fii";
+              else if(subCl.indexOf("etf")>=0)tp2="etf_br";
+              else if(subCl.indexOf("bdr")>=0)tp2="bdr";
+              else tp2="acao";
+            }else if(cl.indexOf("Exterior")>=0){
+              if(subCl.indexOf("reit")>=0)tp2="reit";
+              else if(subCl.indexOf("etf")>=0)tp2="etf_int";
+              else tp2="stock_us";
+            }else if(cl.indexOf("Previd")>=0||cl.indexOf("previd")>=0)tp2="prev";
+            else if(cl.indexOf("Cripto")>=0||cl.indexOf("cripto")>=0)tp2="cripto";
+            else if(cl==="Caixa")tp2="caixa";
+            else if(cl.indexOf("Multi")>=0)tp2="fundo_mm";
+
+            var pmReal=(!isNaN(pm2)&&pm2>0)?pm2:(qtd2>0?pos2/qtd2:preco2||0);
+            var cTotal=pmReal*qtd2;
+            var ganho2=pos2-cTotal;
+            var gPct2=cTotal>0?(ganho2/cTotal*100):0;
+
+            var rentAtivo={},rentAtivoRs={};
+            if(pctStart>=0){
+              for(var k=0;k<5;k++){var idxPct=pctStart+k;if(idxPct<row.length)rentAtivo[COL_LABELS[k]]=typeof row[idxPct]==="number"?row[idxPct]:pv(row[idxPct]);}
+            }
+            if(rsStart>=0){
+              for(var k=0;k<5;k++){var idxRs=rsStart+k;if(idxRs<row.length)rentAtivoRs[COL_LABELS[k]]=typeof row[idxRs]==="number"?row[idxRs]:pv(row[idxRs]);}
+            }
+
+            var vencFmt="";
+            var vencISO=toISO(venc2);
+            if(vencISO&&vencISO.length>=10)vencFmt=vencISO;
+
+            var tk2base=nm2.substring(0,15).replace(/[^A-Za-z0-9]/g,"").toUpperCase()||"AT";
+            var tk2=tk2base;var tkIdx=0;
+            while(ativosTit.some(function(a){return a.tk===tk2})){tkIdx++;tk2=tk2base+tkIdx;}
+            ativosTit.push({
+              tk:tk2,nm:nm2,posR:pos2,qtd:qtd2||0,
+              pa:preco2||pmReal,
+              pm:pmReal,
+              cT:cTotal,ganho:ganho2,gPct:gPct2,
+              _gRentPct:rentAtivo,_gRentRs:rentAtivoRs,
+              tp:tp2,inst:inst2,cat:cl,
+              venc:vencFmt||undefined
+            });
+          }
+        }
+        gRentTit.dataIni=dI;gRentTit.dataFim=dF;
+        gRentTit.resultado=resultadoTit;
+        if(patTit>0)gRentTit.patTotal=patTit;
+        /* === REMAPEIA VÍNCULOS DE OBJETIVOS (ativosVinculados) PRA OS NOVOS TICKERS DO TITULAR ===
+           Mesma lógica do importGorilaCliente/importarGorilaConjuge — o tk de cada ativo é
+           recalculado a cada importação, então objetivos que vincularam ativos antigos (ex: a
+           Reserva de Emergência) perderiam o vínculo na reimportação se não remapearmos. */
+        var _objetivosPreservados=c.objetivos||[];
+        var _ativosAntigos=c._ativosImport||[];
+        if(_ativosAntigos.length>0&&ativosTit.length>0&&_objetivosPreservados.length>0){
+          var _tkAntigoParaNovo={};
+          _ativosAntigos.forEach(function(aOld){
+            var nomeNorm=String(aOld.nm||"").trim().toLowerCase();
+            if(!nomeNorm)return;
+            var match=ativosTit.find(function(aNew){return String(aNew.nm||"").trim().toLowerCase()===nomeNorm});
+            if(match&&match.tk!==aOld.tk)_tkAntigoParaNovo[aOld.tk]=match.tk;
+          });
+          if(Object.keys(_tkAntigoParaNovo).length>0){
+            _objetivosPreservados=_objetivosPreservados.map(function(obj){
+              if(!obj.ativosVinculados||obj.ativosVinculados.length===0)return obj;
+              var novosVinc=obj.ativosVinculados.map(function(tkAntigo){return _tkAntigoParaNovo[tkAntigo]||tkAntigo;});
+              return Object.assign({},obj,{ativosVinculados:novosVinc});
+            });
+          }
+        }
+        dp({t:"UC",p:{
+          id:c.id,objetivos:_objetivosPreservados,
+          _ativosImport:ativosTit.length>0?ativosTit:(c._ativosImport||[]),
+          _ativosTs:Date.now(),
+          _gorilaRent:gRentTit,
+          patGorila:patTit||0
+        }});
+        sCorrMsg("✅ Carteira do cliente importada do Gorila"+(ativosTit.length>0?" — "+ativosTit.length+" ativo(s)":"")+(patTit>0?" (Pat: "+fmF(patTit)+")":"")+"!");
+        setTimeout(function(){sCorrMsg("")},5000);
+      }catch(err){sCorrMsg("⚠ Erro ao importar Gorila: "+err.message);}
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+
   var importCorretora=function(file){
     if(!file)return;
     var isExcel=file.name.match(/\.(xlsx|xls)$/i);
@@ -14569,9 +14799,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
   ];
   /* Planejamento — só pra cliente de Gestão Financeira (vem ANTES de Carteira) */
   if(isFin) tabs.push({id:"plan",l:"📋 Planejamento"});
-  
-  if(isPat||isFin) tabs.push({id:"carteira",l:"📊 Carteira"});
-  if(isPat||isFin) tabs.push({id:"aportes",l:"💱 Movimentações"});
+
+  /* Carteira/Movimentações: sempre visíveis pra cliente de Patrimônio (é o produto dele).
+     Cliente só-Financeira (sem Patrimônio) não tem carteira de investimentos pra gerenciar —
+     essas duas abas só fazem sentido pra ele se algum dia importar algum ativo (Gorila). Até lá
+     ficam escondidas, em vez de aparecerem vazias feito um "cadê minha carteira?" confuso. */
+  var temAtivosImportados=(c._ativosImport&&c._ativosImport.length>0);
+  var mostraCarteiraAportes=isPat||(isFin&&temAtivosImportados);
+  if(mostraCarteiraAportes) tabs.push({id:"carteira",l:"📊 Carteira"});
+  if(mostraCarteiraAportes) tabs.push({id:"aportes",l:"💱 Movimentações"});
   
   if(isPat&&!isFin) tabs.push({id:"suc",l:"🏛 Sucessório"});
   if(isPat) tabs.push({id:"fire",l:"🏖 Aposentadoria"});
@@ -14924,6 +15160,39 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           }
         }
 
+
+        /* ====== VISÃO GERAL — DASHBOARD DE GESTÃO FINANCEIRA (cliente só-GF) ======
+           Espelha os conceitos do Relatório Mensal (Saúde Financeira, orçamento do mês,
+           maiores despesas, reserva de emergência, diagnóstico automático) só que como
+           dashboard vivo, sempre atualizado, sem precisar gerar PDF. Reaproveita as mesmas
+           funções puras usadas no relatório (gerarAnaliseFinanceira/calcularSaudeFinanceira)
+           e o mesmo cálculo de reserva acumulada usado em exportarRelatorioFinPDF (duplicado
+           aqui de propósito, igual já se faz lá, pra não precisar reordenar o arquivo). */
+        var anVG=null,saudeVG=null,reservaAtualVG=0,metaReservaVG=0,pctReservaVG=0,objetivoReservaVG=null;
+        if(isFin && !isPat){
+          anVG=gerarAnaliseFinanceira();
+          var carteiraReservaVG=(function(){
+            if(!(c.tipoCli==="casal"||c.tipoCli==="familia"||!!c.conjuge))return c._ativosImport||[];
+            if(viewCasal==="conjuge")return (c.conjuge&&c.conjuge._ativosImport)||[];
+            if(viewCasal==="titular")return c._ativosImport||[];
+            var t=c._ativosImport||[];
+            var cj=(c.conjuge&&c.conjuge._ativosImport)||[];
+            return t.concat(cj);
+          })();
+          objetivoReservaVG=(c.objetivos||[]).find(function(o){return /reserva/i.test(o.nome||"")&&/emerg/i.test(o.nome||"")});
+          if(objetivoReservaVG){
+            if(objetivoReservaVG.modo==="manual")reservaAtualVG=objetivoReservaVG.acumuladoManual||0;
+            else if(objetivoReservaVG.ativosVinculados&&objetivoReservaVG.ativosVinculados.length>0){
+              objetivoReservaVG.ativosVinculados.forEach(function(tk){
+                carteiraReservaVG.filter(function(x){return x.tk===tk||x.nm===tk}).forEach(function(a){reservaAtualVG+=(a.posR||a.qtd*a.pa||0)});
+              });
+            }
+          }
+          saudeVG=calcularSaudeFinanceira(anVG,reservaAtualVG);
+          metaReservaVG=(objetivoReservaVG&&objetivoReservaVG.alvo)?objetivoReservaVG.alvo:(((anVG.snapAtual&&anVG.snapAtual.tDespPuro)||0)*6);
+          pctReservaVG=metaReservaVG>0?Math.min(100,(reservaAtualVG/metaReservaVG)*100):0;
+        }
+
         return (
         <div style={{display:"grid",gridTemplateColumns:isMob?"1fr":"repeat(12,1fr)",gap:12}}>
           {/* === LINHA 1: KPIs ADAPTATIVOS POR TIPO DE CLIENTE ===
@@ -15177,6 +15446,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
 
           </div>
 
+          {!(isFin&&!isPat) && (<>
           {/* === DISTRIBUIÇÃO + PRÓXIMAS AÇÕES === */}
           <Cd style={{padding:18,gridColumn:isMob?"1":"1/8"}} hov={false}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
@@ -15208,6 +15478,43 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
               </div>
             )}
           </Cd>
+          </>)}
+
+          {(isFin&&!isPat) && (
+          <Cd style={{padding:18,gridColumn:isMob?"1":"1/8"}} hov={false}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <h4 style={{margin:0,fontSize:13,fontWeight:700,color:T.gold}}>🩺 Saúde Financeira</h4>
+              <span style={{fontSize:10,color:T.t3}}>ref. {(function(){
+                var MN=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+                var p=String(anVG.mesRef||"").split("-");
+                return p.length===2?MN[parseInt(p[1])-1]+"/"+p[0].slice(2):"—";
+              })()}</span>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:14}}>
+              <div style={{width:72,height:72,borderRadius:"50%",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,fontWeight:800,fontFamily:"'JetBrains Mono'",color:(saudeVG.faixa==="Excelente"||saudeVG.faixa==="Boa")?T.green:(saudeVG.faixa==="Atenção"?T.orange:T.red),border:"4px solid "+((saudeVG.faixa==="Excelente"||saudeVG.faixa==="Boa")?T.green:(saudeVG.faixa==="Atenção"?T.orange:T.red))+"33",background:((saudeVG.faixa==="Excelente"||saudeVG.faixa==="Boa")?T.green:(saudeVG.faixa==="Atenção"?T.orange:T.red))+"11"}}>
+                {saudeVG.nota}
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:14,fontWeight:800,color:(saudeVG.faixa==="Excelente"||saudeVG.faixa==="Boa")?T.green:(saudeVG.faixa==="Atenção"?T.orange:T.red)}}>{saudeVG.faixa}</div>
+                <div style={{fontSize:10,color:T.t3,marginTop:3,lineHeight:1.4}}>Ponto de atenção: <strong style={{color:T.t1}}>{saudeVG.piorIndicador.l}</strong> ({Math.round(saudeVG.piorIndicador.score)}/100)</div>
+              </div>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:7}}>
+              {saudeVG.indicadores.map(function(ind,i){
+                var corI=ind.score>=80?T.green:(ind.score>=60?T.orange:T.red);
+                return (
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:10,color:T.t2,minWidth:140,flexShrink:0}}>{ind.l}</span>
+                    <div style={{flex:1,height:6,background:T.w3,borderRadius:3,overflow:"hidden"}}>
+                      <div style={{height:"100%",width:Math.max(4,ind.score)+"%",background:corI,borderRadius:3}}/>
+                    </div>
+                    <span style={{fontSize:9,fontWeight:700,color:corI,minWidth:30,textAlign:"right",fontFamily:"'JetBrains Mono'"}}>{Math.round(ind.score)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </Cd>
+          )}
 
           <Cd style={{padding:18,gridColumn:isMob?"1":"8/13"}} hov={false}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
@@ -15228,6 +15535,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
             )}
           </Cd>
 
+          {!(isFin&&!isPat) && (<>
           {/* === TOP ATIVOS === */}
           <Cd style={{padding:18,gridColumn:isMob?"1":"1/7"}} hov={false}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
@@ -15312,7 +15620,67 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
               </div>
             )}
           </Cd>
+          </>)}
 
+          {(isFin&&!isPat) && (<>
+          <Cd style={{padding:18,gridColumn:isMob?"1":"1/7"}} hov={false}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <h4 style={{margin:0,fontSize:13,fontWeight:700,color:T.gold}}>💰 Orçamento do Mês</h4>
+              <span style={{fontSize:10,fontWeight:700,color:(anVG.kpis.txPoupAtual||0)>=20?T.green:((anVG.kpis.txPoupAtual||0)>=10?T.gold:T.red)}}>poupança {(anVG.kpis.txPoupAtual||0).toFixed(0)}%</span>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14}}>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:8,color:T.t3,fontWeight:600,letterSpacing:.5}}>RECEITA</div>
+                <div style={{fontSize:13,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'",marginTop:3}}>{fmCli((anVG.snapAtual&&anVG.snapAtual.tRec)||0,c)}</div>
+              </div>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:8,color:T.t3,fontWeight:600,letterSpacing:.5}}>DESPESAS</div>
+                <div style={{fontSize:13,fontWeight:800,color:T.red,fontFamily:"'JetBrains Mono'",marginTop:3}}>{fmCli((anVG.snapAtual&&anVG.snapAtual.tDespPuro)||0,c)}</div>
+              </div>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:8,color:T.t3,fontWeight:600,letterSpacing:.5}}>INVESTIDO</div>
+                <div style={{fontSize:13,fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'",marginTop:3}}>{fmCli((anVG.snapAtual&&anVG.snapAtual.tInv)||0,c)}</div>
+              </div>
+            </div>
+            <div style={{fontSize:9,color:T.t3,fontWeight:600,letterSpacing:.5,marginBottom:8}}>MAIORES DESPESAS</div>
+            {(anVG.topDesp||[]).length===0?(
+              <div style={{padding:12,textAlign:"center",color:T.t3,fontSize:11}}>Sem lançamentos no período</div>
+            ):(
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {anVG.topDesp.slice(0,4).map(function(d,i){
+                  var mc=MACRO_CATS[d.macro]||{l:d.macro||"Outros",ic:"📦"};
+                  return (
+                    <div key={i} style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:12,flexShrink:0}}>{mc.ic}</span>
+                      <span style={{fontSize:11,color:T.t1,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.sub||d.cat||mc.l}</span>
+                      <span style={{fontSize:11,fontWeight:700,color:T.t2,fontFamily:"'JetBrains Mono'"}}>{fmCli(d.valor,c)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Cd>
+
+          <Cd style={{padding:18,gridColumn:isMob?"1":"7/13"}} hov={false}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <h4 style={{margin:0,fontSize:13,fontWeight:700,color:T.gold}}>🛟 Reserva de Emergência</h4>
+              {!objetivoReservaVG && <span style={{fontSize:9,color:T.orange,fontWeight:600}}>não configurada</span>}
+            </div>
+            <div style={{textAlign:"center",marginBottom:10}}>
+              <div style={{fontSize:22,fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fmCli(reservaAtualVG,c)}</div>
+              <div style={{fontSize:10,color:T.t3,marginTop:2}}>meta: {fmCli(metaReservaVG,c)} (6 meses de despesas)</div>
+            </div>
+            <div style={{height:10,background:T.w3,borderRadius:5,overflow:"hidden",marginBottom:8}}>
+              <div style={{height:"100%",width:pctReservaVG+"%",background:pctReservaVG>=100?T.green:(pctReservaVG>=50?T.gold:T.orange),borderRadius:5}}/>
+            </div>
+            <div style={{textAlign:"center",fontSize:11,fontWeight:700,color:pctReservaVG>=100?T.green:(pctReservaVG>=50?T.gold:T.orange)}}>
+              {((anVG.snapAtual&&anVG.snapAtual.tDespPuro)>0?(reservaAtualVG/anVG.snapAtual.tDespPuro):0).toFixed(1)} de 6 meses cobertos ({pctReservaVG.toFixed(0)}%)
+            </div>
+            {!objetivoReservaVG && <div style={{marginTop:10,padding:"8px 10px",background:"rgba(251,191,36,0.08)",border:"1px solid rgba(251,191,36,0.2)",borderRadius:8,fontSize:10,color:T.orange,lineHeight:1.4}}>Nenhum objetivo "Reserva de Emergência" cadastrado — crie um na aba Planejamento pra acompanhar aqui.</div>}
+          </Cd>
+          </>)}
+
+          {!(isFin&&!isPat) && (<>
           {/* === VENCIMENTOS === */}
           <Cd style={{padding:18,gridColumn:isMob?"1":"1/7"}} hov={false}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
@@ -15386,6 +15754,36 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
               </div>
             )}
           </Cd>
+          </>)}
+
+          {(isFin&&!isPat) && (
+          <Cd style={{padding:18,gridColumn:"1/13"}} hov={false}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <h4 style={{margin:0,fontSize:13,fontWeight:700,color:T.gold}}>🧠 Diagnóstico Automático</h4>
+              <span style={{fontSize:10,color:T.t3}}>gerado a partir do mês de referência</span>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:isMob?"1fr":"1fr 1fr 1fr",gap:14}}>
+              <div>
+                <div style={{fontSize:10,fontWeight:700,color:T.green,marginBottom:8,letterSpacing:.5}}>✓ PONTOS FORTES</div>
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  {(anVG.pontos.fortes||[]).map(function(t,i){return <div key={i} style={{fontSize:11,color:T.t1,lineHeight:1.5,paddingLeft:12,borderLeft:"2px solid "+T.green}}>{t}</div>})}
+                </div>
+              </div>
+              <div>
+                <div style={{fontSize:10,fontWeight:700,color:T.orange,marginBottom:8,letterSpacing:.5}}>⚠ ALERTAS</div>
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  {(anVG.pontos.alertas||[]).map(function(t,i){return <div key={i} style={{fontSize:11,color:T.t1,lineHeight:1.5,paddingLeft:12,borderLeft:"2px solid "+T.orange}}>{t}</div>})}
+                </div>
+              </div>
+              <div>
+                <div style={{fontSize:10,fontWeight:700,color:T.cyan,marginBottom:8,letterSpacing:.5}}>💡 RECOMENDAÇÕES</div>
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  {(anVG.pontos.recomendacoes||[]).map(function(t,i){return <div key={i} style={{fontSize:11,color:T.t1,lineHeight:1.5,paddingLeft:12,borderLeft:"2px solid "+T.cyan}}>{t}</div>})}
+                </div>
+              </div>
+            </div>
+          </Cd>
+          )}
 
           {/* === APORTES + DADOS === */}
           {isPat&&(
@@ -15683,7 +16081,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       )}
 
       {}
-      {tab==="carteira" && (isPat||isFin) && (
+      {tab==="carteira" && mostraCarteiraAportes && (
         <div>
           <div style={{display:"flex",gap:4,marginBottom:14,alignItems:"center",flexWrap:"wrap"}}>
             {(c.tipoCli==="casal"||c.tipoCli==="familia"||!!c.conjuge) && (
@@ -18551,7 +18949,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         </div>
       )}
 
-      {tab==="aportes" && (isPat||isFin) && (function(){
+      {tab==="aportes" && mostraCarteiraAportes && (function(){
         /* ===== REBALANCEAMENTO INTELIGENTE ===== */
         
         var TP2M={cdb:"rf",lci:"rf",lca:"rf",lc:"rf",cri:"rf",cra:"rf",tesouro:"rf",deb:"rf",debi:"rf",fundo_rf:"rf",fundo_mm:"rf",fundo_camb:"rf",coe:"rf",poupanca:"rf",acao:"rv",fii:"rv",fiagro:"rv",fip:"rv",etf_br:"rv",bdr:"rv",fundo_acoes:"rv",ouro:"rv",fundo_infra:"rv",stock_us:"ext",etf_int:"ext",etf_eu:"ext",reit:"ext",bond_intl:"ext",fundo_mm_intl:"ext",caixa:"caixa",cripto:"cripto",prev:"prev"};
@@ -21207,8 +21605,46 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                       </div>
                     </Cd>
                   </div>
-                  <div style={{padding:"10px 14px",background:T.w3,borderRadius:8,fontSize:10,color:T.t3,lineHeight:1.6}}>
-                    💡 Para gerar o relatório financeiro, importe o arquivo do <strong style={{color:T.t2}}>Meu Vista</strong> na aba <strong style={{color:T.t2}}>Planejamento → Orçamento</strong> primeiro.
+
+                  {/* === FONTES DE DADOS DO RELATÓRIO DE GF — importar direto aqui, sem precisar trocar de aba ===
+                      Pedido do Igor: a aba de gerar o relatório precisa ter onde importar tanto o Meu Vista
+                      (obrigatório — é o orçamento do mês que vira o relatório) quanto o Gorila (opcional — só
+                      pra cliente de GF que também tem investimentos geridos por nós, pra entrar o resumo do
+                      patrimônio no relatório). Reaproveita vistaRef/importVista (mesmo fluxo de sempre, com
+                      revisão antes de salvar) e o novo importarGorilaRelatorio (mesmo parser do import do
+                      cônjuge, só que gravando direto no cliente). */}
+                  <div style={{marginBottom:8}}>
+                    <div style={{fontSize:10,color:T.t3,fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>📥 Dados para o relatório</div>
+                    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,padding:"12px 16px",background:"rgba(56,189,248,0.04)",borderRadius:10,border:"1px solid rgba(56,189,248,0.15)"}}>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:11,fontWeight:700,color:T.cyan,marginBottom:3}}>📋 Orçamento do mês (Meu Vista) — obrigatório</div>
+                        <div style={{fontSize:10,color:T.t3}}>
+                          {(function(){
+                            var keys=(c.orcamento&&c.orcamento.mensais)?Object.keys(c.orcamento.mensais).sort():[];
+                            if(keys.length===0)return "Nenhum mês importado ainda — importe o orçamento do Meu Vista pra gerar o relatório.";
+                            var ult=keys[keys.length-1];
+                            var MN=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+                            var p=ult.split("-");
+                            return "✅ último mês importado: "+MN[parseInt(p[1])-1]+"/"+p[0].slice(2)+" ("+keys.length+" mês(es) no total)";
+                          })()}
+                        </div>
+                      </div>
+                      <input ref={vistaRef} type="file" accept=".csv,.txt,.tsv,.xlsx,.xls,.pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf,text/csv,text/plain,*/*" onChange={function(e){if(e.target.files[0])importVista(e.target.files[0]);e.target.value=""}} style={{display:"none"}}/>
+                      <Bt v="secondary" onClick={function(){vistaRef.current&&vistaRef.current.click()}} style={{fontSize:10,padding:"8px 14px",color:T.cyan,border:"1px solid rgba(56,189,248,0.3)",flexShrink:0}}>📥 Importar Meu Vista</Bt>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,padding:"12px 16px",background:"rgba(212,163,40,0.04)",borderRadius:10,border:"1px solid rgba(212,163,40,0.15)"}}>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:11,fontWeight:700,color:T.gold,marginBottom:3}}>📈 Carteira de investimentos (Gorila) — opcional</div>
+                        <div style={{fontSize:10,color:T.t3}}>
+                          {c._ativosImport&&c._ativosImport.length>0
+                            ? "✅ "+c._ativosImport.length+" ativo"+(c._ativosImport.length>1?"s":"")+" importado"+(c._ativosImport.length>1?"s":"")+(c.patGorila>0?" · "+fmF(c.patGorila):"")
+                            : "Caso o cliente também tenha investimentos com a gente, importe o extrato do Gorila (XLSX) pra incluir o resumo do patrimônio no relatório."}
+                        </div>
+                      </div>
+                      <input ref={gorilaRelRef} type="file" accept=".xlsx,.xls" onChange={function(e){if(e.target.files[0])importarGorilaRelatorio(e.target.files[0]);e.target.value=""}} style={{display:"none"}}/>
+                      <Bt v="secondary" onClick={function(){gorilaRelRef.current&&gorilaRelRef.current.click()}} style={{fontSize:10,padding:"8px 14px",color:T.gold,border:"1px solid rgba(212,163,40,0.3)",flexShrink:0}}>{c._ativosImport&&c._ativosImport.length>0?"🔄 Reimportar Gorila":"📥 Importar Gorila"}</Bt>
+                      {corrMsg&&(corrMsg.indexOf("Carteira do cliente")>=0||corrMsg.indexOf("Erro ao importar Gorila")>=0)&&<span style={{fontSize:10,fontWeight:600,color:corrMsg.indexOf("✅")>=0?T.green:T.orange,flexShrink:0,maxWidth:220}}>{corrMsg}</span>}
+                    </div>
                   </div>
                 </div>
               )}
@@ -36365,7 +36801,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '490';
+  var SW_VERSION = '493';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
