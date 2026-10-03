@@ -1990,7 +1990,14 @@ const calcularAnaliseFinanceira=function(histMensal,receitasAtual,despesasAtual,
     if(lazerMacro && (lazerMacro.tot/totDespAtual)>0.15)pontos.recomendacoes.push("Lazer & Viagem em "+((lazerMacro.tot/totDespAtual)*100).toFixed(0)+"% — definir orçamento mensal específico evita surpresas.");
     var assinMacro=atualPorMacro["assinaturas"];
     if(assinMacro && assinMacro.n>=4)pontos.recomendacoes.push("Você tem "+assinMacro.n+" assinaturas ativas ("+fmF(assinMacro.tot)+"/mês = "+fmF(assinMacro.tot*12)+"/ano). Vale uma auditoria.");
-    if(!atualPorMacro["investimentos"] && saldoAtual>1000)pontos.recomendacoes.push("Iniciar aportes mensais em renda fixa (Tesouro Selic) ou previdência — mesmo R$500/mês fazem diferença em 10 anos.");
+    /* BUG (roadmap.md): esse check usava !atualPorMacro["investimentos"], mas atualPorMacro
+       NUNCA tem a chave "investimentos" (ela é deliberadamente excluída logo na montagem desse
+       objeto, algumas linhas acima — investimentos é tratado à parte, em atualInv/invMacro).
+       Ou seja, essa condição era sempre verdadeira, e a recomendação "comece a investir"
+       aparecia até pra cliente que já investe bastante. Corrigido pra checar invMacro (o valor
+       correto, já calculado acima), que só é "vazio" quando não há nenhum lançamento em
+       Investimentos no mês. */
+    if(!invMacro && saldoAtual>1000)pontos.recomendacoes.push("Iniciar aportes mensais em renda fixa (Tesouro Selic) ou previdência — mesmo R$500/mês fazem diferença em 10 anos.");
 
     if(pontos.fortes.length===0)pontos.fortes.push("Continue importando dados mensais para que o sistema identifique padrões positivos ao longo do tempo.");
     if(pontos.alertas.length===0)pontos.alertas.push("Nenhum alerta crítico identificado neste período. Bom trabalho!");
@@ -2105,6 +2112,32 @@ const calcularVisaoCasal=function(an,nomeTitular){
   var despIndTotal=Object.keys(despIndPorPessoa).reduce(function(s,n){return s+despIndPorPessoa[n]},0);
   var despTotal=despCompartilhada+despIndTotal;
   return {pessoas:pessoas,rendaTotal:rendaTotal,despCompartilhada:despCompartilhada,despIndTotal:despIndTotal,despTotal:despTotal};
+};
+
+/* ===== VALIDA\u00c7\u00c3O P\u00d3S-IMPORT DO GORILA \u2014 soma dos ativos bate com o patrim\u00f4nio declarado? =====
+   Fun\u00e7\u00e3o pura: recebe os ativos j\u00e1 parseados (cada um com .posR) e o patrim\u00f4nio total que a
+   pr\u00f3pria planilha/PDF do Gorila declara (ex: a linha "Patrim\u00f4nio" do resumo). Compara os dois.
+   ROADMAP (item "Colis\u00e3o de tickers no parser de importa\u00e7\u00e3o do Gorila"): v\u00e1rios trechos do
+   c\u00f3digo t\u00eam coment\u00e1rios de "fix" pra nomes de ativos truncados que colidem entre si (ex: dois
+   ativos diferentes virando o mesmo tk e um sobrescrevendo o outro na pr\u00e1tica, ou um ativo
+   sendo descartado por engano). Um formato novo de exporta\u00e7\u00e3o do Gorila pode reintroduzir esse
+   tipo de problema sem gerar nenhum erro vis\u00edvel \u2014 o import "funciona", s\u00f3 que com o n\u00famero
+   errado. Essa fun\u00e7\u00e3o d\u00e1 um alarme simples e barato: se a soma dos ativos importados n\u00e3o bate
+   (com uma margem de toler\u00e2ncia, pra n\u00e3o disparar por puro arredondamento/taxas/caixa residual)
+   com o total que o pr\u00f3prio Gorila declarou, avisa \u2014 em vez de confiar cegamente que bateu.
+   Retorna null quando n\u00e3o h\u00e1 base de compara\u00e7\u00e3o (patDeclarado<=0, ou seja, nada pra conferir
+   contra) ou quando a diferen\u00e7a est\u00e1 dentro da toler\u00e2ncia; caso contr\u00e1rio, retorna
+   {somaAtivos,patDeclarado,diffAbs,diffPct} pro chamador decidir como avisar. */
+const checarSomaAtivosGorila=function(ativos,patDeclarado){
+  if(!patDeclarado||patDeclarado<=0)return null;
+  var somaAtivos=(ativos||[]).reduce(function(s,a){return s+(a.posR||0)},0);
+  var diffAbs=Math.abs(somaAtivos-patDeclarado);
+  var diffPct=patDeclarado>0?(diffAbs/patDeclarado*100):0;
+  /* Toler\u00e2ncia: 5% OU R$500 (o que for maior) \u2014 cobre arredondamento normal entre o resumo e a
+     tabela detalhada sem deixar passar uma diverg\u00eancia de verdade (ex: ativo duplicado/perdido). */
+  var tolerancia=Math.max(patDeclarado*0.05,500);
+  if(diffAbs<=tolerancia)return null;
+  return {somaAtivos:somaAtivos,patDeclarado:patDeclarado,diffAbs:diffAbs,diffPct:diffPct};
 };
 
 const normVista=function(s){return String(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim()};
@@ -3056,6 +3089,37 @@ function Dash({data:d,onSel:os,goTo}){
   var isEnviadoPersistido=function(c){
     return !!(c&&c.particularidades&&c.particularidades.relatorios&&c.particularidades.relatorios[mesRefKey]&&c.particularidades.relatorios[mesRefKey].publicado);
   };
+  /* isAprovadoPersistido / persistirAprovado: mesmo problema do isEnviadoPersistido acima, só que
+     pro status "aprovado" do painel de envio em lote — relAprovados era um useState puramente
+     local, sem nenhum campo persistido equivalente a particularidades.relatorios[mesAno].publicado.
+     Na prática, se o usuário fosse aprovando clientes aos poucos (ex.: revisando um a um ao longo
+     do dia) e desse F5, trocasse de aba, ou a página recarregasse sozinha (o hub tem auto-update
+     silencioso — ver roadmap.md), todo o trabalho de aprovação se perdia e tinha que ser refeito do
+     zero antes de poder enviar. Corrigido no mesmo padrão do "enviado": grava
+     particularidades.relatorios[mesAno].aprovado no Firestore a cada mudança (individual ou em
+     lote), e o status exibido passa a considerar esse campo persistido, com relAprovados servindo só
+     de reforço otimista pra atualizar a tela na hora, sem esperar o round-trip do Firestore. */
+  var isAprovadoPersistido=function(c){
+    return !!(c&&c.particularidades&&c.particularidades.relatorios&&c.particularidades.relatorios[mesRefKey]&&c.particularidades.relatorios[mesRefKey].aprovado);
+  };
+  var persistirAprovado=function(ids,valor){
+    try{
+      if(!window._fbDB||!ids||!ids.length)return;
+      var idsSet={};ids.forEach(function(id){idsSet[id]=true;});
+      window._fbDB.collection("workspaces").doc("main").get().then(function(snap){
+        if(!snap.exists)return;
+        var data=snap.data();
+        var clientes=(data.cl||[]).map(function(cc){
+          if(!idsSet[cc.id])return cc;
+          var particularidades=cc.particularidades||{};
+          var relatorios=Object.assign({},particularidades.relatorios||{});
+          relatorios[mesRefKey]=Object.assign({mes:mesRefKey,mesNome:mesRefNome},relatorios[mesRefKey]||{},{aprovado:valor});
+          return Object.assign({},cc,{particularidades:Object.assign({},particularidades,{relatorios:relatorios}),_updatedAt:Date.now()});
+        });
+        window._fbDB.collection("workspaces").doc("main").update({cl:clientes});
+      }).catch(function(e){console.warn("Persistir aprovado:",e)});
+    }catch(e){console.warn("Persistir aprovado:",e);}
+  };
   /* enviarRelatorioParaCliente: extrai a lógica de UM envio individual (registro no Firebase,
      abertura do PDF e disparo por e-mail/WhatsApp) pra poder ser reaproveitada tanto no envio
      em lote quanto no botão de "reenviar" de um cliente que já está marcado como enviado. */
@@ -3383,6 +3447,7 @@ function Dash({data:d,onSel:os,goTo}){
                 var novo={};
                 clRelatorio.forEach(function(c){novo[c.id+"-"+mesRefKey]=true});
                 sRelAprovados(function(prev){return Object.assign({},prev,novo)});
+                persistirAprovado(clRelatorio.map(function(c){return c.id}),true);
               }} style={{padding:"7px 14px",background:T.goldD,border:"1px solid "+T.gold,color:T.gold,borderRadius:8,fontSize:11,fontWeight:700,cursor:"pointer"}}>
                 ✅ Aprovar todos
               </button>
@@ -3390,12 +3455,13 @@ function Dash({data:d,onSel:os,goTo}){
                 var novo={};
                 clRelatorio.forEach(function(c){novo[c.id+"-"+mesRefKey]=false});
                 sRelAprovados(function(prev){return Object.assign({},prev,novo)});
+                persistirAprovado(clRelatorio.map(function(c){return c.id}),false);
               }} style={{padding:"7px 14px",background:"transparent",border:"1px solid "+T.bdrL,color:T.t3,borderRadius:8,fontSize:11,fontWeight:700,cursor:"pointer"}}>
                 ✕ Desmarcar todos
               </button>
               <div style={{flex:1}}/>
               <button onClick={function(){
-                var aprovList=clRelatorio.filter(function(c){return relAprovados[c.id+"-"+mesRefKey]&&!(relEnviados[c.id+"-"+mesRefKey]||isEnviadoPersistido(c))});
+                var aprovList=clRelatorio.filter(function(c){return (relAprovados[c.id+"-"+mesRefKey]||isAprovadoPersistido(c))&&!(relEnviados[c.id+"-"+mesRefKey]||isEnviadoPersistido(c))});
                 if(!aprovList.length){alert("Nenhum relatório aprovado para envio.");return;}
                 var idx=0;
                 var enviarProximo=function(){
@@ -3427,7 +3493,7 @@ function Dash({data:d,onSel:os,goTo}){
                 var svArr=Array.isArray(c.sv)?c.sv:(c.sv?[c.sv]:[]);
                 var svStr=svArr.join(",");
                 var enviado=!!(relEnviados[c.id+"-"+mesRefKey]||isEnviadoPersistido(c));
-                var aprovado=!!relAprovados[c.id+"-"+mesRefKey]||enviado;
+                var aprovado=!!(relAprovados[c.id+"-"+mesRefKey]||isAprovadoPersistido(c))||enviado;
                 var enviando=relEnviando===c.id;
                 var temWa=!!(c.waGrupo||c.tel);
                 var pat=c.patGorila||c.pat||0;
@@ -3437,7 +3503,7 @@ function Dash({data:d,onSel:os,goTo}){
                 return (
                   <div key={c.id} data-rel-nome={c.nome} data-rel-tipo={svStr} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",background:enviado?"rgba(45,212,160,0.06)":aprovado?"rgba(212,163,40,0.06)":T.w3,borderRadius:10,border:"1px solid "+(enviado?T.green+"44":aprovado?T.gold+"44":T.bdrL),transition:"all 0.2s"}}>
                     {/* Checkbox */}
-                    <div onClick={function(){if(!enviado)sRelAprovados(function(prev){var n=Object.assign({},prev);n[c.id+"-"+mesRefKey]=!prev[c.id+"-"+mesRefKey];return n;})}} style={{width:20,height:20,borderRadius:5,border:"1.5px solid "+(enviado?T.green:aprovado?T.gold:T.bdrL),background:enviado?"rgba(45,212,160,0.2)":aprovado?T.goldD:"transparent",display:"flex",alignItems:"center",justifyContent:"center",cursor:enviado?"default":"pointer",flexShrink:0,fontSize:12}}>
+                    <div onClick={function(){if(!enviado){var novoVal=!aprovado;sRelAprovados(function(prev){var n=Object.assign({},prev);n[c.id+"-"+mesRefKey]=novoVal;return n;});persistirAprovado([c.id],novoVal);}}} style={{width:20,height:20,borderRadius:5,border:"1.5px solid "+(enviado?T.green:aprovado?T.gold:T.bdrL),background:enviado?"rgba(45,212,160,0.2)":aprovado?T.goldD:"transparent",display:"flex",alignItems:"center",justifyContent:"center",cursor:enviado?"default":"pointer",flexShrink:0,fontSize:12}}>
                       {enviado?"✓":aprovado?"✓":""}
                     </div>
                     {/* Avatar */}
@@ -5515,20 +5581,42 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
   };
 
   /* === Helper: extrai metadados do nome do arquivo ===
-     Padrão Gorila: "relatorio_Nome-Sobrenome_DD-MM-YYYY_DD-MM-YYYY.xlsx"
-     Retorna {nomeCliente, dataIni, dataFim} ou null se não bate o padrão. */
+     O Gorila usa pelo menos duas convenções de nome de arquivo dependendo do tipo de
+     exportação, e nenhuma delas é garantida — então tentamos várias, da mais específica
+     pra mais genérica. Retorna {nomeCliente, dataIni, dataFim} ou null se não achar nada
+     que pareça um nome de cliente de verdade.
+     Padrão 1 (planilha XLSX): "relatorio_Nome-Sobrenome_DD-MM-YYYY_DD-MM-YYYY.xlsx"
+     Padrão 2 (PDF "Relatório por período"): "report-Nome_Sobrenome-YYYY-MM-DD_HH-MM.pdf"
+       — esse formato de PDF não traz o nome do cliente em lugar nenhum do texto do corpo
+       (o cabeçalho de cada página mostra só o rótulo "Cliente" em branco, sem o valor
+       preenchido) — o nome do arquivo é a ÚNICA fonte confiável pra esse tipo de export. */
   var parseFilenameGorila=function(filename){
     if(!filename)return null;
-    /* Tira extensão */
     var base=filename.replace(/\.(xlsx|xls|pdf|csv)$/i,"");
-    /* Padrão: relatorio_Nome-Sobrenome_DD-MM-YYYY_DD-MM-YYYY */
     var m=base.match(/^relatorio_(.+?)_(\d{2}-\d{2}-\d{4})_(\d{2}-\d{2}-\d{4})$/i);
-    if(!m)return null;
-    /* "Marcus-Goyata" → "Marcus Goyata" */
-    var nome=m[1].replace(/-/g," ").trim();
-    /* "01-04-2026" → "2026-04-01" */
-    var fmtData=function(d){var p=d.split("-");return p[2]+"-"+p[1]+"-"+p[0]};
-    return {nomeCliente:nome,dataIni:fmtData(m[2]),dataFim:fmtData(m[3])};
+    if(m){
+      var nome1=m[1].replace(/-/g," ").trim();
+      var fmtData=function(d){var p=d.split("-");return p[2]+"-"+p[1]+"-"+p[0]};
+      return {nomeCliente:nome1,dataIni:fmtData(m[2]),dataFim:fmtData(m[3])};
+    }
+    var m2=base.match(/^report[-_](.+?)-(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2})$/i);
+    if(m2){
+      var nome2=m2[1].replace(/_/g," ").replace(/-/g," ").replace(/\s+/g," ").trim();
+      if(nome2.length>=3)return {nomeCliente:nome2,dataIni:m2[2],dataFim:m2[2]};
+    }
+    /* Padrão 3 (fallback genérico): tira prefixo "report"/"relatorio" do início e
+       qualquer bloco de data/hora do final — cobre variações futuras de nome de arquivo
+       do Gorila. Só entra em ação se achar um desses marcadores claros, pra não tentar
+       adivinhar um nome de cliente a partir de um arquivo qualquer sem relação com o Gorila. */
+    var hadPrefix=/^(?:report|relat[oó]rio)[-_]/i.test(base);
+    var temp=base.replace(/^(?:report|relat[oó]rio)[-_]+/i,"");
+    var hadDateSuffix=/[-_]\d{4}-\d{2}-\d{2}/.test(temp)||/[-_]\d{2}-\d{2}-\d{4}/.test(temp);
+    temp=temp.replace(/[-_]+\d{4}-\d{2}-\d{2}.*$/,"").replace(/[-_]+\d{2}-\d{2}-\d{4}.*$/,"");
+    temp=temp.replace(/[_-]/g," ").replace(/\s+/g," ").trim();
+    if((hadPrefix||hadDateSuffix)&&temp.length>=3&&!/^\d+$/.test(temp)){
+      return {nomeCliente:temp,dataIni:null,dataFim:null};
+    }
+    return null;
   };
 
   var importGorilaBulk=function(files){
@@ -6286,7 +6374,20 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
                 break;
               }
             }
-            if(!nomeCliente){sGMsg("⚠ Nome não encontrado no PDF");return}
+            /* Fallback: alguns tipos de PDF do Gorila (ex.: "Relatório por período") não
+               trazem o nome do cliente em texto nenhum do corpo — o cabeçalho de cada
+               página só mostra o rótulo "Cliente" em branco, sem o valor preenchido.
+               Confirmado lendo a extração real do pdf.js num relatório desse tipo: a
+               busca por "Cliente:" nunca vai achar nada nesses casos, não importa quantas
+               vezes o PDF for reimportado. Nesses casos o nome do arquivo exportado pelo
+               Gorila (padrão "report-Nome_Sobrenome-AAAA-MM-DD_HH-MM.pdf") é a única fonte
+               confiável — mesmo parser de nome de arquivo já usado no fallback do Excel. */
+            var nomeViaArquivo=false;
+            if(!nomeCliente){
+              var _fnParsedPdf=parseFilenameGorila(file.name);
+              if(_fnParsedPdf&&_fnParsedPdf.nomeCliente){nomeCliente=_fnParsedPdf.nomeCliente;nomeViaArquivo=true;}
+            }
+            if(!nomeCliente){sGMsg("⚠ Nome não encontrado no PDF nem no nome do arquivo — renomeie o arquivo mantendo o nome do cliente (ex: report-Nome_Sobrenome-...) ou importe pela planilha Excel do Gorila.");return}
             
             
             var patBruto=0;
@@ -6374,8 +6475,8 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
               orcamento:(existing&&existing.orcamento)||{}
             });
             dp({t:"RC",p:newC});
-            sGMsg("✅ "+nomeCliente+(existing?" atualizado":" criado")+" via PDF! Patrimônio: "+fm(patReal)+" | "+Object.keys(instData).length+" instituições");
-            setTimeout(function(){sGMsg("");os(newC)},2500);
+            sGMsg("✅ "+nomeCliente+(existing?" atualizado":" criado")+" via PDF! Patrimônio: "+fm(patReal)+" | "+Object.keys(instData).length+" instituições"+(nomeViaArquivo?" • ⚠ nome extraído do nome do arquivo (não veio no PDF) — confira se está certo":""));
+            setTimeout(function(){sGMsg("");os(newC)},nomeViaArquivo?6000:2500);
           });
         }).catch(function(err){sGMsg("⚠ Erro PDF: "+err.message)});
       };
@@ -6877,8 +6978,21 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
         if(cfgSv)cfgsLidas.push("Serviços=["+cfgSv.join(",")+"]");
         if(cfgFeeFixo)cfgsLidas.push("Fee="+fm(cfgFeeFixo));
         if(cfgsLidas.length>0)msg+=" • "+cfgsLidas.length+" config(s) extras detectadas";
+        /* Validação pós-import (roadmap.md): confere se a soma dos ativos lidos bate com o
+           patrimônio que a própria planilha do Gorila declarou — ver checarSomaAtivosGorila.
+           IMPORTANTE: a comparação tem que ser contra patBruto (lido de forma independente, da
+           seção-resumo "Patrimônio" da planilha), NUNCA contra patReal — patReal prioriza
+           sumPosR (a própria soma dos ativos) quando ele é >0, então comparar ativos com
+           patReal seria circular e nunca detectaria nada. Quando diverge, dá mais tempo de tela
+           (6s em vez de 2.5s) pra dar tempo de ler antes de navegar sozinho pra ficha do cliente. */
+        var _divergCL=checarSomaAtivosGorila(ativos,patBruto);
+        var _tempoMsg=2500;
+        if(_divergCL){
+          msg+=" • ⚠ SOMA DOS ATIVOS NÃO BATE: "+fm(_divergCL.somaAtivos)+" importado vs. "+fm(_divergCL.patDeclarado)+" declarado (dif. "+_divergCL.diffPct.toFixed(0)+"%) — confira antes de usar num relatório";
+          _tempoMsg=6000;
+        }
         sGMsg(msg);
-        setTimeout(function(){sGMsg("");os(newC)},2500);
+        setTimeout(function(){sGMsg("");os(newC)},_tempoMsg);
       }catch(err){sGMsg("⚠ Erro: "+err.message);console.error(err)}
     };
     reader.readAsArrayBuffer(file);
@@ -8295,8 +8409,16 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           _gorilaRent:gRentConj,
           patGorila:patConj||0
         })}});
-        sCorrMsg("✅ Cônjuge "+((c.conjuge&&c.conjuge.nome)||"")+" importado"+(patConj>0?" (Pat: "+fmF(patConj)+")":"")+"!");
-        setTimeout(function(){sCorrMsg("")},5000);
+        /* Validação pós-import (roadmap.md): confere se a soma dos ativos lidos bate com o
+           patrimônio que a própria planilha do Gorila declarou — ver checarSomaAtivosGorila. */
+        var _divergConj=checarSomaAtivosGorila(ativosConj,patConj);
+        if(_divergConj){
+          sCorrMsg("⚠ Cônjuge importado, mas a soma dos ativos ("+fmF(_divergConj.somaAtivos)+") não bate com o patrimônio declarado ("+fmF(_divergConj.patDeclarado)+") — diferença de "+_divergConj.diffPct.toFixed(0)+"%. Confira se algum ativo ficou duplicado ou faltando antes de usar esses dados num relatório.");
+          setTimeout(function(){sCorrMsg("")},9000);
+        }else{
+          sCorrMsg("✅ Cônjuge "+((c.conjuge&&c.conjuge.nome)||"")+" importado"+(patConj>0?" (Pat: "+fmF(patConj)+")":"")+"!");
+          setTimeout(function(){sCorrMsg("")},5000);
+        }
       }catch(err){sCorrMsg("⚠ Erro cônjuge: "+err.message);}
     };
     reader.readAsArrayBuffer(file);
@@ -8493,8 +8615,18 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           _gorilaRent:gRentTit,
           patGorila:patTit||0
         }});
-        sCorrMsg("✅ Carteira do cliente importada do Gorila"+(ativosTit.length>0?" — "+ativosTit.length+" ativo(s)":"")+(patTit>0?" (Pat: "+fmF(patTit)+")":"")+"!");
-        setTimeout(function(){sCorrMsg("")},5000);
+        /* Validação pós-import (roadmap.md): confere se a soma dos ativos lidos bate com o
+           patrimônio que a própria planilha do Gorila declarou — ver checarSomaAtivosGorila.
+           Mantém a frase "Carteira do cliente" no aviso de divergência de propósito: é o texto
+           que o filtro de exibição na aba Relatório procura pra saber se mostra esse corrMsg. */
+        var _divergTit=checarSomaAtivosGorila(ativosTit,patTit);
+        if(_divergTit){
+          sCorrMsg("⚠ Carteira do cliente importada, mas a soma dos ativos ("+fmF(_divergTit.somaAtivos)+") não bate com o patrimônio declarado ("+fmF(_divergTit.patDeclarado)+") — diferença de "+_divergTit.diffPct.toFixed(0)+"%. Confira antes de usar esses dados num relatório.");
+          setTimeout(function(){sCorrMsg("")},9000);
+        }else{
+          sCorrMsg("✅ Carteira do cliente importada do Gorila"+(ativosTit.length>0?" — "+ativosTit.length+" ativo(s)":"")+(patTit>0?" (Pat: "+fmF(patTit)+")":"")+"!");
+          setTimeout(function(){sCorrMsg("")},5000);
+        }
       }catch(err){sCorrMsg("⚠ Erro ao importar Gorila: "+err.message);}
     };
     reader.readAsArrayBuffer(file);
@@ -9331,6 +9463,16 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
      real de agosto era R$ 5,18. Extraída aqui pra virar reutilizável tanto pelo botão quanto pelo
      fluxo automático (ver o efeito autoRelatorio mais abaixo). */
   var buscarCambioFechamentoMes=function(){
+    /* RETORNO (v494): {valor, real, dataRef} em vez de um número cru.
+       ROADMAP (item "Cotação de câmbio fixa"): antes, quando a AwesomeAPI falhava nas 7
+       tentativas, essa função resolvia o fallback (usdRateGlobal||5.70) como se fosse um
+       valor normal — indistinguível do valor real pra quem chama. O relatório então rotulava
+       esse número como "fechamento do mês" (rótulo que promete precisão) mesmo quando era só
+       uma estimativa de última hora. Agora o chamador recebe `real:false` nesse caso e decide
+       não usar esse valor como "fechamento do mês" — ele cai no PRÓPRIO fallback de
+       usdRateRelatorio em gerarRelatorio, que já existe e já rotula corretamente como
+       "câmbio atual" (ver fonteUsdRate). Nenhuma mudança de comportamento quando a API responde
+       normalmente: resolve exatamente a mesma cotação real de antes. */
     return new Promise(function(resolve){
       var dataRefStr=null;
       if(c._vestRent && c._vestRent.dataFim) dataRefStr=c._vestRent.dataFim;
@@ -9351,7 +9493,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       var idx=0;
       var tryNext=function(){
         if(idx>=tentativas.length){
-          resolve(usdRateGlobal||5.70);
+          resolve({valor:usdRateGlobal||5.70,real:false,dataRef:null});
           return;
         }
         var dataFmt=tentativas[idx++];
@@ -9366,7 +9508,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
               var sorted=data.slice().sort(function(a,b){return parseInt(b.timestamp)-parseInt(a.timestamp)});
               var melhor=sorted[0];
               if(melhor&&melhor.bid){
-                resolve(parseFloat(melhor.bid));
+                resolve({valor:parseFloat(melhor.bid),real:true,dataRef:dataFmtHifen});
                 return;
               }
             }
@@ -9921,6 +10063,10 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                pra quem importou o extrato do cônjuge antes desta correção. */
             var _pRaw=(a._gRentPct&&typeof a._gRentPct.periodo==="number")?a._gRentPct.periodo:null;
             var rp=_pRaw===null?null:(Math.abs(_pRaw)>1?_pRaw:_pRaw*100);
+            /* ROADMAP (mesma heurística ambígua de getRentAtivoPer, ver comentário lá) — aviso
+               de console quando o resultado for extremo, pra não passar batido sem possibilidade
+               de checagem. */
+            if(rp!==null&&Math.abs(rp)>60)console.warn("[rentConjuge] Rentabilidade mensal extrema detectada via heurística de magnitude (ambígua) — "+(a.tk||a.nm||"ativo do cônjuge")+": "+rp.toFixed(2)+"%. Confira manualmente antes de enviar o relatório.");
             if(rp!==null&&v>0){_somaPondRentConjPre+=v*rp;_somaValComRentConjPre+=v;}
           });
           if(_somaValComRentConjPre>0){
@@ -10422,10 +10568,22 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                  caso — nenhuma carteira real rende >100%/-100% num único mês — então tratamos
                  como já sendo % em vez de multiplicar por 100 de novo (o que gerava números
                  como "116%" pra um ativo que na verdade rendeu 1,16%). Isso corrige tanto dados
-                 novos (fração) quanto antigos (pontos percentuais), sem precisar reimportar. */
+                 novos (fração) quanto antigos (pontos percentuais), sem precisar reimportar.
+                 ROADMAP (item "heurística de rentabilidade já em %"): essa é uma ambiguidade de
+                 verdade — um único número sem unidade registrada não dá pra diferenciar com
+                 100% de certeza "+116% num mês" de "+1,16% salvo errado", e esse ramo só é
+                 alcançado quando não há o valor em R$ do período (rsPeriodo) pra conferir contra
+                 — a forma mais confiável de resolver isso de vez seria gravar a unidade no
+                 momento da importação, só que isso exigiria migrar/reimportar dados antigos de
+                 clientes reais, risco que não cabe numa correção pontual. Mitigação mais segura
+                 aqui: manter o comportamento (já correto pro caso comum, documentado acima), mas
+                 avisar no console quando o resultado for um valor extremo — pra aparecer no
+                 debug caso algum número estranho chegue a um relatório, em vez de passar batido
+                 silenciosamente. */
               var ehJaPct=Math.abs(pctPeriodo)>1;
               var pctFrac=ehJaPct?pctPeriodo/100:pctPeriodo;
               var pctFinal=ehJaPct?pctPeriodo:pctPeriodo*100;
+              if(Math.abs(pctFinal)>60)console.warn("[getRentAtivoPer] Rentabilidade mensal extrema detectada via heurística de magnitude (ambígua) — "+(a.tk||a.nm||"ativo")+": "+pctFinal.toFixed(2)+"%. Confira manualmente antes de enviar o relatório.");
               return {pct:pctFinal,rs:a.vA*pctFrac/(1+pctFrac),doPeriodo:true,fonte:"gorila_periodo_pct"};
             }
             var vAno=pickKey(rp,["ano","Ano","ANO"]);
@@ -21185,7 +21343,11 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
             };
             var _ehMensal=tipoRel==="mensal";
             Promise.all([
-              _ehMensal?buscarCambioFechamentoMes():Promise.resolve(null),
+              /* Só usa o valor como "fechamento do mês" quando vem de verdade da API — ver
+                 comentário em buscarCambioFechamentoMes (roadmap: cotação de câmbio fixa). Se
+                 caiu no fallback interno (real:false), passa null pra gerarRelatorio cair no
+                 próprio fallback dele, que já rotula corretamente como "câmbio atual". */
+              _ehMensal?buscarCambioFechamentoMes().then(function(r){return r&&r.real?r.valor:null;}):Promise.resolve(null),
               _ehMensal?buscarRentAtivosUSD():Promise.resolve(null)
             ]).catch(function(){return [null,null];}).then(function(res){
               try{
@@ -21693,9 +21855,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                         gerarRelMensal(usdRelatorio);
                         return;
                       }
-                      buscarCambioFechamentoMes().then(function(taxa){
-                        sUsdRelatorio(taxa);
-                        gerarRelMensal(taxa);
+                      buscarCambioFechamentoMes().then(function(r){
+                        /* Só fixa/usa o valor como "fechamento do mês" quando é real — ver
+                           comentário em buscarCambioFechamentoMes (roadmap: cotação de câmbio
+                           fixa). Se a API falhou (real:false), passa null: o campo volta a
+                           mostrar "deixe em branco..." (honesto — não achamos o câmbio real) e
+                           gerarRelMensal cai no próprio fallback dele, rotulado "câmbio atual". */
+                        var taxaReal=r&&r.real?r.valor:null;
+                        sUsdRelatorio(taxaReal);
+                        gerarRelMensal(taxaReal);
                       });
                     }} style={{padding:20,cursor:"pointer",background:"linear-gradient(145deg,"+T.goldD+",rgba(212,163,40,0.04))",border:"1px solid "+T.gold+"33"}}>
                       <div style={{display:"flex",alignItems:"center",gap:12}}>
@@ -35201,10 +35369,19 @@ function RfPainelTaxas({taxas,status}){
   if(!taxas)return React.createElement("div",{style:{height:34,background:"rgba(255,255,255,0.02)",borderRadius:10,marginBottom:12}});
   var items=[{l:"CDI",v:(taxas.cdi_aa||0).toFixed(2).replace(".",",")+"% a.a.",cor:T.cyan},{l:"Selic",v:(taxas.selic_aa||0).toFixed(2).replace(".",",")+"% a.a.",cor:T.gold},{l:"IPCA",v:(taxas.ipca_mm||0).toFixed(2).replace(".",",")+"% a.m.",cor:T.green},{l:"IGP-M",v:(taxas.igpm_mm||0).toFixed(2).replace(".",",")+"% a.m.",cor:T.purple}];
   var dt=taxas.atualizadoEm?new Date(taxas.atualizadoEm).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}):null;
-  return React.createElement("div",{style:{background:"rgba(10,20,38,0.6)",border:"1px solid "+T.bdr,borderRadius:10,padding:"8px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}},
+  /* BUG (roadmap.md — "modo reserva fixo"): quando a API do BCB falha e não há cache válido,
+     carregarTaxasBCB() cai no _bcbFallback — um snapshot fixo escrito no código, que fica cada
+     vez mais desatualizado conforme o tempo passa (Selic/CDI mudam a cada reunião do Copom).
+     Antes, esse estado só mudava a cor de uma bolinha (verde→laranja) mantendo o MESMO texto
+     "Taxas BCB" — fácil de não notar. Agora mostra um aviso explícito, porque esse saldo
+     calculado (rfCalcSaldo) entra no patrimônio em Renda Fixa mostrado pro cliente. */
+  var isFallback=status==="fallback";
+  return React.createElement("div",{style:{background:isFallback?"rgba(224,168,92,0.08)":"rgba(10,20,38,0.6)",border:"1px solid "+(isFallback?"rgba(224,168,92,0.35)":T.bdr),borderRadius:10,padding:"8px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}},
     React.createElement("div",{style:{display:"flex",alignItems:"center",gap:5,flexShrink:0}},
-      React.createElement("span",{style:{fontSize:9,color:status==="ok"?T.green:"#E0A85C"}},status==="loading"?"⟳":"●"),
-      React.createElement("span",{style:{fontSize:10,color:T.t3,fontWeight:600}},status==="loading"?"Buscando BCB…":("Taxas BCB"+(dt?" · "+dt:"")))
+      React.createElement("span",{style:{fontSize:9,color:status==="ok"?T.green:"#E0A85C"}},status==="loading"?"⟳":(isFallback?"⚠️":"●")),
+      React.createElement("span",{style:{fontSize:10,color:isFallback?"#E0A85C":T.t3,fontWeight:isFallback?700:600}},
+        status==="loading"?"Buscando BCB…":(isFallback?"API do BCB indisponível — taxas de reserva, podem estar desatualizadas":("Taxas BCB"+(dt?" · "+dt:"")))
+      )
     ),
     React.createElement("div",{style:{display:"flex",gap:12,flexWrap:"wrap"}},
       items.map(function(i){return React.createElement("div",{key:i.l,style:{display:"flex",gap:4,alignItems:"baseline"}},
@@ -36801,7 +36978,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '493';
+  var SW_VERSION = '495';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
