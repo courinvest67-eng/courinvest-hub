@@ -7781,7 +7781,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
      Sem isso, o reportHtml fica em state com dados velhos (ex: perfil "Moderado" depois de mudar pra "Arrojado").
      Lista de campos que devem disparar regeração: risco, ativos importados, proventos, gorilaRent, vestRent, particularidades. */
   React.useEffect(function(){
-    if(reportHtml)sReportHtml(null);
+    if(reportHtml){sReportHtml(null);sGfAvisoReimport(false);}
   // eslint-disable-next-line
   },[c.risco,c.pais,c.investExterior,c._ativosTs,(c._gorilaRent&&c._gorilaRent.dataFim),(c._vestRent&&c._vestRent.dataFim),(c.proventos||[]).length,(c.particularidades&&JSON.stringify(c.particularidades.relatorio||{}))]);
 
@@ -9652,6 +9652,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
     var normI=function(n){if(!n)return"Sem instituição";if(n.match(/xp\b|xp investimentos/i))return"Rico";if(n.match(/rico/i))return"Rico";if(n.match(/sproutfi|passfolio|PASSFOLIO|passfólio/i))return"Vest";if(n.match(/j\.?\s*safra/i))return"Safra";return n;};
     /* Garante acesso ao estado global d — usa window._courinvestData como fallback */
     var _d=d||(window._courinvestData)||{};
+    /* v500: relatório de Gestão Financeira = novo modelo "orçamento" (gerarRelatorioGFModeloHtml). Só cai
+       no layout antigo daqui pra baixo se o cliente não tiver nenhum mês de orçamento importado. */
+    if(tipo==="planejamento"){var _htmlGFNovo=gerarRelatorioGFModeloHtml(c);if(_htmlGFNovo)return _htmlGFNovo;}
     var hoje=new Date().toLocaleDateString("pt-BR");
     var MESES_NOMES=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
     var dataRef=new Date();dataRef.setDate(1);dataRef.setMonth(dataRef.getMonth()-1);
@@ -13010,7 +13013,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
   const[showAddDesp,sShowAddDesp]=useState(false);
   const[showAddMeta,sShowAddMeta]=useState(false);
   const[reviewVista,sReviewVista]=useState(null); 
-  const[showFinReport,sShowFinReport]=useState(false); 
+  const[gfAvisoReimport,sGfAvisoReimport]=useState(false); /* v500: prévia do relatório de GF com dados antigos (sem grupo/realizado) */
   const vistaRef=useRef(null);
   const tRec=receitas.reduce(function(a,r){return a+(r.valor||0)},0);
   const tDesp=despesas.reduce(function(a,d){return a+(d.valor||0)},0);
@@ -13155,6 +13158,10 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                    Para trimestral: total = soma do período, realizadoMensal = média.
                    Usamos: realizadoMensal para trimestral (já é média), total para mensal. */
                 var valorFinal=nMeses===1?total:realizadoMensal;
+                /* v500: nº de lançamentos da categoria — vem como inteiro logo antes do "Total" (ex:
+                   "19.000,00 21.315,00 31 21.315,00 112,18% 86,47%"). Categoria sem lançamento não tem. */
+                var mQtd=rest.match(/\s(\d+)\s+[\d.]+,\d{2}(?:\s+\d+,\d{2}%)+\s*$/);
+                var qtdLanc=mQtd?parseInt(mQtd[1],10):0;
 
                 if(nomeCat&&(valorFinal>0||estimado>0)){
                   rows.push({
@@ -13164,6 +13171,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                     estimado:estimado,
                     realizadoMensal:valorFinal,
                     total:nMeses===1?total:realizadoMensal*nMeses,
+                    qtd:qtdLanc,
                     integrante:integranteAtual  /* preserva quem é (Hélio/Karla) */
                   });
                 }
@@ -13211,7 +13219,11 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                 valor:Math.abs(val||orc),tipo:isReceita?"r":"d",
                 orc:orc>0?orc:null,include:true,learned:!!cls.learned,
                 via:cls.via||null,hits:cls.hits||0,objId:cls.objId||null,
-                integrante:integranteFinal
+                integrante:integranteFinal,
+                /* v500 — pro Relatório de Gestão Financeira (modelo "orçamento"): grupo do Meu Vista
+                   ("Orçamento Moradia"), realizado de verdade (valor cai pro previsto quando não houve
+                   lançamento) e nº de lançamentos */
+                grp:r.categoria||null,real:val,qtd:(r.qtd!=null?r.qtd:null)
               });
             });
 
@@ -13413,15 +13425,15 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
     reviewVista.items.forEach(function(it,i){
       if(!it.include)return;
       if(it.tipo==="r"){
-        newRec.push({id:Date.now()+i,cat:MACRO_CATS[it.macro]?MACRO_CATS[it.macro].l:it.macro,macro:it.macro,sub:it.sub,valor:it.valor,orc:it.orc||0,integrante:it.integrante||null});
+        newRec.push({id:Date.now()+i,cat:MACRO_CATS[it.macro]?MACRO_CATS[it.macro].l:it.macro,macro:it.macro,sub:it.sub,valor:it.valor,orc:it.orc||0,integrante:it.integrante||null,grp:it.grp||null,real:(it.real!=null?it.real:null),qtd:(it.qtd!=null?it.qtd:null)});
       }else if(it.macro==="investimentos"){
         
-        var iItem={id:Date.now()+i+2000,cat:"Investimento",macro:"investimentos",sub:it.sub,valor:it.valor,orc:it.orc||0,cor:T.gold,integrante:it.integrante||null};
+        var iItem={id:Date.now()+i+2000,cat:"Investimento",macro:"investimentos",sub:it.sub,valor:it.valor,orc:it.orc||0,cor:T.gold,integrante:it.integrante||null,grp:it.grp||null,real:(it.real!=null?it.real:null),qtd:(it.qtd!=null?it.qtd:null)};
         if(it.objId)iItem.objId=it.objId;
         newInv.push(iItem);
       }else{
         var corMacro=MACRO_CATS[it.macro]?MACRO_CATS[it.macro].cor:T.t2;
-        var dItem={id:Date.now()+i+1000,cat:MACRO_CATS[it.macro]?MACRO_CATS[it.macro].l:it.macro,macro:it.macro,sub:it.sub,valor:it.valor,orc:it.orc||0,cor:corMacro,integrante:it.integrante||null};
+        var dItem={id:Date.now()+i+1000,cat:MACRO_CATS[it.macro]?MACRO_CATS[it.macro].l:it.macro,macro:it.macro,sub:it.sub,valor:it.valor,orc:it.orc||0,cor:corMacro,integrante:it.integrante||null,grp:it.grp||null,real:(it.real!=null?it.real:null),qtd:(it.qtd!=null?it.qtd:null)};
         newDesp.push(dItem);
       }
       /* APRENDIZADO AUTOMÁTICO — adiciona à memória global vistaLearning toda vez
@@ -14128,11 +14140,20 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       +'</body></html>';
   };
 
-  const exportarRelatorioFinPDF=async function(){
+  /* opts.apenasHtml===true → NÃO abre janela/impressão: devolve o HTML completo do relatório (a mesma
+     coisa que vai pro PDF) pra pré-visualização dentro do Hub (modal "Relatório Financeiro Mensal").
+     Antes, esse modal tinha um layout próprio e antigo (só KPIs/comparativo/categorias), diferente
+     do relatório novo (v486) que é o que realmente sai no PDF — agora os dois são o MESMO HTML.
+     Chamado como onClick, o 1º argumento é o evento (objeto) — por isso o teste é === true. */
+  const exportarRelatorioFinPDF=async function(opts){
+    var apenasHtml=!!(opts&&opts.apenasHtml===true);
     var an=gerarAnaliseFinanceira();
-    if(!an){alert("Sem dados para gerar relatório.");return}
-    var w=window.open("","_blank","width=900,height=1200");
-    if(!w){alert("Bloqueador de pop-up impediu abrir a janela. Permita pop-ups e tente novamente.");return}
+    if(!an){if(!apenasHtml)alert("Sem dados para gerar relatório.");return null}
+    var w=null;
+    if(!apenasHtml){
+      w=window.open("","_blank","width=900,height=1200");
+      if(!w){alert("Bloqueador de pop-up impediu abrir a janela. Permita pop-ups e tente novamente.");return}
+    }
 
     var MN=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
     var partes=an.mesRef.split("-");
@@ -14818,7 +14839,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         return parsed;
       }catch(e){return null;}
     };
-    var obsIA=await gerarObservacoesIA();
+    var obsIA=apenasHtml?null:await gerarObservacoesIA(); /* prévia não chama a IA (custo/lentidão) — o PDF sim */
     var pontosAtencaoFinal=obsIA?obsIA.pontosAtencao:an.pontos.alertas.slice(0,3).map(function(a){return {titulo:"Ponto de atenção",texto:a}});
     var planoAcaoFinal=obsIA?obsIA.planoAcao:an.pontos.recomendacoes.slice(0,4).map(function(r){return {acao:r,responsavel:"Ambos",prazo:"Próximo mês"}});
     var secObs='<section class="page page-light">'
@@ -15015,7 +15036,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
 
     var fontLink='<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">';
 
-    w.document.write('<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">'
+    var _htmlRelFin=('<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">'
       +'<title>Relatório Financeiro — '+esc(c.nome)+' · '+mesNome+'</title>'
       +fontLink
       +'<style>'+styles+'<\/style>'
@@ -15057,8 +15078,10 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         if(sec.proximosPassos!==false) partes+=fechamento;
         return partes;
       })()
-      +'<script>setTimeout(function(){window.print()},700)<\/script>'
+      +(apenasHtml?'':'<script>setTimeout(function(){window.print()},700)<\/script>')
       +'<\/body><\/html>');
+    if(apenasHtml)return _htmlRelFin;
+    w.document.write(_htmlRelFin);
     w.document.close();
   };
 
@@ -21845,12 +21868,19 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                 <div style={{marginBottom:20}}>
                   <div style={{fontSize:10,color:T.cyan,fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>💰 Gestão Financeira</div>
                   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:12,marginBottom:8}}>
-                    <Cd onClick={function(){sShowFinReport(true)}} style={{padding:20,cursor:"pointer",background:"linear-gradient(145deg,rgba(56,189,248,0.06),rgba(56,189,248,0.02))",border:"1px solid "+T.cyan+"33"}}>
+                    <Cd onClick={function(){
+                      /* v500: abre a PRÉVIA do relatório novo aqui na aba (mesmo fluxo do Relatório Mensal de GP):
+                         ← Voltar · 🖨 Imprimir/PDF · WhatsApp · Email */
+                      var htmlGF=gerarRelatorioGFModeloHtml(c);
+                      if(!htmlGF){alert("Sem orçamento importado. Importe o Meu Vista deste cliente (botão abaixo) pra gerar o relatório.");return;}
+                      sGfAvisoReimport(!gfModeloDadosCompletos(c));
+                      sReportHtml(htmlGF);
+                    }} style={{padding:20,cursor:"pointer",background:"linear-gradient(145deg,rgba(56,189,248,0.06),rgba(56,189,248,0.02))",border:"1px solid "+T.cyan+"33"}}>
                       <div style={{display:"flex",alignItems:"center",gap:12}}>
                         <div style={{fontSize:32}}>📊</div>
                         <div style={{flex:1}}>
                           <div style={{fontSize:14,fontWeight:800,color:T.cyan,marginBottom:2}}>Relatório Mensal Financeiro</div>
-                          <div style={{fontSize:10,color:T.t3,lineHeight:1.5}}>Orçamento · Receitas vs Despesas · Fluxo de Caixa · Taxa de Poupança · Evolução patrimonial</div>
+                          <div style={{fontSize:10,color:T.t3,lineHeight:1.5}}>Resumo · Receitas · Despesas por orçamento · Raio-X · Metas previsto × realizado · Plano de ação</div>
                         </div>
                       </div>
                     </Cd>
@@ -21868,19 +21898,6 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                         <div style={{flex:1}}>
                           <div style={{fontSize:14,fontWeight:800,color:T.gold,marginBottom:2}}>Relatório Trimestral Financeiro</div>
                           <div style={{fontSize:10,color:T.t3,lineHeight:1.5}}>Comparativo dos últimos 3 meses · Evolução por categoria · Alertas e próximos passos</div>
-                        </div>
-                      </div>
-                    </Cd>
-                    <Cd onClick={function(){
-                      var an=gerarAnaliseFinanceira();
-                      if(!an||!an.snapAtual){alert("Sem dados financeiros. Importe o Meu Vista primeiro.");return;}
-                      exportarRelatorioFinPDF();
-                    }} style={{padding:20,cursor:"pointer",background:"linear-gradient(145deg,rgba(56,189,248,0.06),rgba(56,189,248,0.02))",border:"1px solid "+T.cyan+"33"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:12}}>
-                        <div style={{fontSize:32}}>📄</div>
-                        <div style={{flex:1}}>
-                          <div style={{fontSize:14,fontWeight:800,color:T.cyan,marginBottom:2}}>Exportar PDF / Imprimir</div>
-                          <div style={{fontSize:10,color:T.t3,lineHeight:1.5}}>Versão para impressão e envio ao cliente · Layout otimizado para A4</div>
                         </div>
                       </div>
                     </Cd>
@@ -22049,34 +22066,23 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                  Alinhada 1:1 com o TEMPLATE_DEFAULTS de dentro do exportarRelatorioFinPDF —
                  mesmas chaves, pra marcar/desmarcar aqui realmente mudar o PDF gerado. */
               var TEMPLATES_FIN={
-                premium:  {l:"Premium",   ic:"⭐", cor:T.gold,   desc:"Relatório completo: indicadores do mês, saúde financeira, raio-x de gastos, visão do casal, metas e diagnóstico"},
-                simples:  {l:"Simples",   ic:"📃", cor:T.cyan,   desc:"Essencial: capa + indicadores do mês + saúde financeira (sem raio-x, sem visão do casal, sem diagnóstico)"},
-                completo: {l:"Completo",  ic:"📚", cor:T.purple, desc:"Idêntico ao Premium + evolução histórica dos últimos meses"},
+                premium:  {l:"Premium",   ic:"⭐", cor:T.gold,   desc:"Relatório completo (9 páginas): resumo, receitas, despesas por orçamento, detalhamento, raio-x, metas e plano de ação"},
+                simples:  {l:"Simples",   ic:"📃", cor:T.cyan,   desc:"Essencial: capa + sumário + resumo executivo + despesas por orçamento + metas"},
+                completo: {l:"Completo",  ic:"📚", cor:T.purple, desc:"Idêntico ao Premium (todas as páginas do modelo)"},
                 custom:   {l:"Custom",    ic:"🎛️", cor:T.green,  desc:"Você escolhe seção por seção abaixo"}
               };
               var SECOES_FIN=[
-                {k:"capa",           l:"Capa personalizada",            ic:"🎨", desc:"Página de abertura com logo Courinvest e nome do cliente"},
-                {k:"resumoExec",     l:"Indicadores do Mês",            ic:"📋", desc:"Receitas x despesas, taxa de poupança e evolução do mês"},
-                {k:"saude",          l:"Saúde Financeira",              ic:"❤️", desc:"Nota geral (0-100) com os 6 indicadores: poupança, reserva, orçamento, investimento, custos fixos e dívida"},
-                {k:"despesas",       l:"Distribuição de Gastos",        ic:"🥧", desc:"Gastos por categoria + maiores despesas do mês"},
-                {k:"raiox",          l:"Raio-X dos Gastos",             ic:"🔍", desc:"Custos fixos vs variáveis por R$100 gasto + comparativo com o mesmo mês do ano anterior"},
-                {k:"visaoCasal",     l:"Visão do Casal",                ic:"👫", desc:"Divisão de receitas e despesas entre os dois integrantes (só aparece com 2+ integrantes)"},
-                {k:"metasOrc",       l:"Metas e Orçamento",             ic:"🎯", desc:"Previsto x realizado por categoria, com status de aderência ao orçamento"},
-                {k:"carteira",       l:"Resumo do Patrimônio",          ic:"💰", desc:"Carteira de investimentos do cliente, se houver ativos importados"},
-                {k:"metas",          l:"Aportes do Mês",                ic:"📥", desc:"Movimentações e aportes registrados no período"},
-                {k:"objetivos",      l:"Reserva e Objetivos",           ic:"🌟", desc:"Progresso da reserva de emergência e de cada objetivo cadastrado"},
-                {k:"analise",        l:"Diagnóstico Inteligente",       ic:"🧠", desc:"Pontos fortes, alertas e recomendações automáticas com base no mês"},
-                {k:"trabalho",       l:"Nosso Trabalho por Você",       ic:"🤝", desc:"Registro do que foi feito pela Courinvest pelo cliente no mês"},
-                {k:"observacoes",    l:"Observações e Próximos Passos", ic:"💬", desc:"Pontos de atenção e plano de ação pro próximo mês (com apoio de IA)"},
-                {k:"historico",      l:"Evolução Histórica",            ic:"📈", desc:"Gráfico com o histórico de meses anteriores importados"},
-                {k:"proximosPassos", l:"Página de Encerramento",        ic:"🙏", desc:"Página final de agradecimento"}
+                {k:"capa",        l:"Capa personalizada",            ic:"🎨", desc:"Página de abertura com logo Courinvest e nome do cliente"},
+                {k:"sumario",     l:"Sumário",                       ic:"📑", desc:"Índice das seções + como ler o relatório"},
+                {k:"resumoExec",  l:"Resumo Executivo",              ic:"📊", desc:"Receitas, despesas, saldo, taxa de poupança, previsto × realizado e destaques do mês"},
+                {k:"receitas",    l:"Receitas do Mês",               ic:"💰", desc:"Receitas por categoria, % do total e variação frente ao previsto"},
+                {k:"despesas",    l:"Despesas por Orçamento",        ic:"🧾", desc:"Gastos por grupo do orçamento + as 5 maiores categorias do mês"},
+                {k:"detalhe",     l:"Detalhamento de Despesas",      ic:"🔬", desc:"Cada grupo aberto em categorias, com maiores estouros e economias"},
+                {k:"raiox",       l:"Raio-X dos Gastos",             ic:"🔍", desc:"Para onde foi cada R$ 100 que entrou, gastos sem previsto e origem do desvio"},
+                {k:"metasOrc",    l:"Metas e Orçamento",             ic:"🎯", desc:"Previsto × realizado por grupo, com status Dentro / Atenção / Estourou"},
+                {k:"observacoes", l:"Observações e Próximos Passos", ic:"📋", desc:"Pontos de atenção, o que funcionou e plano de ação pro próximo mês"}
               ];
-              var TEMPLATE_DEFAULTS_FIN={
-                premium:  {capa:true, resumoExec:true, saude:true, despesas:true, raiox:true, visaoCasal:true, metasOrc:true, carteira:true, metas:true, objetivos:true, analise:true, trabalho:true, observacoes:true, historico:false, proximosPassos:true},
-                simples:  {capa:true, resumoExec:true, saude:true, despesas:false,raiox:false,visaoCasal:false,metasOrc:false,carteira:true, metas:false,objetivos:false,analise:false,trabalho:false,observacoes:false,historico:false, proximosPassos:false},
-                completo: {capa:true, resumoExec:true, saude:true, despesas:true, raiox:true, visaoCasal:true, metasOrc:true, carteira:true, metas:true, objetivos:true, analise:true, trabalho:true, observacoes:true, historico:true,  proximosPassos:true},
-                custom:   {capa:true, resumoExec:true, saude:true, despesas:false,raiox:false,visaoCasal:false,metasOrc:false,carteira:true, metas:false,objetivos:false,analise:false,trabalho:false,observacoes:true, historico:false, proximosPassos:true}
-              };
+              var TEMPLATE_DEFAULTS_FIN=GF_SECOES_PADRAO; /* mesma tabela usada pelo gerador (gfModeloDados) — nunca divergem */
 
               var TEMPLATES = usaFin ? TEMPLATES_FIN : TEMPLATES_PAT;
               var SECOES = usaFin ? SECOES_FIN : SECOES_PAT;
@@ -22087,7 +22093,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                  mas tinha um custom antigo com chaves de Patrimônio), ignora e usa o default custom da
                  família certa — evita checklist "tudo desmarcado" mostrando chaves que não existem mais. */
               var secoesSalvo=rel.secoes;
-              var secoesCompativel=secoesSalvo && (usaFin ? ("saude" in secoesSalvo) : ("overview" in secoesSalvo || "instituicao" in secoesSalvo));
+              var secoesCompativel=secoesSalvo && (usaFin ? ("detalhe" in secoesSalvo) : ("overview" in secoesSalvo || "instituicao" in secoesSalvo));
               var secoes=tpl==="custom" ? (secoesCompativel ? secoesSalvo : TEMPLATE_DEFAULTS.custom) : TEMPLATE_DEFAULTS[tpl];
 
               /* Garante que particularidades seja sempre um objeto (pode vir como "" do Gorila) */
@@ -22193,7 +22199,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
             <div>
               {}
               <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
-                <Bt v="ghost" onClick={function(){sReportHtml(null)}} style={{fontSize:13,padding:"6px 0"}}>← Voltar</Bt>
+                <Bt v="ghost" onClick={function(){sReportHtml(null);sGfAvisoReimport(false)}} style={{fontSize:13,padding:"6px 0"}}>← Voltar</Bt>
                 <div style={{marginLeft:"auto",display:"flex",gap:6}}>
                   <Bt v="secondary" style={{fontSize:10,padding:"6px 12px"}} onClick={function(){
                     var printWin=document.getElementById("report-frame").contentWindow;
@@ -22209,7 +22215,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                   }}>📧 Email</Bt>
                 </div>
               </div>
-              {}
+              {gfAvisoReimport && <div style={{marginBottom:10,padding:"10px 14px",borderRadius:10,background:"rgba(232,163,23,0.10)",border:"1px solid rgba(232,163,23,0.35)",fontSize:11,color:T.orange,lineHeight:1.5}}>⚠️ <b>Esse mês foi importado antes do modelo novo</b> — os grupos do orçamento (Moradia, Dependentes...) e os valores realizados exatos não ficaram salvos, então o relatório está usando as macro-categorias do Hub. Pra sair idêntico ao modelo, reimporte o PDF do Meu Vista deste mês (botão "Importar Meu Vista" nesta aba).</div>}
               <div style={{borderRadius:14,overflow:"hidden",border:"1px solid "+T.bdr,background:"#050A14"}}>
                 <iframe id="report-frame" srcDoc={reportHtml} style={{width:"100%",height:"80vh",border:"none",borderRadius:14,background:"#050A14"}}/>
               </div>
@@ -23002,214 +23008,6 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
               <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
                 <Bt v="secondary" onClick={function(){sReviewVista(null);if(vistaRef.current)vistaRef.current.value=""}}>Cancelar</Bt>
                 <Bt onClick={applyReviewedVista}>✦ Importar {inc.length} {inc.length===1?"item":"itens"}</Bt>
-              </div>
-            </div>
-          );
-        })()}
-      </Mo>
-
-      {}
-      <Mo open={showFinReport} onClose={function(){sShowFinReport(false)}} title="📊 Relatório Financeiro Mensal" wide>
-        {showFinReport && (function(){
-          var an=gerarAnaliseFinanceira();
-          snapAtualLabel=an.mesRef;
-          var MN=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
-          var partes=an.mesRef.split("-");
-          var mesNome=partes.length===2?MN[+partes[1]-1]+"/"+partes[0]:an.mesRef;
-          var partesAnt=an.snapAnterior?an.snapAnterior.mes.split("-"):null;
-          var mesAntNome=partesAnt?MN[+partesAnt[1]-1]+"/"+partesAnt[0]:null;
-
-          
-          var macroOrdered=Object.keys(an.atualPorMacro).map(function(k){return{k:k,tot:an.atualPorMacro[k].tot,n:an.atualPorMacro[k].n}}).sort(function(a,b){return b.tot-a.tot});
-          var totDespAtual=an.snapAtual.tDesp||1;
-
-          return (
-            <div style={{display:"flex",flexDirection:"column",gap:14}}>
-              {}
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:T.goldD,border:"1px solid "+T.gold+"22",borderRadius:10}}>
-                <div>
-                  <div style={{fontSize:9,color:T.t3,fontWeight:600,letterSpacing:.5}}>CLIENTE</div>
-                  <div style={{fontSize:14,fontWeight:700,color:T.gold,marginTop:1}}>{c.nome}</div>
-                  <div style={{fontSize:11,color:T.t2,marginTop:2}}>📅 Período: <b>{mesNome}</b></div>
-                </div>
-                <Bt onClick={exportarRelatorioFinPDF} style={{fontSize:11,padding:"8px 14px"}}>📄 Exportar PDF / Imprimir</Bt>
-              </div>
-
-              {}
-              <div id="fin-report-content" style={{display:"flex",flexDirection:"column",gap:18}}>
-
-                {}
-                <div className="section">
-                  <div className="section-title" style={{fontSize:13,fontWeight:700,color:T.gold,marginBottom:10,paddingBottom:6,borderBottom:"2px solid "+T.gold+"22",letterSpacing:.3}}>📊 INDICADORES DO MÊS</div>
-                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                    <div className="kpi" style={{padding:"10px 14px",border:"1px solid "+T.bdrL,borderRadius:8,background:T.w3,flex:"1 1 140px",minWidth:140}}>
-                      <div className="kpi-label" style={{fontSize:9,color:T.t3,fontWeight:600,letterSpacing:.8}}>RECEITA</div>
-                      <div className="kpi-value green" style={{fontSize:18,fontWeight:800,color:T.green,marginTop:4,fontFamily:"'JetBrains Mono'"}}>{fmF(an.snapAtual.tRec)}</div>
-                      {an.kpis.varRec!==null && <div className="kpi-sub" style={{fontSize:9,color:an.kpis.varRec>=0?T.green:T.red,marginTop:2}}>{an.kpis.varRec>=0?"▲":"▼"} {Math.abs(an.kpis.varRec).toFixed(1)}% vs. {mesAntNome}</div>}
-                    </div>
-                    <div className="kpi" style={{padding:"10px 14px",border:"1px solid "+T.bdrL,borderRadius:8,background:T.w3,flex:"1 1 140px",minWidth:140}}>
-                      <div className="kpi-label" style={{fontSize:9,color:T.t3,fontWeight:600,letterSpacing:.8}}>DESPESAS</div>
-                      <div className="kpi-value red" style={{fontSize:18,fontWeight:800,color:T.red,marginTop:4,fontFamily:"'JetBrains Mono'"}}>{fmF(an.snapAtual.tDesp)}</div>
-                      {an.kpis.varDesp!==null && <div className="kpi-sub" style={{fontSize:9,color:an.kpis.varDesp<=0?T.green:T.red,marginTop:2}}>{an.kpis.varDesp>=0?"▲":"▼"} {Math.abs(an.kpis.varDesp).toFixed(1)}% vs. {mesAntNome}</div>}
-                    </div>
-                    <div className="kpi" style={{padding:"10px 14px",border:"1px solid "+T.bdrL,borderRadius:8,background:T.w3,flex:"1 1 140px",minWidth:140}}>
-                      <div className="kpi-label" style={{fontSize:9,color:T.t3,fontWeight:600,letterSpacing:.8}}>SALDO</div>
-                      <div className="kpi-value" style={{fontSize:18,fontWeight:800,color:an.kpis.saldoAtual>=0?T.gold:T.red,marginTop:4,fontFamily:"'JetBrains Mono'"}}>{(an.kpis.saldoAtual>=0?"+":"")+fmF(an.kpis.saldoAtual)}</div>
-                      {an.kpis.saldoAnt!==null && <div className="kpi-sub" style={{fontSize:9,color:T.t3,marginTop:2}}>Anterior: {fmF(an.kpis.saldoAnt)}</div>}
-                    </div>
-                    <div className="kpi" style={{padding:"10px 14px",border:"1px solid "+T.bdrL,borderRadius:8,background:T.w3,flex:"1 1 140px",minWidth:140}}>
-                      <div className="kpi-label" style={{fontSize:9,color:T.t3,fontWeight:600,letterSpacing:.8}}>TX. POUPANÇA</div>
-                      <div className="kpi-value" style={{fontSize:18,fontWeight:800,color:an.kpis.txPoupAtual>=20?T.green:an.kpis.txPoupAtual>=10?T.orange:T.red,marginTop:4,fontFamily:"'JetBrains Mono'"}}>{an.kpis.txPoupAtual.toFixed(0)}%</div>
-                      {an.kpis.txPoupAnt!==null && <div className="kpi-sub" style={{fontSize:9,color:T.t3,marginTop:2}}>Anterior: {an.kpis.txPoupAnt.toFixed(0)}%</div>}
-                    </div>
-                  </div>
-                </div>
-
-                {}
-                {an.media3m && (
-                  <div className="section">
-                    <div className="section-title" style={{fontSize:13,fontWeight:700,color:T.gold,marginBottom:10,paddingBottom:6,borderBottom:"2px solid "+T.gold+"22",letterSpacing:.3}}>📈 COMPARATIVO — MÊS ATUAL · MÊS ANTERIOR · MÉDIA 3 MESES</div>
-                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                      <thead>
-                        <tr style={{background:T.bg3}}>
-                          <th style={{padding:"8px 10px",textAlign:"left",color:T.t3,fontSize:9,fontWeight:700,letterSpacing:.5}}>INDICADOR</th>
-                          <th style={{padding:"8px 10px",textAlign:"right",color:T.t3,fontSize:9,fontWeight:700,letterSpacing:.5}}>{mesNome}</th>
-                          {mesAntNome && <th style={{padding:"8px 10px",textAlign:"right",color:T.t3,fontSize:9,fontWeight:700,letterSpacing:.5}}>{mesAntNome}</th>}
-                          <th style={{padding:"8px 10px",textAlign:"right",color:T.t3,fontSize:9,fontWeight:700,letterSpacing:.5}}>MÉDIA {an.media3m.n}M</th>
-                          <th style={{padding:"8px 10px",textAlign:"right",color:T.t3,fontSize:9,fontWeight:700,letterSpacing:.5}}>VS. MÉDIA</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {[
-                          {l:"Receita",a:an.snapAtual.tRec,p:an.snapAnterior?an.snapAnterior.tRec:null,m:an.media3m.tRec,c:T.green,inverter:false},
-                          {l:"Despesas",a:an.snapAtual.tDesp,p:an.snapAnterior?an.snapAnterior.tDesp:null,m:an.media3m.tDesp,c:T.red,inverter:true},
-                          {l:"Saldo",a:an.snapAtual.tRec-an.snapAtual.tDesp,p:an.snapAnterior?(an.snapAnterior.tRec-an.snapAnterior.tDesp):null,m:an.media3m.tRec-an.media3m.tDesp,c:T.gold,inverter:false}
-                        ].map(function(r,i){
-                          var deltaMedia=r.m>0?((r.a-r.m)/r.m*100):0;
-                          var corDelta=r.inverter?(deltaMedia<=0?T.green:T.red):(deltaMedia>=0?T.green:T.red);
-                          return <tr key={i} style={{borderTop:"1px solid "+T.bdrL}}>
-                            <td style={{padding:"8px 10px",color:T.t1,fontWeight:600}}>{r.l}</td>
-                            <td style={{padding:"8px 10px",textAlign:"right",color:r.c,fontFamily:"'JetBrains Mono'",fontWeight:700}}>{fmF(r.a)}</td>
-                            {mesAntNome && <td style={{padding:"8px 10px",textAlign:"right",color:T.t2,fontFamily:"'JetBrains Mono'"}}>{r.p!==null?fmF(r.p):"—"}</td>}
-                            <td style={{padding:"8px 10px",textAlign:"right",color:T.t2,fontFamily:"'JetBrains Mono'"}}>{fmF(r.m)}</td>
-                            <td style={{padding:"8px 10px",textAlign:"right",color:corDelta,fontFamily:"'JetBrains Mono'",fontWeight:700,fontSize:10}}>{deltaMedia>=0?"▲":"▼"} {Math.abs(deltaMedia).toFixed(1)}%</td>
-                          </tr>;
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                {}
-                {macroOrdered.length>0 && (
-                  <div className="section">
-                    <div className="section-title" style={{fontSize:13,fontWeight:700,color:T.gold,marginBottom:10,paddingBottom:6,borderBottom:"2px solid "+T.gold+"22",letterSpacing:.3}}>🎯 DESPESAS POR CATEGORIA</div>
-                    <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                      {macroOrdered.map(function(mo){
-                        var m=MACRO_CATS[mo.k]||{l:mo.k,ic:"📦",cor:T.t2};
-                        var pct=(mo.tot/totDespAtual)*100;
-                        var antVal=an.snapAnterior?(an.snapAnterior.despesas.filter(function(d){return(d.macro||"outros")===mo.k}).reduce(function(s,x){return s+x.valor},0)):null;
-                        var deltaAnt=antVal&&antVal>0?((mo.tot-antVal)/antVal*100):null;
-                        return <div key={mo.k} className="bar-row" style={{display:"flex",alignItems:"center",gap:10,padding:"6px 0",borderBottom:"1px solid "+T.bdrL+"55"}}>
-                          <div className="bar-label" style={{flex:"0 0 160px",fontSize:11,color:T.t1,fontWeight:600}}>{m.ic} {m.l} <span style={{fontSize:9,color:T.t3,fontWeight:400}}>({mo.n})</span></div>
-                          <div className="bar-track" style={{flex:1,height:18,background:T.w3,borderRadius:4,overflow:"hidden",position:"relative"}}>
-                            <div className="bar-fill" style={{height:"100%",width:Math.min(pct,100)+"%",background:m.cor,borderRadius:4,opacity:.8}}/>
-                          </div>
-                          <div style={{flex:"0 0 50px",textAlign:"right",fontSize:10,color:T.t3,fontFamily:"'JetBrains Mono'"}}>{pct.toFixed(0)}%</div>
-                          <div className="bar-value" style={{flex:"0 0 100px",textAlign:"right",fontFamily:"'JetBrains Mono'",fontSize:11,fontWeight:700,color:m.cor}}>{fmF(mo.tot)}</div>
-                          {deltaAnt!==null && <div style={{flex:"0 0 60px",textAlign:"right",fontSize:9,fontWeight:700,color:deltaAnt>=10?T.red:deltaAnt<=-10?T.green:T.t3}}>{deltaAnt>=0?"+":""}{deltaAnt.toFixed(0)}%</div>}
-                        </div>;
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {}
-                {an.topDesp.length>0 && (
-                  <div className="section">
-                    <div className="section-title" style={{fontSize:13,fontWeight:700,color:T.gold,marginBottom:10,paddingBottom:6,borderBottom:"2px solid "+T.gold+"22",letterSpacing:.3}}>💸 MAIORES DESPESAS DO MÊS</div>
-                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                      <thead>
-                        <tr style={{background:T.bg3}}>
-                          <th style={{padding:"8px 10px",textAlign:"left",color:T.t3,fontSize:9,fontWeight:700,letterSpacing:.5}}>CATEGORIA</th>
-                          <th style={{padding:"8px 10px",textAlign:"left",color:T.t3,fontSize:9,fontWeight:700,letterSpacing:.5}}>DESCRIÇÃO</th>
-                          <th style={{padding:"8px 10px",textAlign:"right",color:T.t3,fontSize:9,fontWeight:700,letterSpacing:.5}}>VALOR</th>
-                          <th style={{padding:"8px 10px",textAlign:"right",color:T.t3,fontSize:9,fontWeight:700,letterSpacing:.5}}>% TOTAL</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {an.topDesp.map(function(d,i){
-                          var m=MACRO_CATS[d.macro||"outros"]||{l:d.macro||"Outros",ic:"📦",cor:T.t2};
-                          return <tr key={i} style={{borderTop:"1px solid "+T.bdrL}}>
-                            <td style={{padding:"8px 10px"}}><span className="macro-pill" style={{display:"inline-block",padding:"3px 8px",borderRadius:10,fontSize:9,fontWeight:700,background:m.cor+"22",color:m.cor}}>{m.ic} {m.l}</span></td>
-                            <td style={{padding:"8px 10px",color:T.t1,fontSize:11}}>{d.sub||d.cat}</td>
-                            <td style={{padding:"8px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",fontWeight:700,color:T.red}}>{fmF(d.valor)}</td>
-                            <td style={{padding:"8px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t2,fontSize:10}}>{(d.valor/totDespAtual*100).toFixed(1)}%</td>
-                          </tr>;
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                {}
-                <div className="section">
-                  <div className="section-title" style={{fontSize:13,fontWeight:700,color:T.gold,marginBottom:10,paddingBottom:6,borderBottom:"2px solid "+T.gold+"22",letterSpacing:.3}}>🤖 DIAGNÓSTICO INTELIGENTE</div>
-
-                  <div style={{marginBottom:14}}>
-                    <div style={{fontSize:11,fontWeight:700,color:T.green,marginBottom:6,letterSpacing:.3}}>✅ PONTOS FORTES</div>
-                    {an.pontos.fortes.map(function(p,i){return <div key={i} className="insight insight-forte" style={{padding:"10px 12px",borderLeft:"3px solid "+T.green,borderRadius:"0 6px 6px 0",margin:"6px 0",background:T.greenD,fontSize:11,color:T.t1,lineHeight:1.5}}>{p}</div>})}
-                  </div>
-
-                  <div style={{marginBottom:14}}>
-                    <div style={{fontSize:11,fontWeight:700,color:T.red,marginBottom:6,letterSpacing:.3}}>⚠️ ALERTAS</div>
-                    {an.pontos.alertas.map(function(p,i){return <div key={i} className="insight insight-alerta" style={{padding:"10px 12px",borderLeft:"3px solid "+T.red,borderRadius:"0 6px 6px 0",margin:"6px 0",background:T.redD,fontSize:11,color:T.t1,lineHeight:1.5}}>{p}</div>})}
-                  </div>
-
-                  <div>
-                    <div style={{fontSize:11,fontWeight:700,color:T.cyan,marginBottom:6,letterSpacing:.3}}>💡 RECOMENDAÇÕES</div>
-                    {an.pontos.recomendacoes.map(function(p,i){return <div key={i} className="insight insight-rec" style={{padding:"10px 12px",borderLeft:"3px solid "+T.cyan,borderRadius:"0 6px 6px 0",margin:"6px 0",background:T.cyanD,fontSize:11,color:T.t1,lineHeight:1.5}}>{p}</div>})}
-                  </div>
-                </div>
-
-                {}
-                {an.historico.length>=2 && (
-                  <div className="section">
-                    <div className="section-title" style={{fontSize:13,fontWeight:700,color:T.gold,marginBottom:10,paddingBottom:6,borderBottom:"2px solid "+T.gold+"22",letterSpacing:.3}}>📅 EVOLUÇÃO HISTÓRICA</div>
-                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                      <thead>
-                        <tr style={{background:T.bg3}}>
-                          <th style={{padding:"8px 10px",textAlign:"left",color:T.t3,fontSize:9,fontWeight:700,letterSpacing:.5}}>MÊS</th>
-                          <th style={{padding:"8px 10px",textAlign:"right",color:T.t3,fontSize:9,fontWeight:700,letterSpacing:.5}}>RECEITA</th>
-                          <th style={{padding:"8px 10px",textAlign:"right",color:T.t3,fontSize:9,fontWeight:700,letterSpacing:.5}}>DESPESA</th>
-                          <th style={{padding:"8px 10px",textAlign:"right",color:T.t3,fontSize:9,fontWeight:700,letterSpacing:.5}}>SALDO</th>
-                          <th style={{padding:"8px 10px",textAlign:"right",color:T.t3,fontSize:9,fontWeight:700,letterSpacing:.5}}>TX. POUP.</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {an.historico.map(function(h,i){
-                          var sl=(h.tRec||0)-(h.tDesp||0);
-                          var tx=h.tRec>0?(sl/h.tRec*100):0;
-                          var pp=h.mes.split("-");
-                          var nm=pp.length===2?MN[+pp[1]-1].substring(0,3)+"/"+pp[0].slice(2):h.mes;
-                          return <tr key={i} style={{borderTop:"1px solid "+T.bdrL}}>
-                            <td style={{padding:"8px 10px",color:T.t1,fontWeight:600}}>{nm}</td>
-                            <td style={{padding:"8px 10px",textAlign:"right",color:T.green,fontFamily:"'JetBrains Mono'"}}>{fmF(h.tRec||0)}</td>
-                            <td style={{padding:"8px 10px",textAlign:"right",color:T.red,fontFamily:"'JetBrains Mono'"}}>{fmF(h.tDesp||0)}</td>
-                            <td style={{padding:"8px 10px",textAlign:"right",color:sl>=0?T.gold:T.red,fontFamily:"'JetBrains Mono'",fontWeight:700}}>{(sl>=0?"+":"")+fmF(sl)}</td>
-                            <td style={{padding:"8px 10px",textAlign:"right",color:tx>=20?T.green:tx>=10?T.orange:T.red,fontFamily:"'JetBrains Mono'",fontWeight:700}}>{tx.toFixed(0)}%</td>
-                          </tr>;
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-              </div>{}
-
-              <div style={{display:"flex",gap:8,justifyContent:"flex-end",paddingTop:6}}>
-                <Bt v="secondary" onClick={function(){sShowFinReport(false)}}>Fechar</Bt>
-                <Bt onClick={exportarRelatorioFinPDF}>📄 Exportar PDF</Bt>
               </div>
             </div>
           );
@@ -35739,6 +35537,537 @@ function ModuloRendaFixa({c,dispatch,taxasBCB,taxaBCBStatus}){
 }
 /* ════════════ FIM MÓDULO RENDA FIXA ════════════ */
 
+/* ════════════ RELATÓRIO MENSAL DE GESTÃO FINANCEIRA — MODELO "ORÇAMENTO" (v500) ════════════
+   Novo padrão pedido pelo Igor (PDF modelo "Relatorio_Mensal_Gestao_Financeira_Marilia_Celeste_Set2026"):
+   9 páginas — Capa, Sumário, Resumo Executivo, Receitas do Mês, Despesas por Orçamento,
+   Detalhamento de Despesas, Raio-X dos Gastos, Metas e Orçamento, Observações e Próximos Passos.
+   Tudo é PREVISTO × REALIZADO por GRUPO do orçamento do Meu Vista (Moradia, Dependentes,
+   Alimentação...), aberto em categorias. Função pura (só lê o cliente) — usada por 3 caminhos:
+   (1) prévia na aba Relatório (igual ao GP), (2) PDF anexado no e-mail (gerarRelatorio "planejamento"),
+   (3) impressão. Os dados vêm de c.orcamento.mensais[mês] — cada item guarda:
+     sub (categoria), grp (grupo do Meu Vista), orc (previsto), real (realizado de verdade — o campo
+     "valor" cai pro previsto quando não houve lançamento), qtd (nº de lançamentos).
+   grp/real/qtd só existem em meses importados a partir da v500 — antes disso o relatório sai com o
+   que existir (grupo cai pra macro-categoria) e gfModeloDadosCompletos() avisa pra reimportar. */
+var GF_MESES=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+var GF_SECOES_PADRAO={
+  premium:  {capa:true,sumario:true,resumoExec:true,receitas:true,despesas:true,detalhe:true,raiox:true,metasOrc:true,observacoes:true},
+  simples:  {capa:true,sumario:true,resumoExec:true,receitas:false,despesas:true,detalhe:false,raiox:false,metasOrc:true,observacoes:false},
+  completo: {capa:true,sumario:true,resumoExec:true,receitas:true,despesas:true,detalhe:true,raiox:true,metasOrc:true,observacoes:true},
+  custom:   {capa:true,sumario:true,resumoExec:true,receitas:true,despesas:true,detalhe:false,raiox:false,metasOrc:true,observacoes:true}
+};
+function gfEsc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+function gfBRL(v,sinal){
+  var n=Math.abs(v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+  var s=(v||0)<0?"-":(sinal?"+":"");
+  return s+"R$ "+n;
+}
+function gfBRL0(v){return "R$ "+Math.round(Math.abs(v||0)).toLocaleString("pt-BR");}
+function gfPct(v,d,sinal){
+  var n=Math.abs(v||0).toFixed(d==null?1:d).replace(".",",");
+  var s=(v||0)<0?"-":(sinal?"+":"");
+  return s+n+"%";
+}
+function gfStatusOrc(pct){
+  if(pct<=100)return {k:"ok",l:"Dentro",cor:"#16A05B"};
+  if(pct<=110)return {k:"at",l:"Atenção",cor:"#E8A317"};
+  return {k:"est",l:"Estourou",cor:"#D4183D"};
+}
+function gfListaNomes(arr){
+  if(arr.length===0)return "";
+  if(arr.length===1)return arr[0];
+  return arr.slice(0,-1).join(", ")+" e "+arr[arr.length-1];
+}
+function gfAddDias(dt,n){var r=new Date(dt.getTime());r.setDate(r.getDate()+n);return String(r.getDate()).padStart(2,"0")+"/"+String(r.getMonth()+1).padStart(2,"0");}
+
+/* Lê o orçamento do mês e monta toda a estrutura de números do relatório. Devolve null sem dados. */
+function gfModeloDados(c,opts){
+  opts=opts||{};
+  var mensais=(c&&c.orcamento&&c.orcamento.mensais)||{};
+  var keys=Object.keys(mensais).sort();
+  var mesKey=opts.mesKey||keys[keys.length-1];
+  if(!mesKey||!mensais[mesKey])return null;
+  var snap=mensais[mesKey];
+  var info={temGrupo:false,temReal:false,temQtd:false};
+  var norm=function(it){
+    if(it.grp)info.temGrupo=true;
+    if(it.real!=null)info.temReal=true;
+    if(it.qtd!=null)info.temQtd=true;
+    return {nome:it.sub||it.cat||"Sem nome",grupo:it.grp||it.cat||"Outros",real:(it.real!=null?it.real:(it.valor||0)),prev:it.orc||0,qtd:it.qtd||0};
+  };
+  var rec=(snap.receitas||[]).map(norm).filter(function(x){return x.real>0||x.prev>0;});
+  var desp=(snap.despesas||[]).map(norm).filter(function(x){return x.real>0||x.prev>0;});
+  if(rec.length===0&&desp.length===0)return null;
+  var soma=function(a,k){return a.reduce(function(s,x){return s+(x[k]||0);},0);};
+  var tRec=soma(rec,"real"),pRec=soma(rec,"prev"),tDesp=soma(desp,"real"),pDesp=soma(desp,"prev");
+  var saldo=tRec-tDesp,saldoPrev=pRec-pDesp;
+  var tx=tRec>0?saldo/tRec*100:0;
+  /* grupos de despesa */
+  var gmap={};
+  desp.forEach(function(x){
+    var g=gmap[x.grupo]||(gmap[x.grupo]={nome:x.grupo,real:0,prev:0,qtd:0,cats:[]});
+    g.real+=x.real;g.prev+=x.prev;g.qtd+=x.qtd;g.cats.push(x);
+  });
+  var grupos=Object.keys(gmap).map(function(k){var g=gmap[k];g.cats.sort(function(a,b){return b.real-a.real;});g.desvio=g.real-g.prev;g.pctPrev=g.prev>0?g.real/g.prev*100:null;return g;});
+  grupos.sort(function(a,b){return b.real-a.real;});
+  var cats=desp.slice().sort(function(a,b){return b.real-a.real;});
+  rec.sort(function(a,b){return b.real-a.real;});
+  var p=mesKey.split("-");var ano=+p[0],mes=+p[1];
+  var ultDia=new Date(ano,mes,0).getDate();
+  var pad=function(n){return String(n).padStart(2,"0");};
+  return {
+    mesKey:mesKey,ano:ano,mes:mes,mesNome:GF_MESES[mes-1],
+    periodoTxt:"01/"+pad(mes)+"/"+ano+" a "+ultDia+"/"+pad(mes)+"/"+ano,
+    atualizadoEm:ultDia+"/"+pad(mes)+"/"+ano,
+    rec:rec,desp:desp,grupos:grupos,cats:cats,
+    tRec:tRec,pRec:pRec,tDesp:tDesp,pDesp:pDesp,saldo:saldo,saldoPrev:saldoPrev,tx:tx,
+    nRec:soma(rec,"qtd"),nDesp:soma(desp,"qtd"),info:info
+  };
+}
+/* true se o mês mais recente já foi importado com grupo + realizado (dados que o modelo precisa) */
+function gfModeloDadosCompletos(c){
+  var d=gfModeloDados(c);
+  return !!(d&&d.info.temGrupo&&d.info.temReal);
+}
+
+function gerarRelatorioGFModeloHtml(c,opts){
+  opts=opts||{};
+  var D=gfModeloDados(c,opts);
+  if(!D)return null;
+  var nomeCompleto=String(c.nome||"Cliente");
+  var primeiro=nomeCompleto.split(" ")[0];
+  var hoje=new Date();
+
+  /* ── seções ativas (mesma configuração do configurador em Particularidades) ── */
+  var rel=(c.particularidades&&typeof c.particularidades==="object"&&c.particularidades.relatorio)||{};
+  var tpl=rel.template||"premium";
+  var salvo=rel.secoes;
+  var compat=salvo&&("detalhe" in salvo)&&("metasOrc" in salvo);
+  var sec=tpl==="custom"?(compat?salvo:GF_SECOES_PADRAO.custom):(GF_SECOES_PADRAO[tpl]||GF_SECOES_PADRAO.premium);
+  var on=function(k){return sec[k]!==false;};
+
+  /* ── derivados usados em vários textos ── */
+  var recVar=D.pRec>0?(D.tRec/D.pRec-1)*100:null;
+  var despVar=D.pDesp>0?(D.tDesp/D.pDesp-1)*100:null;
+  var recDiff=D.tRec-D.pRec,despDiff=D.tDesp-D.pDesp;
+  var semPrev=D.cats.filter(function(x){return x.prev===0&&x.real>0;});
+  var prevSemLanc=D.cats.filter(function(x){return x.real===0&&x.prev>0;});
+  var somaSemPrev=semPrev.reduce(function(s,x){return s+x.real;},0);
+  var somaPrevSemLanc=prevSemLanc.reduce(function(s,x){return s+x.prev;},0);
+  var gruposComPrev=D.grupos.filter(function(g){return g.prev>0;});
+  var gruposDentro=gruposComPrev.filter(function(g){return g.real<=g.prev;});
+  var topGrupo=D.grupos[0];
+  var corVerde="#16A05B",corVermelho="#D4183D",corOuro="#D4A328";
+  var cls=function(v){return v>0?corVermelho:v<0?corVerde:"#8B93A8";}; /* despesa: acima = ruim */
+  var clsRec=function(v){return v>0?corVerde:v<0?corVermelho:"#8B93A8";}; /* receita: acima = bom */
+
+  /* ── ordem/numeração das páginas ── */
+  var DEF=[
+    {k:"resumoExec",ic:"📊",t:"Resumo Executivo"},
+    {k:"receitas",ic:"💰",t:"Receitas"},
+    {k:"despesas",ic:"🧾",t:"Despesas por Orçamento"},
+    {k:"detalhe",ic:"🔬",t:"Detalhamento de Despesas"},
+    {k:"raiox",ic:"🔍",t:"Raio-X dos Gastos"},
+    {k:"metasOrc",ic:"🎯",t:"Metas e Orçamento"},
+    {k:"observacoes",ic:"📋",t:"Observações e Próximos Passos"}
+  ].filter(function(s){return on(s.k);});
+  var pg={},n=on("capa")?1:0,tocPg=null;
+  if(on("sumario")){n++;tocPg=n;}
+  DEF.forEach(function(s){n++;pg[s.k]=n;});
+  var totalPg=n;
+  var p2=function(x){return String(x).padStart(2,"0");};
+
+  /* ── peças visuais ── */
+  var logoMark='<svg width="30" height="30" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="gfl" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#F7D84A"/><stop offset="100%" stop-color="#D4A328"/></linearGradient></defs><path d="M62 10 C26 10,8 28,8 50 C8 72,26 90,62 90" stroke="url(#gfl)" stroke-width="9" stroke-linecap="round" fill="none"/><path d="M62 28 C40 28,28 38,28 50 C28 62,40 72,62 72" stroke="url(#gfl)" stroke-width="7" stroke-linecap="round" fill="none" opacity=".75"/></svg>';
+  var hdr=function(){
+    return '<div class="gf-hdr"><div class="gf-logo">'+logoMark+'<span>COURINVEST</span></div>'
+      +'<div class="gf-meta">'+D.periodoTxt.replace(" a "," A ")+'<b>'+gfEsc(primeiro)+'</b></div></div>';
+  };
+  var ttl=function(ic,a,b,sub){
+    return '<div class="gf-bar"></div><h2 class="gf-ttl">'+(ic?'<span class="gf-ic">'+ic+'</span>':'')+a+'<i>'+b+'</i></h2>'+(sub?'<div class="gf-sub">'+sub+'</div>':'');
+  };
+  var page=function(key,inner){
+    return '<div class="gf-page">'+hdr()+inner+'<div class="gf-ftr"><span>COURINVEST · CONFIDENCIAL</span><span class="gf-pg"><b>'+p2(pg[key])+'</b> / '+p2(totalPg)+'</span></div></div>';
+  };
+  var money=function(v,cor){return '<span class="gf-mono" style="color:'+cor+'">'+gfBRL(v)+'</span>';};
+  var barra=function(pct,cor,alt){
+    var w=Math.max(0,Math.min(100,pct||0));
+    return '<div class="gf-bt" style="'+(alt?'height:'+alt+'px;':'')+'"><div class="gf-bf" style="width:'+w+'%;background:'+(cor||corOuro)+'"></div></div>';
+  };
+  var htmlPages="";
+
+  /* ═════ CAPA ═════ */
+  if(on("capa")){
+    htmlPages+='<div class="gf-cover">'
+      +'<div class="gf-cv-top"><div class="gf-logo gf-logo-lg">'+logoMark.replace('width="30" height="30"','width="46" height="46"')+'<span>COURINVEST<small>CONSULTORIA EM INVESTIMENTOS</small></span></div>'
+      +'<div class="gf-cv-ref">REFERÊNCIA<b>'+D.mesNome.toUpperCase()+'/'+D.ano+'</b></div></div>'
+      +'<div class="gf-cv-mid"><div class="gf-pill">📊 RELATÓRIO MENSAL</div>'
+      +'<h1 class="gf-cv-title">Gestão <i>Financeira</i></h1>'
+      +'<div class="gf-cv-sub">FLUXO DE CAIXA E ORÇAMENTO · '+D.mesNome.toUpperCase()+'/'+D.ano+'</div>'
+      +'<div class="gf-cv-box"><div class="gf-cv-box-l">✦ PREPARADO EXCLUSIVAMENTE PARA</div><div class="gf-cv-box-n">'+gfEsc(nomeCompleto)+'</div></div></div>'
+      +'<div class="gf-cv-foot"><div class="gf-cv-line"></div>'
+      +'<div class="gf-cv-note">Elaborado a partir do orçamento cadastrado e dos lançamentos do mês importados do Meu Vista. Não substitui a orientação de um profissional financeiro ou contábil.</div>'
+      +'<div class="gf-cv-by">Elaborado por COURINVEST</div></div></div>';
+  }
+
+  /* ═════ SUMÁRIO ═════ */
+  if(on("sumario")){
+    var comoLer="";
+    if(D.nRec+D.nDesp>0){
+      comoLer='considera '+(D.nRec+D.nDesp)+' lançamentos do mês ('+D.nRec+' de receitas e '+D.nDesp+' de despesas) e compara cada categoria com o valor previsto no orçamento. ';
+    }else{
+      comoLer='compara cada categoria do mês com o valor previsto no orçamento. ';
+    }
+    comoLer+='Transferências entre contas próprias, liquidação de fatura de cartão e saques financiados por transferência interna são <b>neutros</b> e não entram em receitas nem despesas.';
+    var tocRows=DEF.map(function(s,i){
+      return '<tr><td class="gf-toc-n">'+p2(i+1)+'</td><td class="gf-toc-t">'+s.ic+' '+s.t+'</td><td class="gf-toc-p">'+p2(pg[s.k])+'</td></tr>';
+    }).join("");
+    var tocInner=ttl("","Sum","ário","Acompanhamento mensal do fluxo de caixa e do orçamento: receitas, despesas por categoria e comparação com o previsto.")
+      +'<div class="gf-card" style="padding:8px 20px"><table class="gf-toc"><tbody>'+tocRows+'</tbody></table></div>'
+      +'<div class="gf-note gf-note-gold"><b>Como ler este relatório:</b> '+comoLer+'</div>';
+    htmlPages+='<div class="gf-page">'+hdr()+tocInner+'<div class="gf-ftr"><span>COURINVEST · CONFIDENCIAL</span><span class="gf-pg"><b>'+p2(tocPg)+'</b> / '+p2(totalPg)+'</span></div></div>';
+  }
+
+  /* ═════ RESUMO EXECUTIVO ═════ */
+  if(on("resumoExec")){
+    var saldoPos=D.saldo>=0;
+    var lead='No mês, as receitas somaram <span style="color:'+corVerde+'">'+gfBRL(D.tRec)+'</span> e as despesas <span style="color:'+corVermelho+'">'+gfBRL(D.tDesp)+'</span>, resultando em saldo '+(saldoPos?'de':'negativo de')+' <span style="color:'+(saldoPos?corVerde:corVermelho)+'">'+gfBRL(Math.abs(D.saldo))+'</span> — taxa de poupança de <span style="color:'+(D.tx>=0?corVerde:corVermelho)+'">'+gfPct(D.tx)+'</span>.';
+    var kpi=function(l,v,cor,sub){return '<td class="gf-kpi-td"><div class="gf-kpi"><div class="gf-kpi-l">'+l+'</div><div class="gf-kpi-v" style="color:'+cor+'">'+v+'</div><div class="gf-kpi-s">'+sub+'</div></div></td>';};
+    var kpis='<table class="gf-kpis"><tbody><tr>'
+      +kpi("RECEITAS",gfBRL(D.tRec),corVerde,recVar!=null?gfPct(recVar,1,true)+' vs previsto':'sem previsto cadastrado')
+      +kpi("DESPESAS",gfBRL(D.tDesp),corVermelho,despVar!=null?gfPct(despVar,1,true)+' vs previsto':'sem previsto cadastrado')
+      +kpi("SALDO DO MÊS",(saldoPos?"+":"")+gfBRL(D.saldo),saldoPos?corVerde:corVermelho,'receitas − despesas')
+      +kpi("TAXA DE POUPANÇA",gfPct(D.tx),D.tx>=0?corVerde:corVermelho,'saldo ÷ receitas')
+      +'</tr></tbody></table>';
+    /* texto de síntese */
+    var sint='Olá <b>'+gfEsc(primeiro)+'</b>, segue a síntese do seu fluxo de caixa em <b>'+D.periodoTxt.replace(" a "," a ")+'</b>.';
+    if(despVar!=null){
+      sint+=' As despesas ficaram <b>'+(despVar>0?gfPct(despVar,1,true)+'</b> frente':gfPct(Math.abs(despVar),1)+'</b> abaixo d')+(despVar>0?' ao orçamento previsto (':'o orçamento previsto (')+gfBRL(D.pDesp)+')';
+      if(recVar!=null){
+        if(despVar>0&&recVar>0)sint+=', mas as receitas também vieram acima do esperado.';
+        else if(despVar>0)sint+=', e as receitas ficaram abaixo do esperado.';
+        else if(recVar>=0)sint+=', e as receitas vieram acima do esperado.';
+        else sint+=', embora as receitas tenham ficado abaixo do esperado.';
+      }else sint+='.';
+    }
+    if(topGrupo&&D.tDesp>0)sint+=' A maior categoria foi <b>'+gfEsc(topGrupo.nome)+'</b>, com '+gfPct(topGrupo.real/D.tDesp*100)+' do total gasto.';
+    /* previsto x realizado */
+    var difSaldo=D.saldo-D.saldoPrev;
+    var notaPR="";
+    if(D.pRec>0||D.pDesp>0){
+      if(recDiff>0&&despDiff>0){
+        var ratio=recDiff/despDiff;
+        notaPR='Receitas '+gfBRL(recDiff,true)+' acima do previsto '+(ratio>=1?'compensaram todo o estouro':ratio>=0.9?'compensaram quase todo o estouro':'compensaram parte ('+gfPct(ratio*100,0)+') do estouro')+' de '+gfBRL(despDiff)+' nas despesas.';
+      }else if(recDiff<0&&despDiff>0){
+        notaPR='Receitas '+gfBRL(Math.abs(recDiff))+' abaixo do previsto somaram-se a um estouro de '+gfBRL(despDiff)+' nas despesas.';
+      }else if(despDiff<=0&&recDiff>=0){
+        notaPR='Receitas acima e despesas abaixo do previsto — o saldo superou a meta do orçamento.';
+      }else{
+        notaPR='Despesas '+gfBRL(Math.abs(despDiff))+' abaixo do previsto compensaram receitas '+gfBRL(Math.abs(recDiff))+' abaixo do esperado.';
+      }
+    }
+    var prBox='<div class="gf-card" style="padding:16px 20px;margin-top:14px"><div class="gf-eyebrow">RESULTADO DO MÊS · PREVISTO × REALIZADO</div>'
+      +'<table class="gf-pr"><thead><tr><th>Saldo previsto</th><th>Saldo realizado</th><th>Diferença</th></tr></thead><tbody><tr>'
+      +'<td class="gf-mono">'+gfBRL(D.saldoPrev)+'</td>'
+      +'<td class="gf-mono" style="color:'+(D.saldo>=0?corVerde:corVermelho)+'">'+gfBRL(D.saldo)+'</td>'
+      +'<td class="gf-mono" style="color:'+(difSaldo>=0?corVerde:corVermelho)+'">'+gfBRL(difSaldo)+'</td></tr></tbody></table>'
+      +(notaPR?'<div class="gf-tiny">'+notaPR+'</div>':'')+'</div>';
+    /* destaques */
+    var maiorEcon=null;
+    D.grupos.forEach(function(g){if(g.prev>0&&g.prev-g.real>0&&(!maiorEcon||(g.prev-g.real)>(maiorEcon.prev-maiorEcon.real)))maiorEcon=g;});
+    var dest=[];
+    if(recVar!=null)dest.push({ic:"💰",t:'Receitas '+gfPct(Math.abs(recVar),0)+(recVar>=0?' acima':' abaixo')+' do previsto',s:gfBRL0(D.tRec)+' realizados vs '+gfBRL0(D.pRec)+' previstos'});
+    else dest.push({ic:"💰",t:'Receitas de '+gfBRL0(D.tRec),s:D.rec.length+' categoria'+(D.rec.length!==1?'s':'')+' de receita'});
+    dest.push({ic:saldoPos?"📈":"📉",t:'Saldo '+(saldoPos?'positivo':'negativo')+' de '+gfBRL0(D.saldo),s:'taxa de poupança de '+gfPct(D.tx)});
+    if(gruposComPrev.length>0){
+      dest.push({ic:"🎯",t:gruposDentro.length+' de '+gruposComPrev.length+' grupos dentro do previsto',s:gruposDentro.length?gfListaNomes(gruposDentro.slice(0,3).map(function(g){return gfEsc(g.nome);})):'revisar o previsto dos grupos'});
+    }
+    if(maiorEcon)dest.push({ic:"🌟",t:gfBRL0(maiorEcon.prev-maiorEcon.real)+' economizados em '+gfEsc(maiorEcon.nome),s:gfPct(maiorEcon.real/maiorEcon.prev*100,0)+' do valor previsto'});
+    else if(topGrupo)dest.push({ic:"🏷️",t:'Maior grupo de gasto: '+gfEsc(topGrupo.nome),s:gfPct(topGrupo.real/Math.max(D.tDesp,1)*100)+' do total gasto'});
+    var destHtml='<div class="gf-eyebrow" style="margin:16px 0 8px">🏅 DESTAQUES DO MÊS</div><table class="gf-dest"><tbody>';
+    for(var di=0;di<dest.length;di+=2){
+      destHtml+='<tr>';
+      [dest[di],dest[di+1]].forEach(function(x){
+        destHtml+=x?'<td><div class="gf-card gf-dest-c"><span class="gf-dest-ic">'+x.ic+'</span><div><div class="gf-dest-t">'+x.t+'</div><div class="gf-dest-s">'+x.s+'</div></div></div></td>':'<td></td>';
+      });
+      destHtml+='</tr>';
+    }
+    destHtml+='</tbody></table>';
+    /* análise (citação) */
+    var topRecCats=D.rec.filter(function(x){return x.prev>0?x.real>x.prev:x.real>0;}).sort(function(a,b){return (b.real-b.prev)-(a.real-a.prev);}).slice(0,2).map(function(x){return gfEsc(x.nome);});
+    var q="";
+    if(recVar!=null){
+      if(recVar>0.5)q+='As receitas superaram o previsto em '+gfPct(recVar,0)+(topRecCats.length?', com destaque para '+gfListaNomes(topRecCats):'');
+      else if(recVar<-0.5)q+='As receitas ficaram '+gfPct(Math.abs(recVar),0)+' abaixo do previsto';
+      else q+='As receitas ficaram em linha com o previsto';
+    }else q+='As receitas somaram '+gfBRL0(D.tRec);
+    if(despVar!=null){
+      if(saldoPos&&despVar>0)q+=', o que sustentou saldo positivo mesmo com as despesas '+gfPct(despVar,0)+' acima do orçamento.';
+      else if(saldoPos)q+=', e as despesas ficaram '+gfPct(Math.abs(despVar),0)+' abaixo do orçamento, mantendo saldo positivo.';
+      else q+=', mas o saldo do mês ficou negativo com as despesas '+(despVar>0?gfPct(despVar,0)+' acima do':gfPct(Math.abs(despVar),0)+' abaixo do')+' orçamento.';
+    }else q+='.';
+    var desvGrp=D.grupos.filter(function(g){return g.prev>0&&g.desvio>0;}).sort(function(a,b){return b.desvio-a.desvio;}).slice(0,3).map(function(g){return gfEsc(g.nome);});
+    if(desvGrp.length)q+=' O maior desvio em valor veio de '+desvGrp[0]+(desvGrp.length>1?', seguido de '+gfListaNomes(desvGrp.slice(1)):'')+'.';
+    q+=desvGrp.length?(' O foco do próximo ciclo é recalibrar o previsto desses grupos'+(semPrev.length?' e ajustar lançamentos sem categoria prevista.':'.')):' O foco do próximo ciclo é manter a disciplina que levou os grupos a ficarem dentro do previsto.';
+    var quote='<div class="gf-quote"><span class="gf-q-mark">“</span><div class="gf-q-t">'+q+'</div><div class="gf-q-by">— ANÁLISE COURINVEST · '+D.periodoTxt.replace(" a "," A ").toUpperCase()+'</div></div>';
+    htmlPages+=page("resumoExec",ttl("📊","Resumo ","Executivo",lead)+kpis+'<div class="gf-note gf-note-gold gf-note-lg">'+sint+'</div>'+prBox+destHtml+quote);
+  }
+
+  /* ═════ RECEITAS ═════ */
+  if(on("receitas")){
+    var rows=D.rec.map(function(x){
+      var v=x.prev>0?(x.real/x.prev-1)*100:null;
+      return '<tr><td><div class="gf-cn">'+gfEsc(x.nome)+'</div>'+(x.qtd>0?'<div class="gf-cs">'+x.qtd+' lançamento'+(x.qtd!==1?'s':'')+'</div>':'')+'</td>'
+        +'<td class="gf-r gf-mono">'+gfBRL(x.real)+'</td>'
+        +'<td class="gf-r gf-mono gf-mut">'+gfPct(D.tRec>0?x.real/D.tRec*100:0)+'</td>'
+        +'<td>'+barra(D.tRec>0?x.real/D.tRec*100:0)+'</td>'
+        +'<td class="gf-r gf-mono gf-mut2">'+(x.prev>0?gfBRL(x.prev):'—')+'</td>'
+        +'<td class="gf-r gf-mono" style="color:'+(v==null?"#8B93A8":clsRec(v))+'">'+(v==null?'s/ prev.':gfPct(v,1,true))+'</td></tr>';
+    }).join("");
+    var totalRow='<tr class="gf-tot"><td><div class="gf-cn">TOTAL DE RECEITAS</div>'+(D.nRec>0?'<div class="gf-cs">'+D.nRec+' lançamentos</div>':'')+'</td><td class="gf-r gf-mono">'+gfBRL(D.tRec)+'</td><td class="gf-r gf-mono">100%</td><td></td><td class="gf-r gf-mono">'+(D.pRec>0?gfBRL(D.pRec):'—')+'</td><td class="gf-r gf-mono" style="color:'+(recVar==null?"#8B93A8":clsRec(recVar))+'">'+(recVar==null?'—':gfPct(recVar,1,true))+'</td></tr>';
+    var recTbl='<table class="gf-tbl"><colgroup><col style="width:27%"/><col style="width:17%"/><col style="width:11%"/><col style="width:17%"/><col style="width:16%"/><col style="width:12%"/></colgroup>'
+      +'<thead><tr><th>CATEGORIA</th><th class="gf-r">REALIZADO</th><th class="gf-r">% TOTAL</th><th></th><th class="gf-r">PREVISTO</th><th class="gf-r">VAR.</th></tr></thead><tbody>'+rows+totalRow+'</tbody></table>';
+    var extra="";
+    var pos=D.rec.filter(function(x){return x.real-x.prev>0;}).sort(function(a,b){return (b.real-b.prev)-(a.real-a.prev);});
+    if(recDiff>0&&pos.length){
+      var top2=pos.slice(0,2);
+      var somaTop=top2.reduce(function(s,x){return s+(x.real-x.prev);},0);
+      var somaRealTop=top2.reduce(function(s,x){return s+x.real;},0);
+      extra='<div class="gf-note gf-note-gold">📌 <b>De onde veio a receita extra:</b> '+gfListaNomes(top2.map(function(x){return gfEsc(x.nome);}))+' '+(top2.length>1?'responderam':'respondeu')+' por '+gfBRL(somaTop)+' dos '+gfBRL(recDiff)+' recebidos acima do previsto.'+(top2.length>1?' Em conjunto, as duas categorias representaram '+gfPct(D.tRec>0?somaRealTop/D.tRec*100:0)+' da receita do mês.':'')+'</div>';
+    }else if(recDiff<0){
+      var neg=D.rec.filter(function(x){return x.prev>0&&x.real<x.prev;}).sort(function(a,b){return (a.real-a.prev)-(b.real-b.prev);}).slice(0,2);
+      if(neg.length)extra='<div class="gf-note gf-note-gold">📌 <b>Onde a receita ficou abaixo:</b> '+gfListaNomes(neg.map(function(x){return gfEsc(x.nome)+' ('+gfBRL(x.prev-x.real)+' abaixo)';}))+'.</div>';
+    }
+    var neutro='<div class="gf-note gf-note-blue">💡 <b>Transferências entre contas próprias não são receita.</b> Entradas classificadas como neutras (autotransferências, crédito de pagamento de fatura) foram excluídas deste total.</div>';
+    htmlPages+=page("receitas",ttl("💰","Receitas ","do Mês","Composição das receitas por categoria e comparação com o valor previsto no orçamento.")+'<div class="gf-card gf-card-t">'+recTbl+'</div>'+extra+neutro);
+  }
+
+  /* ═════ DESPESAS POR ORÇAMENTO ═════ */
+  if(on("despesas")){
+    var maxG=D.grupos.length?D.grupos[0].real:1;
+    var rowsG=D.grupos.map(function(g){
+      var v=g.prev>0?(g.real/g.prev-1)*100:null;
+      var sub=g.cats.slice(0,3).map(function(x){return gfEsc(x.nome);}).join(" · ");
+      return '<tr><td><div class="gf-cn">'+gfEsc(g.nome)+'</div><div class="gf-cs">'+sub+'</div></td>'
+        +'<td class="gf-r gf-mono">'+gfBRL(g.real)+'</td>'
+        +'<td class="gf-r gf-mono gf-mut">'+gfPct(D.tDesp>0?g.real/D.tDesp*100:0)+'</td>'
+        +'<td>'+barra(maxG>0?g.real/maxG*100:0,"#0E1B3D")+'</td>'
+        +'<td class="gf-r gf-mono gf-mut2">'+(g.prev>0?gfBRL(g.prev):'—')+'</td>'
+        +'<td class="gf-r gf-mono" style="color:'+(v==null?"#8B93A8":cls(v))+'">'+(v==null?'s/ prev.':gfPct(v,1,true))+'</td></tr>';
+    }).join("");
+    var totG='<tr class="gf-tot"><td><div class="gf-cn">TOTAL DE DESPESAS</div>'+(D.nDesp>0?'<div class="gf-cs">'+D.nDesp+' lançamentos</div>':'')+'</td><td class="gf-r gf-mono">'+gfBRL(D.tDesp)+'</td><td class="gf-r gf-mono">100%</td><td></td><td class="gf-r gf-mono">'+(D.pDesp>0?gfBRL(D.pDesp):'—')+'</td><td class="gf-r gf-mono" style="color:'+(despVar==null?"#8B93A8":cls(despVar))+'">'+(despVar==null?'—':gfPct(despVar,1,true))+'</td></tr>';
+    var tblG='<table class="gf-tbl"><colgroup><col style="width:31%"/><col style="width:17%"/><col style="width:10%"/><col style="width:13%"/><col style="width:16%"/><col style="width:13%"/></colgroup>'
+      +'<thead><tr><th>ORÇAMENTO</th><th class="gf-r">REALIZADO</th><th class="gf-r">% TOTAL</th><th></th><th class="gf-r">PREVISTO</th><th class="gf-r">VS PREV.</th></tr></thead><tbody>'+rowsG+totG+'</tbody></table>';
+    var top5=D.cats.slice(0,5).map(function(x,i){
+      return '<tr><td class="gf-rk"><span>'+(i+1)+'</span></td><td><div class="gf-cn">'+gfEsc(x.nome)+'</div><div class="gf-cs">'+gfEsc(x.grupo)+'</div></td><td class="gf-r gf-mono" style="color:'+corVermelho+'">'+gfBRL(x.real)+'</td></tr>';
+    }).join("");
+    htmlPages+=page("despesas",ttl("🧾","Despesas por ","Orçamento","Distribuição dos gastos por grupo de orçamento e variação frente ao valor previsto.")
+      +'<div class="gf-card gf-card-t">'+tblG+'</div>'
+      +'<div class="gf-card" style="padding:14px 20px;margin-top:14px"><div class="gf-eyebrow">🏷 5 MAIORES CATEGORIAS DO MÊS</div><table class="gf-top5"><tbody>'+top5+'</tbody></table></div>');
+  }
+
+  /* ═════ DETALHAMENTO DE DESPESAS ═════ */
+  if(on("detalhe")){
+    var cards=D.grupos.map(function(g){
+      var st=g.prev>0?gfStatusOrc(g.real/g.prev*100):null;
+      var catRows=g.cats.map(function(x){
+        var v=x.prev>0?(x.real/x.prev-1)*100:null;
+        var vTxt=x.prev>0?gfPct(v,1,true):(x.real>0?'s/ prev.':'—');
+        var vCor=x.prev>0?cls(v):"#8B93A8";
+        return '<tr><td class="gf-dn">'+gfEsc(x.nome)+'</td><td class="gf-db">'+barra(g.real>0?x.real/g.real*100:0,corOuro,5)+'</td>'
+          +'<td class="gf-r gf-mono gf-dv">'+gfBRL(x.real)+'</td><td class="gf-r gf-mono gf-mut gf-dp">'+gfPct(g.real>0?x.real/g.real*100:0,0)+'</td>'
+          +'<td class="gf-r gf-mono gf-dvar" style="color:'+vCor+'">'+vTxt+'</td></tr>';
+      }).join("");
+      return {peso:g.cats.length+2,html:'<div class="gf-card gf-gcard"><div class="gf-gh"><span class="gf-gn">'+gfEsc(g.nome)+'</span>'
+        +(st?'<span class="gf-badge" style="background:'+st.cor+'">'+gfPct(g.real/g.prev*100,0)+' do prev.</span>':'')
+        +'<span class="gf-gv gf-mono">'+gfBRL(g.real)+'</span></div><table class="gf-dtbl"><tbody>'+catRows+'</tbody></table></div>'};
+    });
+    var colA=[],colB=[],pA=0,pB=0;
+    cards.forEach(function(cd){if(pA<=pB){colA.push(cd.html);pA+=cd.peso;}else{colB.push(cd.html);pB+=cd.peso;}});
+    var estouros=D.cats.filter(function(x){return x.prev>0&&x.real>x.prev;}).sort(function(a,b){return (b.real-b.prev)-(a.real-a.prev);}).slice(0,3);
+    var econ=D.cats.filter(function(x){return x.prev>0&&x.real<x.prev;}).sort(function(a,b){return (b.prev-b.real)-(a.prev-a.real);}).slice(0,3);
+    var listaDif=function(arr,sinal,cor){
+      if(!arr.length)return '<div class="gf-tiny">—</div>';
+      return '<table class="gf-dif"><tbody>'+arr.map(function(x){
+        var dif=sinal>0?x.real-x.prev:x.prev-x.real;
+        return '<tr><td><span class="gf-cn2">'+gfEsc(x.nome)+'</span> <span class="gf-cs2">'+gfEsc(x.grupo)+'</span></td><td class="gf-r gf-mono" style="color:'+cor+'">'+(sinal>0?'+':'-')+gfBRL(dif)+'</td></tr>';
+      }).join("")+'</tbody></table>';
+    };
+    htmlPages+=page("detalhe",ttl("🔬","Detalhamento de ","Despesas","Cada grupo de orçamento aberto em categorias, com a variação frente ao valor previsto.")
+      +'<div class="gf-cols"><div class="gf-col">'+colA.join("")+'</div><div class="gf-col">'+colB.join("")+'</div></div>'
+      +'<div class="gf-card" style="padding:14px 20px;margin-top:6px"><table class="gf-2c"><tbody><tr><td><div class="gf-eyebrow">▲ MAIORES ESTOUROS VS PREVISTO</div>'+listaDif(estouros,1,corVermelho)+'</td><td><div class="gf-eyebrow">▼ MAIORES ECONOMIAS VS PREVISTO</div>'+listaDif(econ,-1,corVerde)+'</td></tr></tbody></table></div>');
+  }
+
+  /* ═════ RAIO-X DOS GASTOS ═════ */
+  if(on("raiox")){
+    var PAL=["#0E1B3D","#1B2E66","#3B4F96","#5F73B8","#8B9ED0","#B4BFE3","#D4A328","#E5C468","#C99A3A","#A47A1F"];
+    var base=Math.max(D.tRec,D.tDesp,1);
+    var segs=D.grupos.map(function(g,i){return {nome:g.nome,v:g.real,cor:PAL[i%PAL.length]};});
+    var barSeg=segs.map(function(s){return '<div style="width:'+(s.v/base*100)+'%;background:'+s.cor+'"></div>';}).join("")+(D.saldo>0?'<div style="width:'+(D.saldo/base*100)+'%;background:'+corVerde+'"></div>':'');
+    var leg=segs.map(function(s){return '<td class="gf-lg"><span class="gf-dot" style="background:'+s.cor+'"></span>'+gfEsc(s.nome)+'<b class="gf-mono">R$ '+(D.tRec>0?(s.v/D.tRec*100):0).toFixed(1).replace(".",",")+'</b></td>';});
+    leg.push('<td class="gf-lg gf-lg-s"><span class="gf-dot" style="background:'+(D.saldo>=0?corVerde:corVermelho)+'"></span>'+(D.saldo>=0?'Sobra (poupança)':'Déficit do mês')+'<b class="gf-mono" style="color:'+(D.saldo>=0?corVerde:corVermelho)+'">'+(D.saldo<0?'-':'')+'R$ '+Math.abs(D.tRec>0?(D.saldo/D.tRec*100):0).toFixed(1).replace(".",",")+'</b></td>');
+    /* legenda em 2 colunas, preenchendo coluna a coluna como no modelo */
+    var metade=Math.ceil(leg.length/2),legRows="";
+    for(var li=0;li<metade;li++){legRows+='<tr>'+leg[li]+(leg[li+metade]||'<td class="gf-lg"></td>')+'</tr>';}
+    var cem='<div class="gf-card" style="padding:16px 20px"><div class="gf-eyebrow">PARA ONDE FOI CADA R$ 100 QUE ENTROU</div><div class="gf-seg">'+barSeg+'</div><table class="gf-leg"><tbody>'+legRows+'</tbody></table></div>';
+    var nomesCats=function(arr,max){
+      if(!arr.length)return "nenhuma categoria";
+      var m=arr.slice(0,max).map(function(x){return gfEsc(x.nome)+' ('+gfBRL0(x.real||x.prev)+')';});
+      return arr.length+' categoria'+(arr.length!==1?'s':'')+': '+m.join(", ")+(arr.length>max?' e mais '+(arr.length-max):'');
+    };
+    var duas='<table class="gf-2c gf-2cards"><tbody><tr>'
+      +'<td><div class="gf-card" style="padding:16px 20px"><div class="gf-eyebrow">GASTOS SEM PREVISTO</div><div class="gf-big gf-mono">'+gfBRL(somaSemPrev)+'</div><div class="gf-tiny">'+nomesCats(semPrev,6)+'</div></div></td>'
+      +'<td><div class="gf-card" style="padding:16px 20px"><div class="gf-eyebrow">PREVISTO SEM LANÇAMENTO</div><div class="gf-big gf-mono">'+gfBRL(somaPrevSemLanc)+'</div><div class="gf-tiny">'+nomesCats(prevSemLanc,6)+'</div></div></td>'
+      +'</tr></tbody></table>';
+    var gDes=D.grupos.slice().sort(function(a,b){return b.desvio-a.desvio;});
+    var totDesvio=gDes.reduce(function(s,g){return s+g.desvio;},0);
+    var maxAbs=gDes.reduce(function(m,g){return Math.max(m,Math.abs(g.desvio));},1);
+    var rowsD=gDes.map(function(g){
+      var pc=totDesvio!==0?g.desvio/totDesvio*100:0;
+      return '<tr><td class="gf-cn">'+gfEsc(g.nome)+'</td><td class="gf-r gf-mono" style="color:'+(g.desvio>=0?corVermelho:corVerde)+'">'+(g.desvio<0?'-':'+')+gfBRL(Math.abs(g.desvio))+'</td>'
+        +'<td class="gf-r gf-mono" style="color:'+(g.desvio>=0?corVermelho:corVerde)+'">'+(pc<0?'-':'+')+Math.abs(pc).toFixed(0)+'%</td>'
+        +'<td>'+barra(Math.abs(g.desvio)/maxAbs*100,g.desvio>=0?"#0E1B3D":corVerde,8)+'</td></tr>';
+    }).join("");
+    var tDesvio='<table class="gf-tbl gf-tbl-d"><colgroup><col style="width:30%"/><col style="width:25%"/><col style="width:20%"/><col style="width:25%"/></colgroup><thead><tr><th>ORÇAMENTO</th><th class="gf-r">DESVIO</th><th class="gf-r">% DO DESVIO</th><th></th></tr></thead><tbody>'+rowsD
+      +'<tr class="gf-tot"><td class="gf-cn">DESVIO TOTAL</td><td class="gf-r gf-mono" style="color:'+(totDesvio>=0?corVermelho:corVerde)+'">'+(totDesvio<0?'-':'+')+gfBRL(Math.abs(totDesvio))+'</td><td class="gf-r gf-mono">100%</td><td></td></tr></tbody></table>';
+    var tituloDesvio=totDesvio>=0?('ORIGEM DO DESVIO DE +'+gfBRL(totDesvio)+' NAS DESPESAS'):('ORIGEM DA ECONOMIA DE '+gfBRL(Math.abs(totDesvio))+' NAS DESPESAS');
+    htmlPages+=page("raiox",ttl("🔍","Raio-X dos ","Gastos","Para onde vai o dinheiro e de onde veio o desvio do orçamento neste mês.")
+      +cem+duas+'<div class="gf-eyebrow" style="margin:6px 0 8px">🧩 '+tituloDesvio+'</div><div class="gf-card gf-card-t">'+tDesvio+'</div>');
+  }
+
+  /* ═════ METAS E ORÇAMENTO ═════ */
+  if(on("metasOrc")){
+    var kpiM=function(l,v,cor,sub){return '<td class="gf-kpi-td"><div class="gf-kpi"><div class="gf-kpi-l">'+l+'</div><div class="gf-kpi-v" style="color:'+cor+'">'+v+'</div><div class="gf-kpi-s">'+sub+'</div></div></td>';};
+    var dm=D.pDesp-D.tDesp;
+    var kM='<table class="gf-kpis gf-kpis3"><tbody><tr>'
+      +kpiM("PREVISTO",gfBRL(D.pDesp),"#0A1628","orçamento do mês")
+      +kpiM("REALIZADO",gfBRL(D.tDesp),corVermelho,"despesas do mês")
+      +kpiM("DESVIO",gfBRL(dm),dm>=0?corVerde:corVermelho,"previsto − realizado")
+      +'</tr></tbody></table>';
+    var gm=gruposComPrev.slice().sort(function(a,b){return b.desvio-a.desvio;});
+    var rowsM=gm.map(function(g){
+      var pct=g.real/g.prev*100,st=gfStatusOrc(pct);
+      return '<div class="gf-card gf-mrow"><table class="gf-mt"><tbody><tr><td class="gf-cn">'+gfEsc(g.nome)+'</td><td class="gf-r gf-mono">'+gfBRL(g.real)+' <span class="gf-mut2">/ '+gfBRL(g.prev)+'</span></td></tr></tbody></table>'
+        +barra(Math.min(pct,100),st.cor,10)
+        +'<table class="gf-mt"><tbody><tr><td><span class="gf-badge" style="background:'+st.cor+'">'+st.l+'</span></td><td class="gf-r gf-tiny" style="margin:0">'+gfPct(pct,0)+' do previsto · '+(g.desvio<0?'-':'+')+gfBRL(Math.abs(g.desvio))+'</td></tr></tbody></table></div>';
+    }).join("");
+    if(!rowsM)rowsM='<div class="gf-note gf-note-gold">Nenhum grupo do orçamento tem valor previsto cadastrado neste mês.</div>';
+    htmlPages+=page("metasOrc",ttl("🎯","Metas e ","Orçamento","Previsto × realizado por grupo de orçamento no mês.")+kM+rowsM
+      +'<div class="gf-tiny" style="margin-top:8px">Estimativas de cada categoria conforme o orçamento cadastrado. Categorias sem valor previsto compõem o total realizado, mas não entram nesta comparação por grupo.</div>');
+  }
+
+  /* ═════ OBSERVAÇÕES E PRÓXIMOS PASSOS ═════ */
+  if(on("observacoes")){
+    var pontos=[];
+    var grpEst=D.grupos.filter(function(g){return g.prev>0&&g.desvio>0;}).sort(function(a,b){return b.desvio-a.desvio;});
+    var totDesvPos=D.grupos.reduce(function(s,g){return s+g.desvio;},0);
+    grpEst.slice(0,2).forEach(function(g){
+      var dom=g.cats[0];
+      var dica=(dom&&g.real>0&&dom.real/g.real>=0.7)?'Concentrado em '+gfEsc(dom.nome)+'. Vale rever o previsto ou confirmar se os lançamentos estão na categoria certa.':'Vale rever o previsto desse grupo ou conferir se todos os lançamentos pertencem a ele.';
+      pontos.push({t:gfEsc(g.nome)+' acima do esperado',x:gfBRL(g.real)+' contra '+gfBRL(g.prev)+' previstos ('+gfPct(g.real/g.prev*100,0)+').'+(totDesvPos>0?' Responde por '+gfPct(g.desvio/totDesvPos*100,0)+' do desvio total.':'')+' '+dica});
+    });
+    var catEst=D.cats.filter(function(x){return x.prev>0&&x.real>=x.prev*2&&x.real-x.prev>=100;}).sort(function(a,b){return (b.real-b.prev)-(a.real-a.prev);})[0];
+    if(catEst)pontos.push({t:gfEsc(catEst.nome)+' muito acima do previsto',x:gfBRL(catEst.real)+(catEst.qtd>0?' em '+catEst.qtd+' lançamentos':'')+', '+gfPct(catEst.real/catEst.prev*100,0)+' do previsto de '+gfBRL(catEst.prev)+'.'});
+    if(semPrev.length||prevSemLanc.length){
+      var tx2=[];
+      if(semPrev.length)tx2.push(semPrev.length+' categoria'+(semPrev.length!==1?'s somam ':' soma ')+gfBRL(somaSemPrev)+' sem valor previsto ('+gfListaNomes(semPrev.slice(0,4).map(function(x){return gfEsc(x.nome);}))+').');
+      if(prevSemLanc.length)tx2.push(gfListaNomes(prevSemLanc.slice(0,3).map(function(x){return gfEsc(x.nome);}))+' '+(prevSemLanc.length>1?'têm previsto e nenhum lançamento':'tem previsto e nenhum lançamento')+': pode haver lançamentos em categoria diferente da prevista.');
+      pontos.push({t:'Categorias sem previsto',x:tx2.join(" ")});
+    }
+    if(!pontos.length)pontos.push({t:'Orçamento sob controle',x:'Nenhum grupo ultrapassou o previsto de forma relevante neste mês.'});
+    var pontosHtml=pontos.slice(0,4).map(function(p,i,a){return '<div class="gf-pt"'+(i<a.length-1?' style="border-bottom:1px solid #EEF0F5"':'')+'><div class="gf-pt-t">'+p.t+'</div><div class="gf-pt-x">'+p.x+'</div></div>';}).join("");
+    var funcionou=D.cats.filter(function(x){return x.prev>0&&x.real<x.prev;}).sort(function(a,b){return (b.prev-b.real)-(a.prev-a.real);}).slice(0,3);
+    var funcHtml=funcionou.length?'<div class="gf-card" style="padding:16px 20px;margin-top:14px"><div class="gf-eyebrow">✅ O QUE FUNCIONOU</div><table class="gf-top5"><tbody>'+funcionou.map(function(x){return '<tr><td class="gf-rk gf-rk-ok"><span>✓</span></td><td><div class="gf-cn">'+gfEsc(x.nome)+'</div><div class="gf-cs">'+gfEsc(x.grupo)+' · '+gfBRL(x.prev-x.real)+' abaixo do previsto</div></td></tr>';}).join("")+'</tbody></table></div>':'';
+    var plano=[];
+    var catsEst=D.cats.filter(function(x){return x.prev>0&&x.real>x.prev;}).sort(function(a,b){return (b.real-b.prev)-(a.real-a.prev);}).slice(0,2);
+    if(catsEst.length)plano.push({a:'Definir novo previsto para '+gfListaNomes(catsEst.map(function(x){return gfEsc(x.nome);})),r:"Ambos",d:gfAddDias(hoje,7)});
+    if(semPrev.length)plano.push({a:'Incluir '+gfListaNomes(semPrev.slice(0,3).map(function(x){return gfEsc(x.nome);}))+' no orçamento previsto',r:"Courinvest",d:gfAddDias(hoje,5)});
+    if(prevSemLanc.length)plano.push({a:'Conferir lançamentos de '+gfListaNomes(prevSemLanc.slice(0,2).map(function(x){return gfEsc(x.nome);}))+' em outras categorias',r:"Courinvest",d:gfAddDias(hoje,5)});
+    var recExtra=D.rec.filter(function(x){return x.real-x.prev>0&&(D.pRec>0?(x.real-x.prev)>D.pRec*0.05:x.real>0);}).sort(function(a,b){return (b.real-b.prev)-(a.real-a.prev);})[0];
+    if(recExtra&&D.pRec>0)plano.push({a:'Confirmar a origem das receitas em '+gfEsc(recExtra.nome)+(recExtra.qtd>0?' ('+recExtra.qtd+' lançamentos)':''),r:"Cliente",d:gfAddDias(hoje,10)});
+    if(!plano.length)plano.push({a:'Manter o acompanhamento mensal do orçamento e revisar o previsto a cada fechamento',r:"Ambos",d:gfAddDias(hoje,10)});
+    var corR={"Cliente":"#E8A317","Courinvest":"#16A05B","Ambos":"#D4A328"};
+    var planoHtml='<div class="gf-eyebrow" style="margin:16px 0 8px">📌 PLANO DE AÇÃO PARA O PRÓXIMO MÊS</div><div class="gf-card gf-card-t"><table class="gf-tbl gf-tbl-p"><colgroup><col style="width:62%"/><col style="width:22%"/><col style="width:16%"/></colgroup><thead><tr><th>AÇÃO</th><th class="gf-r">RESPONSÁVEL</th><th class="gf-r">PRAZO</th></tr></thead><tbody>'
+      +plano.slice(0,4).map(function(p){return '<tr><td>'+p.a+'</td><td class="gf-r"><span class="gf-resp" style="background:'+(corR[p.r]||corOuro)+'">'+p.r+'</span></td><td class="gf-r gf-mono">'+p.d+'</td></tr>';}).join("")
+      +'</tbody></table></div>';
+    var fim='<div class="gf-end"><b>COURINVEST · CONFIDENCIAL</b><div>'+gfEsc(nomeCompleto)+' · Dados atualizados em '+D.atualizadoEm+'.</div><div>Este relatório é uma ferramenta de apoio e não substitui a orientação de um profissional financeiro ou contábil. Totais calculados a partir do orçamento importado do Meu Vista.</div></div>';
+    htmlPages+=page("observacoes",ttl("📋","Observações e ","Próximos Passos","")+'<div class="gf-card" style="padding:6px 20px">'+pontosHtml+'</div>'+funcHtml+planoHtml+fim);
+  }
+
+  var css='@import url("https://fonts.googleapis.com/css2?family=Outfit:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,700;1,800&family=Cormorant+Garamond:ital,wght@1,400;1,500;1,600&family=JetBrains+Mono:wght@400;500;700&display=swap");'
+    +'*{box-sizing:border-box}html,body{margin:0;padding:0}'
+    +'body{font-family:Outfit,-apple-system,sans-serif;background:#0A1628;color:#0A1628;font-size:11px;line-height:1.45;-webkit-print-color-adjust:exact;print-color-adjust:exact}'
+    +'.gf-mono{font-family:"JetBrains Mono",monospace;font-weight:500}'
+    +'.gf-page{width:210mm;min-height:297mm;margin:0 auto 14px;position:relative;padding:14mm 17mm 12mm;display:flex;flex-direction:column;background:linear-gradient(180deg,#F8F9FC 0%,#F2F4F9 100%)}'
+    +'.gf-hdr{display:flex;justify-content:space-between;align-items:center;padding-bottom:11px;border-bottom:1px solid #E6D9AE}'
+    +'.gf-logo{display:flex;align-items:center;gap:7px;font-weight:800;font-size:13px;letter-spacing:2.5px;color:#0A1628}'
+    +'.gf-meta{text-align:right;font-size:9px;color:#6B7390;letter-spacing:.3px}.gf-meta b{display:block;color:#0A1628;font-size:10px;letter-spacing:0}'
+    +'.gf-bar{width:42px;height:4px;background:#D4A328;border-radius:2px;margin:18px 0 12px}'
+    +'.gf-ttl{font-size:30px;font-weight:800;letter-spacing:-1px;margin:0;line-height:1.1;color:#0A1628}.gf-ttl i{color:#D4A328;font-style:italic;font-weight:800}.gf-ic{margin-right:8px;font-size:27px}'
+    +'.gf-sub{font-family:"Cormorant Garamond",Georgia,serif;font-style:italic;font-size:16px;color:#5A6280;margin:8px 0 16px;line-height:1.45}'
+    +'.gf-card{background:#fff;border-radius:14px;box-shadow:0 2px 10px rgba(10,22,40,.07);padding:0}.gf-card-t{overflow:hidden}'
+    +'.gf-eyebrow{font-size:8.5px;font-weight:800;letter-spacing:2.2px;color:#2A3350;margin-bottom:9px}'
+    +'.gf-tiny{font-size:8.5px;color:#7C849C;line-height:1.5;margin-top:6px}'
+    +'.gf-mut{color:#8B93A8}.gf-mut2{color:#9AA1B5}'
+    +'.gf-ftr{margin-top:auto;padding-top:9px;border-top:1px solid #DDE0EA;display:flex;justify-content:space-between;align-items:center;font-size:8px;letter-spacing:2.2px;color:#8B93A8}'
+    +'.gf-pg{letter-spacing:1px}.gf-pg b{color:#D4A328;font-size:15px;font-weight:800}'
+    +'.gf-note{border-radius:12px;padding:13px 18px;font-size:10.5px;line-height:1.6;margin-top:14px;border-left:4px solid #D4A328}'
+    +'.gf-note-gold{background:#FBF1D6}.gf-note-blue{background:#E6F1FB;border-left-color:#3B8DD9}.gf-note-lg{font-size:11.5px;padding:15px 20px}'
+    +'.gf-tbl{width:100%;border-collapse:collapse;table-layout:fixed}'
+    +'.gf-tbl th{background:#FAF1D6;color:#8A6A0B;font-size:8.5px;font-weight:800;letter-spacing:1.8px;text-align:left;padding:11px 10px}'
+    +'.gf-tbl td{padding:9px 10px;border-bottom:1px solid #F0F1F6;vertical-align:middle;font-size:10.5px}'
+    +'.gf-tbl th:first-child,.gf-tbl td:first-child{padding-left:14px}.gf-tbl th:last-child,.gf-tbl td:last-child{padding-right:14px}'
+    +'.gf-r{text-align:right!important}.gf-tbl .gf-mono{font-size:10px}'
+    +'.gf-tot td{background:#FBF1D6;border-bottom:none;font-weight:700}'
+    +'.gf-cn{font-weight:600;color:#0A1628;font-size:11px}.gf-cs{font-size:8px;color:#8B93A8;margin-top:1px;line-height:1.35}'
+    +'.gf-cn2{font-weight:600;color:#0A1628;font-size:10px}.gf-cs2{font-size:8px;color:#8B93A8}'
+    +'.gf-bt{height:7px;background:#E9ECF3;border-radius:4px;overflow:hidden}.gf-bf{height:100%;border-radius:4px}'
+    +'.gf-toc{width:100%;border-collapse:collapse}.gf-toc td{padding:11px 0;border-bottom:1px solid #EEF0F5;font-size:12px}.gf-toc tr:last-child td{border-bottom:none}'
+    +'.gf-toc-n{width:34px;color:#D4A328;font-family:"JetBrains Mono",monospace;font-weight:700}.gf-toc-t{font-weight:600}.gf-toc-p{text-align:right;color:#8B93A8;font-family:"JetBrains Mono",monospace}'
+    +'.gf-kpis{width:100%;border-collapse:separate;border-spacing:10px 0;margin:0 -10px;width:calc(100% + 20px)}.gf-kpi-td{width:25%;vertical-align:top;padding:0}.gf-kpis3 .gf-kpi-td{width:33.3%}'
+    +'.gf-kpi{background:#fff;border-radius:12px;border-top:3px solid #D4A328;box-shadow:0 2px 10px rgba(10,22,40,.07);padding:12px 14px}'
+    +'.gf-kpi-l{font-size:8px;font-weight:800;letter-spacing:2px;color:#2A3350}.gf-kpi-v{font-family:"JetBrains Mono",monospace;font-weight:700;font-size:17px;margin:7px 0 3px;white-space:nowrap}.gf-kpi-s{font-size:8px;color:#8B93A8}'
+    +'.gf-pr{width:100%;border-collapse:collapse}.gf-pr th{font-size:9px;font-weight:400;color:#8B93A8;text-align:left;padding:2px 0}.gf-pr td{font-size:11px;padding:3px 0}.gf-pr th:nth-child(2),.gf-pr td:nth-child(2){text-align:center}.gf-pr th:last-child,.gf-pr td:last-child{text-align:right}'
+    +'.gf-dest{width:100%;border-collapse:separate;border-spacing:10px 8px;margin:-8px -10px;width:calc(100% + 20px)}.gf-dest td{width:50%;vertical-align:top;padding:0}'
+    +'.gf-dest-c{display:flex;align-items:center;gap:11px;padding:11px 14px}.gf-dest-ic{font-size:24px}.gf-dest-t{font-weight:800;font-size:11.5px;color:#0A1628}.gf-dest-s{font-size:8.5px;color:#7C849C;margin-top:1px}'
+    +'.gf-quote{background:#EDEFF8;border-left:4px solid #D4A328;border-radius:4px;padding:16px 26px 14px;margin-top:16px;position:relative}'
+    +'.gf-q-mark{position:absolute;left:18px;top:2px;font-family:"Cormorant Garamond",serif;font-size:36px;color:#D4A328}'
+    +'.gf-q-t{font-family:"Cormorant Garamond",Georgia,serif;font-style:italic;font-size:16px;line-height:1.55;color:#2A3350;padding-left:14px}'
+    +'.gf-q-by{font-size:8px;font-weight:800;letter-spacing:2px;color:#7C849C;margin-top:12px;padding-left:14px}'
+    +'.gf-top5{width:100%;border-collapse:collapse}.gf-top5 td{padding:7px 0;border-top:1px solid #EEF0F5}.gf-top5 tr:first-child td{border-top:none}.gf-rk{width:34px}'
+    +'.gf-rk span{display:inline-block;width:22px;height:22px;border-radius:50%;background:#FBF1D6;color:#8A6A0B;font-weight:800;font-size:10px;text-align:center;line-height:22px}.gf-rk-ok span{background:#16A05B;color:#fff}'
+    +'.gf-cols{display:flex;gap:10px;align-items:flex-start;margin-bottom:10px}.gf-col{width:50%}'
+    +'.gf-gcard{padding:11px 14px;margin-bottom:10px}.gf-gh{display:flex;align-items:center;gap:7px;margin-bottom:6px}.gf-gn{font-weight:800;font-size:12px;color:#0A1628}.gf-gv{margin-left:auto;font-size:11px;font-weight:700}'
+    +'.gf-badge{display:inline-block;color:#fff;font-size:7.5px;font-weight:800;padding:2px 8px;border-radius:9px;letter-spacing:.3px;white-space:nowrap}'
+    +'.gf-dtbl{width:100%;border-collapse:collapse;table-layout:fixed}.gf-dtbl td{padding:3.5px 0;border-top:1px solid #F3F4F8;font-size:8.5px}.gf-dtbl tr:first-child td{border-top:none}'
+    +'.gf-dn{width:34%;color:#2A3350;font-size:8.5px;line-height:1.25}.gf-db{width:15%;padding:0 6px!important}.gf-dv{width:23%;font-size:8.5px!important}.gf-dp{width:10%;font-size:7.5px!important}.gf-dvar{width:18%;font-size:8px!important;font-weight:700}'
+    +'.gf-2c{width:100%;border-collapse:separate;border-spacing:0}.gf-2c>tbody>tr>td{width:50%;vertical-align:top;padding:0 8px}.gf-2c>tbody>tr>td:first-child{padding-left:0}.gf-2c>tbody>tr>td:last-child{padding-right:0}'
+    +'.gf-2cards{border-spacing:10px 0;margin:14px -10px;width:calc(100% + 20px)}.gf-2cards>tbody>tr>td{padding:0}'
+    +'.gf-dif{width:100%;border-collapse:collapse}.gf-dif td{padding:5px 0;border-top:1px solid #EEF0F5;font-size:9.5px}.gf-dif tr:first-child td{border-top:none}'
+    +'.gf-big{font-size:21px;font-weight:700;margin:4px 0 4px;color:#0A1628}'
+    +'.gf-seg{display:flex;height:26px;border-radius:13px;overflow:hidden;margin:2px 0 14px;background:#E9ECF3}.gf-seg div{height:100%}'
+    +'.gf-leg{width:100%;border-collapse:collapse}.gf-lg{width:50%;padding:4px 0;font-size:10px;color:#2A3350}.gf-lg b{float:right;font-size:10px;font-weight:500;margin-right:14px}.gf-lg-s{font-weight:800}.gf-lg-s b{font-weight:800}'
+    +'.gf-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:8px}'
+    +'.gf-tbl-d td{padding:10px 10px}'
+    +'.gf-mrow{padding:7px 16px;margin-bottom:6px}.gf-mt{width:100%;border-collapse:collapse}.gf-mt td{padding:1px 0;font-size:10.5px}.gf-mrow .gf-bt{margin:3px 0 3px}'
+    +'.gf-pt{padding:10px 0}.gf-pt-t{font-weight:800;font-size:11px;color:#0A1628;margin-bottom:2px}.gf-pt-x{font-size:10px;color:#4A5370;line-height:1.55}'
+    +'.gf-tbl-p td{font-size:10.5px}.gf-resp{display:inline-block;color:#fff;font-family:"JetBrains Mono",monospace;font-size:8px;font-weight:700;padding:3px 10px;border-radius:9px}'
+    +'.gf-end{text-align:center;border-top:1px solid #E6D9AE;margin-top:16px;padding-top:11px;font-size:8px;color:#7C849C;line-height:1.55}.gf-end b{display:block;color:#8A6A0B;letter-spacing:1.6px;font-size:9px;margin-bottom:3px}'
+    /* capa */
+    +'.gf-cover{width:210mm;height:297mm;margin:0 auto 14px;position:relative;padding:16mm 17mm;display:flex;flex-direction:column;color:#fff;background:radial-gradient(ellipse 90% 55% at 50% 0%,rgba(30,58,120,.55) 0%,transparent 70%),linear-gradient(180deg,#0B1A3C 0%,#060E22 100%)}'
+    +'.gf-cv-top{display:flex;justify-content:space-between;align-items:flex-start}.gf-logo-lg{color:#fff;font-size:22px;gap:12px}.gf-logo-lg small{display:block;font-size:8.5px;letter-spacing:4px;color:#D4A328;font-weight:700;margin-top:3px}'
+    +'.gf-cv-ref{text-align:right;font-size:9px;letter-spacing:1.5px;color:#8B9DC3;margin-top:10px}.gf-cv-ref b{display:block;color:#D4A328;font-size:10px}'
+    +'.gf-cv-mid{margin-top:34mm;text-align:center}.gf-pill{display:inline-block;padding:9px 26px;border:1px solid rgba(212,163,40,.45);border-radius:20px;background:rgba(255,255,255,.04);color:#D4A328;font-weight:800;font-size:11px;letter-spacing:3px}'
+    +'.gf-cv-title{font-size:56px;font-weight:800;letter-spacing:-2px;margin:26px 0 12px;line-height:1.05}.gf-cv-title i{color:#D4A328;font-style:italic}'
+    +'.gf-cv-sub{font-size:13px;font-weight:700;letter-spacing:1.5px;color:#8B9DC3}'
+    +'.gf-cv-box{width:68%;margin:34px auto 0;border:1px solid rgba(212,163,40,.4);border-radius:18px;background:rgba(255,255,255,.05);padding:20px 10px}'
+    +'.gf-cv-box-l{font-size:9.5px;font-weight:800;letter-spacing:3px;color:#D4A328}.gf-cv-box-n{font-size:30px;font-weight:800;margin-top:9px}'
+    +'.gf-cv-foot{margin-top:24px;text-align:center}.gf-cv-line{height:1px;background:rgba(255,255,255,.1);margin-bottom:14px}.gf-cv-note{font-family:"Cormorant Garamond",serif;font-style:italic;font-size:11px;color:#8B9DC3;line-height:1.5;max-width:150mm;margin:0 auto}.gf-cv-by{color:#D4A328;font-weight:800;font-size:12px;margin-top:12px}'
+    +'@media print{@page{size:A4;margin:0}body{background:#fff}.gf-page,.gf-cover{margin:0;page-break-after:always;break-after:page}}';
+  return '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório Mensal de Gestão Financeira — '+gfEsc(nomeCompleto)+' · '+D.mesNome+' '+D.ano+'</title><style>'+css+'</style></head><body>'+htmlPages+'</body></html>';
+}
+/* ════════════ FIM RELATÓRIO GF MODELO ORÇAMENTO ════════════ */
+
 /* ════════════ VENCIMENTOS DE RENDA FIXA (consolidado entre todos os clientes) ════════════
    Antes dessa aba, "vencimento de renda fixa" só existia espalhado em dois lugares:
    1. O widget "⏰ Vencimentos nos Próximos 90 dias" dentro de Dashboard → Oportunidades —
@@ -37257,7 +37586,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '498';
+  var SW_VERSION = '500';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
