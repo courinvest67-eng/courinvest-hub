@@ -1258,8 +1258,41 @@ const obterOverviewMercadoRecente=function(dadosApp){
    Pega só o primeiro parágrafo de prosa (pula cabeçalhos em CAIXA ALTA) e trunca pra caber bem
    no e-mail. Os indicadores vêm do MESMO dado estruturado (dados.selic/ipca/dolar) salvo junto
    com o texto na aba "Overview IA" — não faz nenhuma chamada de API nova. */
-const montarResumoMercadoEmail=function(ov){
+/* === INDICADORES DE MERCADO "VIVOS" PRO E-MAIL (Selic meta + IPCA 12m, direto do BCB) ===
+   Antes o e-mail só lia o "retrato" (ov.dados) gravado no momento em que o overview foi gerado/
+   publicado — então se a Selic mudasse numa reunião do Copom depois disso (ou o IPCA do mês
+   saísse depois), o cliente recebia o número velho. Agora, no momento do envio, busca de novo:
+   Selic = série 432 do BCB (META Selic definida pelo Copom — a 4189 usada antes é a Selic
+   EFETIVA acumulada no mês, que nunca bate com a meta) e IPCA 12m = série 13522.
+   Qualquer falha de rede devolve null e o e-mail cai no retrato salvo (nunca trava o envio). */
+var _indicVivosCache=null;
+const buscarIndicadoresMercadoVivos=function(){
+  if(_indicVivosCache&&(Date.now()-_indicVivosCache.t)<30*60*1000)return Promise.resolve(_indicVivosCache);
+  var comTimeout=function(url){
+    return new Promise(function(res){
+      var enc=false;var tm=setTimeout(function(){if(!enc){enc=true;res(null);}},7000);
+      fetch(url).then(function(r){return r.json();}).then(function(j){if(!enc){enc=true;clearTimeout(tm);res(j);}}).catch(function(){if(!enc){enc=true;clearTimeout(tm);res(null);}});
+    });
+  };
+  var num=function(x){var n=parseFloat(String(x).replace(",","."));return isNaN(n)?null:n;};
+  return Promise.all([
+    comTimeout("https://api.bcb.gov.br/dados/serie/bcdata.sgs.432/dados/ultimos/1?formato=json"),
+    comTimeout("https://api.bcb.gov.br/dados/serie/bcdata.sgs.13522/dados/ultimos/1?formato=json")
+  ]).then(function(r){
+    var selic=r[0]&&r[0][0]?num(r[0][0].valor):null;
+    var ipca=r[1]&&r[1][0]?num(r[1][0].valor):null;
+    if(selic!=null&&(selic<=0||selic>50))selic=null;
+    if(ipca!=null&&(ipca<-20||ipca>50))ipca=null;
+    if(selic==null&&ipca==null)return null;
+    _indicVivosCache={t:Date.now(),selic:selic,ipca:ipca};
+    return _indicVivosCache;
+  }).catch(function(){return null;});
+};
+try{buscarIndicadoresMercadoVivos();}catch(e){}
+
+const montarResumoMercadoEmail=function(ov,vivos){
   if(!ov)return null;
+  if(!vivos&&_indicVivosCache&&(Date.now()-_indicVivosCache.t)<6*3600*1000)vivos=_indicVivosCache;
   var fmtN=function(v,d){return v==null?null:Number(v).toFixed(d==null?2:d).replace(".",",");};
   var comentario=null;
   if(ov.texto){
@@ -1281,7 +1314,8 @@ const montarResumoMercadoEmail=function(ov){
     }
   }
   var indicadores=[];
-  var dd=ov.dados||{};
+  var dd=Object.assign({},ov.dados||{});
+  if(vivos){if(vivos.selic!=null)dd.selic=vivos.selic;if(vivos.ipca!=null)dd.ipca=vivos.ipca;}
   if(dd.selic!=null)indicadores.push({label:"Selic",value:fmtN(dd.selic)+"% a.a."});
   if(dd.ipca!=null)indicadores.push({label:"IPCA (12m)",value:fmtN(dd.ipca)+"%"});
   if(dd.dolar&&dd.dolar.bid!=null)indicadores.push({label:"Dólar",value:"R$ "+fmtN(dd.dolar.bid,2)});
@@ -3009,7 +3043,20 @@ function Dash({data:d,onSel:os,goTo}){
          pro resumo curto (o card com os KPIs) como PDF — nunca bloqueia o envio do e-mail. */
       var pathStorage="relatorios/"+c.id+"/"+mesRefArquivo+"_"+(isPlan?"gf":"gp")+".pdf";
       var tipoRelatorioCompleto=isPlan?"planejamento":"mensal";
-      gerarRelatorioHtmlHeadless(c,d,tipoRelatorioCompleto).then(function(htmlCompleto){
+      buscarIndicadoresMercadoVivos().then(function(vivos){
+        /* Refaz o card "Panorama do Mês" com Selic/IPCA de HOJE (não o retrato salvo no overview) */
+        if(vivos&&!isPlan){
+          try{
+            reportHtml=montarEmailRelatorioHtml({
+              nome:c.nome,mesRefStr:mesRefStr,
+              tituloTopo:"Relatório Mensal",introTxt:introTxt,destaque:destaque,
+              mercado:montarResumoMercadoEmail(obterOverviewMercadoRecente(d),vivos),
+              remetente:cfg.remetente||"contato@courinvest.com.br"
+            });
+          }catch(e){console.warn("Falha ao atualizar indicadores do e-mail:",e);}
+        }
+        return gerarRelatorioHtmlHeadless(c,d,tipoRelatorioCompleto);
+      }).then(function(htmlCompleto){
         var htmlParaPdf=htmlCompleto||reportHtml.replace("%%PDF_BUTTON%%","");
         return gerarPdfLinkCourinvest(pathStorage,htmlParaPdf);
       }).then(function(pdfUrl){
@@ -4682,6 +4729,9 @@ function Dash({data:d,onSel:os,goTo}){
                   })
                 )}
                 {vencProximos.length>6 && <div style={{fontSize:10,color:T.t3,textAlign:"center",marginTop:8,fontStyle:"italic"}}>+ {vencProximos.length-6} outros vencimentos</div>}
+                {/* Este card só lê ativos importados do Gorila — a aba "Vencimentos" junta isso
+                    com os ativos de RF lançados manualmente na ficha de cada cliente também. */}
+                <div onClick={function(){goTo&&goTo("vencimentos")}} style={{fontSize:10,color:T.gold,textAlign:"center",marginTop:10,paddingTop:8,borderTop:"1px solid "+T.w3,cursor:"pointer",fontWeight:700}}>Ver todos os vencimentos (+ lançamentos manuais) →</div>
               </Cd>
             </div>
 
@@ -6436,8 +6486,70 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
                 }
               }
             }
-            
-            
+
+            /* === Benchmarks (CDI/IPCA/Ibovespa) da tabela "Resultado financeiro" ===
+               BUG real reportado pelo Igor: o painel "Rentabilidade vs Benchmarks" dos
+               relatórios continuava mostrando valores de Ibovespa/CDI/IPCA errados (ex.:
+               -0,33% quando o Ibovespa realmente rendeu +5,03% no mês) mesmo depois de
+               reimportar o PDF mais recente do Gorila. Causa raiz: esse import de PDF
+               (diferente do import por planilha Excel) nunca populava c._gorilaRent —
+               só extraía patrimônio e posição por instituição. Então o relatório mensal
+               continuava usando um c._gorilaRent ANTIGO (de uma importação Excel de outro
+               mês, há semanas) ou o fallback fixo no código, nunca os dados reais e atuais
+               deste PDF. Esse tipo de relatório do Gorila ("Relatório por período") tem uma
+               tabela "Resultado financeiro" com uma coluna "Período" — exatamente os números
+               do período coberto por este PDF — que ficava sem uso nenhum. Agora extraímos
+               essa coluna e gravamos em c._gorilaRent, no mesmo formato que o import via
+               Excel já usa, sobrescrevendo qualquer dado antigo (este PDF é a fonte mais
+               recente no momento da importação). */
+            var gorilaRentPdf=null;
+            (function(){
+              try{
+                var rfIdx=-1;
+                for(var k=0;k<lines.length-1;k++){
+                  if(lines[k].toLowerCase()==="resultado financeiro"&&lines[k+1].match(/^R\$/)){rfIdx=k;break}
+                }
+                if(rfIdx<0)return;
+                var lerLinhaPct=function(label){
+                  for(var k=rfIdx;k<Math.min(rfIdx+40,lines.length);k++){
+                    if(lines[k].toLowerCase()===label.toLowerCase()){
+                      var vm=(lines[k+1]||"").match(/(-?[\d.,]+)%/);
+                      if(vm)return parseFloat(vm[1].replace(/\./g,"").replace(",","."))/100;
+                    }
+                  }
+                  return null;
+                };
+                var rentPer=lerLinhaPct("Rentabilidade");
+                var cdiPer=lerLinhaPct("CDI");
+                var ipcaPer=lerLinhaPct("IPCA");
+                var ibovPer=lerLinhaPct("Ibovespa");
+                if(rentPer===null)return;
+                /* Data do período coberto: o cabeçalho "Período do Relatório" vem em branco
+                   nesse tipo de PDF (mesma particularidade do nome do cliente), então achamos
+                   o mês de referência pelo último mês preenchido (≠"-") na tabela
+                   "Rentabilidade mensal e acumulada" (o bloco do ano mais recente vem primeiro). */
+                var dataIniPdf=null,dataFimPdf=null;
+                var anoIdx=-1;
+                for(var k=0;k<lines.length;k++){
+                  if(/^\d{4}$/.test(lines[k])){anoIdx=k;break}
+                }
+                if(anoIdx>=0&&anoIdx+13<lines.length){
+                  var anoRef=parseInt(lines[anoIdx],10);
+                  var mesIdx=-1;
+                  for(var m=11;m>=0;m--){
+                    var val=lines[anoIdx+1+m];
+                    if(val&&val!=="-"&&val.match(/%/)){mesIdx=m;break}
+                  }
+                  if(mesIdx>=0&&anoRef>2000){
+                    dataIniPdf=anoRef+"-"+String(mesIdx+1).padStart(2,"0")+"-01";
+                    var ultDia=new Date(anoRef,mesIdx+1,0).getDate();
+                    dataFimPdf=anoRef+"-"+String(mesIdx+1).padStart(2,"0")+"-"+String(ultDia).padStart(2,"0");
+                  }
+                }
+                gorilaRentPdf={periods:[{p:"Período",rent:rentPer,cdi:cdiPer,ibov:ibovPer,ipca:ipcaPer}],dataIni:dataIniPdf,dataFim:dataFimPdf,resultado:null,aportes:0,retiradas:0,captacao:0,importedAt:Date.now()};
+              }catch(err){console.warn("Parse benchmarks PDF Gorila:",err)}
+            })();
+
             var ativos=[];
             Object.entries(instData).forEach(function(e){
               ativos.push({tk:"Portfolio "+e[0],nm:"Portfolio "+e[0],tp:"fundo_rf",qtd:1,pm:e[1],pa:e[1],inst:e[0],venc:"",posR:e[1]});
@@ -6465,6 +6577,12 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
               _ativosImport:existing&&existing._ativosImport&&existing._ativosImport.length>ativos.length?existing._ativosImport:ativos,
               _ativosTs:Date.now(),
               _backupAntesImport:backup,
+              /* Benchmarks (CDI/IPCA/Ibovespa) do período deste PDF — sobrescreve qualquer
+                 c._gorilaRent antigo (de uma importação Excel de outro mês, por ex.) sempre
+                 que este PDF específico trouxer a tabela "Resultado financeiro" com sucesso;
+                 se não achar (formato do Gorila mudou de novo), preserva o que já existia em
+                 vez de apagar dado bom por causa de um parsing que falhou. */
+              _gorilaRent:gorilaRentPdf||(existing&&existing._gorilaRent),
               /* === PRESERVAÇÃO EXPLÍCITA DE DADOS MANUAIS === sempre mantém, nunca sobrescreve na reimportação */
               proventos:(existing&&existing.proventos&&existing.proventos.length>0)?existing.proventos:(existing&&existing.proventos||[]),
               notasFiscais:(existing&&existing.notasFiscais)||[],
@@ -6475,7 +6593,7 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
               orcamento:(existing&&existing.orcamento)||{}
             });
             dp({t:"RC",p:newC});
-            sGMsg("✅ "+nomeCliente+(existing?" atualizado":" criado")+" via PDF! Patrimônio: "+fm(patReal)+" | "+Object.keys(instData).length+" instituições"+(nomeViaArquivo?" • ⚠ nome extraído do nome do arquivo (não veio no PDF) — confira se está certo":""));
+            sGMsg("✅ "+nomeCliente+(existing?" atualizado":" criado")+" via PDF! Patrimônio: "+fm(patReal)+" | "+Object.keys(instData).length+" instituições"+(gorilaRentPdf?" | benchmarks do período atualizados (Ibov "+(gorilaRentPdf.periods[0].ibov*100).toFixed(2)+"%)":"")+(nomeViaArquivo?" • ⚠ nome extraído do nome do arquivo (não veio no PDF) — confira se está certo":""));
             setTimeout(function(){sGMsg("");os(newC)},nomeViaArquivo?6000:2500);
           });
         }).catch(function(err){sGMsg("⚠ Erro PDF: "+err.message)});
@@ -27288,14 +27406,17 @@ function NewsView({data,dispatch}){
       return {bid:parseFloat(c.bidPrice),pct:parseFloat(c.percentageChange),max:parseFloat(c.high),min:parseFloat(c.low)};
     });
 
-    /* Selic: série 4189 = Meta da Selic (definida pelo Copom) */
-    var pSelic=safeFetch("https://api.bcb.gov.br/dados/serie/bcdata.sgs.4189/dados/ultimos/3?formato=json",function(d){
+    /* Selic: série 432 = META Selic (definida pelo Copom). A 4189 usada antes é a Selic EFETIVA
+       acumulada no mês anualizada — não é a meta e dava ~0,10 p.p. diferente (ex: 14,15 com meta
+       14,25). A 432 é diária (repete o valor todo dia), então pega ~400 dias e anda pra trás até
+       achar o valor anterior diferente (a meta antes da última mudança do Copom). */
+    var pSelic=safeFetch("https://api.bcb.gov.br/dados/serie/bcdata.sgs.432/dados/ultimos/400?formato=json",function(d){
       if(!d||d.length<1)return null;
-      /* Filtra só entradas com valor numérico válido */
       var validos=d.filter(function(x){return x.valor&&parseFloat(x.valor.replace(",","."))<50});
       if(validos.length<1)return null;
       var atual=parseFloat(validos[validos.length-1].valor.replace(",","."));
-      var anterior=validos.length>=2?parseFloat(validos[validos.length-2].valor.replace(",",".")):null;
+      var anterior=null;
+      for(var qi=validos.length-2;qi>=0;qi--){var vq=parseFloat(validos[qi].valor.replace(",","."));if(vq!==atual){anterior=vq;break;}}
       return {atual:atual,anterior:anterior};
     }).catch(function(){
       /* Fallback: busca via brapi */
@@ -34260,7 +34381,7 @@ function PropostasView({data,dispatch}){
   return null;
 }
 
-const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"interacoes",l:"Interações",i:"📡"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"parceiros",l:"Parceiros",i:"🤝"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"irAnual",l:"Relatório IR",i:"📑"}];
+const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"interacoes",l:"Interações",i:"📡"},{id:"vencimentos",l:"Vencimentos",i:"⏰"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"parceiros",l:"Parceiros",i:"🤝"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"irAnual",l:"Relatório IR",i:"📑"}];
 
 /* ============ AUTH + FIRESTORE SYNC ============ */
 
@@ -35618,6 +35739,163 @@ function ModuloRendaFixa({c,dispatch,taxasBCB,taxaBCBStatus}){
 }
 /* ════════════ FIM MÓDULO RENDA FIXA ════════════ */
 
+/* ════════════ VENCIMENTOS DE RENDA FIXA (consolidado entre todos os clientes) ════════════
+   Antes dessa aba, "vencimento de renda fixa" só existia espalhado em dois lugares:
+   1. O widget "⏰ Vencimentos nos Próximos 90 dias" dentro de Dashboard → Oportunidades —
+      só lê c._ativosImport (ativos vindos do import do Gorila, campo "venc"), travado em
+      90 dias fixos, mostra só os 6 primeiros.
+   2. Cada ativo lançado manualmente no Módulo de Renda Fixa de um cliente (c.rendaFixa,
+      campo "dataVenc") — só aparecia dentro da ficha DAQUELE cliente, um de cada vez. Não
+      tinha NENHUM lugar que juntasse os vencimentos lançados manualmente entre clientes.
+   Esta aba junta as duas fontes (Gorila + lançamento manual) numa lista só, sem limite fixo
+   de dias (o padrão mostra vencidos + próximos 90 dias, mas dá pra abrir o período todo),
+   com busca, filtro por tipo de ativo e exportação pra Excel — pensada pra virar rotina de
+   "o que preciso ligar pro cliente essa semana pra decidir reinvestir". */
+var RF_TYPES_VENC=["cdb","lci","lca","lc","cri","cra","tesouro","deb","debi","coe"];
+
+function coletarVencimentosRF(clientes,taxasBCB){
+  var hoje=new Date();hoje.setHours(0,0,0,0);
+  var lista=[];
+  (clientes||[]).forEach(function(c){
+    /* Fonte 1: ativos importados do Gorila — campo "venc" (string de data, pode vir vazia) */
+    (c._ativosImport||[]).forEach(function(a){
+      if(RF_TYPES_VENC.indexOf(a.tp)<0||!a.venc)return;
+      var dt=new Date(a.venc);
+      if(isNaN(dt.getTime()))return;
+      var dias=Math.ceil((dt-hoje)/86400000);
+      var tInfo=RF_TIPOS_LISTA.find(function(t){return t.k===a.tp});
+      lista.push({id:"g_"+c.id+"_"+(a.tk||a.nm)+"_"+a.venc,clienteId:c.id,cliente:c.nome,ativo:a.tk||a.nm||"Ativo RF",tipo:a.tp,tipoLabel:tInfo?tInfo.l:a.tp,ic:tInfo?tInfo.ic:"📄",cor:tInfo?tInfo.cor:T.t3,isento:tInfo?tInfo.isento:false,inst:a.inst||"—",valor:a.posR||0,vencDate:dt,dias:dias,fonte:"gorila",idxLabel:null});
+    });
+    /* Fonte 2: Módulo de Renda Fixa nativo — campo "dataVenc" (sempre YYYY-MM-DD quando preenchido) */
+    (c.rendaFixa||[]).forEach(function(a){
+      if(!a.dataVenc)return;
+      var dt=new Date(a.dataVenc+"T12:00:00");
+      if(isNaN(dt.getTime()))return;
+      var dias=Math.ceil((dt-hoje)/86400000);
+      var tInfo=RF_TIPOS_LISTA.find(function(t){return t.k===a.tp});
+      lista.push({id:"n_"+a.id,clienteId:c.id,cliente:c.nome,ativo:a.nm||a.tk||"Ativo RF",tipo:a.tp,tipoLabel:tInfo?tInfo.l:a.tp,ic:tInfo?tInfo.ic:"📄",cor:tInfo?tInfo.cor:T.t3,isento:tInfo?tInfo.isento:false,inst:a.inst||"—",valor:rfCalcSaldo(a,taxasBCB),vencDate:dt,dias:dias,fonte:"nativo",idxLabel:rfLabelIdx(a)});
+    });
+  });
+  lista.sort(function(a,b){return a.dias-b.dias});
+  return lista;
+}
+
+function VencimentosView({data:d,dispatch:dp,taxasBCB,taxaBCBStatus,onGoClient}){
+  var [periodo,sPeriodo]=useState("90");
+  var [tipoF,sTipoF]=useState("todos");
+  var [busca,sBusca]=useState("");
+
+  var todos=React.useMemo(function(){return coletarVencimentosRF(d.cl,taxasBCB);},[d.cl,taxasBCB]);
+
+  var vencidos=todos.filter(function(v){return v.dias<0});
+  var venc30=todos.filter(function(v){return v.dias>=0&&v.dias<=30});
+  var venc90=todos.filter(function(v){return v.dias>=0&&v.dias<=90});
+  var valorTotal=todos.reduce(function(s,v){return s+v.valor},0);
+  var tiposPresentes=[...new Set(todos.map(function(v){return v.tipo}))];
+
+  var filtrados=todos.filter(function(v){
+    if(periodo==="vencidos")return v.dias<0;
+    if(periodo==="30")return v.dias<=30;
+    if(periodo==="60")return v.dias<=60;
+    if(periodo==="90")return v.dias<=90;
+    if(periodo==="180")return v.dias<=180;
+    return true; /* "todos" */
+  });
+  if(tipoF!=="todos")filtrados=filtrados.filter(function(v){return v.tipo===tipoF});
+  if(busca){
+    var bq=busca.toLowerCase();
+    filtrados=filtrados.filter(function(v){return(v.cliente+v.ativo+v.inst).toLowerCase().indexOf(bq)>=0});
+  }
+
+  var irParaCliente=function(clienteId){
+    var c=(d.cl||[]).find(function(x){return x.id===clienteId});
+    if(c&&onGoClient)onGoClient(c);
+  };
+
+  var exportar=function(){
+    if(typeof XLSX==="undefined"||filtrados.length===0)return;
+    var rows=filtrados.map(function(v){return {Cliente:v.cliente,Ativo:v.ativo,Tipo:v.tipoLabel,Instituição:v.inst,Vencimento:v.vencDate.toLocaleDateString("pt-BR"),Dias:v.dias,Valor:v.valor,Origem:v.fonte==="gorila"?"Gorila":"Lançamento manual"};});
+    var ws=XLSX.utils.json_to_sheet(rows);
+    var wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,"Vencimentos RF");
+    XLSX.writeFile(wb,"vencimentos_renda_fixa_"+new Date().toISOString().split("T")[0]+".xlsx");
+  };
+
+  var selStyle={background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,padding:"9px 12px",fontSize:12,color:T.t2,outline:"none",cursor:"pointer"};
+
+  return (
+    <div style={{padding:"24px 28px",maxWidth:1100,margin:"0 auto"}}>
+      <div style={{marginBottom:18}}>
+        <h2 style={{margin:0,fontSize:22,fontWeight:800,color:T.t1}}>⏰ Vencimentos de Renda Fixa</h2>
+        <div style={{fontSize:12,color:T.t3,marginTop:4}}>CDBs, LCIs, LCAs, Tesouro, debêntures e outros — de todos os clientes, num só lugar, pra não deixar nenhum passar sem reinvestir.</div>
+      </div>
+
+      <RfPainelTaxas taxas={taxasBCB} status={taxaBCBStatus}/>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,marginBottom:18}}>
+        <KCard label="Vencidos" valor={String(vencidos.length)} sub={fm(vencidos.reduce(function(s,v){return s+v.valor},0))} cor={T.red} ic="⛔" compact onClick={function(){sPeriodo("vencidos")}}/>
+        <KCard label="Vence em 30 dias" valor={String(venc30.length)} sub={fm(venc30.reduce(function(s,v){return s+v.valor},0))} cor={"#E0A85C"} ic="⏰" compact onClick={function(){sPeriodo("30")}}/>
+        <KCard label="Vence em 90 dias" valor={String(venc90.length)} sub={fm(venc90.reduce(function(s,v){return s+v.valor},0))} cor={T.cyan} ic="📅" compact onClick={function(){sPeriodo("90")}}/>
+        <KCard label="Total monitorado" valor={fm(valorTotal)} sub={todos.length+" ativo"+(todos.length!==1?"s":"")+" ao todo"} cor={T.gold} ic="💰" compact onClick={function(){sPeriodo("todos")}}/>
+      </div>
+
+      <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+        <input value={busca} onChange={function(e){sBusca(e.target.value)}} placeholder="🔍 Buscar cliente, ativo ou instituição..." style={Object.assign({},inpS,{flex:1,minWidth:160,fontSize:12,padding:"9px 14px"})}/>
+        <select value={periodo} onChange={function(e){sPeriodo(e.target.value)}} style={selStyle}>
+          <option value="vencidos" style={{background:"#0F1B2E"}}>Só vencidos</option>
+          <option value="30" style={{background:"#0F1B2E"}}>Até 30 dias</option>
+          <option value="60" style={{background:"#0F1B2E"}}>Até 60 dias</option>
+          <option value="90" style={{background:"#0F1B2E"}}>Até 90 dias</option>
+          <option value="180" style={{background:"#0F1B2E"}}>Até 180 dias</option>
+          <option value="todos" style={{background:"#0F1B2E"}}>Todos (sem limite)</option>
+        </select>
+        <select value={tipoF} onChange={function(e){sTipoF(e.target.value)}} style={selStyle}>
+          <option value="todos" style={{background:"#0F1B2E"}}>Todos os tipos</option>
+          {tiposPresentes.map(function(tp){var t=RF_TIPOS_LISTA.find(function(x){return x.k===tp});return <option key={tp} value={tp} style={{background:"#0F1B2E"}}>{t?t.l:tp}</option>;})}
+        </select>
+        <Bt v="secondary" onClick={exportar} style={{fontSize:11,padding:"9px 16px"}}>📥 Exportar Excel</Bt>
+      </div>
+
+      {filtrados.length===0?(
+        <Cd style={{padding:40,textAlign:"center"}} hov={false}>
+          <div style={{fontSize:34,marginBottom:10}}>{todos.length===0?"🏦":"👌"}</div>
+          <div style={{fontSize:14,fontWeight:700,color:T.t2,marginBottom:6}}>{todos.length===0?"Nenhum vencimento cadastrado ainda":"Nenhum vencimento nesse filtro"}</div>
+          <div style={{fontSize:12,color:T.t3}}>{todos.length===0?"Vencimentos aparecem aqui a partir do import do Gorila (CDB/LCI/Tesouro com data de vencimento) ou do Módulo de Renda Fixa dentro da ficha do cliente.":"Ajuste o período, o tipo de ativo ou a busca acima."}</div>
+        </Cd>
+      ):(
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {filtrados.map(function(v){
+            var urgencia=v.dias<0?T.red:v.dias<=15?T.red:v.dias<=30?"#E0A85C":v.dias<=90?T.cyan:T.t3;
+            var urgLabel=v.dias<0?"VENCIDO HÁ "+Math.abs(v.dias)+"D":v.dias===0?"HOJE":v.dias+"D RESTANTES";
+            return (
+              <Cd key={v.id} onClick={function(){irParaCliente(v.clienteId)}} style={{padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
+                <div style={{width:44,height:44,borderRadius:12,background:urgencia+"1c",color:urgencia,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0,border:"1px solid "+urgencia+"40"}}>
+                  <div style={{fontSize:v.dias<0?18:14,fontWeight:800,lineHeight:1,fontFamily:"'JetBrains Mono'"}}>{v.dias<0?"!":v.dias}</div>
+                  {v.dias>=0&&<div style={{fontSize:7,fontWeight:600}}>DIAS</div>}
+                </div>
+                <div style={{width:26,textAlign:"center",fontSize:16,flexShrink:0}}>{v.ic}</div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:12,fontWeight:700,color:T.t1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{v.ativo}</div>
+                  <div style={{fontSize:10,color:T.t3,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {v.cliente} · {v.tipoLabel}{v.idxLabel?" · "+v.idxLabel:""} · {v.inst}
+                    {v.isento&&<span style={{color:T.green,fontWeight:700}}> · Isento IR</span>}
+                  </div>
+                </div>
+                <div style={{textAlign:"right",flexShrink:0}}>
+                  <div style={{fontSize:13,fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(v.valor)}</div>
+                  <div style={{fontSize:9,color:urgencia,fontWeight:700,marginTop:2}}>{urgLabel}</div>
+                  <div style={{fontSize:9,color:T.t3,marginTop:1}}>{v.vencDate.toLocaleDateString("pt-BR")}</div>
+                </div>
+              </Cd>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+/* ════════════ FIM VENCIMENTOS DE RENDA FIXA ════════════ */
+
 function AppWithAuth(){
   const[authUser,sAuthUser]=useState(null);
   const[authChecked,sAuthChecked]=useState(false);
@@ -36542,7 +36820,7 @@ function App({authUser}){
     });
   },[notsReais,pushPerm]);
   const go=function(p){sPg(p);sSel(null);sShowMenu(false)};
-  const titles={dashboard:"Dashboard",clients:sel?sel.nome:"Clientes",interacoes:"Interações",financeiro:"Financeiro da Empresa",comercial:"Comercial",metas:"Painel de Metas",agenda:"Agenda",news:"Notícias & Mercado",import:"Importar",irAnual:"Relatório Anual de IR"};
+  const titles={dashboard:"Dashboard",clients:sel?sel.nome:"Clientes",interacoes:"Interações",vencimentos:"Vencimentos de Renda Fixa",financeiro:"Financeiro da Empresa",comercial:"Comercial",metas:"Painel de Metas",agenda:"Agenda",news:"Notícias & Mercado",import:"Importar",irAnual:"Relatório Anual de IR"};
 
   
   const[isMobile,setMobile]=useState(window.innerWidth<768);
@@ -36843,6 +37121,7 @@ function App({authUser}){
           {pg==="dashboard" && <Dash data={d} onSel={function(c){sPg("clients");sSel(c)}} goTo={function(p){sPg(p)}}/>}
           {pg==="clients" && !sel && <CL data={d} onSel={function(c){sSel(c)}} dispatch={dp} fi={clFi} sFi={sClFi}/>}
           {pg==="interacoes" && <InteracoesView data={d} dispatch={dp} onGoClient={function(c){sPg("clients");sSel(c)}}/>}
+          {pg==="vencimentos" && <VencimentosView data={d} dispatch={dp} taxasBCB={taxasBCB} taxaBCBStatus={taxaBCBStatus} onGoClient={function(c){sPg("clients");sSel(c)}}/>}
           {pg==="clients" && sel && <CD client={sel} data={d} dispatch={dp} onBack={function(){sSel(null)}} taxasBCB={taxasBCB} taxaBCBStatus={taxaBCBStatus}/>}
           {pg==="financeiro" && <FinanceiroView data={d} dispatch={dp}/>}
           {pg==="parceiros" && <ParceirosView data={d} dispatch={dp}/>}
@@ -36978,7 +37257,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '495';
+  var SW_VERSION = '498';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
