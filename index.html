@@ -35678,7 +35678,7 @@ function gerarRelatorioGFModeloHtml(c,opts){
   var p2=function(x){return String(x).padStart(2,"0");};
 
   /* ── peças visuais ── */
-  var logoMark='<svg width="30" height="30" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="gfl" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#F7D84A"/><stop offset="100%" stop-color="#D4A328"/></linearGradient></defs><path d="M62 10 C26 10,8 28,8 50 C8 72,26 90,62 90" stroke="url(#gfl)" stroke-width="9" stroke-linecap="round" fill="none"/><path d="M62 28 C40 28,28 38,28 50 C28 62,40 72,62 72" stroke="url(#gfl)" stroke-width="7" stroke-linecap="round" fill="none" opacity=".75"/></svg>';
+  var logoMark='<img src="'+COURINVEST_ICON_URI+'" alt="" width="20" height="34" style="display:block;width:20px;height:34px"/>';
   var hdr=function(){
     return '<div class="gf-hdr"><div class="gf-logo">'+logoMark+'<span>COURINVEST</span></div>'
       +'<div class="gf-meta">'+D.periodoTxt.replace(" a "," A ")+'<b>'+gfEsc(primeiro)+'</b></div></div>';
@@ -35699,7 +35699,7 @@ function gerarRelatorioGFModeloHtml(c,opts){
   /* ═════ CAPA ═════ */
   if(on("capa")){
     htmlPages+='<div class="gf-cover">'
-      +'<div class="gf-cv-top"><div class="gf-logo gf-logo-lg">'+logoMark.replace('width="30" height="30"','width="46" height="46"')+'<span>COURINVEST<small>CONSULTORIA EM INVESTIMENTOS</small></span></div>'
+      +'<div class="gf-cv-top"><div class="gf-logo gf-logo-lg">'+logoMark.replace('width="20" height="34"','width="36" height="60"').replace('width:20px;height:34px','width:36px;height:60px')+'<span>COURINVEST<small>CONSULTORIA EM INVESTIMENTOS</small></span></div>'
       +'<div class="gf-cv-ref">REFERÊNCIA<b>'+D.mesNome.toUpperCase()+'/'+D.ano+'</b></div></div>'
       +'<div class="gf-cv-mid"><div class="gf-pill">📊 RELATÓRIO MENSAL</div>'
       +'<h1 class="gf-cv-title">Gestão <i>Financeira</i></h1>'
