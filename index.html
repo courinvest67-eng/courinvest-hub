@@ -2751,6 +2751,19 @@ const TIPOS_AGENDA_DEFAULT=[
   {id:"tp_lembrete_outro",l:"Lembrete Geral",ic:"🔔",cor:"#9D174D",cat:"lembrete"}
 ];
 
+/* v501: localiza o cliente já existente a partir do nome que veio do Gorila — ignora acento, maiúscula e espaços extras;
+   se não houver igual, aceita um ÚNICO cliente com mesmo primeiro e último nome (ex.: "Marcus Goyata" x "Marcus Vinicius Goyata"). */
+function gcNormNome(n){return String(n||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/\s+/g," ").trim();}
+function gcAcharClienteExistente(lista,nome){
+  var alvo=gcNormNome(nome);if(!alvo)return undefined;
+  var ex=(lista||[]).find(function(c){return gcNormNome(c.nome)===alvo;});
+  if(ex)return ex;
+  var tk=alvo.split(" ");if(tk.length<2)return undefined;
+  var pri=tk[0],ult=tk[tk.length-1];
+  var cands=(lista||[]).filter(function(c){var t=gcNormNome(c.nome).split(" ");return t.length>=2&&t[0]===pri&&t[t.length-1]===ult;});
+  return cands.length===1?cands[0]:undefined;
+}
+
 function rd(st,ac){
   /* _updatedAt: carimbo de hora em CADA cliente tocado (AC/UC/RC), usado pelo merge de sync
      (ver mergeClientes mais abaixo, perto do useEffect do Firestore) pra decidir, cliente por
@@ -2760,7 +2773,27 @@ function rd(st,ac){
      por exemplo, se o desktop salvasse por qualquer outro motivo logo em seguida). */
   if(ac.t==="AC") return {...st,cl:[...st.cl,{...ac.p,id:ac.p.id||("c"+Date.now()),_updatedAt:Date.now()}]};
   if(ac.t==="UC") return {...st,cl:st.cl.map(c=>c.id===ac.p.id?{...c,...ac.p,_updatedAt:Date.now()}:c)};
-  if(ac.t==="RC"){var _rcId=ac.p.id,_rcNm=ac.p.nome.toLowerCase();return {...st,cl:[...st.cl.filter(function(c){return c.id!==_rcId&&c.nome.toLowerCase()!==_rcNm;}),{...ac.p,_updatedAt:Date.now()}]};}
+  if(ac.t==="RC"){var _rcId=ac.p.id,_rcNm=ac.p.nome.toLowerCase();
+    /* v501: rede de segurança — reimportar (RC) nunca pode apagar lançamentos manuais (proventos, NFs, contratos).
+       Une os do cliente antigo (mesmo id ou mesmo nome) com os do novo, por id. Restaurar backup passa noMerge. */
+    var _rcNovo=ac.p;
+    if(!ac.noMerge){
+      var _rcOld=st.cl.find(function(c){return c.id===_rcId||c.nome.toLowerCase()===_rcNm;});
+      if(_rcOld){
+        var _rcUp={};
+        ["proventos","notasFiscais","_contratos"].forEach(function(k){
+          var a=_rcOld[k],b=_rcNovo[k];
+          if(Array.isArray(a)&&a.length>0){
+            var vistos={};(Array.isArray(b)?b:[]).forEach(function(x){if(x&&x.id!=null)vistos[x.id]=true;});
+            var falt=a.filter(function(x){return !(x&&x.id!=null&&vistos[x.id]);});
+            if(!Array.isArray(b)||b.length===0)_rcUp[k]=a.slice();
+            else if(falt.length>0)_rcUp[k]=b.concat(falt);
+          }
+        });
+        _rcNovo=Object.assign({},_rcNovo,_rcUp);
+      }
+    }
+    return {...st,cl:[...st.cl.filter(function(c){return c.id!==_rcId&&c.nome.toLowerCase()!==_rcNm;}),{..._rcNovo,_updatedAt:Date.now()}]};}
   if(ac.t==="AI") return {...st,it:[{...ac.p,id:"i"+Date.now()},...st.it]};
   if(ac.t==="DC") return {...st,cl:st.cl.filter(c=>c.id!==ac.p),it:st.it.filter(i=>i.cid!==ac.p)};
   
@@ -5811,7 +5844,7 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
             if(ativos.length===0&&patBruto>0){
               ativos.push({tk:"Portfolio Total",nm:"Portfolio Total",tp:"fundo_rf",qtd:1,pm:patBruto,pa:patBruto,inst:"Diversos",venc:"",posR:patBruto});
             }
-            var existing=d.cl.find(function(c){return c.nome.toLowerCase()===nomeCliente.toLowerCase()});
+            var existing=gcAcharClienteExistente(d.cl,nomeCliente);
             var newId=existing?existing.id:("c"+Date.now()+Math.random().toString(36).substr(2,5));
             var patReal=patBruto>0?patBruto:Object.values(instData).reduce(function(a,v){return a+v},0);
             /* Backup automático antes de reimportar */
@@ -5821,7 +5854,7 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
               backup={timestamp:Date.now(),data:cleanCopy,stats:{proventos:(existing.proventos||[]).length,notasFiscais:(existing.notasFiscais||[]).length,interacoes:(existing.interacoes||[]).length,objetivos:(existing.objetivos||[]).length,ativos:(existing._ativosImport||[]).length}};
             }
             var newC=Object.assign({},(existing||{}),{
-              id:newId,nome:nomeCliente,email:existing?existing.email:"",tel:existing?existing.tel:"",risco:existing?existing.risco:"Moderado",pais:existing?(existing.pais||"BR"):"BR",investExterior:existing?!!existing.investExterior:false,
+              id:newId,nome:(existing?existing.nome:nomeCliente),email:existing?existing.email:"",tel:existing?existing.tel:"",risco:existing?existing.risco:"Moderado",pais:existing?(existing.pais||"BR"):"BR",investExterior:existing?!!existing.investExterior:false,
               sv:existing?existing.sv:["patrimonio"],pat:patReal,patGorila:patReal,
               rend:existing&&existing.rend?existing.rend:0,notas:existing?existing.notas:("Importado em massa em "+new Date().toLocaleDateString("pt-BR")),
               txGestao:existing?existing.txGestao:0.80,feeFixo:existing?existing.feeFixo:0,feeBase:existing?existing.feeBase:"",
@@ -5989,7 +6022,7 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
             ativos.push({tk:tk,nm:ativo,tp:tp,qtd:qtd,pm:pm,pa:preco,inst:inst,venc:vD,posR:pos,_gClasse:classe,_gSubCl:subcl,_gRentPct:rentAtivoM1,_gRentRs:rentAtivoRsM1,_liquidado:foiLiquidadoM1});
           }
         }
-        var existing=d.cl.find(function(c){return c.nome.toLowerCase()===nomeCliente.toLowerCase()});
+        var existing=gcAcharClienteExistente(d.cl,nomeCliente);
         var newId=existing?existing.id:("c"+Date.now()+Math.random().toString(36).substr(2,5));
         var sumPosR=ativos.reduce(function(a,at){return a+parseFloat(at.posR||0)},0);
         var patReal=sumPosR>0?sumPosR:(patBruto>0?patBruto:0);
@@ -6027,7 +6060,7 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
           }
         }
         var newC=Object.assign({},(existing||{}),{
-          id:newId,nome:nomeCliente,email:existing?existing.email:"",tel:existing?existing.tel:"",risco:existing?existing.risco:"Moderado",pais:existing?(existing.pais||"BR"):"BR",investExterior:existing?!!existing.investExterior:false,
+          id:newId,nome:(existing?existing.nome:nomeCliente),email:existing?existing.email:"",tel:existing?existing.tel:"",risco:existing?existing.risco:"Moderado",pais:existing?(existing.pais||"BR"):"BR",investExterior:existing?!!existing.investExterior:false,
           sv:existing?existing.sv:["patrimonio"],pat:patReal,patGorila:patReal,
           rend:existing&&existing.rend?existing.rend:0,notas:existing?existing.notas:("Importado em massa em "+new Date().toLocaleDateString("pt-BR")),
           txGestao:existing?existing.txGestao:0.80,feeFixo:existing?existing.feeFixo:0,feeBase:existing?existing.feeBase:"",
@@ -6559,7 +6592,7 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
               ativos.push({tk:"Portfolio Total",nm:"Portfolio Total",tp:"fundo_rf",qtd:1,pm:patBruto,pa:patBruto,inst:"Diversos",venc:"",posR:patBruto});
             }
             
-            var existing=d.cl.find(function(c){return c.nome.toLowerCase()===nomeCliente.toLowerCase()});
+            var existing=gcAcharClienteExistente(d.cl,nomeCliente);
             var newId=existing?existing.id:("c"+Date.now());
             var patReal=patBruto>0?patBruto:Object.values(instData).reduce(function(a,v){return a+v},0);
             /* Backup automático antes de reimportar */
@@ -6570,7 +6603,7 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
             }
             
             var newC=Object.assign({},(existing||{}),{
-              id:newId,nome:nomeCliente,email:existing?existing.email:"",tel:existing?existing.tel:"",risco:existing?existing.risco:"Moderado",pais:existing?(existing.pais||"BR"):"BR",investExterior:existing?!!existing.investExterior:false,
+              id:newId,nome:(existing?existing.nome:nomeCliente),email:existing?existing.email:"",tel:existing?existing.tel:"",risco:existing?existing.risco:"Moderado",pais:existing?(existing.pais||"BR"):"BR",investExterior:existing?!!existing.investExterior:false,
               sv:existing?existing.sv:["patrimonio"],pat:patReal,patGorila:patReal,
               rend:existing&&existing.rend?existing.rend:0,notas:existing?existing.notas:("Importado do Gorila PDF em "+new Date().toLocaleDateString("pt-BR")),
               txGestao:existing?existing.txGestao:0.80,feeFixo:existing?existing.feeFixo:0,feeBase:existing?existing.feeBase:"",
@@ -6969,7 +7002,7 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
         }
 
         
-        var existing=d.cl.find(function(c){return c.nome.toLowerCase()===nomeCliente.toLowerCase()});
+        var existing=gcAcharClienteExistente(d.cl,nomeCliente);
 
         /* Create client (new or replacing old).
            Prioridade dos campos: configs do XLSX > existing > defaults
@@ -7036,7 +7069,7 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
         }
         var newC=Object.assign({},(existing||{}),{
           id:newId,
-          nome:nomeCliente,
+          nome:(existing?existing.nome:nomeCliente),
           email:pickCfg(cfgEmail,existing?existing.email:"",""),
           tel:pickCfg(cfgTel,existing?existing.tel:"",""),
           risco:pickCfg(cfgRisco,existing?existing.risco:"","Moderado"),
@@ -16353,10 +16386,25 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
               )}
             </div>
           </div>
+          {(function(){
+            var bk=c._backupAntesImport.data||{};
+            var provBk=Array.isArray(bk.proventos)?bk.proventos:[];
+            var nfBk=Array.isArray(bk.notasFiscais)?bk.notasFiscais:[];
+            var ids={};(c.proventos||[]).forEach(function(p){ids[p.id]=true});
+            var idsNf={};(c.notasFiscais||[]).forEach(function(p){idsNf[p.id]=true});
+            var provFalt=provBk.filter(function(p){return !ids[p.id]});
+            var nfFalt=nfBk.filter(function(p){return !idsNf[p.id]});
+            if(provFalt.length===0&&nfFalt.length===0)return null;
+            return <Bt v="ghost" onClick={function(){
+              if(!confirm("Recuperar do backup "+provFalt.length+" provento(s) e "+nfFalt.length+" NF(s) que não estão mais no cliente?\n\nOs ativos e demais dados atuais NÃO serão alterados."))return;
+              dp({t:"UC",p:{id:c.id,proventos:(c.proventos||[]).concat(provFalt),notasFiscais:(c.notasFiscais||[]).concat(nfFalt)}});
+              alert("✅ Recuperados "+provFalt.length+" provento(s) e "+nfFalt.length+" NF(s) do backup.");
+            }} style={{fontSize:11,padding:"8px 14px",border:"1px solid "+T.green+"66",color:T.green}}>🛟 Recuperar só proventos ({provFalt.length})</Bt>;
+          })()}
           <Bt v="ghost" onClick={function(){
             if(!confirm("Restaurar o cliente "+c.nome+" para o estado antes da última reimportação?\n\nIsso vai SOBRESCREVER os dados atuais com o backup de "+new Date(c._backupAntesImport.timestamp).toLocaleString("pt-BR")+".\n\nEssa ação não pode ser desfeita.")) return;
             var bData=Object.assign({},c._backupAntesImport.data,{id:c.id});
-            dp({t:"RC",p:bData});
+            dp({t:"RC",p:bData,noMerge:true});
             alert("✅ Backup restaurado com sucesso.\n\nO cliente foi revertido ao estado de "+new Date(c._backupAntesImport.timestamp).toLocaleString("pt-BR")+".");
           }} style={{fontSize:11,padding:"8px 14px",border:"1px solid "+T.gold+"55",color:T.gold}}>↺ Restaurar Backup</Bt>
         </div>
@@ -35636,6 +35684,16 @@ function gerarRelatorioGFModeloHtml(c,opts){
   if(!D)return null;
   var nomeCompleto=String(c.nome||"Cliente");
   var primeiro=nomeCompleto.split(" ")[0];
+  /* Casal/família: o relatório leva o nome de todos os integrantes (ex.: "Thiago & Uliana") */
+  if(c.tipoCli==="casal"||c.tipoCli==="familia"){
+    var _nomesCasal=[primeiro];
+    (c.integrantes||[]).forEach(function(it){var pn=String((it&&it.nome)||"").trim().split(/\s+/)[0];if(pn&&_nomesCasal.indexOf(pn)<0)_nomesCasal.push(pn);});
+    if(_nomesCasal.length<2&&c.conjuge&&c.conjuge.nome){var pc=String(c.conjuge.nome).trim().split(/\s+/)[0];if(pc&&_nomesCasal.indexOf(pc)<0)_nomesCasal.push(pc);}
+    if(_nomesCasal.length>1){
+      nomeCompleto=_nomesCasal.length===2?_nomesCasal.join(" & "):_nomesCasal.slice(0,-1).join(", ")+" & "+_nomesCasal[_nomesCasal.length-1];
+      primeiro=nomeCompleto;
+    }
+  }
   var hoje=new Date();
 
   /* ── seções ativas (mesma configuração do configurador em Particularidades) ── */
@@ -37586,7 +37644,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '500';
+  var SW_VERSION = '501';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
