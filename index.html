@@ -3076,6 +3076,7 @@ function Dash({data:d,onSel:os,goTo}){
          pro resumo curto (o card com os KPIs) como PDF — nunca bloqueia o envio do e-mail. */
       var pathStorage="relatorios/"+c.id+"/"+mesRefArquivo+"_"+(isPlan?"gf":"gp")+".pdf";
       var tipoRelatorioCompleto=isPlan?"planejamento":"mensal";
+      var _pdfModo="nenhum";
       buscarIndicadoresMercadoVivos().then(function(vivos){
         /* Refaz o card "Panorama do Mês" com Selic/IPCA de HOJE (não o retrato salvo no overview) */
         if(vivos&&!isPlan){
@@ -3091,10 +3092,28 @@ function Dash({data:d,onSel:os,goTo}){
         return gerarRelatorioHtmlHeadless(c,d,tipoRelatorioCompleto);
       }).then(function(htmlCompleto){
         var htmlParaPdf=htmlCompleto||reportHtml.replace("%%PDF_BUTTON%%","");
-        return gerarPdfLinkCourinvest(pathStorage,htmlParaPdf);
+        var _htmlResumoPdf=reportHtml.replace("%%PDF_BUTTON%%","");
+        /* v502: o botão de PDF sumia em silêncio quando a geração falhava/estourava o tempo. Agora:
+           1ª tentativa = relatório completo; se falhar, 2ª = o relatório completo de novo (pode ter sido
+           falha momentânea) só se a 1ª tiver sido rápida; 3ª = resumo curto (leve). O resultado vira
+           _pdfModo ("completo"|"resumo"|"nenhum") e é mostrado ao Igor no painel de envio. */
+        var _t0=Date.now();
+        return gerarPdfLinkCourinvest(pathStorage,htmlParaPdf).then(function(url){
+          if(url){_pdfModo="completo";return url;}
+          console.warn("[E-mail] PDF completo de "+c.nome+" falhou após "+Math.round((Date.now()-_t0)/1000)+"s.");
+          var rapido=(Date.now()-_t0)<60000;
+          var p2=rapido?gerarPdfLinkCourinvest(pathStorage,htmlParaPdf):Promise.resolve(null);
+          return p2.then(function(url2){
+            if(url2){_pdfModo="completo";return url2;}
+            return gerarPdfLinkCourinvest(pathStorage.replace(/\.pdf$/,"_resumo.pdf"),_htmlResumoPdf).then(function(url3){
+              _pdfModo=url3?"resumo":"nenhum";
+              return url3;
+            });
+          });
+        });
       }).then(function(pdfUrl){
         var botaoHtml=pdfUrl
-          ?'<a class="cta-btn" href="'+pdfUrl+'" target="_blank" rel="noopener">📄 Baixar Relatório Completo em PDF</a>'
+          ?'<a class="cta-btn" href="'+pdfUrl+'" target="_blank" rel="noopener">'+(_pdfModo==="resumo"?'📄 Baixar Resumo do Relatório em PDF':'📄 Baixar Relatório Completo em PDF')+'</a>'
           :'<span class="cta-fallback">Entre em contato para receber o relatório completo em PDF.</span>';
         var reportHtmlFinal=reportHtml.replace("%%PDF_BUTTON%%",botaoHtml);
 
@@ -3113,7 +3132,7 @@ function Dash({data:d,onSel:os,goTo}){
 
         return window.emailjs.send(cfg.serviceId,cfg.templateId,templateParams);
       })
-        .then(function(){resolve();})
+        .then(function(){resolve(_pdfModo);})
         .catch(function(e){reject(new Error("EmailJS: "+(e&&e.text||e&&e.message||JSON.stringify(e))));});
     });
   };
@@ -3251,8 +3270,8 @@ function Dash({data:d,onSel:os,goTo}){
     if(enviaPorEmail){
       sEmailStatus(function(p){var n=Object.assign({},p);n[cl.id]="enviando";return n;});
       sendReportEmail(cl,tipoRelEmail,mesRefNome)
-        .then(function(){
-          sEmailStatus(function(p){var n=Object.assign({},p);n[cl.id]="ok";return n;});
+        .then(function(modoPdf){
+          sEmailStatus(function(p){var n=Object.assign({},p);n[cl.id]=(modoPdf==="completo")?"ok":(modoPdf==="resumo"?"ok-resumo":"ok-sempdf");return n;});
           console.log("[E-mail] Enviado para",cl.nome,cl.email);
         })
         .catch(function(e){
@@ -3619,8 +3638,8 @@ function Dash({data:d,onSel:os,goTo}){
                     </div>
                     {/* Status do e-mail */}
                     {emailStatus[c.id]&&(
-                      <div style={{fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:5,background:emailStatus[c.id]==="ok"?"rgba(45,212,160,0.15)":emailStatus[c.id]==="enviando"?"rgba(56,189,248,0.15)":"rgba(239,100,97,0.15)",color:emailStatus[c.id]==="ok"?T.green:emailStatus[c.id]==="enviando"?T.cyan:T.red,whiteSpace:"nowrap"}}>
-                        {emailStatus[c.id]==="ok"?"📧✅":emailStatus[c.id]==="enviando"?"📧⏳":"📧❌"}
+                      <div style={{fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:5,background:(emailStatus[c.id]==="ok-resumo"||emailStatus[c.id]==="ok-sempdf")?"rgba(232,163,23,0.18)":emailStatus[c.id]==="ok"?"rgba(45,212,160,0.15)":emailStatus[c.id]==="enviando"?"rgba(56,189,248,0.15)":"rgba(239,100,97,0.15)",color:(emailStatus[c.id]==="ok-resumo"||emailStatus[c.id]==="ok-sempdf")?T.gold:emailStatus[c.id]==="ok"?T.green:emailStatus[c.id]==="enviando"?T.cyan:T.red,whiteSpace:"nowrap"}}>
+                        {emailStatus[c.id]==="ok-resumo"?"📧⚠ só resumo em PDF":emailStatus[c.id]==="ok-sempdf"?"📧⚠ enviado SEM botão de PDF":emailStatus[c.id]==="ok"?"📧✅":emailStatus[c.id]==="enviando"?"📧⏳":"📧❌"}
                       </div>
                     )}
                     {/* PDF com tipo correto baseado no serviço */}
@@ -8556,6 +8575,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           }
         }
         dp({t:"UC",p:{id:c.id,objetivos:_objetivosConjPreservados,conjuge:Object.assign({},c.conjuge||{},{
+          nome:(c.conjuge&&c.conjuge.nome)||((c.integrantes||[]).filter(function(i){return i&&i.nome;})[0]||{}).nome||"",
           _ativosImport:ativosConj.length>0?ativosConj:(c.conjuge&&c.conjuge._ativosImport||[]),
           _gorilaRent:gRentConj,
           patGorila:patConj||0
@@ -21990,6 +22010,21 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                       <Bt v="secondary" onClick={function(){gorilaRelRef.current&&gorilaRelRef.current.click()}} style={{fontSize:10,padding:"8px 14px",color:T.gold,border:"1px solid rgba(212,163,40,0.3)",flexShrink:0}}>{c._ativosImport&&c._ativosImport.length>0?"🔄 Reimportar Gorila":"📥 Importar Gorila"}</Bt>
                       {corrMsg&&(corrMsg.indexOf("Carteira do cliente")>=0||corrMsg.indexOf("Erro ao importar Gorila")>=0)&&<span style={{fontSize:10,fontWeight:600,color:corrMsg.indexOf("✅")>=0?T.green:T.orange,flexShrink:0,maxWidth:220}}>{corrMsg}</span>}
                     </div>
+                    {(c.tipoCli==="casal"||c.tipoCli==="familia"||!!c.conjuge)&&(
+                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,padding:"12px 16px",background:"rgba(167,139,250,0.05)",borderRadius:10,border:"1px solid rgba(167,139,250,0.2)"}}>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:11,fontWeight:700,color:T.purple,marginBottom:3}}>👫 Gorila do cônjuge{(c.conjuge&&c.conjuge.nome)?" — "+c.conjuge.nome:((c.integrantes||[]).filter(function(i){return i&&i.nome;})[0]?" — "+(c.integrantes||[]).filter(function(i){return i&&i.nome;})[0].nome:"")} — opcional</div>
+                          <div style={{fontSize:10,color:T.t3}}>
+                            {c.conjuge&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0
+                              ? "✅ "+c.conjuge._ativosImport.length+" ativo"+(c.conjuge._ativosImport.length>1?"s":"")+" importado"+(c.conjuge._ativosImport.length>1?"s":"")+(c.conjuge.patGorila>0?" · "+fmF(c.conjuge.patGorila):"")+" — o relatório mostra a carteira consolidada do casal."
+                              : "Importe o extrato do Gorila do cônjuge (XLSX). O relatório passa a mostrar o patrimônio investido consolidado do casal, com a divisão entre os dois."}
+                          </div>
+                        </div>
+                        <input ref={gorilaConjRef} type="file" accept=".xlsx,.xls" onChange={function(e){if(e.target.files[0])importarGorilaConjuge(e.target.files[0]);e.target.value="";}} style={{display:"none"}}/>
+                        <Bt v="secondary" onClick={function(){gorilaConjRef.current&&gorilaConjRef.current.click()}} style={{fontSize:10,padding:"8px 14px",color:T.purple,border:"1px solid rgba(167,139,250,0.3)",flexShrink:0}}>{c.conjuge&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0?"🔄 Reimportar Gorila":"📥 Importar Gorila"}</Bt>
+                        {corrMsg&&corrMsg.indexOf("Cônjuge")>=0&&<span style={{fontSize:10,fontWeight:600,color:corrMsg.indexOf("✅")>=0?T.green:T.orange,flexShrink:0,maxWidth:220}}>{corrMsg}</span>}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -22114,7 +22149,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                  Alinhada 1:1 com o TEMPLATE_DEFAULTS de dentro do exportarRelatorioFinPDF —
                  mesmas chaves, pra marcar/desmarcar aqui realmente mudar o PDF gerado. */
               var TEMPLATES_FIN={
-                premium:  {l:"Premium",   ic:"⭐", cor:T.gold,   desc:"Relatório completo (9 páginas): resumo, receitas, despesas por orçamento, detalhamento, raio-x, metas e plano de ação"},
+                premium:  {l:"Premium",   ic:"⭐", cor:T.gold,   desc:"Relatório completo (9 páginas + investimentos se houver Gorila): resumo, receitas, despesas por orçamento, detalhamento, raio-x, metas e plano de ação"},
                 simples:  {l:"Simples",   ic:"📃", cor:T.cyan,   desc:"Essencial: capa + sumário + resumo executivo + despesas por orçamento + metas"},
                 completo: {l:"Completo",  ic:"📚", cor:T.purple, desc:"Idêntico ao Premium (todas as páginas do modelo)"},
                 custom:   {l:"Custom",    ic:"🎛️", cor:T.green,  desc:"Você escolhe seção por seção abaixo"}
@@ -22128,6 +22163,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                 {k:"detalhe",     l:"Detalhamento de Despesas",      ic:"🔬", desc:"Cada grupo aberto em categorias, com maiores estouros e economias"},
                 {k:"raiox",       l:"Raio-X dos Gastos",             ic:"🔍", desc:"Para onde foi cada R$ 100 que entrou, gastos sem previsto e origem do desvio"},
                 {k:"metasOrc",    l:"Metas e Orçamento",             ic:"🎯", desc:"Previsto × realizado por grupo, com status Dentro / Atenção / Estourou"},
+                {k:"carteira",    l:"Investimentos (Gorila)",        ic:"📈", desc:"Patrimônio investido consolidado (titular + cônjuge), por classe e maiores posições — só aparece se houver Gorila importado"},
                 {k:"observacoes", l:"Observações e Próximos Passos", ic:"📋", desc:"Pontos de atenção, o que funcionou e plano de ação pro próximo mês"}
               ];
               var TEMPLATE_DEFAULTS_FIN=GF_SECOES_PADRAO; /* mesma tabela usada pelo gerador (gfModeloDados) — nunca divergem */
@@ -35599,10 +35635,10 @@ function ModuloRendaFixa({c,dispatch,taxasBCB,taxaBCBStatus}){
    que existir (grupo cai pra macro-categoria) e gfModeloDadosCompletos() avisa pra reimportar. */
 var GF_MESES=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 var GF_SECOES_PADRAO={
-  premium:  {capa:true,sumario:true,resumoExec:true,receitas:true,despesas:true,detalhe:true,raiox:true,metasOrc:true,observacoes:true},
-  simples:  {capa:true,sumario:true,resumoExec:true,receitas:false,despesas:true,detalhe:false,raiox:false,metasOrc:true,observacoes:false},
-  completo: {capa:true,sumario:true,resumoExec:true,receitas:true,despesas:true,detalhe:true,raiox:true,metasOrc:true,observacoes:true},
-  custom:   {capa:true,sumario:true,resumoExec:true,receitas:true,despesas:true,detalhe:false,raiox:false,metasOrc:true,observacoes:true}
+  premium:  {capa:true,sumario:true,resumoExec:true,receitas:true,despesas:true,detalhe:true,raiox:true,metasOrc:true,carteira:true,observacoes:true},
+  simples:  {capa:true,sumario:true,resumoExec:true,receitas:false,despesas:true,detalhe:false,raiox:false,metasOrc:true,carteira:false,observacoes:false},
+  completo: {capa:true,sumario:true,resumoExec:true,receitas:true,despesas:true,detalhe:true,raiox:true,metasOrc:true,carteira:true,observacoes:true},
+  custom:   {capa:true,sumario:true,resumoExec:true,receitas:true,despesas:true,detalhe:false,raiox:false,metasOrc:true,carteira:true,observacoes:true}
 };
 function gfEsc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
 function gfBRL(v,sinal){
@@ -35678,6 +35714,36 @@ function gfModeloDadosCompletos(c){
   return !!(d&&d.info.temGrupo&&d.info.temReal);
 }
 
+/* v503: carteira de investimentos (Gorila) consolidada — titular + cônjuge — pro relatório de Gestão Financeira */
+function gfCarteiraConsolidada(c){
+  var tpL={tesouro:"Tesouro",cdb:"CDB",lci:"LCI",lca:"LCA",fii:"FII",fundo_rf:"Fundo RF",fundo_infra:"FI-Infra",fundo_mm:"Fundo MM",acao:"Ação",debi:"Debêntures",caixa:"Caixa"};
+  var val=function(a){var v=+a.posR;if(!(v>0))v=(+a.qtd||0)*(+a.pa||0);return v>0?v:0;};
+  var pri=function(n){return String(n||"").trim().split(/\s+/)[0];};
+  var nomeT=pri(c.nome)||"Titular";
+  var nomeC=pri((c.conjuge&&c.conjuge.nome)||((c.integrantes||[]).filter(function(i){return i&&i.nome;})[0]||{}).nome)||"Cônjuge";
+  var grupos=[{nome:nomeT,ativos:c._ativosImport||[],patDecl:c.patGorila||0,res:(c._gorilaRent&&c._gorilaRent.resultado)}];
+  if(c.conjuge)grupos.push({nome:nomeC,ativos:c.conjuge._ativosImport||[],patDecl:c.conjuge.patGorila||0,res:(c.conjuge._gorilaRent&&c.conjuge._gorilaRent.resultado)});
+  var pessoas=[],classes={},todos=[];
+  grupos.forEach(function(g){
+    var soma=0;
+    (g.ativos||[]).forEach(function(a){
+      var v=val(a);if(!(v>0)||a._liquidado)return;
+      soma+=v;
+      var cl=a._gClasse||a.cat||tpL[a.tp]||a.tp||"Outros";
+      classes[cl]=(classes[cl]||0)+v;
+      todos.push({nm:a.nm||a.tk||"Ativo",dono:g.nome,classe:cl,valor:v});
+    });
+    var pat=soma>0?soma:g.patDecl;
+    if(pat>0||(g.ativos||[]).length>0)pessoas.push({nome:g.nome,pat:pat,n:(g.ativos||[]).length,res:(typeof g.res==="number"?g.res:null)});
+  });
+  var total=pessoas.reduce(function(s,p){return s+p.pat;},0);
+  if(!(total>0))return null;
+  var cls=Object.keys(classes).map(function(k){return {nome:k,valor:classes[k]};}).sort(function(a,b){return b.valor-a.valor;});
+  todos.sort(function(a,b){return b.valor-a.valor;});
+  var resTot=null;
+  pessoas.forEach(function(p){if(p.res!=null)resTot=(resTot||0)+p.res;});
+  return {pessoas:pessoas,total:total,classes:cls,top:todos.slice(0,8),nAtivos:todos.length,resultado:resTot,casal:pessoas.length>1};
+}
 function gerarRelatorioGFModeloHtml(c,opts){
   opts=opts||{};
   var D=gfModeloDados(c,opts);
@@ -35720,6 +35786,7 @@ function gerarRelatorioGFModeloHtml(c,opts){
   var clsRec=function(v){return v>0?corVerde:v<0?corVermelho:"#8B93A8";}; /* receita: acima = bom */
 
   /* ── ordem/numeração das páginas ── */
+  var CART=on("carteira")?gfCarteiraConsolidada(c):null;
   var DEF=[
     {k:"resumoExec",ic:"📊",t:"Resumo Executivo"},
     {k:"receitas",ic:"💰",t:"Receitas"},
@@ -35727,8 +35794,9 @@ function gerarRelatorioGFModeloHtml(c,opts){
     {k:"detalhe",ic:"🔬",t:"Detalhamento de Despesas"},
     {k:"raiox",ic:"🔍",t:"Raio-X dos Gastos"},
     {k:"metasOrc",ic:"🎯",t:"Metas e Orçamento"},
+    {k:"carteira",ic:"📈",t:(CART&&CART.casal?"Investimentos do Casal":"Carteira de Investimentos")},
     {k:"observacoes",ic:"📋",t:"Observações e Próximos Passos"}
-  ].filter(function(s){return on(s.k);});
+  ].filter(function(s){return on(s.k)&&(s.k!=="carteira"||!!CART);});
   var pg={},n=on("capa")?1:0,tocPg=null;
   if(on("sumario")){n++;tocPg=n;}
   DEF.forEach(function(s){n++;pg[s.k]=n;});
@@ -36012,6 +36080,30 @@ function gerarRelatorioGFModeloHtml(c,opts){
     if(!rowsM)rowsM='<div class="gf-note gf-note-gold">Nenhum grupo do orçamento tem valor previsto cadastrado neste mês.</div>';
     htmlPages+=page("metasOrc",ttl("🎯","Metas e ","Orçamento","Previsto × realizado por grupo de orçamento no mês.")+kM+rowsM
       +'<div class="gf-tiny" style="margin-top:8px">Estimativas de cada categoria conforme o orçamento cadastrado. Categorias sem valor previsto compõem o total realizado, mas não entram nesta comparação por grupo.</div>');
+  }
+
+  /* ═════ CARTEIRA DE INVESTIMENTOS (Gorila) — consolidada do casal ═════ */
+  if(on("carteira")&&CART){
+    var kpiC=function(l,v,cor,sub){return '<td class="gf-kpi-td"><div class="gf-kpi"><div class="gf-kpi-l">'+l+'</div><div class="gf-kpi-v" style="color:'+cor+'">'+v+'</div><div class="gf-kpi-s">'+sub+'</div></div></td>';};
+    var kC='<table class="gf-kpis gf-kpis3"><tbody><tr>'+kpiC(CART.casal?"PATRIMÔNIO DO CASAL":"PATRIMÔNIO INVESTIDO",gfBRL0(CART.total),"#0A1628",CART.nAtivos+" ativo"+(CART.nAtivos!==1?"s":"")+" na carteira");
+    if(CART.casal){
+      CART.pessoas.slice(0,2).forEach(function(p){kC+=kpiC(gfEsc(p.nome).toUpperCase(),gfBRL0(p.pat),corOuro,gfPct(CART.total>0?p.pat/CART.total*100:0,0)+" do total");});
+    }else{
+      kC+=kpiC("ATIVOS",String(CART.nAtivos),corOuro,"posições abertas");
+      kC+=kpiC("RESULTADO DO PERÍODO",CART.resultado!=null?gfBRL(CART.resultado,true):"—",CART.resultado!=null&&CART.resultado<0?corVermelho:corVerde,"conforme extrato do Gorila");
+    }
+    kC+='</tr></tbody></table>';
+    var maxCl=CART.classes.length?CART.classes[0].valor:1;
+    var rowsCl=CART.classes.slice(0,8).map(function(x){
+      return '<tr><td><div class="gf-cn">'+gfEsc(x.nome)+'</div></td><td class="gf-r gf-mono">'+gfBRL(x.valor)+'</td><td class="gf-r gf-mono gf-mut">'+gfPct(CART.total>0?x.valor/CART.total*100:0)+'</td><td>'+barra(maxCl>0?x.valor/maxCl*100:0,"#0E1B3D")+'</td></tr>';
+    }).join("");
+    var tblCl='<table class="gf-tbl"><colgroup><col style="width:34%"/><col style="width:24%"/><col style="width:14%"/><col style="width:28%"/></colgroup><thead><tr><th>CLASSE DE ATIVO</th><th class="gf-r">VALOR</th><th class="gf-r">% DA CARTEIRA</th><th></th></tr></thead><tbody>'+rowsCl+'</tbody></table>';
+    var rowsTop=CART.top.map(function(x){
+      return '<tr><td><div class="gf-cn">'+gfEsc(x.nm)+'</div>'+(CART.casal?'<div class="gf-cs">'+gfEsc(x.dono)+' · '+gfEsc(x.classe)+'</div>':'<div class="gf-cs">'+gfEsc(x.classe)+'</div>')+'</td><td class="gf-r gf-mono">'+gfBRL(x.valor)+'</td><td class="gf-r gf-mono gf-mut">'+gfPct(CART.total>0?x.valor/CART.total*100:0)+'</td></tr>';
+    }).join("");
+    var tblTop='<table class="gf-tbl"><colgroup><col style="width:58%"/><col style="width:26%"/><col style="width:16%"/></colgroup><thead><tr><th>MAIORES POSIÇÕES</th><th class="gf-r">VALOR</th><th class="gf-r">% CARTEIRA</th></tr></thead><tbody>'+rowsTop+'</tbody></table>';
+    var notaC='<div class="gf-tiny" style="margin-top:8px">Posições conforme o último extrato do Gorila importado'+(CART.casal?' de cada integrante, somadas em visão consolidada':'')+'. Valores de mercado na data do extrato.</div>';
+    htmlPages+=page("carteira",ttl("📈",CART.casal?"Investimentos ":"Carteira de ",CART.casal?"do Casal":"Investimentos",CART.casal?"Visão consolidada do patrimônio investido de "+gfEsc(nomeCompleto)+".":"Patrimônio investido, alocação por classe e maiores posições.")+kC+'<div class="gf-card gf-card-t" style="margin-bottom:12px">'+tblCl+'</div><div class="gf-card gf-card-t">'+tblTop+'</div>'+notaC);
   }
 
   /* ═════ OBSERVAÇÕES E PRÓXIMOS PASSOS ═════ */
@@ -37644,7 +37736,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '501';
+  var SW_VERSION = '503';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
