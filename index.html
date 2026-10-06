@@ -1268,11 +1268,16 @@ const obterOverviewMercadoRecente=function(dadosApp){
 var _indicVivosCache=null;
 const buscarIndicadoresMercadoVivos=function(){
   if(_indicVivosCache&&(Date.now()-_indicVivosCache.t)<30*60*1000)return Promise.resolve(_indicVivosCache);
-  var comTimeout=function(url){
+  /* v504: timeout maior (12s) + 2 tentativas por série; se mesmo assim falhar, usa o ÚLTIMO valor vivo
+     guardado no aparelho (até 10 dias) — nunca cai pro retrato salvo no overview (que podia ter Selic velha). */
+  var tentar=function(url,ms){
     return new Promise(function(res){
-      var enc=false;var tm=setTimeout(function(){if(!enc){enc=true;res(null);}},7000);
-      fetch(url).then(function(r){return r.json();}).then(function(j){if(!enc){enc=true;clearTimeout(tm);res(j);}}).catch(function(){if(!enc){enc=true;clearTimeout(tm);res(null);}});
+      var enc=false;var tm=setTimeout(function(){if(!enc){enc=true;res(null);}},ms);
+      fetch(url,{cache:"no-store"}).then(function(r){return r.json();}).then(function(j){if(!enc){enc=true;clearTimeout(tm);res(j);}}).catch(function(){if(!enc){enc=true;clearTimeout(tm);res(null);}});
     });
+  };
+  var comTimeout=function(url){
+    return tentar(url,12000).then(function(j){return (j&&j[0])?j:tentar(url+"&_="+Date.now(),12000);});
   };
   var num=function(x){var n=parseFloat(String(x).replace(",","."));return isNaN(n)?null:n;};
   return Promise.all([
@@ -1283,8 +1288,14 @@ const buscarIndicadoresMercadoVivos=function(){
     var ipca=r[1]&&r[1][0]?num(r[1][0].valor):null;
     if(selic!=null&&(selic<=0||selic>50))selic=null;
     if(ipca!=null&&(ipca<-20||ipca>50))ipca=null;
+    var salvo=null;
+    try{salvo=JSON.parse(localStorage.getItem("courinvest_indic_vivos_v1")||"null");}catch(e){}
+    if(salvo&&(Date.now()-salvo.t)>10*24*3600*1000)salvo=null;
+    if(selic==null&&salvo&&salvo.selic!=null)selic=salvo.selic;
+    if(ipca==null&&salvo&&salvo.ipca!=null)ipca=salvo.ipca;
     if(selic==null&&ipca==null)return null;
     _indicVivosCache={t:Date.now(),selic:selic,ipca:ipca};
+    try{localStorage.setItem("courinvest_indic_vivos_v1",JSON.stringify({t:(r[0]||r[1])?Date.now():(salvo?salvo.t:Date.now()),selic:selic,ipca:ipca}));}catch(e){}
     return _indicVivosCache;
   }).catch(function(){return null;});
 };
@@ -1293,6 +1304,7 @@ try{buscarIndicadoresMercadoVivos();}catch(e){}
 const montarResumoMercadoEmail=function(ov,vivos){
   if(!ov)return null;
   if(!vivos&&_indicVivosCache&&(Date.now()-_indicVivosCache.t)<6*3600*1000)vivos=_indicVivosCache;
+  if(!vivos){try{var _sv=JSON.parse(localStorage.getItem("courinvest_indic_vivos_v1")||"null");if(_sv&&(Date.now()-_sv.t)<10*24*3600*1000)vivos=_sv;}catch(e){}}
   var fmtN=function(v,d){return v==null?null:Number(v).toFixed(d==null?2:d).replace(".",",");};
   var comentario=null;
   if(ov.texto){
@@ -1315,6 +1327,8 @@ const montarResumoMercadoEmail=function(ov,vivos){
   }
   var indicadores=[];
   var dd=Object.assign({},ov.dados||{});
+  /* Selic do snapshot salvo no overview não é confiável (já veio da série errada, 14,15%) — só usa a viva. */
+  delete dd.selic;
   if(vivos){if(vivos.selic!=null)dd.selic=vivos.selic;if(vivos.ipca!=null)dd.ipca=vivos.ipca;}
   if(dd.selic!=null)indicadores.push({label:"Selic",value:fmtN(dd.selic)+"% a.a."});
   if(dd.ipca!=null)indicadores.push({label:"IPCA (12m)",value:fmtN(dd.ipca)+"%"});
@@ -35721,8 +35735,19 @@ function gfCarteiraConsolidada(c){
   var pri=function(n){return String(n||"").trim().split(/\s+/)[0];};
   var nomeT=pri(c.nome)||"Titular";
   var nomeC=pri((c.conjuge&&c.conjuge.nome)||((c.integrantes||[]).filter(function(i){return i&&i.nome;})[0]||{}).nome)||"Cônjuge";
-  var grupos=[{nome:nomeT,ativos:c._ativosImport||[],patDecl:c.patGorila||0,res:(c._gorilaRent&&c._gorilaRent.resultado)}];
-  if(c.conjuge)grupos.push({nome:nomeC,ativos:c.conjuge._ativosImport||[],patDecl:c.conjuge.patGorila||0,res:(c.conjuge._gorilaRent&&c.conjuge._gorilaRent.resultado)});
+  var grupos=[{nome:nomeT,ativos:c._ativosImport||[],patDecl:c.patGorila||0,gr:c._gorilaRent||null}];
+  if(c.conjuge)grupos.push({nome:nomeC,ativos:c.conjuge._ativosImport||[],patDecl:c.conjuge.patGorila||0,gr:c.conjuge._gorilaRent||null});
+  /* rentabilidade do MÊS (mesma lógica do relatório de GP): período "Último mês" do Gorila; se o extrato for de ~30 dias, o "Período" */
+  var rentMesDe=function(gr){
+    if(!gr||!gr.periods||!gr.periods.length)return null;
+    var achar=function(keys){return gr.periods.find(function(x){var t=String(x.p||"").toLowerCase();return typeof x.rent==="number"&&keys.some(function(k){return t.indexOf(k)>=0;});});};
+    var al=achar(["último mês","ultimo mes","último mes","ultimo mês","mês atual","mes atual","1m"]);
+    if(!al&&gr.dataIni&&gr.dataFim){
+      var dd=0;try{dd=Math.round((new Date(gr.dataFim)-new Date(gr.dataIni))/86400000);}catch(e){}
+      if(dd>=25&&dd<=40)al=achar(["periodo","período"]);
+    }
+    return al?{rent:al.rent*100,cdi:(typeof al.cdi==="number"?al.cdi*100:null),ipca:(typeof al.ipca==="number"?al.ipca*100:null)}:null;
+  };
   var pessoas=[],classes={},todos=[];
   grupos.forEach(function(g){
     var soma=0;
@@ -35734,15 +35759,26 @@ function gfCarteiraConsolidada(c){
       todos.push({nm:a.nm||a.tk||"Ativo",dono:g.nome,classe:cl,valor:v});
     });
     var pat=soma>0?soma:g.patDecl;
-    if(pat>0||(g.ativos||[]).length>0)pessoas.push({nome:g.nome,pat:pat,n:(g.ativos||[]).length,res:(typeof g.res==="number"?g.res:null)});
+    if(pat>0||(g.ativos||[]).length>0){
+      var rm=rentMesDe(g.gr);
+      var cap=(g.gr&&typeof g.gr.captacao==="number")?g.gr.captacao:0;
+      var ganho=null,rentPct=rm?rm.rent:null;
+      if(g.gr&&typeof g.gr.resultado==="number"&&g.gr.resultado!==0)ganho=g.gr.resultado;
+      else if(rentPct!=null&&pat>0)ganho=(pat-cap)/(1+rentPct/100)*(rentPct/100);
+      var base=(ganho!=null)?(pat-ganho-cap):null;
+      if(rentPct==null&&ganho!=null&&base>0)rentPct=ganho/base*100;
+      pessoas.push({nome:g.nome,pat:pat,n:(g.ativos||[]).length,rent:rentPct,ganho:ganho,base:base,cdi:rm?rm.cdi:null,ipca:rm?rm.ipca:null});
+    }
   });
   var total=pessoas.reduce(function(s,p){return s+p.pat;},0);
   if(!(total>0))return null;
   var cls=Object.keys(classes).map(function(k){return {nome:k,valor:classes[k]};}).sort(function(a,b){return b.valor-a.valor;});
   todos.sort(function(a,b){return b.valor-a.valor;});
-  var resTot=null;
-  pessoas.forEach(function(p){if(p.res!=null)resTot=(resTot||0)+p.res;});
-  return {pessoas:pessoas,total:total,classes:cls,top:todos.slice(0,8),nAtivos:todos.length,resultado:resTot,casal:pessoas.length>1};
+  var ganhoTot=null,baseTot=0;
+  pessoas.forEach(function(p){if(p.ganho!=null&&p.base>0){ganhoTot=(ganhoTot||0)+p.ganho;baseTot+=p.base;}});
+  var rentTot=(ganhoTot!=null&&baseTot>0)?ganhoTot/baseTot*100:null;
+  var ref=pessoas.filter(function(p){return p.cdi!=null;})[0];
+  return {pessoas:pessoas,total:total,classes:cls,top:todos.slice(0,pessoas.length>1?Math.max(3,Math.min(6,10-cls.length)):Math.max(4,Math.min(8,13-cls.length))),nAtivos:todos.length,ganho:ganhoTot,rent:rentTot,cdi:ref?ref.cdi:null,ipca:ref?ref.ipca:null,casal:pessoas.length>1};
 }
 function gerarRelatorioGFModeloHtml(c,opts){
   opts=opts||{};
@@ -36085,14 +36121,21 @@ function gerarRelatorioGFModeloHtml(c,opts){
   /* ═════ CARTEIRA DE INVESTIMENTOS (Gorila) — consolidada do casal ═════ */
   if(on("carteira")&&CART){
     var kpiC=function(l,v,cor,sub){return '<td class="gf-kpi-td"><div class="gf-kpi"><div class="gf-kpi-l">'+l+'</div><div class="gf-kpi-v" style="color:'+cor+'">'+v+'</div><div class="gf-kpi-s">'+sub+'</div></div></td>';};
-    var kC='<table class="gf-kpis gf-kpis3"><tbody><tr>'+kpiC(CART.casal?"PATRIMÔNIO DO CASAL":"PATRIMÔNIO INVESTIDO",gfBRL0(CART.total),"#0A1628",CART.nAtivos+" ativo"+(CART.nAtivos!==1?"s":"")+" na carteira");
+    var corRent=function(v){return v==null?"#8B93A8":(v<0?corVermelho:corVerde);};
+    var subRent=CART.rent!=null?((CART.cdi!=null?"CDI no mês: "+gfPct(CART.cdi,2):"")+(CART.ipca!=null?(CART.cdi!=null?" · ":"")+"IPCA: "+gfPct(CART.ipca,2):"")||"carteira consolidada"):"sem dado de rentabilidade no extrato";
+    var kC='<table class="gf-kpis gf-kpis3"><tbody><tr>'
+      +kpiC(CART.casal?"PATRIMÔNIO DO CASAL":"PATRIMÔNIO INVESTIDO",gfBRL0(CART.total),"#0A1628",CART.nAtivos+" ativo"+(CART.nAtivos!==1?"s":"")+" na carteira")
+      +kpiC("RENTABILIDADE NO MÊS",CART.rent!=null?gfPct(CART.rent,2,true):"—",corRent(CART.rent),subRent)
+      +kpiC("GANHO NO MÊS",CART.ganho!=null?gfBRL(CART.ganho,true):"—",corRent(CART.ganho),CART.casal?"soma dos dois extratos":"resultado do período")
+      +'</tr></tbody></table>';
+    var tblPes="";
     if(CART.casal){
-      CART.pessoas.slice(0,2).forEach(function(p){kC+=kpiC(gfEsc(p.nome).toUpperCase(),gfBRL0(p.pat),corOuro,gfPct(CART.total>0?p.pat/CART.total*100:0,0)+" do total");});
-    }else{
-      kC+=kpiC("ATIVOS",String(CART.nAtivos),corOuro,"posições abertas");
-      kC+=kpiC("RESULTADO DO PERÍODO",CART.resultado!=null?gfBRL(CART.resultado,true):"—",CART.resultado!=null&&CART.resultado<0?corVermelho:corVerde,"conforme extrato do Gorila");
+      var rowsPes=CART.pessoas.map(function(p){
+        return '<tr><td><div class="gf-cn">'+gfEsc(p.nome)+'</div><div class="gf-cs">'+p.n+' ativo'+(p.n!==1?'s':'')+'</div></td><td class="gf-r gf-mono">'+gfBRL(p.pat)+'</td><td class="gf-r gf-mono gf-mut">'+gfPct(CART.total>0?p.pat/CART.total*100:0,0)+'</td><td class="gf-r gf-mono" style="color:'+corRent(p.rent)+'">'+(p.rent!=null?gfPct(p.rent,2,true):'—')+'</td><td class="gf-r gf-mono" style="color:'+corRent(p.ganho)+'">'+(p.ganho!=null?gfBRL(p.ganho,true):'—')+'</td></tr>';
+      }).join("");
+      var totPes='<tr class="gf-tot"><td><div class="gf-cn">TOTAL DO CASAL</div></td><td class="gf-r gf-mono">'+gfBRL(CART.total)+'</td><td class="gf-r gf-mono">100%</td><td class="gf-r gf-mono" style="color:'+corRent(CART.rent)+'">'+(CART.rent!=null?gfPct(CART.rent,2,true):'—')+'</td><td class="gf-r gf-mono" style="color:'+corRent(CART.ganho)+'">'+(CART.ganho!=null?gfBRL(CART.ganho,true):'—')+'</td></tr>';
+      tblPes='<div class="gf-card gf-card-t" style="margin-bottom:12px"><table class="gf-tbl"><colgroup><col style="width:24%"/><col style="width:24%"/><col style="width:12%"/><col style="width:16%"/><col style="width:24%"/></colgroup><thead><tr><th>INTEGRANTE</th><th class="gf-r">PATRIMÔNIO</th><th class="gf-r">% TOTAL</th><th class="gf-r">REND. MÊS</th><th class="gf-r">GANHO NO MÊS</th></tr></thead><tbody>'+rowsPes+totPes+'</tbody></table></div>';
     }
-    kC+='</tr></tbody></table>';
     var maxCl=CART.classes.length?CART.classes[0].valor:1;
     var rowsCl=CART.classes.slice(0,8).map(function(x){
       return '<tr><td><div class="gf-cn">'+gfEsc(x.nome)+'</div></td><td class="gf-r gf-mono">'+gfBRL(x.valor)+'</td><td class="gf-r gf-mono gf-mut">'+gfPct(CART.total>0?x.valor/CART.total*100:0)+'</td><td>'+barra(maxCl>0?x.valor/maxCl*100:0,"#0E1B3D")+'</td></tr>';
@@ -36102,8 +36145,8 @@ function gerarRelatorioGFModeloHtml(c,opts){
       return '<tr><td><div class="gf-cn">'+gfEsc(x.nm)+'</div>'+(CART.casal?'<div class="gf-cs">'+gfEsc(x.dono)+' · '+gfEsc(x.classe)+'</div>':'<div class="gf-cs">'+gfEsc(x.classe)+'</div>')+'</td><td class="gf-r gf-mono">'+gfBRL(x.valor)+'</td><td class="gf-r gf-mono gf-mut">'+gfPct(CART.total>0?x.valor/CART.total*100:0)+'</td></tr>';
     }).join("");
     var tblTop='<table class="gf-tbl"><colgroup><col style="width:58%"/><col style="width:26%"/><col style="width:16%"/></colgroup><thead><tr><th>MAIORES POSIÇÕES</th><th class="gf-r">VALOR</th><th class="gf-r">% CARTEIRA</th></tr></thead><tbody>'+rowsTop+'</tbody></table>';
-    var notaC='<div class="gf-tiny" style="margin-top:8px">Posições conforme o último extrato do Gorila importado'+(CART.casal?' de cada integrante, somadas em visão consolidada':'')+'. Valores de mercado na data do extrato.</div>';
-    htmlPages+=page("carteira",ttl("📈",CART.casal?"Investimentos ":"Carteira de ",CART.casal?"do Casal":"Investimentos",CART.casal?"Visão consolidada do patrimônio investido de "+gfEsc(nomeCompleto)+".":"Patrimônio investido, alocação por classe e maiores posições.")+kC+'<div class="gf-card gf-card-t" style="margin-bottom:12px">'+tblCl+'</div><div class="gf-card gf-card-t">'+tblTop+'</div>'+notaC);
+    var notaC='<div class="gf-tiny" style="margin-top:8px">Rentabilidade e ganho do mês conforme o extrato do Gorila'+(CART.casal?' de cada integrante (rentabilidade do casal ponderada pelo patrimônio inicial de cada um)':'')+'; posições a valor de mercado na data do extrato.</div>';
+    htmlPages+=page("carteira",ttl("📈",CART.casal?"Investimentos ":"Carteira de ",CART.casal?"do Casal":"Investimentos",CART.casal?"Rentabilidade e patrimônio investido consolidados de "+gfEsc(nomeCompleto)+" no mês.":"Rentabilidade no mês, patrimônio investido, alocação por classe e maiores posições.")+kC+tblPes+'<div class="gf-card gf-card-t" style="margin-bottom:12px">'+tblCl+'</div><div class="gf-card gf-card-t">'+tblTop+'</div>'+notaC);
   }
 
   /* ═════ OBSERVAÇÕES E PRÓXIMOS PASSOS ═════ */
@@ -37736,7 +37779,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '503';
+  var SW_VERSION = '505';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
