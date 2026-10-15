@@ -2809,7 +2809,12 @@ function rd(st,ac){
     }
     return {...st,cl:[...st.cl.filter(function(c){return c.id!==_rcId&&c.nome.toLowerCase()!==_rcNm;}),{..._rcNovo,_updatedAt:Date.now()}]};}
   if(ac.t==="AI") return {...st,it:[{...ac.p,id:"i"+Date.now()},...st.it]};
-  if(ac.t==="DC") return {...st,cl:st.cl.filter(c=>c.id!==ac.p),it:st.it.filter(i=>i.cid!==ac.p)};
+  if(ac.t==="DC"){
+    /* v509: lápide (tombstone) — registra que o cliente foi EXCLUÍDO (config._clExcl[id]=hora). Sem isso, o merge de sync
+       (mergeClientes) trazia o cliente de volta a partir de outro dispositivo/cópia antiga no Firestore. */
+    var _exc=Object.assign({},(st.config&&st.config._clExcl)||{});_exc[ac.p]=Date.now();
+    return {...st,config:{...(st.config||{}),_clExcl:_exc},cl:st.cl.filter(c=>c.id!==ac.p),it:st.it.filter(i=>i.cid!==ac.p)};
+  }
   
   if(ac.t==="AL") return {...st,lds:[...(st.lds||[]),{...ac.p,id:ac.p.id||("l"+Date.now())}]};
   if(ac.t==="UL") return {...st,lds:(st.lds||[]).map(function(l){return l.id===ac.p.id?{...l,...ac.p}:l})};
@@ -37387,6 +37392,10 @@ function App({authUser}){
   useEffect(function(){finRef.current=d.fin;},[d.fin]);
   const ovRef=useRef(d.overviewMercado||{}); /* FIX: ref para overviewMercado — evita closure stale no merge */
   useEffect(function(){ovRef.current=d.overviewMercado||{};},[d.overviewMercado]);
+  const cfgRef=useRef(d.config||{}); /* v509: config atual (lápides de clientes excluídos) pro listener em tempo real */
+  useEffect(function(){cfgRef.current=d.config||{};},[d.config]);
+  const itRef=useRef(d.it);
+  useEffect(function(){itRef.current=d.it;},[d.it]);
   const clRef=useRef(d.cl); /* ref pro array de clientes atual — evita closure stale no merge do onSnapshot */
   useEffect(function(){clRef.current=d.cl;},[d.cl]);
 
@@ -37402,7 +37411,14 @@ function App({authUser}){
      mente pelo carimbo _updatedAt (gravado pelo reducer em todo AC/UC/RC) — o mais recente vence,
      cliente por cliente, então uma mudança nova em QUALQUER dispositivo sobrevive mesmo que o
      outro dispositivo salve algo não relacionado logo depois. */
-  var mergeClientes=function(localCl,remoteCl){
+  /* v509: lápides de clientes excluídos — união entre local e remoto (maior carimbo vence) */
+  var exclUniao=function(a,b){var r=Object.assign({},a||{});Object.keys(b||{}).forEach(function(k){if(!(r[k]>=b[k]))r[k]=b[k];});return r;};
+  var itSemExcl=function(it,cl,excl){
+    var vivos={};(cl||[]).forEach(function(c){vivos[c.id]=true;});
+    return (it||[]).filter(function(i){return !(i&&i.cid&&excl[i.cid]&&!vivos[i.cid]);});
+  };
+  var mergeClientes=function(localCl,remoteCl,excl){
+    excl=excl||{};
     var localById={},remoteById={};
     (localCl||[]).forEach(function(c){localById[c.id]=c;});
     (remoteCl||[]).forEach(function(c){remoteById[c.id]=c;});
@@ -37415,6 +37431,9 @@ function App({authUser}){
       if(rc&&!lc)return rc; /* só existe remoto — criado em outro dispositivo */
       var lTs=lc._updatedAt||0,rTs=rc._updatedAt||0;
       return (lTs>=rTs)?lc:rc; /* empate ou local mais novo fica com local; senão remoto vence */
+    }).filter(function(c){
+      /* excluído (lápide) e não recriado/editado depois da exclusão → não volta */
+      return !(excl[c.id]&&excl[c.id]>=(c._updatedAt||0));
     });
   };
 
@@ -37484,25 +37503,29 @@ function App({authUser}){
              mergeClientes acima) em vez de "local inteiro" ou "remoto inteiro" — protege contra
              perder uma importação/edição feita em OUTRO dispositivo mesmo quando a heurística de
              "quem tem mais dados" (baseada no total de it/lds/fin) aponta pro lado errado. */
-          var clMesclados=mergeClientes(d.cl,data.cl);
+          var exclM=exclUniao((d.config||{})._clExcl,(data.config||{})._clExcl);
+          var clMesclados=mergeClientes(d.cl,data.cl,exclM);
+          var _cfgLocalX=Object.assign({},d.config||{},{_clExcl:exclM});
+          var _faltaExclRemoto=Object.keys(exclM).some(function(k){return !(((data.config||{})._clExcl||{})[k]>=exclM[k]);});
           if(localTemMaisDados){
             console.log("[Sync] Local tem mais dados"+(pendingFlagLocal?" (havia mudança pendente de sessão anterior)":"")+". Fazendo UPLOAD.");
             pendingLocalRef.current=true;
-            _salvarFirestore(clMesclados,{it:d.it,lds:d.lds||[],fin:finRef.current||{entradas:[],despesas:[]},parceiros:d.parceiros||{parceiros:[],indicacoes:[]},overviewMercado:ovRef.current||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[]}).then(function(){
+            _salvarFirestore(clMesclados,{it:itSemExcl(d.it,clMesclados,exclM),lds:d.lds||[],fin:finRef.current||{entradas:[],despesas:[]},parceiros:d.parceiros||{parceiros:[],indicacoes:[]},overviewMercado:ovRef.current||{},config:_cfgLocalX,ag:d.ag||[],tpAg:d.tpAg||[]}).then(function(){
               pendingLocalRef.current=false;
               try{localStorage.removeItem("courinvest_pending_v1")}catch(e){}
             }).catch(function(e){console.warn("Upload migration failed:",e)});
             skipNextSaveRef.current=true;
-            dp({t:"REPLACE_ALL",p:{cl:clMesclados,it:d.it,lds:d.lds||[],fin:finRef.current||{entradas:[],despesas:[]},parceiros:d.parceiros||{parceiros:[],indicacoes:[]},overviewMercado:ovRef.current||{},config:d.config||{},ag:d.ag||[],tpAg:d.tpAg||[]}});
+            dp({t:"REPLACE_ALL",p:{cl:clMesclados,it:itSemExcl(d.it,clMesclados,exclM),lds:d.lds||[],fin:finRef.current||{entradas:[],despesas:[]},parceiros:d.parceiros||{parceiros:[],indicacoes:[]},overviewMercado:ovRef.current||{},config:_cfgLocalX,ag:d.ag||[],tpAg:d.tpAg||[]}});
             sSyncState("synced");
             isInitialLoadRef.current=false;
             return;
           }
-          skipNextSaveRef.current=true;
+          /* se há lápides locais que o Firestore ainda não tem, NÃO pula o salvamento — assim elas sobem */
+          skipNextSaveRef.current=!_faltaExclRemoto;
           var _localOv=ovRef.current||{};
           var _mergedOv=Object.assign({},data.overviewMercado||{},_localOv);
-          var _mergedCfg=Object.assign({},data.config||{},d.config||{});
-          dp({t:"REPLACE_ALL",p:{cl:clMesclados,it:data.it,lds:data.lds||[],fin:data.fin||{entradas:[],despesas:[]},parceiros:data.parceiros||{parceiros:[],indicacoes:[]},overviewMercado:_mergedOv,config:_mergedCfg,ag:data.ag||[],tpAg:data.tpAg||[]}});
+          var _mergedCfg=Object.assign({},data.config||{},d.config||{},{_clExcl:exclM});
+          dp({t:"REPLACE_ALL",p:{cl:clMesclados,it:itSemExcl(data.it,clMesclados,exclM),lds:data.lds||[],fin:data.fin||{entradas:[],despesas:[]},parceiros:data.parceiros||{parceiros:[],indicacoes:[]},overviewMercado:_mergedOv,config:_mergedCfg,ag:data.ag||[],tpAg:data.tpAg||[]}});
           console.log("[Sync] Carregado do Firestore: "+data.cl.length+" clientes, mesclados: "+clMesclados.length);
         }
       }else{
@@ -37642,9 +37665,12 @@ function App({authUser}){
          recém-feita no celular. Agora mescla cliente por cliente (ver mergeClientes acima),
          usando o carimbo _updatedAt de cada um: o mais recente vence, então a importação do
          celular sobrevive mesmo que o desktop salve algo não relacionado logo depois. */
-      var clMescladosSnap=mergeClientes(clRef.current,data.cl);
-      skipNextSaveRef.current=true;
-      dp({t:"REPLACE_ALL",p:{cl:clMescladosSnap,it:data.it,lds:data.lds||[],fin:finParaUsar,parceiros:data.parceiros||{parceiros:[],indicacoes:[]},overviewMercado:data.overviewMercado||{},config:data.config||{},ag:data.ag||[],tpAg:data.tpAg||[]}});
+      var exclSnap=exclUniao((cfgRef.current||{})._clExcl,(data.config||{})._clExcl);
+      var clMescladosSnap=mergeClientes(clRef.current,data.cl,exclSnap);
+      var _faltaExclSnap=Object.keys(exclSnap).some(function(k){return !(((data.config||{})._clExcl||{})[k]>=exclSnap[k]);});
+      /* lápides locais que o remoto não tem (ex: outro dispositivo com versão antiga sobrescreveu) → deixa salvar de novo */
+      skipNextSaveRef.current=!_faltaExclSnap;
+      dp({t:"REPLACE_ALL",p:{cl:clMescladosSnap,it:itSemExcl(data.it,clMescladosSnap,exclSnap),lds:data.lds||[],fin:finParaUsar,parceiros:data.parceiros||{parceiros:[],indicacoes:[]},overviewMercado:data.overviewMercado||{},config:Object.assign({},data.config||{},{_clExcl:exclSnap}),ag:data.ag||[],tpAg:data.tpAg||[]}});
     }
     return function(){if(unsub)unsub()};
   },[]);
@@ -38201,7 +38227,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '508';
+  var SW_VERSION = '509';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
