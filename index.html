@@ -2948,19 +2948,37 @@ function Cd({children,style:s,onClick:oc,hov:hv=true,glow:gl}){
      onClick - se clicável, mostra cursor pointer
      compact - se true, padding e fontes menores (pra grids densos)
 */
+/* FitNum — número que encolhe a fonte até caber na largura disponível (evita valores cortados em telas estreitas/notebook) */
+function FitNum({children,max=17,min=9,style}){
+  var ref=React.useRef(null);
+  var fit=React.useCallback(function(){
+    var el=ref.current;if(!el)return;
+    el.style.fontSize=max+"px";
+    var sz=max;
+    while(el.scrollWidth>el.clientWidth+0.5&&sz>min){sz-=0.5;el.style.fontSize=sz+"px";}
+  },[max,min]);
+  React.useLayoutEffect(function(){fit();});
+  React.useEffect(function(){
+    var el=ref.current;if(!el||typeof ResizeObserver==="undefined")return;
+    var ro=new ResizeObserver(function(){fit()});
+    ro.observe(el);
+    return function(){ro.disconnect()};
+  },[fit]);
+  return <div ref={ref} style={{whiteSpace:"nowrap",overflow:"hidden",width:"100%",minWidth:0,...style}}>{children}</div>;
+}
 function KCard({label,valor,cor,sub,ic,spark,sparkCor,onClick,compact,style:s}){
   var pad=compact?"12px 14px":"16px 18px";
   var fontVal=compact?16:20;
   var fontLabel=compact?8:9;
   var corV=cor||T.t1;
   return (
-    <Cd style={{padding:pad,cursor:onClick?"pointer":"default",minHeight:compact?72:90,display:"flex",flexDirection:"column",justifyContent:"space-between",...s}} hov={!!onClick} onClick={onClick}>
+    <Cd style={{padding:pad,cursor:onClick?"pointer":"default",minHeight:compact?72:90,display:"flex",flexDirection:"column",justifyContent:"space-between",minWidth:0,...s}} hov={!!onClick} onClick={onClick}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
         <div style={{fontSize:fontLabel,color:T.t3,fontWeight:600,letterSpacing:0.8,textTransform:"uppercase"}}>{label}</div>
         {ic && <div style={{fontSize:compact?16:20,opacity:0.45,marginTop:-2}}>{ic}</div>}
       </div>
       <div>
-        <div style={{fontSize:fontVal,fontWeight:800,color:corV,fontFamily:"'JetBrains Mono'",letterSpacing:-0.3,lineHeight:1.1}}>{valor}</div>
+        <FitNum max={fontVal} min={10} style={{fontWeight:800,color:corV,fontFamily:"'JetBrains Mono'",letterSpacing:-0.3,lineHeight:1.1}}>{valor}</FitNum>
         {sub && <div style={{fontSize:9,color:T.t3,marginTop:3,fontWeight:500}}>{sub}</div>}
         {spark && spark.length>1 && <div style={{marginTop:6}}><Spark data={spark} color={sparkCor||corV} w={140} h={22}/></div>}
       </div>
@@ -23818,7 +23836,7 @@ function FinanceiroView({data:d,dispatch:dp}){
                 </div>
               )}
 
-              <div style={{display:"grid",gridTemplateColumns:isMob?"1fr 1fr":"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:16}}>
+              <div style={{display:"grid",gridTemplateColumns:isMob?"1fr 1fr":"repeat(auto-fit,minmax(150px,1fr))",gap:8,marginBottom:16}}>
                 {[
                   {l:"RECEITA "+(selYear==="todos"?"TOTAL":selYear),v:fm(totalEntradas),c:T.green},
                   {l:"DESPESA OPERACIONAL",v:fm(totalDespOperacional),c:T.red,sub:"excl. rem. sócios"},
@@ -23827,9 +23845,9 @@ function FinanceiroView({data:d,dispatch:dp}){
                   {l:"ENTRADAS",v:String(entradasFilt.length),c:T.cyan},
                   {l:"MESES",v:String(mesesOrdenados.length),c:T.purple},
                 ].map(function(k,i){return (
-                  <Cd key={i} style={{padding:isMob?"10px 12px":"12px 16px"}} hov={false} glow={i===2}>
+                  <Cd key={i} style={{padding:isMob?"10px 12px":"12px 16px",minWidth:0}} hov={false} glow={i===2}>
                     <div style={{fontSize:7,color:T.t3,fontWeight:600,letterSpacing:1}}>{k.l}</div>
-                    <div style={{fontSize:isMob?14:17,fontWeight:800,color:k.c,marginTop:2,fontFamily:"'JetBrains Mono'"}}>{k.v}</div>
+                    <FitNum max={isMob?14:17} min={9} style={{fontWeight:800,color:k.c,marginTop:2,fontFamily:"'JetBrains Mono'"}}>{k.v}</FitNum>
                     {k.sub&&<div style={{fontSize:7,color:T.t3,marginTop:2,opacity:0.7}}>{k.sub}</div>}
                   </Cd>
                 )})}
@@ -38183,7 +38201,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '507';
+  var SW_VERSION = '508';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
