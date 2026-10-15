@@ -2991,6 +2991,64 @@ function Mo({open,onClose,title,children,wide}){
   return <div style={{position:"fixed",inset:0,zIndex:1000,display:"flex",alignItems:mob?"flex-end":"center",justifyContent:"center",background:"rgba(0,0,0,0.7)",backdropFilter:"blur(16px)",animation:"fadeIn .2s ease"}}><div style={{background:"linear-gradient(180deg,rgba(14,28,55,0.97),rgba(8,15,30,0.99))",border:"1px solid rgba(212,163,40,0.08)",borderRadius:mob?"24px 24px 0 0":22,padding:mob?20:28,width:mob?"100%":"94%",maxWidth:mob?"100%":wide?720:520,maxHeight:mob?"92vh":"88vh",overflow:"auto",boxShadow:"0 40px 100px rgba(0,0,0,0.5)",animation:"fadeUp .2s ease"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h3 style={{margin:0,fontSize:mob?15:17,fontWeight:700,color:T.gold,letterSpacing:.3}}>{title}</h3><button onClick={onClose} style={{width:32,height:32,borderRadius:10,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",color:T.t3,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button></div>{children}</div></div>;
 }
 function Spark({data,color,w=120,h=32}){const mn=Math.min(...data),mx=Math.max(...data),rng=mx-mn||1;const pts=data.map((v,i)=>(i/(data.length-1))*w+","+(h-((v-mn)/rng)*h*0.75-h*0.12)).join(" ");const gid="sg"+color.replace(/[^a-z0-9]/gi,"").slice(0,4);const area=pts+" "+w+","+h+" 0,"+h;return <svg width={w} height={h} viewBox={"0 0 "+w+" "+h}><defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity="0.2"/><stop offset="100%" stopColor={color} stopOpacity="0"/></linearGradient></defs><polygon points={area} fill={"url(#"+gid+")"}/><polyline points={pts} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>;}
+/* v506: pizza de participação de cada cliente na receita (aba Receita). Top 6 + "Outros"; hover destaca fatia/linha. */
+function PizzaReceita({itens,total,isMob}){
+  const[hv,sHv]=React.useState(null);
+  const PAL=["#3987e5","#d95926","#199e70","#c98500","#d55181","#9085e9"],CINZA="#6b7a90";
+  if(!itens||!itens.length||!(total>0))return null;
+  var top=itens.slice(0,6),resto=itens.slice(6);
+  var fatias=top.map(function(x,i){return {k:x.id,nome:x.nome,v:x.v,c:PAL[i]};});
+  if(resto.length)fatias.push({k:"outros",nome:"Outros ("+resto.length+" cliente"+(resto.length!==1?"s":"")+")",v:resto.reduce(function(a,b){return a+b.v;},0),c:CINZA});
+  const sz=isMob?210:240,cx=sz/2,r=sz/2-6,ir=r*0.58;
+  var cum=0;
+  var paths=fatias.map(function(it,i){
+    var p=it.v/total;
+    var a0=cum*2*Math.PI-Math.PI/2;cum+=p;var a1=cum*2*Math.PI-Math.PI/2;
+    var ativo=hv===it.k;var rr=ativo?r+4:r;
+    var x0=cx+rr*Math.cos(a0),y0=cx+rr*Math.sin(a0),x1=cx+rr*Math.cos(a1),y1=cx+rr*Math.sin(a1);
+    var xi0=cx+ir*Math.cos(a0),yi0=cx+ir*Math.sin(a0),xi1=cx+ir*Math.cos(a1),yi1=cx+ir*Math.sin(a1);
+    var lg=p>0.5?1:0;
+    var d=p>=0.9999?("M "+(cx-rr)+" "+cx+" A "+rr+" "+rr+" 0 1 1 "+(cx+rr)+" "+cx+" A "+rr+" "+rr+" 0 1 1 "+(cx-rr)+" "+cx+" Z")
+      :("M "+x0+" "+y0+" A "+rr+" "+rr+" 0 "+lg+" 1 "+x1+" "+y1+" L "+xi1+" "+yi1+" A "+ir+" "+ir+" 0 "+lg+" 0 "+xi0+" "+yi0+" Z");
+    return <path key={it.k} d={d} fill={it.c} stroke="#0F1B2E" strokeWidth="2" opacity={hv&&!ativo?0.45:1} style={{cursor:"pointer",transition:"opacity .15s"}} onMouseEnter={function(){sHv(it.k)}} onMouseLeave={function(){sHv(null)}}/>;
+  });
+  var sel=fatias.find(function(x){return x.k===hv;});
+  var pctDe=function(v){return (v/total*100).toFixed(v/total*100>=10?0:1).replace(".",",")+"%";};
+  return (
+    <Cd style={{padding:isMob?"14px":"20px 24px",marginBottom:14}} hov={false}>
+      <div style={{fontSize:12,fontWeight:800,color:T.t1,marginBottom:2}}>🥧 Participação de cada cliente na receita</div>
+      <div style={{fontSize:10,color:T.t3,marginBottom:14}}>Receita mensal projetada por cliente (GP + GF) · passe o mouse nas fatias</div>
+      <div style={{display:"flex",flexDirection:isMob?"column":"row",alignItems:"center",gap:isMob?16:32}}>
+        <div style={{position:"relative",width:sz,height:sz,flexShrink:0}}>
+          <svg width={sz} height={sz} viewBox={"0 0 "+sz+" "+sz} role="img" aria-label="Participação de cada cliente na receita mensal">{paths}</svg>
+          <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",pointerEvents:"none",textAlign:"center",padding:"0 "+(sz*0.2)+"px"}}>
+            {sel?(<React.Fragment>
+              <div style={{fontSize:10,color:T.t2,fontWeight:600,lineHeight:1.2,maxHeight:26,overflow:"hidden"}}>{sel.nome}</div>
+              <div style={{fontSize:20,fontWeight:900,color:T.t1,fontFamily:"'JetBrains Mono',monospace"}}>{pctDe(sel.v)}</div>
+              <div style={{fontSize:10,color:T.t3,fontFamily:"'JetBrains Mono',monospace"}}>{fm(sel.v)}</div>
+            </React.Fragment>):(<React.Fragment>
+              <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:1}}>RECEITA/MÊS</div>
+              <div style={{fontSize:17,fontWeight:900,color:T.green,fontFamily:"'JetBrains Mono',monospace"}}>{fm(total)}</div>
+              <div style={{fontSize:9,color:T.t3}}>{itens.length} cliente{itens.length!==1?"s":""}</div>
+            </React.Fragment>)}
+          </div>
+        </div>
+        <div style={{flex:1,minWidth:0,width:"100%"}}>
+          {fatias.map(function(it){
+            var ativo=hv===it.k;
+            return <div key={it.k} onMouseEnter={function(){sHv(it.k)}} onMouseLeave={function(){sHv(null)}} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 8px",borderRadius:8,background:ativo?"rgba(255,255,255,0.06)":"transparent",borderBottom:"1px solid "+T.bdrL,cursor:"default"}}>
+              <span style={{width:10,height:10,borderRadius:3,background:it.c,flexShrink:0}}/>
+              <div style={{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:12,color:T.t1}}>{it.nome}</div>
+              <div style={{fontSize:12,fontWeight:800,color:T.t1,fontFamily:"'JetBrains Mono',monospace",width:48,textAlign:"right"}}>{pctDe(it.v)}</div>
+              <div style={{fontSize:11,color:T.t2,fontFamily:"'JetBrains Mono',monospace",width:96,textAlign:"right"}}>{fm(it.v)}</div>
+            </div>;
+          })}
+          {resto.length>0&&<div style={{fontSize:9,color:T.t3,marginTop:8,lineHeight:1.5}}>Em "Outros": {resto.slice(0,6).map(function(x){return x.nome.split(" ")[0];}).join(", ")}{resto.length>6?" e mais "+(resto.length-6):""}.</div>}
+        </div>
+      </div>
+    </Cd>
+  );
+}
 function Donut({items,sz=140,fmt}){let cum=0;const r=sz/2-8,cx=sz/2,total=items.reduce((a,b)=>a+b.v,0);const fmtFn=fmt||fm;return <svg width={sz} height={sz} viewBox={"0 0 "+sz+" "+sz}>{items.map((it,i)=>{const p=it.v/total,s=cum*2*Math.PI-Math.PI/2;cum+=p;const e=cum*2*Math.PI-Math.PI/2,lg=p>0.5?1:0,ir=r*0.6;return <path key={i} d={"M "+(cx+r*Math.cos(s))+" "+(cx+r*Math.sin(s))+" A "+r+" "+r+" 0 "+lg+" 1 "+(cx+r*Math.cos(e))+" "+(cx+r*Math.sin(e))+" L "+(cx+ir*Math.cos(e))+" "+(cx+ir*Math.sin(e))+" A "+ir+" "+ir+" 0 "+lg+" 0 "+(cx+ir*Math.cos(s))+" "+(cx+ir*Math.sin(s))+" Z"} fill={it.c} opacity=".85"/>})}<circle cx={cx} cy={cx} r={r*0.53} fill="rgba(8,18,36,0.9)"/><text x={cx} y={cx-3} textAnchor="middle" fill={T.t3} fontSize="8" fontWeight="600">RECEITA</text><text x={cx} y={cx+11} textAnchor="middle" fill={T.gold} fontSize="11" fontWeight="800">{fmtFn(total)}</text></svg>;}
 var COURINVEST_ICON_URI = "data:image/png;base64,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";
 function Logo({sz=40,full=true}){return <div style={{display:"flex",alignItems:"center",gap:full?14:0}}><div style={{width:sz,height:sz,animation:"glow 4s ease infinite"}}><svg width={sz} height={sz} viewBox="0 0 100 100" fill="none"><image href={COURINVEST_ICON_URI} x="22.6" y="4" width="54.8" height="92" preserveAspectRatio="xMidYMid meet"/></svg></div>{full&&<div style={{lineHeight:1.1}}><div style={{fontSize:sz*0.45,fontWeight:800,color:T.gold,letterSpacing:2,textShadow:"0 2px 12px rgba(212,163,40,0.15)"}}>COURINVEST</div><div style={{fontSize:sz*0.16,fontWeight:500,color:T.t3,letterSpacing:4,marginTop:3}}>CONSULTORIA EM INVESTIMENTOS</div></div>}</div>;}
@@ -4906,6 +4964,17 @@ function Dash({data:d,onSel:os,goTo}){
                 {mrrMiles>0&&<span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:T.purple,marginRight:4}}/>Milhas {(mrrMiles/mrr*100).toFixed(0)}%</span>}
               </div>
             </Cd>
+
+            {(function(){
+              var recCli=cl.map(function(c){
+                var v=0;
+                if(c.sv&&c.sv.includes("patrimonio"))v+=feeBaseDoCliente(c).fee||0;
+                if(c.sv&&c.sv.includes("planejamento"))v+=feeMensalBRL(c)||0;
+                return {id:c.id,nome:c.nome,v:v};
+              }).filter(function(x){return x.v>0;}).sort(function(a,b){return b.v-a.v;});
+              var totRec=recCli.reduce(function(a,b){return a+b.v;},0);
+              return <PizzaReceita itens={recCli} total={totRec} isMob={isMob}/>;
+            })()}
 
             {}
             <div style={{display:"grid",gridTemplateColumns:isMob?"1fr":"1fr 1fr",gap:12,marginBottom:14}}>
@@ -34277,7 +34346,7 @@ function PropostasView({data,dispatch}){
   return null;
 }
 
-const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"interacoes",l:"Interações",i:"📡"},{id:"vencimentos",l:"Vencimentos",i:"⏰"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"parceiros",l:"Parceiros",i:"🤝"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"irAnual",l:"Relatório IR",i:"📑"}];
+const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"interacoes",l:"Interações",i:"📡"},{id:"vencimentos",l:"Vencimentos",i:"⏰"},{id:"simuladores",l:"Simuladores",i:"🧮"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"parceiros",l:"Parceiros",i:"🤝"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"irAnual",l:"Relatório IR",i:"📑"}];
 
 /* ============ AUTH + FIRESTORE SYNC ============ */
 
@@ -36302,6 +36371,340 @@ function coletarVencimentosRF(clientes,taxasBCB){
   return lista;
 }
 
+/* ============ SIMULADORES (v507) — Carro e Imóvel: comprar × alugar × financiar × consórcio ============
+   Ferramenta educacional de apoio ao consultor. Todas as taxas são PREMISSAS EDITÁVEIS (não são cotações).
+   Método: "patrimônio líquido ao final do horizonte" com o MESMO orçamento mensal em todas as opções —
+   o que não vai pra parcela/custos é investido à taxa líquida informada. Assim as opções ficam comparáveis. */
+function simPn(s){
+  var t=String(s==null?"":s).trim();if(!t)return 0;
+  var x;
+  if(t.indexOf(",")>=0)x=parseFloat(t.replace(/\./g,"").replace(",","."));
+  else if(/^\d+\.\d{1,2}$/.test(t))x=parseFloat(t);
+  else x=parseFloat(t.replace(/\./g,""));
+  return isNaN(x)?0:x;
+}
+function simAm(aa){return Math.pow(1+aa/100,1/12)-1;}
+function simPmt(pv,i,n){if(n<=0)return 0;if(i<=0)return pv/n;return pv*i/(1-Math.pow(1+i,-n));}
+function simBRL0(v){return "R$ "+Math.round(v).toLocaleString("pt-BR");}
+function simPct(v,d){return (v).toFixed(d==null?1:d).replace(".",",")+"%";}
+
+/* motor genérico: roda uma estratégia mês a mês e devolve série de patrimônio líquido */
+function simRodar(cfg){
+  /* cfg: {H, r (mensal), K, B, upfront, bem:{t0,valor0,valoriza(mensal),custoProp(valorAtual)->R$/mes}, parcelas:function(t)->R$ (t=1..), saldo:function(t)->dívida/obrigação restante,
+           buyWhenAfford:{preco0,reaj}, fixoMensal:function(t)->R$ (ex.: aluguel/assinatura), custoAquisicaoPct, aquisicaoNoT0 } */
+  var H=cfg.H,r=cfg.r,inv=cfg.K-(cfg.upfront||0),serie=[],totalPago=(cfg.upfront||0),temBem=false,valorBem=0,t0=cfg.bem?cfg.bem.t0:null,mesCompra=null;
+  if(cfg.bem&&cfg.bem.t0===0){temBem=true;valorBem=cfg.bem.valor0;}
+  var futuro=function(t){return (!temBem&&cfg.bem&&cfg.bem.t0>0&&t<cfg.bem.t0)?cfg.bem.valor0/Math.pow(1+r,cfg.bem.t0-t):0;};
+  serie.push(inv+(temBem?valorBem:0)+futuro(0)-(cfg.saldo?cfg.saldo(0):0));
+  for(var t=1;t<=H;t++){
+    inv=inv*(1+r);
+    var saida=0;
+    if(temBem)valorBem=valorBem*(1+cfg.bem.valoriza);
+    /* compra futura (consórcio contemplado ou "juntar e comprar") */
+    if(!temBem&&cfg.bem&&cfg.bem.t0!=null&&cfg.bem.t0>0&&t===cfg.bem.t0){temBem=true;valorBem=cfg.bem.valor0;mesCompra=t;if(cfg.bem.custoCompra){saida+=cfg.bem.custoCompra;}}
+    if(!temBem&&cfg.juntar){
+      var preco=cfg.juntar.preco0*Math.pow(1+cfg.juntar.reaj,t/12);
+      var custoAq=preco*(cfg.juntar.custoAqPct||0);
+      if(inv+cfg.B>=preco+custoAq){inv-=(preco+custoAq);temBem=true;valorBem=preco;mesCompra=t;totalPago+=preco+custoAq;}
+    }
+    if(cfg.parcelas)saida+=cfg.parcelas(t);
+    if(cfg.fixoMensal)saida+=cfg.fixoMensal(t);
+    if(temBem&&cfg.bem&&cfg.bem.custoProp)saida+=cfg.bem.custoProp(valorBem);
+    totalPago+=saida;
+    inv+=cfg.B-saida;
+    serie.push(inv+(temBem?valorBem:0)+futuro(t)-(cfg.saldo?cfg.saldo(t):0));
+  }
+  return {serie:serie,final:serie[H],valorBem:temBem?valorBem:0,inv:inv,totalPago:totalPago,mesCompra:mesCompra,temBem:temBem};
+}
+
+function SimNum({l,v,set,suf,pre,hint,w}){
+  return (
+    <label style={{display:"block",minWidth:0}}>
+      <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:.6,textTransform:"uppercase",marginBottom:4}}>{l}</div>
+      <div style={{display:"flex",alignItems:"center",gap:6,padding:"8px 10px",borderRadius:9,border:"1px solid "+T.bdrL,background:T.card}}>
+        {pre&&<span style={{fontSize:11,color:T.t3}}>{pre}</span>}
+        <input value={v} onChange={function(e){set(e.target.value)}} inputMode="decimal" style={{flex:1,minWidth:0,width:w||"100%",background:"transparent",border:"none",outline:"none",color:T.t1,fontSize:13,fontWeight:700,fontFamily:"'JetBrains Mono',monospace"}}/>
+        {suf&&<span style={{fontSize:10,color:T.t3,whiteSpace:"nowrap"}}>{suf}</span>}
+      </div>
+      {hint&&<div style={{fontSize:9,color:T.t3,marginTop:3,lineHeight:1.35}}>{hint}</div>}
+    </label>
+  );
+}
+
+function SimulatorLinhas({series,opcoes,H,mesesPorTick,isMob}){
+  /* gráfico de linhas simples: patrimônio líquido (R$) × tempo; 1 linha por opção */
+  var W=isMob?320:720,Hh=isMob?200:240,m={l:56,r:12,t:12,b:26};
+  var vals=[];opcoes.forEach(function(o){series[o.k].forEach(function(v){vals.push(v);});});
+  var mn=Math.min.apply(null,vals.concat([0])),mx=Math.max.apply(null,vals);
+  if(mx===mn)mx=mn+1;
+  var x=function(i){return m.l+(W-m.l-m.r)*i/H;},y=function(v){return m.t+(Hh-m.t-m.b)*(1-(v-mn)/(mx-mn));};
+  var ticksY=[0,0.25,0.5,0.75,1].map(function(f){return mn+(mx-mn)*f;});
+  var anos=Math.floor(H/12),passo=anos>10?Math.ceil(anos/8):1,ticksX=[];
+  for(var a=0;a<=anos;a+=passo)ticksX.push(a*12);
+  var kfmt=function(v){var a=Math.abs(v);return (v<0?"-":"")+(a>=1e6?(a/1e6).toFixed(1).replace(".",",")+" mi":a>=1e3?Math.round(a/1e3)+" mil":Math.round(a));};
+  return (
+    <svg width="100%" viewBox={"0 0 "+W+" "+Hh} style={{display:"block",maxWidth:W}} role="img" aria-label="Patrimônio líquido por opção ao longo do tempo">
+      {ticksY.map(function(v,i){return <g key={i}><line x1={m.l} x2={W-m.r} y1={y(v)} y2={y(v)} stroke="rgba(255,255,255,0.07)" strokeWidth="1"/><text x={m.l-6} y={y(v)+3} textAnchor="end" fontSize="9" fill={T.t3}>{kfmt(v)}</text></g>;})}
+      {mn<0&&<line x1={m.l} x2={W-m.r} y1={y(0)} y2={y(0)} stroke="rgba(255,255,255,0.25)" strokeWidth="1"/>}
+      {ticksX.map(function(t){return <text key={t} x={x(t)} y={Hh-8} textAnchor="middle" fontSize="9" fill={T.t3}>{t===0?"hoje":(t/12)+"a"}</text>;})}
+      {opcoes.map(function(o){
+        var pts=series[o.k].map(function(v,i){return x(i)+","+y(v);}).join(" ");
+        return <polyline key={o.k} points={pts} fill="none" stroke={o.c} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>;
+      })}
+    </svg>
+  );
+}
+
+function SimResultado({opcoes,res,H,isMob,tituloBem,notas}){
+  var disp=opcoes.filter(function(o){return res[o.k]&&!res[o.k].indisponivel;});
+  if(!disp.length)return <Cd style={{padding:18}} hov={false}><div style={{fontSize:12,color:T.t2}}>Nenhuma opção disponível com o capital informado. Aumente o capital disponível.</div></Cd>;
+  var ord=disp.slice().sort(function(a,b){return res[b.k].final-res[a.k].final;});
+  var melhor=ord[0],seg=ord[1];
+  var maxAbs=Math.max.apply(null,disp.map(function(o){return Math.abs(res[o.k].final);}))||1;
+  var series={};disp.forEach(function(o){series[o.k]=res[o.k].serie;});
+  var resumo=function(){
+    var linhas=["Simulação "+tituloBem+" — horizonte de "+(H/12).toFixed(H%12?1:0).replace(".",",")+" anos","(patrimônio líquido estimado ao final, mesmo orçamento mensal em todas as opções)"];
+    ord.forEach(function(o,i){linhas.push((i+1)+". "+o.l+": "+simBRL0(res[o.k].final));});
+    linhas.push("Premissas editáveis; simulação educacional, não é recomendação.");
+    return linhas.join("\n");
+  };
+  return (
+    <div>
+      <Cd style={{padding:isMob?"14px":"18px 22px",marginBottom:12,borderColor:melhor.c+"66"}} hov={false}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Melhor resultado neste cenário</div>
+            <div style={{fontSize:20,fontWeight:900,color:T.t1}}><span style={{display:"inline-block",width:11,height:11,borderRadius:3,background:melhor.c,marginRight:8}}/>{melhor.l}</div>
+            <div style={{fontSize:11,color:T.t2,marginTop:4}}>Patrimônio líquido estimado ao final: <strong style={{color:T.green,fontFamily:"'JetBrains Mono',monospace"}}>{simBRL0(res[melhor.k].final)}</strong>{seg?<span> · {simBRL0(res[melhor.k].final-res[seg.k].final)} a mais que "{seg.l}"</span>:null}</div>
+          </div>
+          <Bt v="secondary" onClick={function(){try{navigator.clipboard.writeText(resumo());alert("Resumo copiado — é só colar no WhatsApp.");}catch(e){alert(resumo());}}} style={{fontSize:11,padding:"8px 14px"}}>📋 Copiar resumo</Bt>
+        </div>
+      </Cd>
+
+      <Cd style={{padding:isMob?"14px":"18px 22px",marginBottom:12}} hov={false}>
+        <div style={{fontSize:12,fontWeight:800,color:T.t1,marginBottom:2}}>Patrimônio líquido ao final de {(H/12).toFixed(H%12?1:0).replace(".",",")} anos</div>
+        <div style={{fontSize:10,color:T.t3,marginBottom:12}}>Bem + investimentos − dívidas, todas as opções com o mesmo orçamento mensal</div>
+        {ord.map(function(o){
+          var f=res[o.k].final,w=Math.max(2,Math.abs(f)/maxAbs*100);
+          return <div key={o.k} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+            <div style={{width:isMob?96:170,fontSize:11,color:T.t1,flexShrink:0,lineHeight:1.25}}>{o.l}</div>
+            <div style={{flex:1,height:16,background:"rgba(255,255,255,0.04)",borderRadius:4,overflow:"hidden"}}><div style={{width:w+"%",height:"100%",background:o.c,borderRadius:"0 4px 4px 0"}}/></div>
+            <div style={{width:isMob?88:112,textAlign:"right",fontSize:11,fontWeight:800,color:f<0?T.red:T.t1,fontFamily:"'JetBrains Mono',monospace"}}>{simBRL0(f)}</div>
+          </div>;
+        })}
+      </Cd>
+
+      <Cd style={{padding:isMob?"14px":"18px 22px",marginBottom:12}} hov={false}>
+        <div style={{fontSize:12,fontWeight:800,color:T.t1,marginBottom:10}}>Evolução do patrimônio líquido</div>
+        <SimulatorLinhas series={series} opcoes={ord} H={H} isMob={isMob}/>
+        <div style={{display:"flex",flexWrap:"wrap",gap:"6px 16px",marginTop:8}}>
+          {ord.map(function(o){return <span key={o.k} style={{fontSize:10,color:T.t2}}><span style={{display:"inline-block",width:9,height:9,borderRadius:2,background:o.c,marginRight:5}}/>{o.l}</span>;})}
+        </div>
+      </Cd>
+
+      <Cd style={{padding:isMob?"10px":"14px 18px",marginBottom:12,overflowX:"auto"}} hov={false}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:520}}>
+          <thead><tr style={{color:T.t3,fontSize:9,letterSpacing:.6,textTransform:"uppercase"}}>
+            <th style={{textAlign:"left",padding:"6px 4px"}}>Opção</th><th style={{textAlign:"right",padding:"6px 4px"}}>Desembolso mensal*</th><th style={{textAlign:"right",padding:"6px 4px"}}>Total desembolsado</th><th style={{textAlign:"right",padding:"6px 4px"}}>Valor do bem ao final</th><th style={{textAlign:"right",padding:"6px 4px"}}>Patrimônio final</th>
+          </tr></thead>
+          <tbody>
+            {opcoes.map(function(o){
+              var r=res[o.k];
+              if(!r)return null;
+              if(r.indisponivel)return <tr key={o.k} style={{borderTop:"1px solid "+T.bdrL,opacity:.55}}><td style={{padding:"8px 4px",color:T.t1}}><span style={{display:"inline-block",width:9,height:9,borderRadius:2,background:o.c,marginRight:6}}/>{o.l}</td><td colSpan={4} style={{padding:"8px 4px",color:T.t3,fontSize:10}}>{r.motivo}</td></tr>;
+              return <tr key={o.k} style={{borderTop:"1px solid "+T.bdrL}}>
+                <td style={{padding:"8px 4px",color:T.t1}}><span style={{display:"inline-block",width:9,height:9,borderRadius:2,background:o.c,marginRight:6}}/>{o.l}{r.extra&&<div style={{fontSize:9,color:T.t3,marginLeft:15}}>{r.extra}</div>}</td>
+                <td style={{padding:"8px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:T.t2}}>{r.mensal||"—"}</td>
+                <td style={{padding:"8px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:T.t2}}>{simBRL0(r.totalPago)}</td>
+                <td style={{padding:"8px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:T.t2}}>{r.valorBem>0?simBRL0(r.valorBem):"—"}</td>
+                <td style={{padding:"8px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:800,color:r.final<0?T.red:T.t1}}>{simBRL0(r.final)}</td>
+              </tr>;
+            })}
+          </tbody>
+        </table>
+        <div style={{fontSize:9,color:T.t3,marginTop:8}}>* Primeira parcela/mensalidade, sem os custos de propriedade (IPVA, seguro, manutenção, etc.), que entram no cálculo do patrimônio.</div>
+      </Cd>
+      {notas&&<div style={{fontSize:10,color:T.t3,lineHeight:1.6,padding:"10px 12px",background:T.w3,borderRadius:8}}>{notas}</div>}
+    </div>
+  );
+}
+
+function SimCarro({isMob}){
+  var[v,sV]=useState("90.000"),[K,sK]=useState("90.000"),[ent,sEnt]=useState("30"),[nFin,sNFin]=useState("48"),[taxa,sTaxa]=useState("1,90"),[tar,sTar]=useState("3");
+  var[adm,sAdm]=useState("15"),[fr,sFr]=useState("2"),[nCon,sNCon]=useState("60"),[mCon,sMCon]=useState("12"),[segCon,sSegCon]=useState("0,04");
+  var[assin,sAssin]=useState("4.500"),[dep,sDep]=useState("12"),[reaj,sReaj]=useState("4,5"),[rend,sRend]=useState("11"),[ipva,sIpva]=useState("4"),[seg,sSeg]=useState("4"),[man,sMan]=useState("3.000"),[H,sH]=useState("4"),[B,sB]=useState("");
+  var V=simPn(v),Kc=simPn(K),E=V*simPn(ent)/100,n=Math.round(simPn(nFin)),i=simPn(taxa)/100,tr=simPn(tar)/100;
+  var r=simAm(simPn(rend)),d=simAm(-simPn(dep)),rj=simPn(reaj)/100,Hm=Math.max(6,Math.round(simPn(H)*12));
+  var custoProp=function(val){return val*(simPn(ipva)+simPn(seg))/100/12+simPn(man)/12;};
+  var principal=(V-E)*(1+tr),P=simPmt(principal,i,n);
+  var nC=Math.round(simPn(nCon)),M=Math.max(1,Math.round(simPn(mCon))),credM=V*Math.pow(1+rj,M/12);
+  var baseCon=V*(1+(simPn(adm)+simPn(fr))/100)/Math.max(1,nC);
+  var parcCon=function(t){return t>nC?0:baseCon*Math.pow(1+rj,Math.floor((t-1)/12))+V*simPn(segCon)/100;};
+  var Bauto=P+custoProp(V),Bv=simPn(B)>0?simPn(B):Bauto;
+  var saldoPrice=function(t){if(t>=n)return 0;var s=principal;for(var k=0;k<t;k++)s=s*(1+i)-P;return Math.max(0,s);};
+  var obrigCon=function(t){var s=0;for(var k=t+1;k<=nC;k++)s+=parcCon(k)/Math.pow(1+r,k-t);return s;};
+  var res={};
+  var op=[
+    {k:"avista",l:"Comprar à vista",c:"#3987e5"},
+    {k:"fin",l:"Financiar",c:"#d95926"},
+    {k:"cons",l:"Consórcio",c:"#199e70"},
+    {k:"juntar",l:"Juntar e comprar depois",c:"#d55181"},
+    {k:"assin",l:"Assinatura / aluguel de carro",c:"#9085e9"}
+  ];
+  /* à vista */
+  if(Kc>=V){var a=simRodar({H:Hm,r:r,K:Kc,B:Bv,upfront:V,bem:{t0:0,valor0:V,valoriza:d,custoProp:custoProp}});a.mensal="R$ 0";a.extra="paga "+simBRL0(V)+" hoje";res.avista=a;}
+  else res.avista={indisponivel:true,motivo:"Capital disponível (R$ "+Math.round(Kc).toLocaleString("pt-BR")+") menor que o valor do carro."};
+  /* financiado */
+  if(Kc>=E){var f=simRodar({H:Hm,r:r,K:Kc,B:Bv,upfront:E,bem:{t0:0,valor0:V,valoriza:d,custoProp:custoProp},parcelas:function(t){return t<=n?P:0;},saldo:saldoPrice});f.mensal=simBRL0(P);f.extra=n+"x · entrada "+simBRL0(E);res.fin=f;}
+  else res.fin={indisponivel:true,motivo:"Capital menor que a entrada."};
+  /* consórcio */
+  var c=simRodar({H:Hm,r:r,K:Kc,B:Bv,upfront:0,bem:{t0:M,valor0:credM,valoriza:d,custoProp:custoProp},parcelas:parcCon,saldo:obrigCon});c.mensal=simBRL0(parcCon(1));c.extra="carro no mês "+M+" (contemplação é incerta)";res.cons=c;
+  /* juntar */
+  if(Kc<V){var j=simRodar({H:Hm,r:r,K:Kc,B:Bv,upfront:0,juntar:{preco0:V,reaj:rj},bem:{t0:null,valor0:0,valoriza:d,custoProp:custoProp}});j.mensal="R$ 0";j.extra=j.temBem?"compra no mês "+j.mesCompra:"não alcança o valor no horizonte";res.juntar=j;}
+  else res.juntar={indisponivel:true,motivo:"Você já tem o valor — equivale a comprar à vista."};
+  /* assinatura */
+  var S=simPn(assin);var s2=simRodar({H:Hm,r:r,K:Kc,B:Bv,upfront:0,fixoMensal:function(){return S;}});s2.mensal=simBRL0(S);s2.extra="tudo incluso, sem o carro no final";res.assin=s2;
+  var avisoOrc=[];
+  if(res.fin&&!res.fin.indisponivel&&Bv<P+custoProp(V))avisoOrc.push("O orçamento mensal informado é menor que parcela + custos do financiamento — o cálculo usa a diferença do seu investimento.");
+  return (
+    <div>
+      <Cd style={{padding:isMob?"14px":"18px 22px",marginBottom:12}} hov={false}>
+        <div style={{fontSize:12,fontWeight:800,color:T.t1,marginBottom:12}}>🚗 O carro e o seu cenário</div>
+        <div style={{display:"grid",gridTemplateColumns:isMob?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
+          <SimNum l="Valor do carro" v={v} set={sV} pre="R$"/>
+          <SimNum l="Capital disponível hoje" v={K} set={sK} pre="R$" hint="Quanto o cliente tem para usar agora"/>
+          <SimNum l="Horizonte" v={H} set={sH} suf="anos"/>
+          <SimNum l="Orçamento mensal p/ o carro" v={B} set={sB} pre="R$" hint={"Vazio = automático ("+simBRL0(Bauto)+")"}/>
+        </div>
+        <div style={{fontSize:10,color:T.gold,fontWeight:700,margin:"14px 0 8px"}}>Financiamento</div>
+        <div style={{display:"grid",gridTemplateColumns:isMob?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
+          <SimNum l="Entrada" v={ent} set={sEnt} suf="% do valor"/>
+          <SimNum l="Prazo" v={nFin} set={sNFin} suf="meses"/>
+          <SimNum l="Juros" v={taxa} set={sTaxa} suf="% a.m."/>
+          <SimNum l="IOF + tarifas" v={tar} set={sTar} suf="% financiado"/>
+        </div>
+        <div style={{fontSize:10,color:T.gold,fontWeight:700,margin:"14px 0 8px"}}>Consórcio</div>
+        <div style={{display:"grid",gridTemplateColumns:isMob?"1fr 1fr":"repeat(5,1fr)",gap:10}}>
+          <SimNum l="Taxa de adm. total" v={adm} set={sAdm} suf="%"/>
+          <SimNum l="Fundo de reserva" v={fr} set={sFr} suf="%"/>
+          <SimNum l="Prazo" v={nCon} set={sNCon} suf="meses"/>
+          <SimNum l="Mês de contemplação" v={mCon} set={sMCon} hint="Sorteio/lance: incerto"/>
+          <SimNum l="Seguro" v={segCon} set={sSegCon} suf="% a.m."/>
+        </div>
+        <div style={{fontSize:10,color:T.gold,fontWeight:700,margin:"14px 0 8px"}}>Mercado e custos</div>
+        <div style={{display:"grid",gridTemplateColumns:isMob?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
+          <SimNum l="Assinatura / aluguel" v={assin} set={sAssin} pre="R$" suf="/mês" hint="Tudo incluso"/>
+          <SimNum l="Depreciação" v={dep} set={sDep} suf="% a.a."/>
+          <SimNum l="Reajuste do preço" v={reaj} set={sReaj} suf="% a.a."/>
+          <SimNum l="Rendimento líquido" v={rend} set={sRend} suf="% a.a." hint="Após IR"/>
+          <SimNum l="IPVA" v={ipva} set={sIpva} suf="% a.a."/>
+          <SimNum l="Seguro do carro" v={seg} set={sSeg} suf="% a.a."/>
+          <SimNum l="Manutenção" v={man} set={sMan} pre="R$" suf="/ano"/>
+        </div>
+      </Cd>
+      {avisoOrc.map(function(t,k){return <div key={k} style={{fontSize:10,color:T.orange,marginBottom:8}}>⚠ {t}</div>;})}
+      <SimResultado opcoes={op} res={res} H={Hm} isMob={isMob} tituloBem="de carro"
+        notas={"Como calculamos: cada opção parte do mesmo capital e usa o mesmo orçamento mensal; o que não vai para parcela e custos é investido ao rendimento líquido informado. Patrimônio final = valor do carro (depreciado) + investimentos − dívida restante. Consórcio: crédito corrigido pelo reajuste informado e carro recebido no mês de contemplação (antes disso não há carro). Taxas, prazos e rendimentos são premissas editáveis — confirme condições reais com a instituição. Simulação educacional, não constitui recomendação de investimento."}/>
+    </div>
+  );
+}
+
+function SimImovel({isMob}){
+  var[v,sV]=useState("600.000"),[K,sK]=useState("630.000"),[ent,sEnt]=useState("20"),[nFin,sNFin]=useState("360"),[juros,sJuros]=useState("11,5"),[segMes,sSegMes]=useState("150");
+  var[itbi,sItbi]=useState("3"),[reg,sReg]=useState("1,5"),[adm,sAdm]=useState("20"),[fr,sFr]=useState("3"),[nCon,sNCon]=useState("180"),[mCon,sMCon]=useState("36"),[segCon,sSegCon]=useState("0,04");
+  var[alug,sAlug]=useState("0,4"),[reajA,sReajA]=useState("4,5"),[valz,sValz]=useState("5,5"),[rend,sRend]=useState("11"),[man,sMan]=useState("1"),[H,sH]=useState("15"),[B,sB]=useState("");
+  var V=simPn(v),Kc=simPn(K),E=V*simPn(ent)/100,n=Math.round(simPn(nFin)),ia=simPn(juros),i=simAm(ia),r=simAm(simPn(rend)),va=simAm(simPn(valz));
+  var cAq=(simPn(itbi)+simPn(reg))/100,Hm=Math.max(12,Math.round(simPn(H)*12)),rj=simPn(reajA)/100,sg=simPn(segMes);
+  var custoProp=function(val){return val*simPn(man)/100/12;};
+  var principal=V-E,pmtPrice=simPmt(principal,i,n)+sg,amort=principal/Math.max(1,n);
+  var sacParc=function(t){if(t>n)return 0;return amort+(principal-amort*(t-1))*i+sg;};
+  var sacSaldo=function(t){return t>=n?0:Math.max(0,principal-amort*t);};
+  var priceParc=function(t){return t<=n?pmtPrice:0;};
+  var priceSaldo=function(t){if(t>=n)return 0;var s=principal,p=pmtPrice-sg;for(var k=0;k<t;k++)s=s*(1+i)-p;return Math.max(0,s);};
+  var nC=Math.round(simPn(nCon)),M=Math.max(1,Math.round(simPn(mCon))),credM=V*Math.pow(1+rj,M/12);
+  var baseCon=V*(1+(simPn(adm)+simPn(fr))/100)/Math.max(1,nC);
+  var parcCon=function(t){return t>nC?0:baseCon*Math.pow(1+rj,Math.floor((t-1)/12))+V*simPn(segCon)/100;};
+  var obrigCon=function(t){var s=0;for(var k=t+1;k<=nC;k++)s+=parcCon(k)/Math.pow(1+r,k-t);return s;};
+  var A0=V*simPn(alug)/100;
+  var Bauto=pmtPrice+custoProp(V),Bv=simPn(B)>0?simPn(B):Bauto;
+  var res={};
+  var op=[
+    {k:"avista",l:"Comprar à vista",c:"#3987e5"},
+    {k:"sac",l:"Financiar (SAC)",c:"#d95926"},
+    {k:"price",l:"Financiar (Price)",c:"#c98500"},
+    {k:"cons",l:"Consórcio",c:"#199e70"},
+    {k:"alug",l:"Alugar e investir a diferença",c:"#9085e9"}
+  ];
+  var custoV=V*cAq;
+  if(Kc>=V+custoV){var a=simRodar({H:Hm,r:r,K:Kc,B:Bv,upfront:V+custoV,bem:{t0:0,valor0:V,valoriza:va,custoProp:custoProp}});a.mensal="R$ 0";a.extra="paga "+simBRL0(V+custoV)+" (com ITBI e registro)";res.avista=a;}
+  else res.avista={indisponivel:true,motivo:"Capital menor que valor + ITBI/registro ("+simBRL0(V+custoV)+")."};
+  if(Kc>=E+custoV){
+    var s1=simRodar({H:Hm,r:r,K:Kc,B:Bv,upfront:E+custoV,bem:{t0:0,valor0:V,valoriza:va,custoProp:custoProp},parcelas:sacParc,saldo:sacSaldo});s1.mensal=simBRL0(sacParc(1))+" → "+simBRL0(sacParc(n));s1.extra="parcelas decrescentes · entrada "+simBRL0(E);res.sac=s1;
+    var s2=simRodar({H:Hm,r:r,K:Kc,B:Bv,upfront:E+custoV,bem:{t0:0,valor0:V,valoriza:va,custoProp:custoProp},parcelas:priceParc,saldo:priceSaldo});s2.mensal=simBRL0(pmtPrice);s2.extra="parcelas fixas · entrada "+simBRL0(E);res.price=s2;
+  }else{res.sac={indisponivel:true,motivo:"Capital menor que entrada + ITBI/registro ("+simBRL0(E+custoV)+")."};res.price=res.sac;}
+  var c=simRodar({H:Hm,r:r,K:Kc,B:Bv,upfront:0,bem:{t0:M,valor0:credM,valoriza:va,custoProp:custoProp,custoCompra:credM*cAq},parcelas:parcCon,saldo:obrigCon});c.mensal=simBRL0(parcCon(1));c.extra="imóvel no mês "+M+" (contemplação é incerta)";res.cons=c;
+  var al=simRodar({H:Hm,r:r,K:Kc,B:Bv,upfront:0,fixoMensal:function(t){return A0*Math.pow(1+rj,Math.floor((t-1)/12));}});al.mensal=simBRL0(A0);al.extra="aluguel reajustado "+simPct(rj*100)+" a.a.";res.alug=al;
+  var anosPrice=n/12;
+  return (
+    <div>
+      <Cd style={{padding:isMob?"14px":"18px 22px",marginBottom:12}} hov={false}>
+        <div style={{fontSize:12,fontWeight:800,color:T.t1,marginBottom:12}}>🏠 O imóvel e o seu cenário</div>
+        <div style={{display:"grid",gridTemplateColumns:isMob?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
+          <SimNum l="Valor do imóvel" v={v} set={sV} pre="R$"/>
+          <SimNum l="Capital disponível hoje" v={K} set={sK} pre="R$" hint="Quanto o cliente tem para usar agora"/>
+          <SimNum l="Horizonte" v={H} set={sH} suf="anos"/>
+          <SimNum l="Orçamento mensal p/ moradia" v={B} set={sB} pre="R$" hint={"Vazio = automático ("+simBRL0(Bauto)+")"}/>
+        </div>
+        <div style={{fontSize:10,color:T.gold,fontWeight:700,margin:"14px 0 8px"}}>Financiamento</div>
+        <div style={{display:"grid",gridTemplateColumns:isMob?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
+          <SimNum l="Entrada" v={ent} set={sEnt} suf="% do valor"/>
+          <SimNum l="Prazo" v={nFin} set={sNFin} suf="meses" hint={"≈ "+anosPrice.toFixed(0)+" anos"}/>
+          <SimNum l="Juros efetivos" v={juros} set={sJuros} suf="% a.a." hint="Inclua a TR, se houver"/>
+          <SimNum l="Seguros + tarifa" v={segMes} set={sSegMes} pre="R$" suf="/mês"/>
+        </div>
+        <div style={{fontSize:10,color:T.gold,fontWeight:700,margin:"14px 0 8px"}}>Consórcio</div>
+        <div style={{display:"grid",gridTemplateColumns:isMob?"1fr 1fr":"repeat(5,1fr)",gap:10}}>
+          <SimNum l="Taxa de adm. total" v={adm} set={sAdm} suf="%"/>
+          <SimNum l="Fundo de reserva" v={fr} set={sFr} suf="%"/>
+          <SimNum l="Prazo" v={nCon} set={sNCon} suf="meses"/>
+          <SimNum l="Mês de contemplação" v={mCon} set={sMCon} hint="Sorteio/lance: incerto"/>
+          <SimNum l="Seguro" v={segCon} set={sSegCon} suf="% a.m."/>
+        </div>
+        <div style={{fontSize:10,color:T.gold,fontWeight:700,margin:"14px 0 8px"}}>Mercado e custos</div>
+        <div style={{display:"grid",gridTemplateColumns:isMob?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
+          <SimNum l="Aluguel equivalente" v={alug} set={sAlug} suf="% do valor/mês" hint={"≈ "+simBRL0(A0)+"/mês"}/>
+          <SimNum l="Reajuste do aluguel" v={reajA} set={sReajA} suf="% a.a." hint="Também corrige o crédito do consórcio"/>
+          <SimNum l="Valorização do imóvel" v={valz} set={sValz} suf="% a.a."/>
+          <SimNum l="Rendimento líquido" v={rend} set={sRend} suf="% a.a." hint="Após IR"/>
+          <SimNum l="ITBI" v={itbi} set={sItbi} suf="%"/>
+          <SimNum l="Escritura + registro" v={reg} set={sReg} suf="%"/>
+          <SimNum l="Manutenção do proprietário" v={man} set={sMan} suf="% a.a. do valor"/>
+        </div>
+      </Cd>
+      <SimResultado opcoes={op} res={res} H={Hm} isMob={isMob} tituloBem="de imóvel"
+        notas={"Como calculamos: cada opção parte do mesmo capital e usa o mesmo orçamento mensal; o que não vai para parcela, aluguel e custos é investido ao rendimento líquido informado. Patrimônio final = imóvel valorizado + investimentos − saldo devedor. Condomínio e IPTU são pagos por quem mora (comprador ou inquilino) e ficam fora da comparação. Não inclui corretagem de venda nem imposto sobre ganho de capital. Consórcio: crédito corrigido pelo reajuste informado e imóvel recebido no mês de contemplação (antes disso não há imóvel). Todas as taxas são premissas editáveis — confirme condições reais. Simulação educacional, não constitui recomendação."}/>
+    </div>
+  );
+}
+
+function SimuladoresView(){
+  var[tab,sTab]=useState("carro");
+  var[isMob,sIsMob]=useState(typeof window!=="undefined"&&window.innerWidth<768);
+  useEffect(function(){var f=function(){sIsMob(window.innerWidth<768)};window.addEventListener("resize",f);return function(){window.removeEventListener("resize",f)};},[]);
+  return (
+    <div>
+      <div style={{marginBottom:16}}>
+        <div style={{fontSize:13,fontWeight:800,color:T.t1,marginBottom:4}}>🧮 Simuladores</div>
+        <div style={{fontSize:11,color:T.t3}}>Compare comprar, financiar, consórcio e alugar/assinar — com premissas que você ajusta para cada cliente</div>
+      </div>
+      <div style={{display:"flex",gap:6,marginBottom:14,padding:4,background:T.w3,borderRadius:12,border:"1px solid "+T.bdrL,width:"fit-content"}}>
+        {[{id:"carro",l:"Carro",ic:"🚗"},{id:"imovel",l:"Imóvel",ic:"🏠"}].map(function(t){var a=tab===t.id;return <button key={t.id} onClick={function(){sTab(t.id)}} style={{padding:"8px 18px",borderRadius:10,fontSize:12,fontWeight:700,cursor:"pointer",border:"none",background:a?T.goldD:"transparent",color:a?T.gold:T.t3}}>{t.ic} {t.l}</button>;})}
+      </div>
+      {tab==="carro"?<SimCarro isMob={isMob}/>:<SimImovel isMob={isMob}/>}
+    </div>
+  );
+}
+
 function VencimentosView({data:d,dispatch:dp,taxasBCB,taxaBCBStatus,onGoClient}){
   var [periodo,sPeriodo]=useState("90");
   var [tipoF,sTipoF]=useState("todos");
@@ -37342,7 +37745,7 @@ function App({authUser}){
     });
   },[notsReais,pushPerm]);
   const go=function(p){sPg(p);sSel(null);sShowMenu(false)};
-  const titles={dashboard:"Dashboard",clients:sel?sel.nome:"Clientes",interacoes:"Interações",vencimentos:"Vencimentos de Renda Fixa",financeiro:"Financeiro da Empresa",comercial:"Comercial",metas:"Painel de Metas",agenda:"Agenda",news:"Notícias & Mercado",import:"Importar",irAnual:"Relatório Anual de IR"};
+  const titles={dashboard:"Dashboard",clients:sel?sel.nome:"Clientes",interacoes:"Interações",vencimentos:"Vencimentos de Renda Fixa",simuladores:"Simuladores — Carro e Imóvel",financeiro:"Financeiro da Empresa",comercial:"Comercial",metas:"Painel de Metas",agenda:"Agenda",news:"Notícias & Mercado",import:"Importar",irAnual:"Relatório Anual de IR"};
 
   
   const[isMobile,setMobile]=useState(window.innerWidth<768);
@@ -37643,6 +38046,7 @@ function App({authUser}){
           {pg==="dashboard" && <Dash data={d} onSel={function(c){sPg("clients");sSel(c)}} goTo={function(p){sPg(p)}}/>}
           {pg==="clients" && !sel && <CL data={d} onSel={function(c){sSel(c)}} dispatch={dp} fi={clFi} sFi={sClFi}/>}
           {pg==="interacoes" && <InteracoesView data={d} dispatch={dp} onGoClient={function(c){sPg("clients");sSel(c)}}/>}
+          {pg==="simuladores" && <SimuladoresView/>}
           {pg==="vencimentos" && <VencimentosView data={d} dispatch={dp} taxasBCB={taxasBCB} taxaBCBStatus={taxaBCBStatus} onGoClient={function(c){sPg("clients");sSel(c)}}/>}
           {pg==="clients" && sel && <CD client={sel} data={d} dispatch={dp} onBack={function(){sSel(null)}} taxasBCB={taxasBCB} taxaBCBStatus={taxaBCBStatus}/>}
           {pg==="financeiro" && <FinanceiroView data={d} dispatch={dp}/>}
@@ -37779,7 +38183,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '505';
+  var SW_VERSION = '507';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
