@@ -36702,7 +36702,7 @@ function simPct(v,d){return (v).toFixed(d==null?1:d).replace(".",",")+"%";}
 function simRodar(cfg){
   /* cfg: {H, r (mensal), K, B, upfront, bem:{t0,valor0,valoriza(mensal),custoProp(valorAtual)->R$/mes}, parcelas:function(t)->R$ (t=1..), saldo:function(t)->dívida/obrigação restante,
            buyWhenAfford:{preco0,reaj}, fixoMensal:function(t)->R$ (ex.: aluguel/assinatura), custoAquisicaoPct, aquisicaoNoT0 } */
-  var H=cfg.H,r=cfg.r,inv=cfg.K-(cfg.upfront||0),serie=[],totalPago=(cfg.upfront||0),temBem=false,valorBem=0,t0=cfg.bem?cfg.bem.t0:null,mesCompra=null;
+  var H=cfg.H,r=cfg.r,inv=cfg.K-(cfg.upfront||0),serie=[],totalPago=(cfg.upfront||0),temBem=false,valorBem=0,t0=cfg.bem?cfg.bem.t0:null,mesCompra=null,mesNeg=null;
   if(cfg.bem&&cfg.bem.t0===0){temBem=true;valorBem=cfg.bem.valor0;}
   var futuro=function(t){return (!temBem&&cfg.bem&&cfg.bem.t0>0&&t<cfg.bem.t0)?cfg.bem.valor0/Math.pow(1+r,cfg.bem.t0-t):0;};
   serie.push(inv+(temBem?valorBem:0)+futuro(0)-(cfg.saldo?cfg.saldo(0):0));
@@ -36715,16 +36715,26 @@ function simRodar(cfg){
     if(!temBem&&cfg.juntar){
       var preco=cfg.juntar.preco0*Math.pow(1+cfg.juntar.reaj,t/12);
       var custoAq=preco*(cfg.juntar.custoAqPct||0);
-      if(inv+cfg.B>=preco+custoAq){inv-=(preco+custoAq);temBem=true;valorBem=preco;mesCompra=t;totalPago+=preco+custoAq;}
+      if(inv+cfg.B-(cfg.semBem?cfg.semBem(t):0)>=preco+custoAq){inv-=(preco+custoAq);temBem=true;valorBem=preco;mesCompra=t;totalPago+=preco+custoAq;}
     }
+    /* v512: enquanto ainda NÃO tem o bem (esperando contemplação / juntando), o cliente precisa de transporte/moradia — custo da espera */
+    if(!temBem&&cfg.semBem)saida+=cfg.semBem(t);
     if(cfg.parcelas)saida+=cfg.parcelas(t);
     if(cfg.fixoMensal)saida+=cfg.fixoMensal(t);
     if(temBem&&cfg.bem&&cfg.bem.custoProp)saida+=cfg.bem.custoProp(valorBem);
     totalPago+=saida;
     inv+=cfg.B-saida;
+    if(inv<0&&mesNeg==null)mesNeg=t;
     serie.push(inv+(temBem?valorBem:0)+futuro(t)-(cfg.saldo?cfg.saldo(t):0));
   }
-  return {serie:serie,final:serie[H],valorBem:temBem?valorBem:0,inv:inv,totalPago:totalPago,mesCompra:mesCompra,temBem:temBem};
+  return {serie:serie,final:serie[H],valorBem:temBem?valorBem:0,inv:inv,totalPago:totalPago,mesCompra:mesCompra,temBem:temBem,divida:(cfg.saldo?cfg.saldo(H):0),credito:futuro(H),mesNeg:mesNeg};
+}
+/* v512: sensibilidade ao mês de contemplação do consórcio — patrimônio final se contemplado no mês 1, 6, 12, 24... */
+function simSens(roda,nC,Hm,M){
+  var lim=Math.min(nC,Hm),meses=[1,6,12,24,36,48,60,72,84,96].filter(function(m){return m<=lim;});
+  if(M<=lim&&meses.indexOf(M)<0)meses.push(M);
+  meses.sort(function(a,b){return a-b;});
+  return meses.map(function(m){return {m:m,final:roda(m).final};});
 }
 
 function SimNum({l,v,set,suf,pre,hint,w}){
@@ -36765,7 +36775,7 @@ function SimulatorLinhas({series,opcoes,H,mesesPorTick,isMob}){
   );
 }
 
-function SimResultado({opcoes,res,H,isMob,tituloBem,notas}){
+function SimResultado({opcoes,res,H,isMob,tituloBem,notas,sens}){
   var disp=opcoes.filter(function(o){return res[o.k]&&!res[o.k].indisponivel;});
   if(!disp.length)return <Cd style={{padding:18}} hov={false}><div style={{fontSize:12,color:T.t2}}>Nenhuma opção disponível com o capital informado. Aumente o capital disponível.</div></Cd>;
   var ord=disp.slice().sort(function(a,b){return res[b.k].final-res[a.k].final;});
@@ -36786,6 +36796,7 @@ function SimResultado({opcoes,res,H,isMob,tituloBem,notas}){
             <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Melhor resultado neste cenário</div>
             <div style={{fontSize:20,fontWeight:900,color:T.t1}}><span style={{display:"inline-block",width:11,height:11,borderRadius:3,background:melhor.c,marginRight:8}}/>{melhor.l}</div>
             <div style={{fontSize:11,color:T.t2,marginTop:4}}>Patrimônio líquido estimado ao final: <strong style={{color:T.green,fontFamily:"'JetBrains Mono',monospace"}}>{simBRL0(res[melhor.k].final)}</strong>{seg?<span> · {simBRL0(res[melhor.k].final-res[seg.k].final)} a mais que "{seg.l}"</span>:null}</div>
+            <div style={{fontSize:10,color:T.t3,marginTop:4}}>Composição: bem {simBRL0(res[melhor.k].valorBem+(res[melhor.k].credito||0))} + investimentos {simBRL0(res[melhor.k].inv)} − dívida {simBRL0(res[melhor.k].divida||0)}</div>
           </div>
           <Bt v="secondary" onClick={function(){try{navigator.clipboard.writeText(resumo());alert("Resumo copiado — é só colar no WhatsApp.");}catch(e){alert(resumo());}}} style={{fontSize:11,padding:"8px 14px"}}>📋 Copiar resumo</Bt>
         </div>
@@ -36813,27 +36824,44 @@ function SimResultado({opcoes,res,H,isMob,tituloBem,notas}){
       </Cd>
 
       <Cd style={{padding:isMob?"10px":"14px 18px",marginBottom:12,overflowX:"auto"}} hov={false}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:520}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:680}}>
           <thead><tr style={{color:T.t3,fontSize:9,letterSpacing:.6,textTransform:"uppercase"}}>
-            <th style={{textAlign:"left",padding:"6px 4px"}}>Opção</th><th style={{textAlign:"right",padding:"6px 4px"}}>Desembolso mensal*</th><th style={{textAlign:"right",padding:"6px 4px"}}>Total desembolsado</th><th style={{textAlign:"right",padding:"6px 4px"}}>Valor do bem ao final</th><th style={{textAlign:"right",padding:"6px 4px"}}>Patrimônio final</th>
+            <th style={{textAlign:"left",padding:"6px 4px"}}>Opção</th><th style={{textAlign:"right",padding:"6px 4px"}}>Desembolso mensal*</th><th style={{textAlign:"right",padding:"6px 4px"}}>Total desembolsado</th><th style={{textAlign:"right",padding:"6px 4px"}}>+ Bem ao final</th><th style={{textAlign:"right",padding:"6px 4px"}}>+ Investimentos</th><th style={{textAlign:"right",padding:"6px 4px"}}>− Dívida</th><th style={{textAlign:"right",padding:"6px 4px"}}>= Patrimônio final</th>
           </tr></thead>
           <tbody>
             {opcoes.map(function(o){
               var r=res[o.k];
               if(!r)return null;
-              if(r.indisponivel)return <tr key={o.k} style={{borderTop:"1px solid "+T.bdrL,opacity:.55}}><td style={{padding:"8px 4px",color:T.t1}}><span style={{display:"inline-block",width:9,height:9,borderRadius:2,background:o.c,marginRight:6}}/>{o.l}</td><td colSpan={4} style={{padding:"8px 4px",color:T.t3,fontSize:10}}>{r.motivo}</td></tr>;
+              if(r.indisponivel)return <tr key={o.k} style={{borderTop:"1px solid "+T.bdrL,opacity:.55}}><td style={{padding:"8px 4px",color:T.t1}}><span style={{display:"inline-block",width:9,height:9,borderRadius:2,background:o.c,marginRight:6}}/>{o.l}</td><td colSpan={6} style={{padding:"8px 4px",color:T.t3,fontSize:10}}>{r.motivo}</td></tr>;
               return <tr key={o.k} style={{borderTop:"1px solid "+T.bdrL}}>
-                <td style={{padding:"8px 4px",color:T.t1}}><span style={{display:"inline-block",width:9,height:9,borderRadius:2,background:o.c,marginRight:6}}/>{o.l}{r.extra&&<div style={{fontSize:9,color:T.t3,marginLeft:15}}>{r.extra}</div>}</td>
+                <td style={{padding:"8px 4px",color:T.t1}}><span style={{display:"inline-block",width:9,height:9,borderRadius:2,background:o.c,marginRight:6}}/>{o.l}{r.extra&&<div style={{fontSize:9,color:T.t3,marginLeft:15}}>{r.extra}</div>}{r.mesNeg!=null&&<div style={{fontSize:9,color:T.orange,marginLeft:15}}>⚠ capital esgota no mês {r.mesNeg} (o saldo negativo seria dívida)</div>}</td>
                 <td style={{padding:"8px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:T.t2}}>{r.mensal||"—"}</td>
                 <td style={{padding:"8px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:T.t2}}>{simBRL0(r.totalPago)}</td>
-                <td style={{padding:"8px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:T.t2}}>{r.valorBem>0?simBRL0(r.valorBem):"—"}</td>
+                <td style={{padding:"8px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:T.t2}}>{(r.valorBem+(r.credito||0))>0?simBRL0(r.valorBem+(r.credito||0)):"—"}</td>
+                <td style={{padding:"8px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:T.t2}}>{simBRL0(r.inv)}</td>
+                <td style={{padding:"8px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:(r.divida||0)>0?T.red:T.t3}}>{(r.divida||0)>0?simBRL0(r.divida):"—"}</td>
                 <td style={{padding:"8px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:800,color:r.final<0?T.red:T.t1}}>{simBRL0(r.final)}</td>
               </tr>;
             })}
           </tbody>
         </table>
-        <div style={{fontSize:9,color:T.t3,marginTop:8}}>* Primeira parcela/mensalidade, sem os custos de propriedade (IPVA, seguro, manutenção, etc.), que entram no cálculo do patrimônio.</div>
+        <div style={{fontSize:9,color:T.t3,marginTop:8}}>* Primeira parcela/mensalidade. Não inclui custos de propriedade (IPVA, seguro, manutenção…) nem o transporte/aluguel pago durante a espera do consórcio — esses custos entram no cálculo do patrimônio final.</div>
       </Cd>
+      {sens&&sens.linhas&&sens.linhas.length>1&&(function(){
+        var mx=Math.max.apply(null,sens.linhas.map(function(l){return l.final;})),mn=Math.min.apply(null,sens.linhas.map(function(l){return l.final;}));
+        return <Cd style={{padding:isMob?"14px":"16px 22px",marginBottom:12}} hov={false}>
+          <div style={{fontSize:12,fontWeight:800,color:T.t1,marginBottom:2}}>Consórcio: e se a contemplação demorar mais?</div>
+          <div style={{fontSize:10,color:T.t3,marginBottom:10}}>{sens.sub}</div>
+          {sens.linhas.map(function(l){
+            var atual=l.m===sens.atual,w=mx===mn?100:Math.max(6,(l.final-mn)/(mx-mn)*100);
+            return <div key={l.m} style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+              <div style={{width:isMob?84:120,fontSize:11,color:atual?T.t1:T.t2,fontWeight:atual?800:500,flexShrink:0}}>{atual?"● ":""}mês {l.m}</div>
+              <div style={{flex:1,height:12,background:"rgba(255,255,255,0.04)",borderRadius:4,overflow:"hidden"}}><div style={{width:w+"%",height:"100%",background:"#199e70",opacity:atual?1:.55,borderRadius:"0 4px 4px 0"}}/></div>
+              <div style={{width:isMob?88:112,textAlign:"right",fontSize:11,fontWeight:atual?800:600,color:T.t1,fontFamily:"'JetBrains Mono',monospace"}}>{simBRL0(l.final)}</div>
+            </div>;
+          })}
+        </Cd>;
+      })()}
       {notas&&<div style={{fontSize:10,color:T.t3,lineHeight:1.6,padding:"10px 12px",background:T.w3,borderRadius:8}}>{notas}</div>}
     </div>
   );
@@ -36842,12 +36870,12 @@ function SimResultado({opcoes,res,H,isMob,tituloBem,notas}){
 function SimCarro({isMob}){
   var[v,sV]=useState("90.000"),[K,sK]=useState("90.000"),[ent,sEnt]=useState("30"),[nFin,sNFin]=useState("48"),[taxa,sTaxa]=useState("1,90"),[tar,sTar]=useState("3");
   var[adm,sAdm]=useState("15"),[fr,sFr]=useState("2"),[nCon,sNCon]=useState("60"),[mCon,sMCon]=useState("12"),[segCon,sSegCon]=useState("0,04");
-  var[assin,sAssin]=useState("4.500"),[dep,sDep]=useState("12"),[reaj,sReaj]=useState("4,5"),[rend,sRend]=useState("11"),[ipva,sIpva]=useState("4"),[seg,sSeg]=useState("4"),[man,sMan]=useState("3.000"),[H,sH]=useState("4"),[B,sB]=useState("");
-  var V=simPn(v),Kc=simPn(K),E=V*simPn(ent)/100,n=Math.round(simPn(nFin)),i=simPn(taxa)/100,tr=simPn(tar)/100;
+  var[assin,sAssin]=useState("4.500"),[dep,sDep]=useState("12"),[reaj,sReaj]=useState("4,5"),[rend,sRend]=useState("11"),[ipva,sIpva]=useState("4"),[seg,sSeg]=useState("4"),[man,sMan]=useState("3.000"),[H,sH]=useState("4"),[B,sB]=useState(""),[trans,sTrans]=useState("");
+  var V=simPn(v),Kc=simPn(K),E=V*simPn(ent)/100,n=Math.max(1,Math.round(simPn(nFin))),i=simPn(taxa)/100,tr=simPn(tar)/100;
   var r=simAm(simPn(rend)),d=simAm(-simPn(dep)),rj=simPn(reaj)/100,Hm=Math.max(6,Math.round(simPn(H)*12));
   var custoProp=function(val){return val*(simPn(ipva)+simPn(seg))/100/12+simPn(man)/12;};
   var principal=(V-E)*(1+tr),P=simPmt(principal,i,n);
-  var nC=Math.round(simPn(nCon)),M=Math.max(1,Math.round(simPn(mCon))),credM=V*Math.pow(1+rj,M/12);
+  var nC=Math.max(1,Math.round(simPn(nCon))),Mdig=Math.max(1,Math.round(simPn(mCon))),M=Math.min(Mdig,nC),credM=V*Math.pow(1+rj,M/12);
   var baseCon=V*(1+(simPn(adm)+simPn(fr))/100)/Math.max(1,nC);
   var parcCon=function(t){return t>nC?0:baseCon*Math.pow(1+rj,Math.floor((t-1)/12))+V*simPn(segCon)/100;};
   var Bauto=P+custoProp(V),Bv=simPn(B)>0?simPn(B):Bauto;
@@ -36868,13 +36896,18 @@ function SimCarro({isMob}){
   if(Kc>=E){var f=simRodar({H:Hm,r:r,K:Kc,B:Bv,upfront:E,bem:{t0:0,valor0:V,valoriza:d,custoProp:custoProp},parcelas:function(t){return t<=n?P:0;},saldo:saldoPrice});f.mensal=simBRL0(P);f.extra=n+"x · entrada "+simBRL0(E);res.fin=f;}
   else res.fin={indisponivel:true,motivo:"Capital menor que a entrada."};
   /* consórcio */
-  var c=simRodar({H:Hm,r:r,K:Kc,B:Bv,upfront:0,bem:{t0:M,valor0:credM,valoriza:d,custoProp:custoProp},parcelas:parcCon,saldo:obrigCon});c.mensal=simBRL0(parcCon(1));c.extra="carro no mês "+M+" (contemplação é incerta)";res.cons=c;
+  /* custo de ficar sem o carro enquanto espera (contemplação / juntar): vazio = igual à assinatura/aluguel */
+  var Tr=(String(trans).trim()!==""&&simPn(trans)>=0)?simPn(trans):simPn(assin);
+  var semCarro=function(){return Tr;};
+  var rodaCons=function(Mx){return simRodar({H:Hm,r:r,K:Kc,B:Bv,upfront:0,bem:{t0:Mx,valor0:V*Math.pow(1+rj,Mx/12),valoriza:d,custoProp:custoProp},parcelas:parcCon,saldo:obrigCon,semBem:semCarro});};
+  var c=rodaCons(M);c.mensal=simBRL0(parcCon(1));c.extra="carro no mês "+M+" · até lá, transporte "+simBRL0(Tr)+"/mês";res.cons=c;
   /* juntar */
-  if(Kc<V){var j=simRodar({H:Hm,r:r,K:Kc,B:Bv,upfront:0,juntar:{preco0:V,reaj:rj},bem:{t0:null,valor0:0,valoriza:d,custoProp:custoProp}});j.mensal="R$ 0";j.extra=j.temBem?"compra no mês "+j.mesCompra:"não alcança o valor no horizonte";res.juntar=j;}
+  if(Kc<V){var j=simRodar({H:Hm,r:r,K:Kc,B:Bv,upfront:0,juntar:{preco0:V,reaj:rj},bem:{t0:null,valor0:0,valoriza:d,custoProp:custoProp},semBem:semCarro});j.mensal="R$ 0";j.extra=j.temBem?"compra no mês "+j.mesCompra:"não alcança o valor no horizonte";res.juntar=j;}
   else res.juntar={indisponivel:true,motivo:"Você já tem o valor — equivale a comprar à vista."};
   /* assinatura */
   var S=simPn(assin);var s2=simRodar({H:Hm,r:r,K:Kc,B:Bv,upfront:0,fixoMensal:function(){return S;}});s2.mensal=simBRL0(S);s2.extra="tudo incluso, sem o carro no final";res.assin=s2;
   var avisoOrc=[];
+  if(Mdig>nC)avisoOrc.push("O mês de contemplação ("+Mdig+") é maior que o prazo do grupo ("+nC+" meses) — o cálculo usa o mês "+nC+".");
   if(res.fin&&!res.fin.indisponivel&&Bv<P+custoProp(V))avisoOrc.push("O orçamento mensal informado é menor que parcela + custos do financiamento — o cálculo usa a diferença do seu investimento.");
   return (
     <div>
@@ -36898,7 +36931,7 @@ function SimCarro({isMob}){
           <SimNum l="Taxa de adm. total" v={adm} set={sAdm} suf="%"/>
           <SimNum l="Fundo de reserva" v={fr} set={sFr} suf="%"/>
           <SimNum l="Prazo" v={nCon} set={sNCon} suf="meses"/>
-          <SimNum l="Mês de contemplação" v={mCon} set={sMCon} hint="Sorteio/lance: incerto"/>
+          <SimNum l="Mês de contemplação" v={mCon} set={sMCon} hint="Sorteio/lance: incerto. Máx. = prazo"/>
           <SimNum l="Seguro" v={segCon} set={sSegCon} suf="% a.m."/>
         </div>
         <div style={{fontSize:10,color:T.gold,fontWeight:700,margin:"14px 0 8px"}}>Mercado e custos</div>
@@ -36910,11 +36943,13 @@ function SimCarro({isMob}){
           <SimNum l="IPVA" v={ipva} set={sIpva} suf="% a.a."/>
           <SimNum l="Seguro do carro" v={seg} set={sSeg} suf="% a.a."/>
           <SimNum l="Manutenção" v={man} set={sMan} pre="R$" suf="/ano"/>
+          <SimNum l="Transporte até ter o carro" v={trans} set={sTrans} pre="R$" suf="/mês" hint={"Vazio = igual à assinatura ("+simBRL0(simPn(assin))+"). Vale p/ consórcio e juntar."}/>
         </div>
       </Cd>
       {avisoOrc.map(function(t,k){return <div key={k} style={{fontSize:10,color:T.orange,marginBottom:8}}>⚠ {t}</div>;})}
       <SimResultado opcoes={op} res={res} H={Hm} isMob={isMob} tituloBem="de carro"
-        notas={"Como calculamos: cada opção parte do mesmo capital e usa o mesmo orçamento mensal; o que não vai para parcela e custos é investido ao rendimento líquido informado. Patrimônio final = valor do carro (depreciado) + investimentos − dívida restante. Consórcio: crédito corrigido pelo reajuste informado e carro recebido no mês de contemplação (antes disso não há carro). Taxas, prazos e rendimentos são premissas editáveis — confirme condições reais com a instituição. Simulação educacional, não constitui recomendação de investimento."}/>
+        sens={{linhas:simSens(rodaCons,nC,Hm,M),atual:M,sub:"Patrimônio final do consórcio conforme o mês em que o carro chega. Cada mês de espera custa transporte ("+simBRL0(Tr)+"/mês) e a parcela segue sendo paga."}}
+        notas={"Como calculamos: cada opção parte do mesmo capital e usa o mesmo orçamento mensal; o que não vai para parcela e custos é investido ao rendimento líquido informado. Patrimônio final = valor do carro (depreciado) + investimentos − dívida restante. Consórcio e “juntar e comprar depois”: crédito corrigido pelo reajuste informado e carro recebido só no mês de contemplação/compra; enquanto não há carro, soma-se o custo de transporte informado (por padrão, o valor da assinatura) — quanto mais demora, maior o custo da espera. Taxas, prazos e rendimentos são premissas editáveis — confirme condições reais com a instituição. Simulação educacional, não constitui recomendação de investimento."}/>
     </div>
   );
 }
@@ -36922,8 +36957,8 @@ function SimCarro({isMob}){
 function SimImovel({isMob}){
   var[v,sV]=useState("600.000"),[K,sK]=useState("630.000"),[ent,sEnt]=useState("20"),[nFin,sNFin]=useState("360"),[juros,sJuros]=useState("11,5"),[segMes,sSegMes]=useState("150");
   var[itbi,sItbi]=useState("3"),[reg,sReg]=useState("1,5"),[adm,sAdm]=useState("20"),[fr,sFr]=useState("3"),[nCon,sNCon]=useState("180"),[mCon,sMCon]=useState("36"),[segCon,sSegCon]=useState("0,04");
-  var[alug,sAlug]=useState("0,4"),[reajA,sReajA]=useState("4,5"),[valz,sValz]=useState("5,5"),[rend,sRend]=useState("11"),[man,sMan]=useState("1"),[H,sH]=useState("15"),[B,sB]=useState("");
-  var V=simPn(v),Kc=simPn(K),E=V*simPn(ent)/100,n=Math.round(simPn(nFin)),ia=simPn(juros),i=simAm(ia),r=simAm(simPn(rend)),va=simAm(simPn(valz));
+  var[alug,sAlug]=useState("0,4"),[reajA,sReajA]=useState("4,5"),[valz,sValz]=useState("5,5"),[rend,sRend]=useState("11"),[man,sMan]=useState("1"),[H,sH]=useState("15"),[B,sB]=useState(""),[alugEsp,sAlugEsp]=useState("");
+  var V=simPn(v),Kc=simPn(K),E=V*simPn(ent)/100,n=Math.max(1,Math.round(simPn(nFin))),ia=simPn(juros),i=simAm(ia),r=simAm(simPn(rend)),va=simAm(simPn(valz));
   var cAq=(simPn(itbi)+simPn(reg))/100,Hm=Math.max(12,Math.round(simPn(H)*12)),rj=simPn(reajA)/100,sg=simPn(segMes);
   var custoProp=function(val){return val*simPn(man)/100/12;};
   var principal=V-E,pmtPrice=simPmt(principal,i,n)+sg,amort=principal/Math.max(1,n);
@@ -36931,11 +36966,16 @@ function SimImovel({isMob}){
   var sacSaldo=function(t){return t>=n?0:Math.max(0,principal-amort*t);};
   var priceParc=function(t){return t<=n?pmtPrice:0;};
   var priceSaldo=function(t){if(t>=n)return 0;var s=principal,p=pmtPrice-sg;for(var k=0;k<t;k++)s=s*(1+i)-p;return Math.max(0,s);};
-  var nC=Math.round(simPn(nCon)),M=Math.max(1,Math.round(simPn(mCon))),credM=V*Math.pow(1+rj,M/12);
+  var nC=Math.max(1,Math.round(simPn(nCon))),Mdig=Math.max(1,Math.round(simPn(mCon))),M=Math.min(Mdig,nC),credM=V*Math.pow(1+rj,M/12);
   var baseCon=V*(1+(simPn(adm)+simPn(fr))/100)/Math.max(1,nC);
   var parcCon=function(t){return t>nC?0:baseCon*Math.pow(1+rj,Math.floor((t-1)/12))+V*simPn(segCon)/100;};
   var obrigCon=function(t){var s=0;for(var k=t+1;k<=nC;k++)s+=parcCon(k)/Math.pow(1+r,k-t);return s;};
+  var avisosIm=Mdig>nC?["O mês de contemplação ("+Mdig+") é maior que o prazo do grupo ("+nC+" meses) — o cálculo usa o mês "+nC+"."]:[];
   var A0=V*simPn(alug)/100;
+  /* aluguel pago enquanto o consórcio não é contemplado: vazio = igual ao aluguel equivalente */
+  var Ae=(String(alugEsp).trim()!==""&&simPn(alugEsp)>=0)?simPn(alugEsp):A0;
+  var semImovel=function(t){return Ae*Math.pow(1+rj,Math.floor((t-1)/12));};
+  var rodaCons=function(Mx){return simRodar({H:Hm,r:r,K:Kc,B:Bv,upfront:0,bem:{t0:Mx,valor0:V*Math.pow(1+rj,Mx/12),valoriza:va,custoProp:custoProp,custoCompra:V*Math.pow(1+rj,Mx/12)*cAq},parcelas:parcCon,saldo:obrigCon,semBem:semImovel});};
   var Bauto=pmtPrice+custoProp(V),Bv=simPn(B)>0?simPn(B):Bauto;
   var res={};
   var op=[
@@ -36952,7 +36992,7 @@ function SimImovel({isMob}){
     var s1=simRodar({H:Hm,r:r,K:Kc,B:Bv,upfront:E+custoV,bem:{t0:0,valor0:V,valoriza:va,custoProp:custoProp},parcelas:sacParc,saldo:sacSaldo});s1.mensal=simBRL0(sacParc(1))+" → "+simBRL0(sacParc(n));s1.extra="parcelas decrescentes · entrada "+simBRL0(E);res.sac=s1;
     var s2=simRodar({H:Hm,r:r,K:Kc,B:Bv,upfront:E+custoV,bem:{t0:0,valor0:V,valoriza:va,custoProp:custoProp},parcelas:priceParc,saldo:priceSaldo});s2.mensal=simBRL0(pmtPrice);s2.extra="parcelas fixas · entrada "+simBRL0(E);res.price=s2;
   }else{res.sac={indisponivel:true,motivo:"Capital menor que entrada + ITBI/registro ("+simBRL0(E+custoV)+")."};res.price=res.sac;}
-  var c=simRodar({H:Hm,r:r,K:Kc,B:Bv,upfront:0,bem:{t0:M,valor0:credM,valoriza:va,custoProp:custoProp,custoCompra:credM*cAq},parcelas:parcCon,saldo:obrigCon});c.mensal=simBRL0(parcCon(1));c.extra="imóvel no mês "+M+" (contemplação é incerta)";res.cons=c;
+  var c=rodaCons(M);c.mensal=simBRL0(parcCon(1));c.extra="imóvel no mês "+M+" · até lá, aluguel de "+simBRL0(Ae)+"/mês";res.cons=c;
   var al=simRodar({H:Hm,r:r,K:Kc,B:Bv,upfront:0,fixoMensal:function(t){return A0*Math.pow(1+rj,Math.floor((t-1)/12));}});al.mensal=simBRL0(A0);al.extra="aluguel reajustado "+simPct(rj*100)+" a.a.";res.alug=al;
   var anosPrice=n/12;
   return (
@@ -36977,7 +37017,7 @@ function SimImovel({isMob}){
           <SimNum l="Taxa de adm. total" v={adm} set={sAdm} suf="%"/>
           <SimNum l="Fundo de reserva" v={fr} set={sFr} suf="%"/>
           <SimNum l="Prazo" v={nCon} set={sNCon} suf="meses"/>
-          <SimNum l="Mês de contemplação" v={mCon} set={sMCon} hint="Sorteio/lance: incerto"/>
+          <SimNum l="Mês de contemplação" v={mCon} set={sMCon} hint="Sorteio/lance: incerto. Máx. = prazo"/>
           <SimNum l="Seguro" v={segCon} set={sSegCon} suf="% a.m."/>
         </div>
         <div style={{fontSize:10,color:T.gold,fontWeight:700,margin:"14px 0 8px"}}>Mercado e custos</div>
@@ -36989,10 +37029,13 @@ function SimImovel({isMob}){
           <SimNum l="ITBI" v={itbi} set={sItbi} suf="%"/>
           <SimNum l="Escritura + registro" v={reg} set={sReg} suf="%"/>
           <SimNum l="Manutenção do proprietário" v={man} set={sMan} suf="% a.a. do valor"/>
+          <SimNum l="Aluguel enquanto aguarda" v={alugEsp} set={sAlugEsp} pre="R$" suf="/mês" hint={"Vazio = igual ao aluguel equivalente ("+simBRL0(A0)+"). Vale p/ consórcio."}/>
         </div>
       </Cd>
+      {avisosIm.map(function(t,k){return <div key={k} style={{fontSize:10,color:T.orange,marginBottom:8}}>⚠ {t}</div>;})}
       <SimResultado opcoes={op} res={res} H={Hm} isMob={isMob} tituloBem="de imóvel"
-        notas={"Como calculamos: cada opção parte do mesmo capital e usa o mesmo orçamento mensal; o que não vai para parcela, aluguel e custos é investido ao rendimento líquido informado. Patrimônio final = imóvel valorizado + investimentos − saldo devedor. Condomínio e IPTU são pagos por quem mora (comprador ou inquilino) e ficam fora da comparação. Não inclui corretagem de venda nem imposto sobre ganho de capital. Consórcio: crédito corrigido pelo reajuste informado e imóvel recebido no mês de contemplação (antes disso não há imóvel). Todas as taxas são premissas editáveis — confirme condições reais. Simulação educacional, não constitui recomendação."}/>
+        sens={{linhas:simSens(rodaCons,nC,Hm,M),atual:M,sub:"Patrimônio final do consórcio conforme o mês em que o imóvel é contemplado. Cada mês de espera custa aluguel ("+simBRL0(Ae)+"/mês) e a parcela segue sendo paga."}}
+        notas={"Como calculamos: cada opção parte do mesmo capital e usa o mesmo orçamento mensal; o que não vai para parcela, aluguel e custos é investido ao rendimento líquido informado. Patrimônio final = imóvel valorizado + investimentos − saldo devedor. Condomínio e IPTU são pagos por quem mora (comprador ou inquilino) e ficam fora da comparação. Não inclui corretagem de venda nem imposto sobre ganho de capital. Consórcio: crédito corrigido pelo reajuste informado e imóvel recebido só no mês de contemplação; até lá soma-se o aluguel informado (por padrão, o aluguel equivalente) — quanto mais demora, maior o custo da espera. Todas as taxas são premissas editáveis — confirme condições reais. Simulação educacional, não constitui recomendação."}/>
     </div>
   );
 }
@@ -38514,7 +38557,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '511';
+  var SW_VERSION = '513';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
