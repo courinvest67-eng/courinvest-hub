@@ -30030,7 +30030,11 @@ var AbaRelatorioIR=function({data}){
   var [busca,sBusca]=React.useState("");
   var [pessoaSel,sPessoaSel]=React.useState(null);
   var [novoAvulsoAberto,sNovoAvulsoAberto]=React.useState(false);
-  var [novoAvulso,sNovoAvulso]=React.useState({nome:"",email:"",telefone:"",cpf:""});
+  var [novoAvulso,sNovoAvulso]=React.useState({nome:"",email:"",telefone:"",cpf:"",valor:""});
+  /* v514: precificação do avulso (valor fixo por relatório) + tabela de faturamento */
+  var [precoRel,sPrecoRel]=React.useState("");
+  var [fatAno,sFatAno]=React.useState("todos");
+  var [fatAberto,sFatAberto]=React.useState(null);
   var [anoBase,sAnoBase]=React.useState(new Date().getFullYear()-1);
   var [arqInformesBR,sArqInformesBR]=React.useState([]);
   var [arqPosicaoB3,sArqPosicaoB3]=React.useState(null);
@@ -30094,16 +30098,36 @@ var AbaRelatorioIR=function({data}){
     return lista.filter(function(p){return (p.nome||"").toLowerCase().indexOf(q)>=0}).slice(0,30);
   },[clientes,avulsos,busca]);
 
+  /* avulso selecionado (com valorRelatorio/faturamento) */
+  var avSel=(pessoaSel&&pessoaSel.tipo==="avulso")?avulsos.find(function(x){return x.id===pessoaSel.id}):null;
+  React.useEffect(function(){
+    if(!avSel){sPrecoRel("");return}
+    var v=avSel.valorRelatorio;
+    if(v==null||v===0){try{var lp=parseFloat(localStorage.getItem("courinvest_ir_preco_padrao"));if(lp>0)v=lp}catch(e){}}
+    sPrecoRel(v>0?String(v).replace(".",","):"");
+  },[pessoaSel&&pessoaSel.id,avulsos.length]);
+  var gravarFatAvulso=function(avId,novaLista,extra){
+    sAvulsos(function(p){return p.map(function(x){return x.id===avId?Object.assign({},x,{faturamento:novaLista},extra||{}):x})});
+    if(window._fbDB)window._fbDB.collection("ir_avulsos").doc(avId).update(Object.assign({faturamento:novaLista},extra||{})).catch(function(e){console.error(e);toast("❌ Erro ao salvar valor (verifique a conexão)")});
+  };
+  var salvarPrecoRel=function(){
+    if(!avSel)return;
+    var v=simPn(precoRel);
+    try{if(v>0)localStorage.setItem("courinvest_ir_preco_padrao",String(v))}catch(e){}
+    if((avSel.valorRelatorio||0)===v)return;
+    gravarFatAvulso(avSel.id,avSel.faturamento||[],{valorRelatorio:v});
+  };
+
   var salvarNovoAvulso=function(){
     if(!novoAvulso.nome.trim()){toast("⚠️ Informe o nome");return}
     if(!window._fbDB){toast("⚠️ Sem conexão com o banco de dados");return}
-    var payload={nome:novoAvulso.nome.trim(),email:novoAvulso.email.trim(),telefone:novoAvulso.telefone.trim(),cpf:novoAvulso.cpf.trim(),criadoEm:new Date().toISOString(),criadoPor:"courinvest.67@gmail.com"};
+    var payload={nome:novoAvulso.nome.trim(),email:novoAvulso.email.trim(),telefone:novoAvulso.telefone.trim(),cpf:novoAvulso.cpf.trim(),valorRelatorio:simPn(novoAvulso.valor),faturamento:[],criadoEm:new Date().toISOString(),criadoPor:"courinvest.67@gmail.com"};
     window._fbDB.collection("ir_avulsos").add(payload).then(function(ref){
       var pessoa={id:ref.id,tipo:"avulso",...payload};
       sAvulsos(function(p){return [pessoa,...p]});
       sPessoaSel(pessoa);
       sNovoAvulsoAberto(false);
-      sNovoAvulso({nome:"",email:"",telefone:"",cpf:""});
+      sNovoAvulso({nome:"",email:"",telefone:"",cpf:"",valor:""});
       toast("✅ Cadastro salvo — "+pessoa.nome);
     }).catch(function(e){console.error(e);toast("❌ Erro ao salvar cadastro")});
   };
@@ -30266,6 +30290,17 @@ var AbaRelatorioIR=function({data}){
           });
         }).catch(function(e){console.error("[RelatórioIR] erro ao salvar:",e)});
       }
+      /* v514: cobrança do avulso — registra o valor deste relatório (regerar o mesmo ano não cobra de novo) */
+      if(pessoaSel.tipo==="avulso"){
+        var _avG=avulsos.find(function(x){return x.id===pessoaSel.id});
+        var _listaG=(_avG&&_avG.faturamento)||[];
+        var _docIdG=pessoaSel.id+"_"+anoBase;
+        if(!_listaG.some(function(e){return e.id===_docIdG})){
+          var _vG=simPn(precoRel);
+          gravarFatAvulso(pessoaSel.id,_listaG.concat([{id:_docIdG,anoBase:anoBase,geradoEm:new Date().toISOString(),valor:_vG}]),(_vG>0&&!(_avG&&_avG.valorRelatorio>0))?{valorRelatorio:_vG}:null);
+          if(!(_vG>0))toast("⚠️ Relatório gerado sem valor de cobrança — informe o valor na tabela de faturamento");
+        }
+      }
       toast("✅ Relatório gerado"+(itensRevisaoManual.length?" — "+itensRevisaoManual.length+" item(ns) para revisão manual":""));
     }catch(e){
       console.error(e);
@@ -30416,7 +30451,7 @@ var AbaRelatorioIR=function({data}){
         <div style={{fontSize:16,fontWeight:800,color:T.t1,marginBottom:4}}>📑 Relatório Anual de IR</div>
         <div style={{fontSize:12,color:T.t3,marginBottom:18}}>Anexe os informes de rendimentos e as posições da B3 para gerar um relatório de declaração de IR personalizado — para clientes do Hub ou para quem contrata só esse serviço avulso.</div>
 
-        <div style={{display:"grid",gridTemplateColumns:"1fr 160px",gap:12,marginBottom:16}}>
+        <div style={{display:"grid",gridTemplateColumns:avSel?"1fr 160px 200px":"1fr 160px",gap:12,marginBottom:16}}>
           <div>
             <div style={{fontSize:10,color:T.t3,fontWeight:700,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>Cliente ou avulso</div>
             {pessoaSel ? (
@@ -30451,6 +30486,15 @@ var AbaRelatorioIR=function({data}){
             <input type="number" value={anoBase} onChange={function(e){sAnoBase(parseInt(e.target.value)||anoBase)}}
               style={{width:"100%",padding:"10px 14px",borderRadius:10,border:"1px solid "+T.bdrL,background:T.w3,color:T.t1,fontSize:13,fontFamily:"'JetBrains Mono'"}}/>
           </div>
+          {avSel && <div>
+            <div style={{fontSize:10,color:T.gold,fontWeight:700,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>💰 Valor por relatório</div>
+            <div style={{display:"flex",alignItems:"center",gap:6,padding:"10px 14px",borderRadius:10,border:"1px solid "+T.gold+"55",background:T.w3}}>
+              <span style={{fontSize:12,color:T.t3}}>R$</span>
+              <input value={precoRel} onChange={function(e){sPrecoRel(e.target.value)}} onBlur={salvarPrecoRel} inputMode="decimal" placeholder="0,00"
+                style={{flex:1,minWidth:0,background:"transparent",border:"none",outline:"none",color:T.gold,fontSize:14,fontWeight:800,fontFamily:"'JetBrains Mono'"}}/>
+            </div>
+            <div style={{fontSize:9,color:T.t3,marginTop:3}}>Fica salvo para este avulso e é lançado no faturamento ao gerar.</div>
+          </div>}
         </div>
 
         {novoAvulsoAberto && (
@@ -30461,6 +30505,7 @@ var AbaRelatorioIR=function({data}){
               <input placeholder="CPF" value={novoAvulso.cpf} onChange={function(e){sNovoAvulso(function(p){return {...p,cpf:e.target.value}})}} style={{padding:"9px 12px",borderRadius:8,border:"1px solid "+T.bdrL,background:T.bg2,color:T.t1,fontSize:12}}/>
               <input placeholder="E-mail" value={novoAvulso.email} onChange={function(e){sNovoAvulso(function(p){return {...p,email:e.target.value}})}} style={{padding:"9px 12px",borderRadius:8,border:"1px solid "+T.bdrL,background:T.bg2,color:T.t1,fontSize:12}}/>
               <input placeholder="Telefone" value={novoAvulso.telefone} onChange={function(e){sNovoAvulso(function(p){return {...p,telefone:e.target.value}})}} style={{padding:"9px 12px",borderRadius:8,border:"1px solid "+T.bdrL,background:T.bg2,color:T.t1,fontSize:12}}/>
+              <input placeholder="Valor cobrado por relatório (R$)" value={novoAvulso.valor} onChange={function(e){sNovoAvulso(function(p){return {...p,valor:e.target.value}})}} style={{padding:"9px 12px",borderRadius:8,border:"1px solid "+T.gold+"66",background:T.bg2,color:T.gold,fontSize:12,fontFamily:"'JetBrains Mono'"}}/>
             </div>
             <div style={{display:"flex",gap:8}}>
               <Bt v="primary" style={{fontSize:12}} onClick={salvarNovoAvulso}>Salvar cadastro</Bt>
@@ -30556,6 +30601,101 @@ var AbaRelatorioIR=function({data}){
           <div style={{fontSize:10,color:T.orange,marginTop:6}}>⚠️ E-mail automático não configurado — acesse Configurações → E-mail (EmailJS) antes de enviar.</div>
         )}
       </Cd>
+
+      {(function(){
+        /* ===== v514: FATURAMENTO DOS AVULSOS ===== */
+        var linhas=[];
+        avulsos.forEach(function(a){
+          var lista=(a.faturamento||[]).slice();
+          relatorios.forEach(function(rel){
+            if(rel.pessoaTipo==="avulso"&&rel.pessoaId===a.id&&!lista.some(function(e){return e.id===rel.id}))lista.push({id:rel.id,anoBase:rel.anoBase,geradoEm:rel.geradoEm,valor:null,virtual:true});
+          });
+          if(!lista.length)return;
+          var ents=lista.map(function(e){return Object.assign({},e,{v:(e.valor!=null?+e.valor:(+a.valorRelatorio||0)),ano:String(e.geradoEm||"").slice(0,4)});});
+          linhas.push({a:a,ents:ents});
+        });
+        if(!linhas.length&&!avulsos.length)return null;
+        var anos={};linhas.forEach(function(l){l.ents.forEach(function(e){if(e.ano)anos[e.ano]=1;});});
+        var listaAnos=Object.keys(anos).sort().reverse();
+        var filtradas=linhas.map(function(l){
+          var es=fatAno==="todos"?l.ents:l.ents.filter(function(e){return e.ano===fatAno;});
+          es=es.slice().sort(function(x,y){return String(y.geradoEm||"").localeCompare(String(x.geradoEm||""));});
+          return {a:l.a,ents:es,qtd:es.length,total:es.reduce(function(s,e){return s+e.v;},0),ultimo:es.length?es[0].geradoEm:null};
+        }).filter(function(l){return l.qtd>0;}).sort(function(x,y){return y.total-x.total;});
+        var totGeral=filtradas.reduce(function(s,l){return s+l.total;},0),qtdGeral=filtradas.reduce(function(s,l){return s+l.qtd;},0);
+        var semValor=filtradas.reduce(function(s,l){return s+l.ents.filter(function(e){return !(e.v>0);}).length;},0);
+        var salvarEnt=function(a,e,novoV){
+          var base=(a.faturamento||[]).filter(function(x){return x.id!==e.id;});
+          gravarFatAvulso(a.id,base.concat([{id:e.id,anoBase:e.anoBase,geradoEm:e.geradoEm,valor:novoV}]));
+        };
+        var removerEnt=function(a,e){
+          if(!window.confirm("Remover este lançamento do faturamento de "+a.nome+"?"))return;
+          gravarFatAvulso(a.id,(a.faturamento||[]).filter(function(x){return x.id!==e.id;}));
+        };
+        var cel={padding:"9px 6px",fontSize:12};
+        return (
+          <Cd style={{padding:20,marginBottom:14}} hov={false}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:12}}>
+              <div>
+                <div style={{fontSize:14,fontWeight:800,color:T.t1}}>💰 Faturamento — Relatório de IR avulso</div>
+                <div style={{fontSize:10,color:T.t3,marginTop:2}}>Valor fixo por relatório gerado, somado por avulso. Clique numa linha para ver/editar os lançamentos.</div>
+              </div>
+              <select value={fatAno} onChange={function(e){sFatAno(e.target.value)}} style={{padding:"7px 12px",borderRadius:8,border:"1px solid "+T.bdrL,background:T.w3,color:T.t1,fontSize:12}}>
+                <option value="todos">Todos os anos</option>
+                {listaAnos.map(function(y){return <option key={y} value={y}>Gerados em {y}</option>;})}
+              </select>
+            </div>
+            <div style={{display:"flex",gap:24,flexWrap:"wrap",marginBottom:14}}>
+              <div><div style={{fontSize:9,color:T.t3,fontWeight:700}}>TOTAL FATURADO</div><div style={{fontSize:20,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(totGeral)}</div></div>
+              <div><div style={{fontSize:9,color:T.t3,fontWeight:700}}>RELATÓRIOS</div><div style={{fontSize:20,fontWeight:800,color:T.t1,fontFamily:"'JetBrains Mono'"}}>{qtdGeral}</div></div>
+              <div><div style={{fontSize:9,color:T.t3,fontWeight:700}}>TICKET MÉDIO</div><div style={{fontSize:20,fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(qtdGeral?totGeral/qtdGeral:0)}</div></div>
+            </div>
+            {semValor>0&&<div style={{fontSize:11,color:T.orange,marginBottom:10}}>⚠️ {semValor} lançamento(s) sem valor — abra a linha do avulso e informe o valor cobrado.</div>}
+            {filtradas.length===0?<div style={{fontSize:12,color:T.t3}}>Nenhum relatório de avulso lançado{fatAno!=="todos"?" em "+fatAno:""} ainda. Ao gerar um relatório para um avulso com valor informado, ele aparece aqui.</div>:(
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",minWidth:520}}>
+                  <thead><tr style={{color:T.t3,fontSize:9,letterSpacing:.6,textTransform:"uppercase"}}>
+                    <th style={{textAlign:"left",padding:"6px"}}>Avulso</th><th style={{textAlign:"right",padding:"6px"}}>Relatórios</th><th style={{textAlign:"right",padding:"6px"}}>Valor padrão</th><th style={{textAlign:"right",padding:"6px"}}>Total faturado</th><th style={{textAlign:"right",padding:"6px"}}>Último</th>
+                  </tr></thead>
+                  <tbody>
+                    {filtradas.map(function(l){
+                      var aberto=fatAberto===l.a.id;
+                      return [
+                        <tr key={l.a.id} onClick={function(){sFatAberto(aberto?null:l.a.id)}} style={{borderTop:"1px solid "+T.bdrL,cursor:"pointer",background:aberto?T.w3:"transparent"}}>
+                          <td style={Object.assign({},cel,{color:T.t1,fontWeight:700})}>{aberto?"▾":"▸"} {l.a.nome}</td>
+                          <td style={Object.assign({},cel,{textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t2})}>{l.qtd}</td>
+                          <td style={Object.assign({},cel,{textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t2})}>{l.a.valorRelatorio>0?fm(l.a.valorRelatorio):"—"}</td>
+                          <td style={Object.assign({},cel,{textAlign:"right",fontFamily:"'JetBrains Mono'",fontWeight:800,color:T.green})}>{fm(l.total)}</td>
+                          <td style={Object.assign({},cel,{textAlign:"right",color:T.t3,fontSize:11})}>{l.ultimo?new Date(l.ultimo).toLocaleDateString("pt-BR"):"—"}</td>
+                        </tr>,
+                        aberto&&<tr key={l.a.id+"_d"}><td colSpan={5} style={{padding:"4px 6px 12px 22px",background:T.w3}}>
+                          {l.ents.map(function(e){
+                            return <div key={e.id+"_"+e.v} style={{display:"flex",alignItems:"center",gap:10,padding:"5px 0",fontSize:11,color:T.t2,flexWrap:"wrap"}}>
+                              <span style={{minWidth:130}}>Ano-calendário <strong style={{color:T.t1}}>{e.anoBase||"—"}</strong></span>
+                              <span style={{minWidth:90,color:T.t3}}>{e.geradoEm?new Date(e.geradoEm).toLocaleDateString("pt-BR"):"—"}</span>
+                              <span style={{color:T.t3}}>R$</span>
+                              <input defaultValue={e.v>0?String(e.v).replace(".",","):""} placeholder="0,00" onBlur={function(ev){var nv=simPn(ev.target.value);if(nv!==e.v)salvarEnt(l.a,e,nv)}}
+                                style={{width:100,padding:"4px 8px",borderRadius:6,border:"1px solid "+(e.v>0?T.bdrL:T.orange),background:T.bg2,color:T.gold,fontSize:12,fontWeight:700,fontFamily:"'JetBrains Mono'"}}/>
+                              {!e.virtual&&<button onClick={function(){removerEnt(l.a,e)}} title="Remover lançamento" style={{background:"transparent",border:"none",color:T.red,cursor:"pointer",fontSize:12}}>✕</button>}
+                            </div>;
+                          })}
+                        </td></tr>
+                      ];
+                    })}
+                    <tr style={{borderTop:"2px solid "+T.bdrL}}>
+                      <td style={Object.assign({},cel,{fontWeight:800,color:T.t1})}>TOTAL</td>
+                      <td style={Object.assign({},cel,{textAlign:"right",fontFamily:"'JetBrains Mono'",fontWeight:800,color:T.t1})}>{qtdGeral}</td>
+                      <td></td>
+                      <td style={Object.assign({},cel,{textAlign:"right",fontFamily:"'JetBrains Mono'",fontWeight:800,color:T.green})}>{fm(totGeral)}</td>
+                      <td></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Cd>
+        );
+      })()}
 
       <Cd style={{padding:20}}>
         <div style={{fontSize:14,fontWeight:800,color:T.t1,marginBottom:12}}>📚 Relatórios gerados</div>
@@ -38557,7 +38697,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '513';
+  var SW_VERSION = '514';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
