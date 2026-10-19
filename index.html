@@ -290,6 +290,8 @@ const metodoCobranca=function(c){
    Pra cliente BR fee é em R$ (sem conversão). Pra exterior, converte EUR/USD/etc → BRL. */
 const feeMensalBRL=function(c){
   if(!c)return 0;
+  /* v510: híbrido (GF + Patrimônio) não paga fee fixo — só a taxa sobre o patrimônio (ver feeBaseDoCliente) */
+  if(Array.isArray(c.sv)&&c.sv.includes("patrimonio")&&c.sv.includes("planejamento"))return 0;
   var moeda=c.feeMoeda||moedaCli(c).code;
   var fee=c.feeFixo||0;
   return toBRL(fee,moeda);
@@ -1428,7 +1430,7 @@ const montarEmailRelatorioHtml=function(opts){
       +'<div class="brand-sub">Consultoria em Investimentos</div>'
       +'<div class="hero-divider"></div>'
       +'<h1>'+tituloTopo+'</h1>'
-      +'<p>Período de referência: '+mesRefStr+'</p>'
+      +'<p>'+(o.refLabel!=null?o.refLabel:('Período de referência: '+mesRefStr))+'</p>'
     +'</div>'
     +'<div class="body-card">'
       +'<p class="greeting">Olá, <strong>'+nome+'</strong>.</p>'
@@ -1705,6 +1707,22 @@ const RC=r=>r==="Conservador"?"green":r==="Conservador/Moderado"?"green":r==="Mo
    Cards aparecem se há DADOS — não dependem do cadastro burocrático em c.sv.
    Isso permite que clientes "Gestão Financeira" mostrem cards de Patrimônio se
    tiverem ativos importados, e vice-versa. */
+/* v510: cliente HÍBRIDO = tem Gestão Financeira E Gestão de Patrimônio (ex.: começou na GF e migrou pra GP, mas segue
+   acompanhado no Meu Vista). Cobrança: ignora o fee fixo da GF, vale só a taxa sobre o patrimônio. */
+const ehHibrido=function(c){return !!(c&&Array.isArray(c.sv)&&c.sv.includes("patrimonio")&&c.sv.includes("planejamento"));};
+/* Selos de serviço: híbrido aparece como UM selo "🔀 Híbrido" em vez de dois */
+const svBadges=function(sv,curto){
+  sv=Array.isArray(sv)?sv:[];
+  var hib=sv.includes("patrimonio")&&sv.includes("planejamento");
+  var out=[];
+  if(hib)out.push(<Bg key="hib" c="purple">🔀 Híbrido</Bg>);
+  sv.forEach(function(s){
+    if(hib&&(s==="patrimonio"||s==="planejamento"))return;
+    if(!SL[s])return;
+    out.push(<Bg key={s} c={SC[s]}>{curto?SL[s].replace("Gestão de ","").replace("Couri ",""):SL[s]}</Bg>);
+  });
+  return out;
+};
 const temPatrimonio=function(c){
   if(!c)return false;
   if((c.patGorila||0)>0||(c.pat||0)>0)return true;
@@ -2576,7 +2594,7 @@ function gerarNotificacoesReais(d){
   
   var _ipcaGlobal=(d&&d.config&&d.config.ipcaAcum12m)||4.31;
   d.cl.forEach(function(c){
-    if(!c.sv||!c.sv.includes("planejamento")||!c.feeBase||!c.feeFixo||c.feeFixo<=0)return;
+    if(!c.sv||!c.sv.includes("planejamento")||c.sv.includes("patrimonio")||!c.feeBase||!c.feeFixo||c.feeFixo<=0)return;
     /* Se já foi marcado como feito este ano/ciclo, não notifica */
     var reajFeito=(c.particularidades&&c.particularidades.reajusteStatus==="feito");
     var reajData=c.particularidades&&c.particularidades.reajusteData;
@@ -2622,6 +2640,27 @@ function gerarNotificacoesReais(d){
       cliNome:c.nome,
       tipo:"reajuste_ipca",
       _reajuste:{feeAtual:c.feeFixo,feeSugerido:feeNovo,ganho:ganho,ipca:_ipcaCliente,diasRestantes:dias,periodo:c._ipcaReajuste&&c._ipcaReajuste.periodo}
+    });
+  });
+
+  /* v511: COBRANÇAS pendentes (consultoria): vencendo em até 5 dias ou atrasadas */
+  d.cl.forEach(function(c){
+    (c.cobrancas||[]).forEach(function(cob){
+      if(cob.status==="paga")return;
+      var dd=cbDias(cob.venc);
+      if(dd==null||dd>5)return;
+      var lbl=dd<0?"⚠️ ATRASADA há "+(-dd)+"d":dd===0?"hoje":dd===1?"amanhã":"em "+dd+"d";
+      nots.push({
+        id:"cobr_"+idCounter++,
+        msg:"Pagamento de "+c.nome+" ("+(cob.desc||"Consultoria")+(cob.parcela?" "+cob.parcela:"")+") vence "+lbl+" · R$ "+(+cob.valor||0).toLocaleString("pt-BR",{minimumFractionDigits:2})+" · abra a aba 💳 Cobranças para enviar o lembrete",
+        ic:dd<0?"🔴":"💳",
+        lido:false,
+        tp:lbl,
+        ordem:dd-20,
+        cliId:c.id,
+        cliNome:c.nome,
+        tipo:"cobranca"
+      });
     });
   });
 
@@ -4722,7 +4761,7 @@ function Dash({data:d,onSel:os,goTo}){
                   <Av name={c.nome} sz={30}/>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontSize:12,fontWeight:600}}>{c.nome}</div>
-                    <div style={{display:"flex",gap:4,marginTop:2}}>{c.sv.map(s=><Bg key={s} c={SC[s]}>{SL[s].replace("Gestão de ","").replace("Couri ","")}</Bg>)}</div>
+                    <div style={{display:"flex",gap:4,marginTop:2}}>{svBadges(c.sv,true)}</div>
                   </div>
                   <div style={{textAlign:"right"}}><div style={{fontSize:13,fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(rec)}<span style={{fontSize:9,color:T.t3}}>/mês</span></div>{c.pat>0&&<div style={{fontSize:9,color:T.t3}}>AUM {fm(c.pat)}</div>}</div>
                 </div>
@@ -4992,7 +5031,7 @@ function Dash({data:d,onSel:os,goTo}){
               var recCli=cl.map(function(c){
                 var v=0;
                 if(c.sv&&c.sv.includes("patrimonio"))v+=feeBaseDoCliente(c).fee||0;
-                if(c.sv&&c.sv.includes("planejamento"))v+=feeMensalBRL(c)||0;
+                if(c.sv&&c.sv.includes("planejamento")&&!c.sv.includes("patrimonio"))v+=feeMensalBRL(c)||0;
                 return {id:c.id,nome:c.nome,v:v};
               }).filter(function(x){return x.v>0;}).sort(function(a,b){return b.v-a.v;});
               var totRec=recCli.reduce(function(a,b){return a+b.v;},0);
@@ -5066,9 +5105,9 @@ function Dash({data:d,onSel:os,goTo}){
                       <div style={{fontSize:11,fontWeight:700,color:T.cyan,fontFamily:"'JetBrains Mono',monospace",flexShrink:0}}>{fm(fee)}</div>
                     </div>;
                   })}
-                  {clFin.filter(function(c){return feeMensalBRL(c)===0 && matchBuscaReceita(c)}).length>0 && (
+                  {clFin.filter(function(c){return feeMensalBRL(c)===0 && !ehHibrido(c) && matchBuscaReceita(c)}).length>0 && (
                     <div style={{fontSize:9,color:T.t3,fontStyle:"italic",marginTop:6}}>
-                      {clFin.filter(function(c){return feeMensalBRL(c)===0 && matchBuscaReceita(c)}).length} cliente(s) sem fee configurado
+                      {clFin.filter(function(c){return feeMensalBRL(c)===0 && !ehHibrido(c) && matchBuscaReceita(c)}).length} cliente(s) sem fee configurado
                     </div>
                   )}
                 </div>
@@ -7274,13 +7313,16 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
     reader.readAsArrayBuffer(file);
   };
 
-  const fl=d.cl.filter(c=>c.sv.includes(fi)&&c.nome.toLowerCase().includes(se.toLowerCase()));
+  const[soHib,sSoHib]=useState(false);
+  const nHib=d.cl.filter(c=>c.sv.includes(fi)&&ehHibrido(c)).length;
+  const fl=d.cl.filter(c=>c.sv.includes(fi)&&(!soHib||ehHibrido(c))&&c.nome.toLowerCase().includes(se.toLowerCase()));
   const fiCores={patrimonio:{c:T.gold,bg:T.goldD},planejamento:{c:T.cyan,bg:T.cyanD},consultoria:{c:T.orange,bg:T.orangeD}};
   return (
     <div>
       <div style={{display:"flex",gap:8,marginBottom:18,flexWrap:"wrap",alignItems:"center"}}>
         <input value={se} onChange={e=>sSe(e.target.value)} placeholder="Buscar cliente..." style={{...inpS,flex:1,minWidth:180,borderRadius:14}}/>
         <div style={{display:"flex",alignItems:"center",gap:6,padding:"6px 12px",borderRadius:12,border:"1px solid "+T.bdrL,fontSize:11,fontWeight:600,color:fiCores[fi].c}}><span style={{width:6,height:6,borderRadius:"50%",background:fiCores[fi].c}}/>{SL[fi]}</div>
+        {(nHib>0||soHib)&&<button onClick={()=>sSoHib(!soHib)} title="Clientes com Gestão Financeira + Patrimônio (conta no Meu Vista)" style={{padding:"7px 12px",borderRadius:12,fontSize:11,fontWeight:700,cursor:"pointer",border:soHib?"1.5px solid "+T.purple:"1px solid "+T.bdrL,background:soHib?"rgba(167,139,250,0.14)":"transparent",color:soHib?T.purple:T.t2}}>🔀 Híbridos ({nHib})</button>}
         <Bt onClick={()=>sShowAdd(true)} style={{fontSize:12,padding:"10px 18px"}}>＋ Novo</Bt>
         <input ref={gorilaRef} type="file" accept=".xlsx,.xls,.csv,.pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf,text/csv,text/plain,*/*" onChange={function(e){if(e.target.files[0])importGorilaCliente(e.target.files[0]);e.target.value=""}} style={{display:"none"}}/>
         <Bt v="secondary" onClick={function(){gorilaRef.current&&gorilaRef.current.click()}} style={{fontSize:11,padding:"10px 14px"}}>📥 Importar Gorila</Bt>
@@ -7699,7 +7741,7 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
                 </>);
               })() : (<><div style={{minWidth:0}}><div style={{fontSize:10,color:T.t3,fontWeight:600}}>FEE MENSAL</div><div style={{fontSize:18,fontWeight:800,color:T.cyan,fontFamily:"'JetBrains Mono'",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{fmCli(c.feeFixo,c)}</div></div><div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:10,color:T.t3,fontWeight:600,whiteSpace:"nowrap"}}>BASE IPCA</div><div style={{fontSize:14,fontWeight:600,color:T.t2,marginTop:2,whiteSpace:"nowrap"}}>{c.feeBase||"—"}</div></div></>)}
             </div>
-            <div style={{display:"flex",gap:5}}>{c.sv.map(s=><Bg key={s} c={SC[s]}>{SL[s]}</Bg>)}</div>
+            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{svBadges(c.sv)}</div>
           </Cd>
         ))}
       </div>
@@ -7714,6 +7756,7 @@ function NewClientForm({onSave,onClose}){
   const[f,sF]=useState({nome:"",email:"",tel:"",risco:"Moderado",sv:["patrimonio"],pat:0,rend:0,notas:"",txGestao:0.083,feeFixo:1200,feeBase:"",pais:"BR",investExterior:false,tipoCli:"individual",integrantes:[],isPJ:false});
   const u=(k,v)=>sF(p=>({...p,[k]:v}));
   const setSvc=s=>{const nSv=f.sv.filter(x=>x!=="patrimonio"&&x!=="planejamento"&&x!=="consultoria");nSv.push(s);sF(p=>({...p,sv:nSv}))};
+  const setHib=()=>{const nSv=f.sv.filter(x=>x!=="patrimonio"&&x!=="planejamento"&&x!=="consultoria");nSv.push("patrimonio");nSv.push("planejamento");sF(p=>({...p,sv:nSv}))};
   const togMilhas=()=>{const nSv=f.sv.includes("milhas")?f.sv.filter(x=>x!=="milhas"):[...f.sv,"milhas"];sF(p=>({...p,sv:nSv}))};
 
   /* Helper: definir tipo de cliente e auto-ajustar fee Gestão Financeira (+55% para casal/família) */
@@ -7768,7 +7811,7 @@ function NewClientForm({onSave,onClose}){
       </div>
       <div><div style={{fontSize:10,fontWeight:700,color:T.t3,marginBottom:4}}>SERVIÇO PRINCIPAL</div>
         <div style={{display:"flex",gap:6,marginBottom:8}}>
-          {[["patrimonio","Gestão de Patrimônio",T.gold,T.goldD],["planejamento","Gestão Financeira",T.cyan,T.cyanD],["consultoria","Consultoria",T.orange,T.orangeD]].map(([k,v,cor,corD])=><button key={k} onClick={()=>setSvc(k)} style={{flex:1,padding:"10px",borderRadius:10,fontSize:12,fontWeight:600,cursor:"pointer",border:f.sv.includes(k)?"1.5px solid "+cor:"1px solid "+T.bdrL,background:f.sv.includes(k)?corD:"transparent",color:f.sv.includes(k)?cor:T.t3}}>{v}</button>)}
+          {[["patrimonio","Gestão de Patrimônio",T.gold,T.goldD],["planejamento","Gestão Financeira",T.cyan,T.cyanD],["hibrido","🔀 Híbrido",T.purple,"rgba(167,139,250,0.14)"],["consultoria","Consultoria",T.orange,T.orangeD]].map(([k,v,cor,corD])=><button key={k} onClick={()=>k==="hibrido"?setHib():setSvc(k)} style={(function(){var _hb=f.sv.includes("patrimonio")&&f.sv.includes("planejamento");var _at=k==="hibrido"?_hb:(_hb&&(k==="patrimonio"||k==="planejamento")?false:f.sv.includes(k));return {flex:1,padding:"10px",borderRadius:10,fontSize:12,fontWeight:600,cursor:"pointer",border:_at?"1.5px solid "+cor:"1px solid "+T.bdrL,background:_at?corD:"transparent",color:_at?cor:T.t3};})()}>{v}</button>)}
         </div>
         <button onClick={togMilhas} style={{padding:"8px 14px",borderRadius:10,fontSize:12,fontWeight:600,cursor:"pointer",border:f.sv.includes("milhas")?"1.5px solid "+T.purple:"1px solid "+T.bdrL,background:f.sv.includes("milhas")?T.purpleD:"transparent",color:f.sv.includes("milhas")?T.purple:T.t3}}>✈️ Couri Mile$ (adicional)</button>
       </div>
@@ -7778,7 +7821,10 @@ function NewClientForm({onSave,onClose}){
           <div><div style={{fontSize:9,color:T.t3,fontWeight:600,marginBottom:3}}>PATRIMÔNIO (R$)</div><input type="number" value={f.pat} onChange={e=>u("pat",+e.target.value)} style={{...inpS,fontFamily:"'JetBrains Mono'"}}/></div>
         </div>
       )}
-      {f.sv.includes("planejamento") && (
+      {f.sv.includes("planejamento")&&f.sv.includes("patrimonio") && (
+        <div style={{padding:"10px 12px",background:"rgba(167,139,250,0.08)",border:"1px solid rgba(167,139,250,0.25)",borderRadius:10,fontSize:11,color:T.t2,lineHeight:1.5}}>🔀 <strong style={{color:T.purple}}>Cliente híbrido</strong> — acompanhado no Meu Vista (Gestão Financeira) e com carteira (Patrimônio). A cobrança considera <strong>somente a taxa sobre o patrimônio</strong>; o fee fixo da GF fica ignorado.</div>
+      )}
+      {f.sv.includes("planejamento")&&!f.sv.includes("patrimonio") && (
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,padding:12,background:T.w3,borderRadius:10}}>
           <div>
             <div style={{fontSize:9,color:T.t3,fontWeight:600,marginBottom:3}}>VALOR MENSAL (R$){f.tipoCli!=="individual" && <span style={{color:T.gold,marginLeft:6,fontWeight:700}}>· +55% Casal/Família</span>}</div>
@@ -7853,6 +7899,240 @@ function TaxaGestaoInput({txGestao,clienteId,dispatch:dp}){
     onKeyDown={function(e){if(e.key==="Enter"){e.target.blur();}}}
     style={{width:"100%",padding:"6px 8px",background:T.w3,border:"1px solid "+T.bdrL,borderRadius:6,color:T.gold,fontSize:14,fontWeight:700,fontFamily:"'JetBrains Mono'",outline:"none",boxSizing:"border-box"}}
   />;
+}
+
+/* ══════════ v511 — COBRANÇAS E LEMBRETES DE PAGAMENTO (clientes de Consultoria) ══════════
+   c.cobrancas = [{id, desc, parcela:"2/2", valor, venc:"YYYY-MM-DD", forma:"PIX", status:"pendente"|"paga", pagoEm:"YYYY-MM-DD",
+                   lembretes:[{em:ISO, para:email}]}]
+   Pix de recebimento da Courinvest: d.config.pixRecebimento / d.config.pixFavorecido.
+   O e-mail usa o mesmo EmailJS/template dos relatórios (Configurações → E-mail) e só é enviado quando o Igor clica em Enviar. */
+function cbEsc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+function cbData(iso){if(!iso)return "—";var p=String(iso).slice(0,10).split("-");return p.length===3?(p[2]+"/"+p[1]+"/"+p[0]):String(iso);}
+function cbHojeIso(){var h=new Date();return h.getFullYear()+"-"+String(h.getMonth()+1).padStart(2,"0")+"-"+String(h.getDate()).padStart(2,"0");}
+function cbDias(iso){
+  if(!iso)return null;var p=String(iso).slice(0,10).split("-");if(p.length!==3)return null;
+  var v=new Date(+p[0],+p[1]-1,+p[2]),h=new Date();h=new Date(h.getFullYear(),h.getMonth(),h.getDate());
+  return Math.round((v-h)/86400000);
+}
+function cbSomaMeses(iso,n){
+  var p=String(iso).slice(0,10).split("-");var y=+p[0],m=+p[1]-1+n,dd=+p[2];
+  var ult=new Date(y,m+1,0).getDate();var dt=new Date(y,m,Math.min(dd,ult));
+  return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0");
+}
+function cbStatus(cob){
+  if(cob.status==="paga")return {txt:"✓ Paga"+(cob.pagoEm?" em "+cbData(cob.pagoEm):""),cor:"green",ordem:3};
+  var dd=cbDias(cob.venc);
+  if(dd==null)return {txt:"Sem vencimento",cor:"gold",ordem:2};
+  if(dd<0)return {txt:"Atrasada há "+(-dd)+" dia"+(dd===-1?"":"s"),cor:"red",ordem:0,dias:dd};
+  if(dd===0)return {txt:"Vence hoje",cor:"orange",ordem:0,dias:dd};
+  if(dd<=5)return {txt:"Vence em "+dd+" dia"+(dd===1?"":"s"),cor:"orange",ordem:1,dias:dd};
+  return {txt:"Vence em "+dd+" dias",cor:"cyan",ordem:2,dias:dd};
+}
+/* Monta o HTML do e-mail de lembrete (mesmo layout visual dos relatórios) */
+function montarEmailLembreteCobranca(o){
+  var cob=o.cob,dd=cbDias(cob.venc);
+  var quando=dd==null?"":dd<0?("venceu há <strong>"+(-dd)+" dia"+(dd===-1?"":"s")+"</strong>"):dd===0?"vence <strong>hoje</strong>":dd===1?"vence <strong>amanhã</strong>":("vence em <strong>"+dd+" dias</strong>");
+  var parc=cob.parcela?("a parcela <strong>"+cbEsc(cob.parcela)+"</strong> referente a "):"o pagamento referente a ";
+  var intro="Passando para deixar um lembrete amigável: "+parc+"<strong>"+cbEsc(cob.desc||"Consultoria")+"</strong> "+(quando?quando+" (<strong>"+cbData(cob.venc)+"</strong>).":"está em aberto.");
+  if(o.mensagem)intro+="<br><br>"+cbEsc(o.mensagem).replace(/\n/g,"<br>");
+  var pix=o.pixChave?(
+    '<div style="background:#FBF8EF;border:1px solid #EFE3BD;border-radius:10px;padding:16px 18px;text-align:center">'
+    +'<div style="font-size:10px;color:#9A8555;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">⚡ Pagamento via PIX</div>'
+    +'<div style="font-size:15px;font-weight:700;color:#0A1628;word-break:break-all">'+cbEsc(o.pixChave)+'</div>'
+    +(o.pixFavorecido?'<div style="font-size:11px;color:#5B6472;margin-top:4px">Favorecido: '+cbEsc(o.pixFavorecido)+'</div>':'')
+    +'</div>'
+  ):'<span class="cta-fallback">Para combinar a forma de pagamento, basta responder este e-mail.</span>';
+  var html=montarEmailRelatorioHtml({
+    nome:cbEsc((o.nome||"").split(" ")[0]),
+    mesRefStr:cbData(cob.venc),
+    refLabel:"Vencimento: "+cbData(cob.venc),
+    tituloTopo:"Lembrete de Pagamento",
+    introTxt:intro,
+    destaque:{icon:"💳",label:"Valor a pagar",value:"R$ "+(+cob.valor||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})},
+    badges:[{icon:"📅",value:"Vencimento "+cbData(cob.venc),cls:(dd!=null&&dd<0)?"red":"neutral"}].concat(cob.parcela?[{value:"Parcela "+cbEsc(cob.parcela),cls:"neutral"}]:[]),
+    remetente:o.remetente||"contato@courinvest.com.br",
+    supportHtml:'💬 <b>Alguma dúvida sobre este pagamento?</b><br>Responda este e-mail — teremos prazer em ajudar.',
+    notaExtra:"Se você já realizou este pagamento, por favor desconsidere esta mensagem."
+  });
+  return html.replace("%%PDF_BUTTON%%",pix);
+}
+function enviarEmailLembreteCobranca(cfg,para,nome,cob,htmlFinal){
+  return new Promise(function(resolve,reject){
+    if(!cfg||!cfg.publicKey||!cfg.serviceId||!cfg.templateId){reject(new Error("E-mail automático não configurado (Configurações → E-mail)."));return;}
+    if(!window.emailjs){reject(new Error("SDK EmailJS não carregou. Recarregue a página."));return;}
+    try{window.emailjs.init({publicKey:cfg.publicKey,limitRate:false});}catch(e){reject(e);return;}
+    window.emailjs.send(cfg.serviceId,cfg.templateId,{
+      to_email:para,
+      to_name:String(nome||"").split(" ")[0],
+      mes_ref:"vencimento "+cbData(cob.venc),
+      patrimonio:"R$ "+(+cob.valor||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2}),
+      rentabilidade:"—",
+      tipo_servico:"Lembrete de pagamento",
+      titulo_email:"Lembrete de pagamento",
+      report_html:htmlFinal,
+      from_name:cfg.nomeRemetente||"Courinvest",
+      reply_to:cfg.remetente||""
+    }).then(function(){resolve();}).catch(function(e){reject(new Error((e&&(e.text||e.message))||JSON.stringify(e)));});
+  });
+}
+
+function CobrancasTab({c,d,dp}){
+  var cfg=d.config||{};
+  var cobs=Array.isArray(c.cobrancas)?c.cobrancas:[];
+  var setCobs=function(arr){dp({t:"UC",p:{id:c.id,cobrancas:arr}});};
+  var upd=function(id,patch){setCobs(cobs.map(function(x){return x.id===id?Object.assign({},x,patch):x;}));};
+  var[msg,sMsg]=useState("");
+  var flash=function(m){sMsg(m);setTimeout(function(){sMsg("")},4500);};
+  /* gerador de parcelas */
+  var[gen,sGen]=useState(false);
+  var[gDesc,sGDesc]=useState("Consultoria Financeira");
+  var[gTotal,sGTotal]=useState("");
+  var[gN,sGN]=useState(2);
+  var[gData,sGData]=useState(cbHojeIso());
+  var[gPrimPaga,sGPrimPaga]=useState(false);
+  var criarParcelas=function(){
+    var tot=parseFloat(String(gTotal).replace(/\./g,"").replace(",","."))||0;
+    var n=Math.max(1,Math.min(24,+gN||1));
+    if(!(tot>0)){flash("⚠️ Informe o valor total.");return;}
+    if(!gData){flash("⚠️ Informe o vencimento da 1ª parcela.");return;}
+    var base=Math.floor(tot/n*100)/100,acum=0,novas=[];
+    for(var i=0;i<n;i++){
+      var v=(i===n-1)?Math.round((tot-acum)*100)/100:base;acum+=v;
+      novas.push({id:"cb"+Date.now()+"_"+i,desc:gDesc||"Consultoria",parcela:n>1?((i+1)+"/"+n):"",valor:v,venc:cbSomaMeses(gData,i),forma:"PIX",
+        status:(i===0&&gPrimPaga)?"paga":"pendente",pagoEm:(i===0&&gPrimPaga)?gData:"",lembretes:[]});
+    }
+    setCobs(cobs.concat(novas));sGen(false);sGTotal("");
+    flash("✅ "+n+" cobrança"+(n>1?"s":"")+" criada"+(n>1?"s":"")+".");
+  };
+  /* edição inline */
+  var[ed,sEd]=useState(null);
+  var[edV,sEdV]=useState({});
+  /* envio */
+  var[envio,sEnvio]=useState(null); /* cob em envio */
+  var[para,sPara]=useState("");
+  var[extra,sExtra]=useState("");
+  var[pixChave,sPixChave]=useState(cfg.pixRecebimento||"");
+  var[pixFav,sPixFav]=useState(cfg.pixFavorecido||"Courinvest");
+  var[enviando,sEnviando]=useState(false);
+  var abrirEnvio=function(cob){sEnvio(cob);sPara(c.email||"");sExtra("");sPixChave(cfg.pixRecebimento||"");sPixFav(cfg.pixFavorecido||"Courinvest");};
+  var emailOk=!!(cfg.emailjs&&cfg.emailjs.publicKey&&cfg.emailjs.serviceId&&cfg.emailjs.templateId);
+  var htmlPrev=envio?montarEmailLembreteCobranca({cob:envio,nome:c.nome,mensagem:extra,pixChave:pixChave.trim(),pixFavorecido:pixFav.trim(),remetente:(cfg.emailjs&&cfg.emailjs.remetente)||""}):"";
+  var enviar=function(){
+    var dest=para.trim();
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(dest)){flash("⚠️ E-mail do destinatário inválido.");return;}
+    sEnviando(true);
+    if(pixChave.trim()!==(cfg.pixRecebimento||"")||pixFav.trim()!==(cfg.pixFavorecido||"")){
+      dp({t:"CONFIG_SET",p:{key:"pixRecebimento",value:pixChave.trim()}});
+      dp({t:"CONFIG_SET",p:{key:"pixFavorecido",value:pixFav.trim()}});
+    }
+    enviarEmailLembreteCobranca(cfg.emailjs,dest,c.nome,envio,htmlPrev).then(function(){
+      var id=envio.id;
+      setCobs(cobs.map(function(x){return x.id===id?Object.assign({},x,{lembretes:(x.lembretes||[]).concat([{em:new Date().toISOString(),para:dest}])}):x;}));
+      if(!c.email)dp({t:"UC",p:{id:c.id,email:dest,cobrancas:cobs.map(function(x){return x.id===id?Object.assign({},x,{lembretes:(x.lembretes||[]).concat([{em:new Date().toISOString(),para:dest}])}):x;})}});
+      sEnviando(false);sEnvio(null);flash("✅ Lembrete enviado para "+dest);
+    }).catch(function(e){sEnviando(false);flash("❌ Falha ao enviar: "+e.message);});
+  };
+  var inp={width:"100%",padding:"8px 10px",borderRadius:8,background:T.w3,border:"1px solid "+T.bdrL,color:T.t1,fontSize:12,outline:"none",boxSizing:"border-box"};
+  var lab={fontSize:9,color:T.t3,fontWeight:700,marginBottom:3,letterSpacing:.5};
+  var ordenadas=cobs.slice().sort(function(a,b){return String(a.venc||"").localeCompare(String(b.venc||""));});
+  var abertas=cobs.filter(function(x){return x.status!=="paga";});
+  var totAberto=abertas.reduce(function(s,x){return s+(+x.valor||0);},0);
+  var totPago=cobs.filter(function(x){return x.status==="paga";}).reduce(function(s,x){return s+(+x.valor||0);},0);
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      <Cd style={{padding:16}} hov={false}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontSize:14,fontWeight:800,color:T.orange}}>💳 Cobranças e Lembretes de Pagamento</div>
+            <div style={{fontSize:10,color:T.t3,marginTop:2}}>Registre as parcelas combinadas (ex.: 2x no Pix) e envie um lembrete por e-mail antes do vencimento.</div>
+          </div>
+          <Bt onClick={function(){sGen(!gen)}} style={{fontSize:12,padding:"8px 14px"}}>{gen?"✕ Fechar":"＋ Nova cobrança"}</Bt>
+        </div>
+        {cobs.length>0&&<div style={{display:"flex",gap:18,marginTop:12,flexWrap:"wrap"}}>
+          <div><div style={lab}>EM ABERTO</div><div style={{fontSize:16,fontWeight:800,color:abertas.length?T.orange:T.t3,fontFamily:"'JetBrains Mono'"}}>{fm(totAberto)}</div></div>
+          <div><div style={lab}>RECEBIDO</div><div style={{fontSize:16,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(totPago)}</div></div>
+        </div>}
+        {msg&&<div style={{marginTop:10,padding:"8px 12px",borderRadius:8,background:T.w3,fontSize:12,color:T.t1}}>{msg}</div>}
+        {!emailOk&&<div style={{marginTop:10,padding:"8px 12px",borderRadius:8,background:"rgba(251,191,36,0.08)",border:"1px solid rgba(251,191,36,0.3)",fontSize:11,color:T.orange}}>⚠️ E-mail automático não configurado — configure em Configurações → E-mail para poder enviar lembretes.</div>}
+      </Cd>
+
+      {gen&&<Cd style={{padding:16}} hov={false}>
+        <div style={{fontSize:12,fontWeight:700,color:T.t1,marginBottom:10}}>Nova cobrança / parcelamento</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
+          <div style={{gridColumn:"1/-1"}}><div style={lab}>DESCRIÇÃO</div><input style={inp} value={gDesc} onChange={function(e){sGDesc(e.target.value)}}/></div>
+          <div><div style={lab}>VALOR TOTAL (R$)</div><input style={inp} value={gTotal} onChange={function(e){sGTotal(e.target.value)}} placeholder="Ex: 2100,00"/></div>
+          <div><div style={lab}>Nº DE PARCELAS</div><input type="number" min="1" max="24" style={inp} value={gN} onChange={function(e){sGN(e.target.value)}}/></div>
+          <div><div style={lab}>VENCIMENTO DA 1ª</div><input type="date" style={inp} value={gData} onChange={function(e){sGData(e.target.value)}}/></div>
+        </div>
+        <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:T.t2,marginTop:10,cursor:"pointer"}}><input type="checkbox" checked={gPrimPaga} onChange={function(e){sGPrimPaga(e.target.checked)}}/> A 1ª parcela já foi paga</label>
+        <div style={{fontSize:10,color:T.t3,marginTop:6}}>As parcelas seguintes vencem a cada mês, no mesmo dia. Depois você pode ajustar valor e data de cada uma.</div>
+        <div style={{marginTop:12}}><Bt onClick={criarParcelas}>Criar cobrança</Bt></div>
+      </Cd>}
+
+      {cobs.length===0&&!gen&&<Cd style={{padding:24,textAlign:"center"}} hov={false}><div style={{fontSize:13,color:T.t3}}>Nenhuma cobrança registrada para {c.nome}. Clique em “Nova cobrança”.</div></Cd>}
+
+      {ordenadas.map(function(cob){
+        var st=cbStatus(cob),cor=T[st.cor]||T.gold,editando=ed===cob.id;
+        var ult=(cob.lembretes||[]).length?cob.lembretes[cob.lembretes.length-1]:null;
+        return (
+          <Cd key={cob.id} style={{padding:14,borderLeft:"3px solid "+cor}} hov={false}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"flex-start"}}>
+              <div style={{minWidth:0,flex:"1 1 220px"}}>
+                <div style={{fontSize:13,fontWeight:700,color:T.t1}}>{cob.desc||"Consultoria"}{cob.parcela&&<span style={{color:T.t3,fontWeight:600}}> · parcela {cob.parcela}</span>}</div>
+                <div style={{fontSize:11,color:T.t3,marginTop:3}}>Vencimento <strong style={{color:T.t2}}>{cbData(cob.venc)}</strong> · {cob.forma||"PIX"}</div>
+                <div style={{marginTop:6,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                  <Bg c={st.cor}>{st.txt}</Bg>
+                  {ult&&<span style={{fontSize:10,color:T.t3}}>📧 último lembrete {cbData(ult.em)} → {ult.para}{cob.lembretes.length>1?" (+"+(cob.lembretes.length-1)+")":""}</span>}
+                </div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:18,fontWeight:800,color:cob.status==="paga"?T.green:T.t1,fontFamily:"'JetBrains Mono'"}}>{fm(+cob.valor||0)}</div>
+                <div style={{display:"flex",gap:6,marginTop:8,justifyContent:"flex-end",flexWrap:"wrap"}}>
+                  {cob.status!=="paga"&&<Bt onClick={function(){abrirEnvio(cob)}} style={{fontSize:11,padding:"6px 12px"}}>📧 Enviar lembrete</Bt>}
+                  {cob.status!=="paga"
+                    ?<Bt v="secondary" onClick={function(){upd(cob.id,{status:"paga",pagoEm:cbHojeIso()})}} style={{fontSize:11,padding:"6px 12px"}}>✓ Marcar paga</Bt>
+                    :<Bt v="secondary" onClick={function(){upd(cob.id,{status:"pendente",pagoEm:""})}} style={{fontSize:11,padding:"6px 12px"}}>↩ Reabrir</Bt>}
+                  <Bt v="secondary" onClick={function(){sEd(editando?null:cob.id);sEdV({desc:cob.desc||"",parcela:cob.parcela||"",valor:String(cob.valor||"").replace(".",","),venc:cob.venc||""});}} style={{fontSize:11,padding:"6px 10px"}}>✏️</Bt>
+                  <Bt v="secondary" onClick={function(){if(window.confirm("Excluir esta cobrança?"))setCobs(cobs.filter(function(x){return x.id!==cob.id}))}} style={{fontSize:11,padding:"6px 10px"}}>🗑</Bt>
+                </div>
+              </div>
+            </div>
+            {editando&&<div style={{marginTop:12,paddingTop:12,borderTop:"1px solid "+T.w3}}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
+                <div><div style={lab}>DESCRIÇÃO</div><input style={inp} value={edV.desc} onChange={function(e){sEdV(Object.assign({},edV,{desc:e.target.value}))}}/></div>
+                <div><div style={lab}>PARCELA</div><input style={inp} value={edV.parcela} onChange={function(e){sEdV(Object.assign({},edV,{parcela:e.target.value}))}} placeholder="2/2"/></div>
+                <div><div style={lab}>VALOR (R$)</div><input style={inp} value={edV.valor} onChange={function(e){sEdV(Object.assign({},edV,{valor:e.target.value}))}}/></div>
+                <div><div style={lab}>VENCIMENTO</div><input type="date" style={inp} value={edV.venc} onChange={function(e){sEdV(Object.assign({},edV,{venc:e.target.value}))}}/></div>
+              </div>
+              <div style={{marginTop:10}}><Bt onClick={function(){
+                var v=parseFloat(String(edV.valor).replace(/\./g,"").replace(",","."));
+                if(!(v>0)){flash("⚠️ Valor inválido.");return;}
+                upd(cob.id,{desc:edV.desc,parcela:edV.parcela,valor:v,venc:edV.venc});sEd(null);
+              }} style={{fontSize:12,padding:"8px 16px"}}>Salvar</Bt></div>
+            </div>}
+          </Cd>
+        );
+      })}
+
+      <Mo open={!!envio} onClose={function(){if(!enviando)sEnvio(null)}} title="📧 Lembrete de pagamento" wide>
+        {envio&&<div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10}}>
+            <div><div style={lab}>PARA (E-MAIL DO CLIENTE)</div><input style={inp} value={para} onChange={function(e){sPara(e.target.value)}} placeholder="cliente@email.com"/></div>
+            <div><div style={lab}>CHAVE PIX DA COURINVEST</div><input style={inp} value={pixChave} onChange={function(e){sPixChave(e.target.value)}} placeholder="CNPJ, e-mail, celular ou chave aleatória"/></div>
+            <div><div style={lab}>FAVORECIDO</div><input style={inp} value={pixFav} onChange={function(e){sPixFav(e.target.value)}}/></div>
+          </div>
+          <div><div style={lab}>MENSAGEM ADICIONAL (opcional)</div><textarea style={Object.assign({},inp,{minHeight:56,resize:"vertical",fontFamily:"inherit"})} value={extra} onChange={function(e){sExtra(e.target.value)}} placeholder="Ex: Qualquer dúvida estou à disposição!"/></div>
+          <div style={{fontSize:10,color:T.t3}}>Prévia do e-mail que será enviado:</div>
+          <iframe title="prévia" srcDoc={htmlPrev} style={{width:"100%",height:420,border:"1px solid "+T.bdrL,borderRadius:10,background:"#EEF1F6"}}/>
+          {msg&&<div style={{padding:"8px 12px",borderRadius:8,background:T.w3,fontSize:12,color:T.t1}}>{msg}</div>}
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <Bt v="secondary" onClick={function(){sEnvio(null)}} disabled={enviando}>Cancelar</Bt>
+            <Bt onClick={enviar} disabled={enviando||!emailOk}>{enviando?"Enviando…":"📧 Enviar agora"}</Bt>
+          </div>
+        </div>}
+      </Mo>
+    </div>
+  );
 }
 
 function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onReportReady,headlessTipoRelatorio}){
@@ -15271,6 +15551,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
   if(isPat) tabs.push({id:"fire",l:"🏖 Aposentadoria"});
   
   tabs.push({id:"contratos",l:"📎 Contratos"});
+  /* v511: Cobranças/lembretes de pagamento — clientes de Consultoria (ou qualquer cliente que já tenha cobranças registradas) */
+  var _cobAbertas=(c.cobrancas||[]).filter(function(x){return x.status!=="paga"}).length;
+  if(c.sv.includes("consultoria")||(c.cobrancas&&c.cobrancas.length>0)) tabs.push({id:"cobrancas",l:"💳 Cobranças"+(_cobAbertas>0?" ("+_cobAbertas+")":"")});
   tabs.push({id:"relatorio",l:"📄 Relatório"});
   /* Particularidades — config técnica do cliente (regras de fee, layout do relatório) */
   tabs.push({id:"particular",l:"⚙️ Particularidades"});
@@ -15315,7 +15598,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
             )}
             <div style={{display:"flex",gap:6,marginTop:6,flexWrap:"wrap",alignItems:"center"}}>
               <Bg c={RC(c.risco)}>{c.risco}</Bg>
-              {c.sv.map(s=><Bg key={s} c={SC[s]}>{SL[s]}</Bg>)}
+              {svBadges(c.sv)}
               {c.isPJ && <Bg c="cyan">🏢 PJ{c.cnpj?" · "+c.cnpj:""}</Bg>}
               {c.grupoFamiliarNome && <Bg c="gold">Familia: {c.grupoFamiliarNome}</Bg>}
               <button onClick={()=>sShowSvcChange(true)} style={{padding:"3px 8px",borderRadius:6,border:"1px dashed rgba(255,255,255,0.06)",background:"transparent",color:T.t3,fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",gap:3}}>✏️ Alterar</button>
@@ -15341,7 +15624,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                 
                 var receitaNativa=0;
                 if(c.sv.includes("patrimonio")) receitaNativa+=receitaCliente;
-                if(c.sv.includes("planejamento")) receitaNativa+=(c.feeFixo||0); 
+                if(c.sv.includes("planejamento")&&!c.sv.includes("patrimonio")) receitaNativa+=(c.feeFixo||0); 
                 
                 
                 var soGF=c.sv.includes("planejamento") && !c.sv.includes("patrimonio");
@@ -15375,21 +15658,23 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       {}
       <Mo open={showSvcChange} onClose={()=>sShowSvcChange(false)} title="Alterar Serviço">
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <div style={{fontSize:12,color:T.t2,marginBottom:4}}>Selecione o serviço principal do cliente. Gestão de Patrimônio, Gestão Financeira e Consultoria são exclusivos.</div>
-          <div style={{display:"flex",gap:8}}>
-            {[["patrimonio","Gestão de Patrimônio","💎",T.gold],["planejamento","Gestão Financeira","📊",T.cyan],["consultoria","Consultoria","🗂️",T.orange]].map(function(arr){
+          <div style={{fontSize:12,color:T.t2,marginBottom:4}}>Selecione o serviço do cliente. Cliente que tem Gestão Financeira (Meu Vista) e também Gestão de Patrimônio é <strong style={{color:T.purple}}>Híbrido</strong>: a cobrança ignora o fee fixo e vale só a taxa sobre o patrimônio.</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {[["patrimonio","Gestão de Patrimônio","💎",T.gold],["planejamento","Gestão Financeira","📊",T.cyan],["hibrido","Híbrido (GF + Patrimônio)","🔀",T.purple],["consultoria","Consultoria","🗂️",T.orange]].map(function(arr){
               var k=arr[0],label=arr[1],ic=arr[2],cor=arr[3];
-              var ativo=c.sv.includes(k);
+              var hibAtual=ehHibrido(c);
+              var ativo=k==="hibrido"?hibAtual:(hibAtual?false:c.sv.includes(k));
               return (
                 <button key={k} onClick={function(){
                   var newSv=c.sv.filter(function(s){return s!=="patrimonio"&&s!=="planejamento"&&s!=="consultoria"});
-                  newSv.push(k);
+                  if(k==="hibrido"){newSv.push("patrimonio");newSv.push("planejamento");}
+                  else newSv.push(k);
                   dp({t:"UC",p:{id:c.id,sv:newSv}});
                   sTab("geral");
                 }} style={{flex:1,padding:"16px",borderRadius:14,border:ativo?"2px solid "+cor:"1px solid "+T.bdrL,background:ativo?cor+"12":"transparent",cursor:"pointer",textAlign:"center"}}>
                   <div style={{fontSize:28,marginBottom:6}}>{ic}</div>
                   <div style={{fontSize:14,fontWeight:700,color:ativo?cor:T.t2}}>{label}</div>
-                  <div style={{fontSize:10,color:T.t3,marginTop:4}}>{k==="patrimonio"?"Taxa % a.m. sobre patrimônio":k==="planejamento"?"Valor fixo mensal + IPCA":"Serviço pontual, não recorrente"}</div>
+                  <div style={{fontSize:10,color:T.t3,marginTop:4}}>{k==="patrimonio"?"Taxa % a.m. sobre patrimônio":k==="planejamento"?"Valor fixo mensal + IPCA":k==="hibrido"?"Meu Vista + carteira · cobra só % do patrimônio":"Serviço pontual, não recorrente"}</div>
                   {ativo && <div style={{marginTop:6,fontSize:10,fontWeight:700,color:cor}}>✓ Ativo</div>}
                 </button>
               );
@@ -15448,6 +15733,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
 
       {}
       <div style={{display:"flex",gap:5,marginBottom:18,overflowX:"auto"}}>{tabs.map(t=><button key={t.id} onClick={()=>sTab(t.id)} style={{padding:"8px 18px",borderRadius:12,fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",border:tab===t.id?"1.5px solid "+T.gold:"1px solid "+T.bdrL,background:tab===t.id?T.goldD:"transparent",color:tab===t.id?T.gold:T.t3}}>{t.l}</button>)}</div>
+
+      {tab==="cobrancas" && <CobrancasTab c={c} d={d} dp={dp}/>}
 
       {}
       {tab==="geral" && (function(){
@@ -15578,7 +15865,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
            Se cliente GF tem feeBase (ex: "02/27"), calcular proximidade e sugerir reajuste.
            IPCA 12m vem de data.config.ipcaAcum12m (salvo pelo gerador de overview)
            ou usamos o valor do Focus cadastrado em config. */
-        if(c.sv.includes("planejamento") && c.feeBase && c.feeFixo>0){
+        if(c.sv.includes("planejamento") && !c.sv.includes("patrimonio") && c.feeBase && c.feeFixo>0){
           
           var _fb=String(c.feeBase||"").trim();
           var _fbParts=_fb.split("/");
@@ -15751,7 +16038,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                 <div style={{fontSize:9,color:T.t3,marginTop:2}}>{(function(){
                   var partes=[];
                   if(c.sv.includes("patrimonio") && (c.txGestao||0)>0) partes.push((c.txGestao||0).toFixed(3)+"% a.m.");
-                  if(c.sv.includes("planejamento") && (c.feeFixo||0)>0) partes.push("fee fixo");
+                  if(c.sv.includes("planejamento") && !c.sv.includes("patrimonio") && (c.feeFixo||0)>0) partes.push("fee fixo");
                   if(c.sv.includes("milhas")) partes.push("milhas");
                   return partes.length>0?partes.join(" + "):"sem cobrança";
                 })()}</div>
@@ -15895,7 +16182,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                 <div style={{fontSize:9,color:T.t3,marginTop:2}}>{(function(){
                   var partes=[];
                   if(c.sv.includes("patrimonio") && (c.txGestao||0)>0) partes.push((c.txGestao||0).toFixed(3)+"% a.m.");
-                  if(c.sv.includes("planejamento") && (c.feeFixo||0)>0) partes.push("fee fixo");
+                  if(c.sv.includes("planejamento") && !c.sv.includes("patrimonio") && (c.feeFixo||0)>0) partes.push("fee fixo");
                   if(c.sv.includes("milhas")) partes.push("milhas");
                   return partes.length>0?partes.join(" + "):"sem cobrança";
                 })()}</div>
@@ -26308,7 +26595,7 @@ function PipelineView({data:d,dispatch:dp}){
               if(!patGorila && c._ativosImport && c._ativosImport.length>0){
                 patGorila=c._ativosImport.reduce(function(s,at){return s+(at.posR||at.qtd*at.pa||0)},0);
               }
-              var recMes=(svArr.indexOf("patrimonio")>=0?patGorila*(c.txGestao||0)/100:0)+(c.feeFixo||0);
+              var recMes=(svArr.indexOf("patrimonio")>=0?patGorila*(c.txGestao||0)/100:0)+(svArr.indexOf("patrimonio")>=0?0:(c.feeFixo||0));
               return (
                 <div key={c.id} style={{padding:12,background:T.card,borderRadius:12,border:"1px solid "+(c._semContato?T.orange+"33":T.green+"22"),position:"relative"}}>
                   {c._temGorila && <span title="Dados importados do Gorila" style={{position:"absolute",top:6,right:6,fontSize:8,fontWeight:800,color:T.gold,background:T.goldD,padding:"2px 5px",borderRadius:4,letterSpacing:.3}}>🦍 GORILA</span>}
@@ -26320,7 +26607,7 @@ function PipelineView({data:d,dispatch:dp}){
                     </div>
                   </div>
                   <div style={{display:"flex",gap:3,marginBottom:6,flexWrap:"wrap"}}>
-                    {svArr.map(function(s){return SL[s]?<Bg key={s} c={SC[s]}>{SL[s].replace("Gestão de ","").replace("Couri ","")}</Bg>:null})}
+                    {svBadges(svArr,true)}
                     {c._semContato && <span style={{fontSize:8,fontWeight:700,color:T.orange,background:T.orangeD,padding:"2px 5px",borderRadius:4}}>⚠️ {c._mSinceContact}m sem contato</span>}
                   </div>
                   {recMes>0 && <div style={{fontSize:11,color:T.gold,fontWeight:700,fontFamily:"'JetBrains Mono'",marginBottom:6}}>{fm(recMes)}/mês</div>}
@@ -34457,7 +34744,7 @@ function FiscalView({data:d,dispatch:dp}){
   var calcFee=function(c){
     var total=0;
     if(c.sv.includes("patrimonio")&&(c.txGestao||0)>0) total+=(c.patGorila||c.pat||0)*(c.txGestao||0)/100;
-    if(c.sv.includes("planejamento")&&(c.feeFixo||0)>0) total+=(c.feeFixo||0);
+    if(c.sv.includes("planejamento")&&!c.sv.includes("patrimonio")&&(c.feeFixo||0)>0) total+=(c.feeFixo||0);
     return total;
   };
 
@@ -37309,7 +37596,7 @@ function App({authUser}){
     if(!d||!d.cl||!d.cl.length)return;
     var hoje=new Date();
     d.cl.forEach(function(c){
-      if(!c.sv||!c.sv.includes("planejamento")||!c.feeFixo||!c.feeBase)return;
+      if(!c.sv||!c.sv.includes("planejamento")||c.sv.includes("patrimonio")||!c.feeFixo||!c.feeBase)return;
       /* Verifica cache: se já tem e foi buscado há menos de 7 dias, pula */
       var cache=c._ipcaReajuste;
       if(cache&&cache.fetchedAt&&(Date.now()-cache.fetchedAt)<7*24*60*60*1000)return;
@@ -38227,7 +38514,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '509';
+  var SW_VERSION = '511';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
