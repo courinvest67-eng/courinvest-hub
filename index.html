@@ -24914,7 +24914,7 @@ function FinanceiroView({data:d,dispatch:dp}){
           return String(n||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().replace(/&/g," ").replace(/[^A-Z0-9 ]/g," ").split(/\s+/).filter(function(w){return w&&w!=="E"&&w!=="DE"&&w!=="DA"&&w!=="DO"&&w!=="DAS"&&w!=="DOS"}).join(" ")||"DESCONHECIDO";
         };
 
-        var auditRec={usados:0,consultoria:0,semData:0,duplicados:0,outros:{}};
+        var auditRec={usados:0,consultoria:0,semData:0,duplicados:0,multiplos:0,outros:{}};
         var cliRec={},mesesComDadosSet={},vistosRec={};
         var fixMojiRec=function(n){
           n=String(n||"");
@@ -24937,10 +24937,12 @@ function FinanceiroView({data:d,dispatch:dp}){
           if(!cliRec[chave])cliRec[chave]={chave:chave,nomes:{},meses:{}};
           var cr=cliRec[chave];
           cr.nomes[nomeCanon]=(cr.nomes[nomeCanon]||0)+1;
-          if(!cr.meses[ym])cr.meses[ym]={gp:0,gf:0,tot:0,dMin:e.data,dMax:e.data};
+          if(!cr.meses[ym])cr.meses[ym]={gp:0,gf:0,gpD:"",gfD:"",tot:0,dMin:e.data,dMax:e.data};
           var mm=cr.meses[ym];
-          if(sv==="GP")mm.gp+=e.valor;else mm.gf+=e.valor;
-          mm.tot+=e.valor;
+          /* Ticket do mês = ÚLTIMO pagamento do mês por serviço (2 pagamentos no mesmo mês costumam ser atraso/reenvio — somar dobra o valor) */
+          if(sv==="GP"){if(mm.gpD){auditRec.multiplos++}if(e.data>=mm.gpD){mm.gp=e.valor;mm.gpD=e.data}}
+          else{if(mm.gfD){auditRec.multiplos++}if(e.data>=mm.gfD){mm.gf=e.valor;mm.gfD=e.data}}
+          mm.tot=mm.gp+mm.gf;
           if(e.data<mm.dMin)mm.dMin=e.data;
           if(e.data>mm.dMax)mm.dMax=e.data;
         });
@@ -24977,7 +24979,9 @@ function FinanceiroView({data:d,dispatch:dp}){
           Object.keys(f.meses).forEach(function(m){
             var a=f.meses[m],b=t.meses[m];
             if(!b){t.meses[m]=a;return}
-            b.gp+=a.gp;b.gf+=a.gf;b.tot+=a.tot;
+            if(a.gpD&&(!b.gpD||a.gpD>b.gpD)){b.gp=a.gp;b.gpD=a.gpD}
+            if(a.gfD&&(!b.gfD||a.gfD>b.gfD)){b.gf=a.gf;b.gfD=a.gfD}
+            b.tot=b.gp+b.gf;
             if(a.dMin<b.dMin)b.dMin=a.dMin;
             if(a.dMax>b.dMax)b.dMax=a.dMax;
           });
@@ -25381,11 +25385,11 @@ function FinanceiroView({data:d,dispatch:dp}){
               {dadosTicket.length===0 ? <div style={{color:T.t3,fontSize:12,textAlign:"center",padding:20}}>Sem dados de faturamento importados ainda pra Gestão de Patrimônio/Financeira</div> : (
                 <div style={{display:"flex",alignItems:"flex-end",gap:visaoRec==="anual"?16:6,height:140,padding:"0 4px",overflowX:visaoRec==="anual"?"visible":"auto"}}>
                   {dadosTicket.map(function(h,i){
-                    var hBar=h.ticketGeral>0?Math.max(4,(h.ticketGeral/maxTicketGeralView)*100):0;
+                    var hBar=h.ticketGeral>0?Math.max(4,(h.ticketGeral/maxTicketGeralView)*90):0;
                     return (
                       <div key={i} title={h.label+": ticket médio "+fm(h.ticketGeral)+" ("+h.nGeral+" cliente(s)-mês pagante(s))"} style={visaoRec==="anual"?{flex:1,display:"flex",flexDirection:"column",alignItems:"center",minWidth:0}:{flex:"0 0 auto",width:30,display:"flex",flexDirection:"column",alignItems:"center",minWidth:0}}>
                         <div style={{fontSize:visaoRec==="anual"?9:7,fontWeight:700,color:T.t3,fontFamily:"'JetBrains Mono'",marginBottom:3,whiteSpace:"nowrap"}}>{h.ticketGeral>0?(h.ticketGeral>=1000?(h.ticketGeral/1000).toFixed(1)+"k":h.ticketGeral.toFixed(0)):""}</div>
-                        <div style={{width:visaoRec==="anual"?36:14,height:hBar>0?hBar+"%":"3px",background:"linear-gradient(180deg,"+T.gold+","+T.goldD+")",borderRadius:"3px 3px 0 0",opacity:h.ticketGeral>0?.9:.15}}/>
+                        <div style={{display:"flex",alignItems:"flex-end",justifyContent:"center",height:90,width:"100%"}}><div style={{width:visaoRec==="anual"?36:14,height:hBar>0?hBar+"px":"3px",background:"linear-gradient(180deg,"+T.gold+","+T.goldD+")",borderRadius:"3px 3px 0 0",opacity:h.ticketGeral>0?.9:.15}}/></div>
                         <div style={{fontSize:visaoRec==="anual"?10:8,color:T.t3,marginTop:5,whiteSpace:"nowrap",fontWeight:visaoRec==="anual"?700:500}}>{h.label}</div>
                       </div>
                     );
@@ -25397,8 +25401,8 @@ function FinanceiroView({data:d,dispatch:dp}){
             {}
             <div style={{display:"grid",gridTemplateColumns:isMobRec?"1fr":"1fr 1fr",gap:14}}>
               <Cd style={{padding:16}} hov={false}>
-                <h4 style={{margin:"0 0 10px",fontSize:13,fontWeight:700,color:T.green}}>🆕 Últimas captações (inclui clientes que voltaram)</h4>
-                {listaClientesRec.filter(function(c){return!c.baseInicial}).sort(function(a,b){return b.primeiroMes.localeCompare(a.primeiroMes)||b.primeiraData.localeCompare(a.primeiraData)}).slice(0,15).map(function(c,i,arr){return (
+                <h4 style={{margin:"0 0 10px",fontSize:13,fontWeight:700,color:T.green}}>🆕 Últimas captações (só quem continua ativo)</h4>
+                {listaClientesRec.filter(function(c){return!c.baseInicial&&!c.perdido}).sort(function(a,b){return b.primeiroMes.localeCompare(a.primeiroMes)||b.primeiraData.localeCompare(a.primeiraData)}).slice(0,15).map(function(c,i,arr){return (
                   <div key={c.chave||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<arr.length-1?"1px solid rgba(255,255,255,0.03)":"none",gap:8}}>
                     <div style={{minWidth:0}}>
                       <div style={{fontSize:12,fontWeight:600,color:T.t1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nome}</div>
@@ -25410,7 +25414,7 @@ function FinanceiroView({data:d,dispatch:dp}){
                     </div>
                   </div>
                 )})}
-                {listaClientesRec.filter(function(c){return!c.baseInicial}).length===0 && <div style={{fontSize:11,color:T.t3,textAlign:"center",padding:12}}>Nenhum registro</div>}
+                {listaClientesRec.filter(function(c){return!c.baseInicial&&!c.perdido}).length===0 && <div style={{fontSize:11,color:T.t3,textAlign:"center",padding:12}}>Nenhum registro</div>}
               </Cd>
               <Cd style={{padding:16}} hov={false}>
                 <h4 style={{margin:"0 0 10px",fontSize:13,fontWeight:700,color:T.red}}>🚪 Últimos recorrentes perdidos</h4>
@@ -25441,7 +25445,7 @@ function FinanceiroView({data:d,dispatch:dp}){
               </div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,marginBottom:10}}>
                 <div style={{padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:8,fontSize:10,color:T.t3}}>🚫 <strong style={{color:T.t1}}>{auditRec.consultoria}</strong> lançamento(s) de Consultoria ignorados (pontual)</div>
-                <div style={{padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:8,fontSize:10,color:T.t3}}>📅 <strong style={{color:auditRec.semData>0?T.orange:T.t1}}>{auditRec.semData}</strong> sem data · <strong style={{color:auditRec.duplicados>0?T.orange:T.t1}}>{auditRec.duplicados}</strong> duplicados exatos (ignorados)</div>
+                <div style={{padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:8,fontSize:10,color:T.t3}}>📅 <strong style={{color:auditRec.semData>0?T.orange:T.t1}}>{auditRec.semData}</strong> sem data · <strong style={{color:auditRec.duplicados>0?T.orange:T.t1}}>{auditRec.duplicados}</strong> duplicados exatos (ignorados) · <strong style={{color:T.t1}}>{auditRec.multiplos}</strong> mês(es) com 2+ pagamentos do mesmo serviço (vale o último)</div>
                 <div style={{padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:8,fontSize:10,color:T.t3}}>👀 <strong style={{color:emObservacaoRec.length>0?T.orange:T.t1}}>{emObservacaoRec.length}</strong> ativo(s) em observação (1 mês sem pagar)</div>
                 <div style={{padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:8,fontSize:10,color:T.t3}}>⏱️ <strong style={{color:perdasNoUltimoMes>0?T.orange:T.t1}}>{perdasNoUltimoMes}</strong> perda(s) confirmada(s) no último mês importado</div>
               </div>
@@ -38973,7 +38977,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '518';
+  var SW_VERSION = '520';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
