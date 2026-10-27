@@ -23689,6 +23689,7 @@ function FinanceiroView({data:d,dispatch:dp}){
   const[delAnoDespesas,sDelAnoDespesas]=useState("");
   /* Toggle Mensal/Anual dos gráficos de barras da aba Recorrentes (Entradas/Perdas e Ticket Médio) */
   const[visaoRec,sVisaoRec]=useState("mensal");
+  const[selPeriodoRec,sSelPeriodoRec]=useState(null);
   /* Aba 💳 Cartão: mês selecionado, ano selecionado (pra separar as faturas por ano no seletor), estado do import de PDF e mensagem de feedback */
   const[selMesCartao,sSelMesCartao]=useState(null);
   const[selAnoCartao,sSelAnoCartao]=useState(null);
@@ -24950,7 +24951,7 @@ function FinanceiroView({data:d,dispatch:dp}){
         /* ===== Unificação de nomes (manual + automática por semelhança) ===== */
         var cfgRec=(d&&d.config&&d.config.recCfg)||{};
         /* Decisões do Igor (27/10/2026) — valem sempre; as escolhas feitas pela tela somam a estas. */
-        var REC_ALIAS_PADRAO={"EDUARDA":"EDUARDA CARVALHO","PEDRO IVO CLEMENTE":"PEDRO IVO BATISTA","VALERIA":"VALERIA PESTANA"};
+        var REC_ALIAS_PADRAO={"EDUARDA":"EDUARDA CARVALHO","PEDRO IVO CLEMENTE":"PEDRO IVO BATISTA","VALERIA":"VALERIA PESTANA","HIVE MKT LTDA":"BEELIKE AGENCIA DIGITAL LTDA"};
         var REC_SEPARAR_PADRAO={"BRUNO NOGUEIRA SAKAYA":true,"BRUNO CARVALHO":true,"VALERIA BORGES PEREIRA COSTEMALLE":true};
         var aliasRec=Object.assign({},REC_ALIAS_PADRAO,cfgRec.aliases||{});
         var jaEraRec=cfgRec.jaEra||{};
@@ -25352,7 +25353,7 @@ function FinanceiroView({data:d,dispatch:dp}){
                     var hNovos=Math.max(3,(h.novos.length/maxEvolRecView)*100);
                     var hPerdidos=Math.max(3,(h.perdidos.length/maxEvolRecView)*100);
                     return (
-                      <div key={i} title={h.label+": +"+h.novos.length+" captação(ões) / -"+h.perdidos.length+" perdido(s) · base de recorrentes "+h.acumulado+(h.baseIni?" (inclui "+h.baseIni+" da base inicial)":"")+(h.semDados?" · SEM PLANILHA IMPORTADA":"")} style={visaoRec==="anual"?{flex:1,display:"flex",flexDirection:"column",alignItems:"center",minWidth:0}:{flex:"0 0 auto",width:28,display:"flex",flexDirection:"column",alignItems:"center",minWidth:0}}>
+                      <div key={i} onClick={function(){sSelPeriodoRec(selPeriodoRec===h.ym?null:h.ym)}} title={h.label+": +"+h.novos.length+" captação(ões) / -"+h.perdidos.length+" perdido(s) · base de recorrentes "+h.acumulado+(h.baseIni?" (inclui "+h.baseIni+" da base inicial)":"")+(h.semDados?" · SEM PLANILHA IMPORTADA":"")} style={Object.assign(visaoRec==="anual"?{flex:1,display:"flex",flexDirection:"column",alignItems:"center",minWidth:0}:{flex:"0 0 auto",width:28,display:"flex",flexDirection:"column",alignItems:"center",minWidth:0},{cursor:"pointer",borderRadius:8,background:selPeriodoRec===h.ym?"rgba(212,163,40,0.10)":"transparent",outline:selPeriodoRec===h.ym?"1px solid "+T.gold:"none"})}>
                         <div style={{fontSize:visaoRec==="anual"?10:8,fontWeight:700,color:h.saldo>=0?T.green:T.red,fontFamily:"'JetBrains Mono'",marginBottom:3}}>{h.saldo>=0?"+":""}{h.saldo}</div>
                         <div style={{display:"flex",gap:visaoRec==="anual"?6:2,alignItems:"flex-end",width:"100%",justifyContent:"center",height:110}}>
                           <div style={{width:visaoRec==="anual"?22:10,height:h.novos.length>0?hNovos+"%":"3px",background:"linear-gradient(180deg,"+T.green+",rgba(45,212,160,0.3))",borderRadius:"3px 3px 0 0",opacity:h.novos.length>0?.9:.15}}/>
@@ -25363,7 +25364,62 @@ function FinanceiroView({data:d,dispatch:dp}){
                     );
                   })}
                 </div>
-                <div style={{fontSize:9,color:T.t3,marginTop:10,fontStyle:"italic"}}>Passe o mouse sobre cada {visaoRec==="anual"?"ano":"mês"} pra ver o detalhe (novos, perdidos e base acumulada). Base de recorrentes ativos hoje: {ativosRec.length}.</div>
+                <div style={{fontSize:9,color:T.t3,marginTop:10,fontStyle:"italic"}}>👆 Clique em um {visaoRec==="anual"?"ano":"mês"} pra ver quem foi captado e quem foi perdido. Base de recorrentes ativos hoje: {ativosRec.length}.</div>
+                {(function(){
+                  var sel=dadosEntradasPerdas.find(function(h){return h.ym===selPeriodoRec});
+                  if(!sel)return null;
+                  var perdSorted=sel.perdidos.slice().sort(function(a,b){return a.mesPerda.localeCompare(b.mesPerda)||a.nome.localeCompare(b.nome)});
+                  var novosSorted=sel.novos.slice().sort(function(a,b){return a.primeiraData.localeCompare(b.primeiraData)});
+                  var somaNov=novosSorted.reduce(function(a,c){return a+c.valorPrimeiro},0),somaPerd=perdSorted.reduce(function(a,c){return a+c.valorUltimo},0);
+                  var mesPt=function(ym){return MN_CURTO_REC[+ym.substring(5,7)-1]+"/"+ym.substring(2,4)};
+                  return (
+                    <div style={{marginTop:14,padding:14,background:"rgba(255,255,255,0.02)",border:"1px solid "+T.bdr,borderRadius:12}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,gap:8,flexWrap:"wrap"}}>
+                        <div style={{fontSize:13,fontWeight:700,color:T.gold}}>📋 {sel.label} — {novosSorted.length} captado(s) · {perdSorted.length} perdido(s)</div>
+                        <button onClick={function(){sSelPeriodoRec(null)}} style={{fontSize:10,padding:"3px 10px",borderRadius:8,border:"1px solid rgba(255,255,255,0.12)",background:"transparent",color:T.t3,cursor:"pointer"}}>✕ fechar</button>
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:isMobRec?"1fr":"1fr 1fr",gap:14}}>
+                        <div>
+                          <div style={{fontSize:11,fontWeight:700,color:T.green,marginBottom:6}}>🆕 Captados <span style={{color:T.t3,fontWeight:500}}>· {fm(somaNov)}/mês de ticket</span></div>
+                          {novosSorted.length===0&&<div style={{fontSize:11,color:T.t3,padding:"6px 0"}}>Nenhuma captação{sel.baseIni?" ("+sel.baseIni+" cliente(s) da base inicial não contam)":""}.</div>}
+                          {novosSorted.map(function(c,i){return (
+                            <div key={c.chave||i} style={{display:"flex",justifyContent:"space-between",gap:8,padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}>
+                              <div style={{minWidth:0}}>
+                                <div style={{fontSize:12,fontWeight:600,color:T.t1}}>{c.nome}</div>
+                                <div style={{fontSize:9,color:T.t3,marginTop:3,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                                  <Bg c={c.temGP?"gold":"cyan"}>{c.servicoLabel}</Bg>
+                                  <span>{fDRec(c.primeiraData)}</span>
+                                  {c.reativacao&&<Bg c="green">VOLTOU APÓS {c.voltouApos}M</Bg>}
+                                  {c.perdido?<Bg c="red">JÁ SAIU ({mesPt(c.mesPerda)})</Bg>:<Bg c="green">ATIVO</Bg>}
+                                </div>
+                              </div>
+                              <div style={{fontSize:11,fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'",flexShrink:0}}>{fm(c.valorPrimeiro)}</div>
+                            </div>
+                          )})}
+                        </div>
+                        <div>
+                          <div style={{fontSize:11,fontWeight:700,color:T.red,marginBottom:6}}>🚪 Perdidos <span style={{color:T.t3,fontWeight:500}}>· {fm(somaPerd)}/mês de ticket</span></div>
+                          {perdSorted.length===0&&<div style={{fontSize:11,color:T.t3,padding:"6px 0"}}>Nenhuma perda 🎉</div>}
+                          {perdSorted.map(function(c,i){return (
+                            <div key={c.chave||i} style={{display:"flex",justifyContent:"space-between",gap:8,padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}>
+                              <div style={{minWidth:0}}>
+                                <div style={{fontSize:12,fontWeight:600,color:T.t1}}>{c.nome}</div>
+                                <div style={{fontSize:9,color:T.t3,marginTop:3,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                                  <Bg c={c.temGP?"gold":"cyan"}>{c.servicoLabel}</Bg>
+                                  <span>último pgto {fDRec(c.ultimaData)}</span>
+                                  <span>· {c.mesesCasa} {c.mesesCasa===1?"mês":"meses"} de casa</span>
+                                  <span>· perda confirmada em {mesPt(c.mesPerda)}</span>
+                                  {c.voltou&&<Bg c="green">VOLTOU DEPOIS</Bg>}
+                                </div>
+                              </div>
+                              <div style={{fontSize:11,fontWeight:700,color:T.red,fontFamily:"'JetBrains Mono'",flexShrink:0}}>−{fm(c.valorUltimo)}</div>
+                            </div>
+                          )})}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
                 </>
               )}
             </Cd>
@@ -38977,7 +39033,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '520';
+  var SW_VERSION = '522';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
