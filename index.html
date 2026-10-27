@@ -24906,23 +24906,32 @@ function FinanceiroView({data:d,dispatch:dp}){
           if(!t)return null;
           if(t.indexOf("consult")>=0)return"CONS";
           if(t.indexOf("patrim")>=0)return"GP";
-          if(t.indexOf("financ")>=0||t.indexOf("planej")>=0)return"GF";
+          if(t.indexOf("gest")>=0&&t.indexOf("financ")>=0)return"GF";
+          if(t.indexOf("planej")>=0)return"GF";
           return null;
         };
         var chaveRecNome=function(n){
           return String(n||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().replace(/&/g," ").replace(/[^A-Z0-9 ]/g," ").split(/\s+/).filter(function(w){return w&&w!=="E"&&w!=="DE"&&w!=="DA"&&w!=="DO"&&w!=="DAS"&&w!=="DOS"}).join(" ")||"DESCONHECIDO";
         };
 
-        var auditRec={usados:0,consultoria:0,semData:0,outros:{}};
-        var cliRec={},mesesComDadosSet={};
+        var auditRec={usados:0,consultoria:0,semData:0,duplicados:0,outros:{}};
+        var cliRec={},mesesComDadosSet={},vistosRec={};
+        var fixMojiRec=function(n){
+          n=String(n||"");
+          if(/[\u00c3\u00c2]/.test(n)){try{var f=decodeURIComponent(escape(n));if(f&&f.indexOf("\ufffd")<0)return f}catch(err){}}
+          return n;
+        };
         entradas.forEach(function(e){
           var sv=clsServRec(e.servico);
           if(sv==="CONS"){auditRec.consultoria++;return}
           if(sv===null){var kOut=(e.servico||"").trim()||"(sem serviço)";auditRec.outros[kOut]=(auditRec.outros[kOut]||0)+1;return}
           if(!e.data){auditRec.semData++;return}
+          var kDup=e.data+"|"+chaveRecNome(fixMojiRec(e.cliente))+"|"+(+e.valor).toFixed(2)+"|"+sv;
+          if(vistosRec[kDup]){auditRec.duplicados++;return}
+          vistosRec[kDup]=true;
           auditRec.usados++;
           var ym=e.data.substring(0,7);
-          var nomeCanon=canonCliente(e.cliente);
+          var nomeCanon=fixMojiRec(canonCliente(e.cliente));
           var chave=chaveRecNome(nomeCanon);
           mesesComDadosSet[ym]=true;
           if(!cliRec[chave])cliRec[chave]={chave:chave,nomes:{},meses:{}};
@@ -24936,11 +24945,140 @@ function FinanceiroView({data:d,dispatch:dp}){
           if(e.data>mm.dMax)mm.dMax=e.data;
         });
 
+        /* ===== Unificação de nomes (manual + automática por semelhança) ===== */
+        var cfgRec=(d&&d.config&&d.config.recCfg)||{};
+        /* Decisões do Igor (27/10/2026) — valem sempre; as escolhas feitas pela tela somam a estas. */
+        var REC_ALIAS_PADRAO={"EDUARDA":"EDUARDA CARVALHO","PEDRO IVO CLEMENTE":"PEDRO IVO BATISTA","VALERIA":"VALERIA PESTANA"};
+        var REC_SEPARAR_PADRAO={"BRUNO NOGUEIRA SAKAYA":true,"BRUNO CARVALHO":true,"VALERIA BORGES PEREIRA COSTEMALLE":true};
+        var aliasRec=Object.assign({},REC_ALIAS_PADRAO,cfgRec.aliases||{});
+        var jaEraRec=cfgRec.jaEra||{};
+        var separarRec=Object.assign({},REC_SEPARAR_PADRAO,cfgRec.separar||{});
+        var inicioConfRec=cfgRec.inicioConfiavel||"";
+        var redirRec={},mergesRec=[];
+        var chaveFinalRec=function(k){var g=0;while(redirRec[k]&&g++<50)k=redirRec[k];return k};
+        var levRec=function(a,b){
+          if(a===b)return 0;
+          var prev=[],cur,i,j;
+          for(j=0;j<=b.length;j++)prev[j]=j;
+          for(i=1;i<=a.length;i++){
+            cur=[i];
+            for(j=1;j<=b.length;j++)cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a.charAt(i-1)===b.charAt(j-1)?0:1));
+            prev=cur;
+          }
+          return prev[b.length];
+        };
+        var tokFuzzy=function(a,b){return a!==b&&a.length>=4&&b.length>=4&&levRec(a,b)<=1};
+        var nomeTopRec=function(cr){return Object.keys(cr.nomes).sort(function(a,b){return cr.nomes[b]-cr.nomes[a]||b.length-a.length})[0]};
+        var mergeInto=function(from,to,motivo){
+          var f=cliRec[from],t=cliRec[to];
+          if(!f||!t||from===to)return false;
+          mergesRec.push({de:nomeTopRec(f),para:nomeTopRec(t),motivo:motivo,deK:from});
+          Object.keys(f.nomes).forEach(function(n){t.nomes[n]=(t.nomes[n]||0)+f.nomes[n]});
+          Object.keys(f.meses).forEach(function(m){
+            var a=f.meses[m],b=t.meses[m];
+            if(!b){t.meses[m]=a;return}
+            b.gp+=a.gp;b.gf+=a.gf;b.tot+=a.tot;
+            if(a.dMin<b.dMin)b.dMin=a.dMin;
+            if(a.dMax>b.dMax)b.dMax=a.dMax;
+          });
+          delete cliRec[from];
+          redirRec[from]=to;
+          return true;
+        };
+        Object.keys(aliasRec).forEach(function(k){
+          var alvo=chaveFinalRec(aliasRec[k]);
+          if(cliRec[k]&&cliRec[alvo])mergeInto(k,alvo,"unido por você");
+          else if(cliRec[k]&&!cliRec[alvo]){/* alvo sem lançamento GP/GF: ignora */}
+        });
+        /* Automático: (A) nomes com 2+ palavras cujas palavras do mais curto estão no mais longo, tolerando 1 letra de diferença
+           em UMA palavra (Alan/Allan); (B) nome de 1 palavra só ("Érika") que bate com o 1º nome de UM único cliente maior. */
+        (function(){
+          var guard=0,mudou=true;
+          while(mudou&&guard++<400){
+            mudou=false;
+            var arr=Object.keys(cliRec).map(function(k){return{k:k,tk:k.split(" ")}});
+            arr.sort(function(a,b){return b.tk.length-a.tk.length||b.k.length-a.k.length});
+            for(var i=0;i<arr.length&&!mudou;i++){
+              for(var j=i+1;j<arr.length&&!mudou;j++){
+                var L=arr[i],S=arr[j];
+                if(!cliRec[L.k]||!cliRec[S.k]||S.tk.length<2||S.tk.length>L.tk.length||separarRec[S.k])continue;
+                var usados={},fuzzy=0,ok=true;
+                /* palavra a palavra: igual > inicial (C = Carvalho) / truncada no fim (Pov = Povoleri) > 1 letra diferente */
+                var casaTok=function(x,ix,y,iy,modo){
+                  if(modo===0)return x===y;
+                  if(modo===1){
+                    if(x.length===1&&y.length>1&&y.charAt(0)===x)return true;
+                    if(y.length===1&&x.length>1&&x.charAt(0)===y)return true;
+                    if(ix===S.tk.length-1&&x.length>=2&&y.length>x.length&&y.indexOf(x)===0)return true;
+                    if(iy===L.tk.length-1&&y.length>=2&&x.length>y.length&&x.indexOf(y)===0)return true;
+                    return false;
+                  }
+                  return tokFuzzy(y,x);
+                };
+                for(var a=0;a<S.tk.length&&ok;a++){
+                  var achou=-1,modoUsado=-1;
+                  for(var modo=0;modo<3&&achou<0;modo++){
+                    for(var b=0;b<L.tk.length;b++){if(usados[b])continue;if(casaTok(S.tk[a],a,L.tk[b],b,modo)){achou=b;modoUsado=modo;break}}
+                  }
+                  if(achou<0)ok=false;else{usados[achou]=true;if(modoUsado===2)fuzzy++}
+                }
+                if(ok&&fuzzy<=1){
+                  if(mergeInto(S.k,L.k,fuzzy?"grafia parecida":"nome contido no outro"))mudou=true;
+                }
+              }
+            }
+          }
+          /* Regra B */
+          var chaves=Object.keys(cliRec);
+          chaves.forEach(function(k){
+            var S=cliRec[k];
+            if(!S||k.indexOf(" ")>=0||separarRec[k])return;
+            var cands=Object.keys(cliRec).filter(function(o){
+              if(o===k||o.indexOf(" ")<0)return false;
+              var p=o.split(" ")[0];
+              return p===k||tokFuzzy(p,k);
+            });
+            if(cands.length!==1)return;
+            mergeInto(k,cands[0],"só o 1º nome — único cliente com esse nome");
+          });
+        })();
+
+        /* Sugestões (NÃO aplicadas sozinhas): mesmo 1º nome, nunca pagaram no mesmo mês e um começou até 4 meses depois do outro
+           parar — típico de sobrenome trocado/grafado diferente. Aparecem na auditoria com botão "são a mesma pessoa". */
+        var sugestoesRec=[];
+        (function(){
+          var ks=Object.keys(cliRec);
+          var im=function(m){var p=m.split("-");return(+p[0])*12+(+p[1])};
+          for(var i=0;i<ks.length;i++){
+            for(var j=i+1;j<ks.length;j++){
+              var a=ks[i],b=ks[j];
+              if(a.split(" ")[0]!==b.split(" ")[0]||separarRec[a]||separarRec[b])continue;
+              var ma=Object.keys(cliRec[a].meses).sort(),mb=Object.keys(cliRec[b].meses).sort();
+              var umaPalavra=a.indexOf(" ")<0||b.indexOf(" ")<0;
+              var sobrepoe=ma.some(function(m){return cliRec[b].meses[m]});
+              if(sobrepoe&&!umaPalavra)continue;
+              var fa=ma[0],la=ma[ma.length-1],fb=mb[0],lb=mb[mb.length-1];
+              var gap=fb>la?im(fb)-im(la):(fa>lb?im(fa)-im(lb):0);
+              if(gap>4)continue;
+              var antigo=la<lb?a:b,novo=la<lb?b:a;
+              sugestoesRec.push({de:antigo,para:novo,nomeDe:nomeTopRec(cliRec[antigo]),nomePara:nomeTopRec(cliRec[novo]),
+                deIni:antigo===a?fa:fb,deFim:antigo===a?la:lb,paraIni:novo===a?fa:fb,paraFim:novo===a?la:lb,fim:la>lb?la:lb});
+            }
+          }
+          sugestoesRec.sort(function(x,y){return y.fim.localeCompare(x.fim)});
+        })();
+
         var dataMonths=Object.keys(mesesComDadosSet).sort();
         var idxM={};dataMonths.forEach(function(m,i){idxM[m]=i});
         var lastIdxRec=dataMonths.length-1;
         var mesMaisRecenteComDados=dataMonths.length?dataMonths[lastIdxRec]:null;
         var mesGlobalInicio=dataMonths.length?dataMonths[0]:null;
+        var primeiroMesSv={GP:null,GF:null};
+        Object.keys(cliRec).forEach(function(k){Object.keys(cliRec[k].meses).forEach(function(m){
+          var mm=cliRec[k].meses[m];
+          if(mm.gp>0&&(!primeiroMesSv.GP||m<primeiroMesSv.GP))primeiroMesSv.GP=m;
+          if(mm.gf>0&&(!primeiroMesSv.GF||m<primeiroMesSv.GF))primeiroMesSv.GF=m;
+        })});
         var mesesSemDadosRec=[];
         if(mesGlobalInicio){for(var mi=mesGlobalInicio;mi<mesMaisRecenteComDados;mi=somaMeses(mi,1)){if(!mesesComDadosSet[mi])mesesSemDadosRec.push(mi)}}
 
@@ -24982,13 +25120,20 @@ function FinanceiroView({data:d,dispatch:dp}){
               reativacao:i>0,
               voltouApos:i>0?diffMeses(ciclos[i-1].fim,cy.ini)-1:0,
               voltou:!ehUltimo,
-              baseInicial:i===0&&cy.ini===mesGlobalInicio
+              baseInicial:false
             };
+            if(i===0){
+              var baseSv=(mIni.gp>0||mIni.gf>0)&&(mIni.gp>0?cy.ini===primeiroMesSv.GP:true)&&(mIni.gf>0?cy.ini===primeiroMesSv.GF:true);
+              if(jaEraRec[chave]){item.baseInicial=true;item.baseMotivo="marcada por você"}
+              else if(inicioConfRec&&cy.ini<=inicioConfRec){item.baseInicial=true;item.baseMotivo="até o início confiável"}
+              else if(baseSv){item.baseInicial=true;item.baseMotivo="1º mês de dados do serviço"}
+            }
             listaClientesRec.push(item);
             if(ehUltimo&&!perdido&&lastIdxRec-idxFim===1)emObservacaoRec.push(item);
           });
         });
 
+        var nomesDatalistRec=Object.keys(cliRec).map(function(k){return nomeTopRec(cliRec[k])}).sort();
         var ativosRec=listaClientesRec.filter(function(c){return!c.perdido});
         var perdidosRecTodos=listaClientesRec.filter(function(c){return c.perdido});
         var ativosSoGP=ativosRec.filter(function(c){return c.fimGP&&!c.fimGF}).length;
@@ -25016,7 +25161,7 @@ function FinanceiroView({data:d,dispatch:dp}){
         var historicoRec=monthsList.map(function(ym){
           var novos=listaClientesRec.filter(function(c){return c.primeiroMes===ym&&!c.baseInicial});
           var perdidos=listaClientesRec.filter(function(c){return c.perdido&&c.mesPerda===ym});
-          var baseIni=ym===mesGlobalInicio?listaClientesRec.filter(function(c){return c.baseInicial}).length:0;
+          var baseIni=listaClientesRec.filter(function(c){return c.baseInicial&&c.primeiroMes===ym}).length;
           var acumulado=listaClientesRec.filter(function(c){return c.primeiroMes<=ym&&(!c.mesPerda||c.mesPerda>ym)}).length;
           var mrrGanho=novos.reduce(function(a,c){return a+c.valorPrimeiro},0);
           var mrrPerdido=perdidos.reduce(function(a,c){return a+c.valorUltimo},0);
@@ -25070,7 +25215,7 @@ function FinanceiroView({data:d,dispatch:dp}){
           if(!ehGP&&!ehGF)return;
           var m=e.data.substring(0,7);
           if(!byMonthTicket[m])byMonthTicket[m]={totalGeral:0,totalGP:0,totalGF:0,cliGeral:{},cliGP:{},cliGF:{}};
-          var nomeCli=chaveRecNome(canonCliente(e.cliente));
+          var nomeCli=chaveFinalRec(chaveRecNome(canonCliente(e.cliente)));
           byMonthTicket[m].totalGeral+=e.valor;
           byMonthTicket[m].cliGeral[nomeCli]=true;
           if(ehGP){byMonthTicket[m].totalGP+=e.valor;byMonthTicket[m].cliGP[nomeCli]=true;}
@@ -25253,16 +25398,19 @@ function FinanceiroView({data:d,dispatch:dp}){
             <div style={{display:"grid",gridTemplateColumns:isMobRec?"1fr":"1fr 1fr",gap:14}}>
               <Cd style={{padding:16}} hov={false}>
                 <h4 style={{margin:"0 0 10px",fontSize:13,fontWeight:700,color:T.green}}>🆕 Últimas captações (inclui clientes que voltaram)</h4>
-                {listaClientesRec.slice().sort(function(a,b){return b.primeiroMes.localeCompare(a.primeiroMes)||b.primeiraData.localeCompare(a.primeiraData)}).slice(0,15).map(function(c,i,arr){return (
+                {listaClientesRec.filter(function(c){return!c.baseInicial}).sort(function(a,b){return b.primeiroMes.localeCompare(a.primeiroMes)||b.primeiraData.localeCompare(a.primeiraData)}).slice(0,15).map(function(c,i,arr){return (
                   <div key={c.chave||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<arr.length-1?"1px solid rgba(255,255,255,0.03)":"none",gap:8}}>
                     <div style={{minWidth:0}}>
                       <div style={{fontSize:12,fontWeight:600,color:T.t1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nome}</div>
-                      <div style={{fontSize:9,color:T.t3,marginTop:3,display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}><Bg c={c.temGP?"gold":"cyan"}>{c.servicoLabel}</Bg>{c.reativacao&&<Bg c="green">VOLTOU APÓS {c.voltouApos}M</Bg>}{c.baseInicial&&<Bg c="purple">BASE INICIAL</Bg>}<span>{fDRec(c.primeiraData)}</span></div>
+                      <div style={{fontSize:9,color:T.t3,marginTop:3,display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}><Bg c={c.temGP?"gold":"cyan"}>{c.servicoLabel}</Bg>{c.reativacao&&<Bg c="green">VOLTOU APÓS {c.voltouApos}M</Bg>}<span>{fDRec(c.primeiraData)}</span></div>
                     </div>
-                    <div style={{fontSize:11,fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'",flexShrink:0}}>{fm(c.valorPrimeiro)}</div>
+                    <div style={{textAlign:"right",flexShrink:0}}>
+                      <div style={{fontSize:11,fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fm(c.valorPrimeiro)}</div>
+                      {!c.reativacao&&<button title="Marca esse cliente como já existente antes (entra na base, não conta como captação nova)" onClick={function(){dp({t:"CONFIG_SET",p:{key:"recCfg",value:Object.assign({},cfgRec,{jaEra:Object.assign({},jaEraRec,{[c.cliente]:true})})}})}} style={{marginTop:3,fontSize:8,padding:"2px 6px",borderRadius:6,border:"1px solid rgba(255,255,255,0.12)",background:"transparent",color:T.t3,cursor:"pointer"}}>não é nova</button>}
+                    </div>
                   </div>
                 )})}
-                {listaClientesRec.length===0 && <div style={{fontSize:11,color:T.t3,textAlign:"center",padding:12}}>Nenhum registro</div>}
+                {listaClientesRec.filter(function(c){return!c.baseInicial}).length===0 && <div style={{fontSize:11,color:T.t3,textAlign:"center",padding:12}}>Nenhum registro</div>}
               </Cd>
               <Cd style={{padding:16}} hov={false}>
                 <h4 style={{margin:"0 0 10px",fontSize:13,fontWeight:700,color:T.red}}>🚪 Últimos recorrentes perdidos</h4>
@@ -25293,16 +25441,54 @@ function FinanceiroView({data:d,dispatch:dp}){
               </div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,marginBottom:10}}>
                 <div style={{padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:8,fontSize:10,color:T.t3}}>🚫 <strong style={{color:T.t1}}>{auditRec.consultoria}</strong> lançamento(s) de Consultoria ignorados (pontual)</div>
-                <div style={{padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:8,fontSize:10,color:T.t3}}>📅 <strong style={{color:auditRec.semData>0?T.orange:T.t1}}>{auditRec.semData}</strong> lançamento(s) GP/GF sem data (ignorados)</div>
+                <div style={{padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:8,fontSize:10,color:T.t3}}>📅 <strong style={{color:auditRec.semData>0?T.orange:T.t1}}>{auditRec.semData}</strong> sem data · <strong style={{color:auditRec.duplicados>0?T.orange:T.t1}}>{auditRec.duplicados}</strong> duplicados exatos (ignorados)</div>
                 <div style={{padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:8,fontSize:10,color:T.t3}}>👀 <strong style={{color:emObservacaoRec.length>0?T.orange:T.t1}}>{emObservacaoRec.length}</strong> ativo(s) em observação (1 mês sem pagar)</div>
                 <div style={{padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:8,fontSize:10,color:T.t3}}>⏱️ <strong style={{color:perdasNoUltimoMes>0?T.orange:T.t1}}>{perdasNoUltimoMes}</strong> perda(s) confirmada(s) no último mês importado</div>
               </div>
+              <div style={{padding:"10px 12px",background:"rgba(255,255,255,0.02)",borderRadius:8,marginBottom:10,fontSize:10,color:T.t3,lineHeight:1.7}}>
+                <div style={{fontWeight:700,color:T.gold,marginBottom:4}}>⚙️ Ajustes manuais</div>
+                <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:8}}>
+                  <span>Histórico confiável a partir de:</span>
+                  <input type="month" value={inicioConfRec} onChange={function(e){dp({t:"CONFIG_SET",p:{key:"recCfg",value:Object.assign({},cfgRec,{inicioConfiavel:e.target.value})}})}} style={{padding:"4px 8px",background:T.w3,border:"1px solid "+T.bdr,borderRadius:6,color:T.t1,fontSize:10}}/>
+                  {inicioConfRec&&<button onClick={function(){dp({t:"CONFIG_SET",p:{key:"recCfg",value:Object.assign({},cfgRec,{inicioConfiavel:""})}})}} style={{fontSize:9,padding:"3px 8px",borderRadius:6,border:"1px solid rgba(255,255,255,0.12)",background:"transparent",color:T.t3,cursor:"pointer"}}>limpar</button>}
+                  <span style={{fontStyle:"italic"}}>Quem pagou pela 1ª vez até esse mês entra como base (já era cliente), não como captação.</span>
+                </div>
+                <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                  <span>Unir nomes:</span>
+                  <input id="recAliasDe" list="recNomesList" placeholder="nome a unir (ex.: Érika)" style={{padding:"4px 8px",background:T.w3,border:"1px solid "+T.bdr,borderRadius:6,color:T.t1,fontSize:10,minWidth:150}}/>
+                  <span>→</span>
+                  <input id="recAliasPara" list="recNomesList" placeholder="nome oficial (ex.: Érika Cristina)" style={{padding:"4px 8px",background:T.w3,border:"1px solid "+T.bdr,borderRadius:6,color:T.t1,fontSize:10,minWidth:150}}/>
+                  <datalist id="recNomesList">{nomesDatalistRec.map(function(n,i){return <option key={i} value={n}/>})}</datalist>
+                  <button onClick={function(){
+                    var de=document.getElementById("recAliasDe"),para=document.getElementById("recAliasPara");
+                    var kde=chaveFinalRec(chaveRecNome(de.value)),kpara=chaveFinalRec(chaveRecNome(para.value));
+                    if(!de.value.trim()||!para.value.trim()||kde===kpara){alert("Informe dois nomes diferentes.");return}
+                    var novo=Object.assign({},aliasRec);novo[chaveRecNome(de.value)]=chaveRecNome(para.value);
+                    dp({t:"CONFIG_SET",p:{key:"recCfg",value:Object.assign({},cfgRec,{aliases:novo})}});
+                    de.value="";para.value="";
+                  }} style={{fontSize:10,padding:"4px 10px",borderRadius:6,border:"1px solid "+T.gold,background:T.goldD,color:T.gold,cursor:"pointer",fontWeight:600}}>Unir</button>
+                </div>
+                {Object.keys(aliasRec).length>0 && <div style={{marginTop:6}}>{Object.keys(aliasRec).map(function(k){return <div key={k}>🔗 {k} → {aliasRec[k]} <button onClick={function(){var n=Object.assign({},aliasRec);delete n[k];dp({t:"CONFIG_SET",p:{key:"recCfg",value:Object.assign({},cfgRec,{aliases:n})}})}} style={{fontSize:9,padding:"1px 6px",marginLeft:4,borderRadius:6,border:"1px solid rgba(255,255,255,0.12)",background:"transparent",color:T.red,cursor:"pointer"}}>desfazer</button></div>})}</div>}
+                {Object.keys(jaEraRec).length>0 && <div style={{marginTop:6}}>{Object.keys(jaEraRec).map(function(k){return <div key={k}>📌 {k} marcado como "já era cliente" <button onClick={function(){var n=Object.assign({},jaEraRec);delete n[k];dp({t:"CONFIG_SET",p:{key:"recCfg",value:Object.assign({},cfgRec,{jaEra:n})}})}} style={{fontSize:9,padding:"1px 6px",marginLeft:4,borderRadius:6,border:"1px solid rgba(255,255,255,0.12)",background:"transparent",color:T.red,cursor:"pointer"}}>desfazer</button></div>})}</div>}
+              </div>
               {mesesSemDadosRec.length>0 && <div style={{padding:"8px 10px",background:"rgba(251,146,60,0.08)",border:"1px solid rgba(251,146,60,0.2)",borderRadius:8,fontSize:10,color:T.orange,marginBottom:8,lineHeight:1.6}}>⚠️ Meses sem nenhum lançamento de GP/GF (planilha não importada?): {mesesSemDadosRec.map(function(m){return MN_CURTO_REC[+m.substring(5,7)-1]+"/"+m.substring(2,4)}).join(", ")}. Foram ignorados na regra dos {GRACE_MESES} meses — importe a planilha desses meses pra ficar exato.</div>}
               {Object.keys(auditRec.outros).length>0 && <div style={{padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:8,fontSize:10,color:T.t3,marginBottom:8,lineHeight:1.6}}>Outros serviços fora de GP/GF/Consultoria (ignorados): {Object.keys(auditRec.outros).map(function(k){return k+" ("+auditRec.outros[k]+")"}).join(" · ")}</div>}
+              <details style={{marginBottom:6}} open={sugestoesRec.length>0&&sugestoesRec.length<=12}>
+                <summary style={{cursor:"pointer",fontSize:11,color:T.purple,fontWeight:600}}>🧩 Possíveis duplicatas pra você revisar ({sugestoesRec.length})</summary>
+                <div style={{marginTop:6,fontSize:10,color:T.t3,lineHeight:1.7}}>
+                  {sugestoesRec.length===0?"Nenhuma suspeita.":<div style={{marginBottom:4,fontStyle:"italic"}}>Mesmo primeiro nome, nunca pagaram no mesmo mês, e um começou logo depois do outro parar. Se for a mesma pessoa, clique em "são a mesma pessoa".</div>}
+                  {sugestoesRec.slice(0,30).map(function(sg,i){return <div key={i} style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",padding:"3px 0"}}>
+                    <span><strong style={{color:T.t1}}>{sg.nomeDe}</strong> ({sg.deIni.substring(2).split("-").reverse().join("/")}–{sg.deFim.substring(2).split("-").reverse().join("/")}) ⇄ <strong style={{color:T.t1}}>{sg.nomePara}</strong> ({sg.paraIni.substring(2).split("-").reverse().join("/")}–{sg.paraFim.substring(2).split("-").reverse().join("/")})</span>
+                    <button onClick={function(){var n=Object.assign({},aliasRec);n[sg.de]=sg.para;dp({t:"CONFIG_SET",p:{key:"recCfg",value:Object.assign({},cfgRec,{aliases:n})}})}} style={{fontSize:9,padding:"2px 8px",borderRadius:6,border:"1px solid "+T.gold,background:T.goldD,color:T.gold,cursor:"pointer",fontWeight:600}}>são a mesma pessoa</button>
+                    <button onClick={function(){var n=Object.assign({},separarRec);n[sg.de]=true;dp({t:"CONFIG_SET",p:{key:"recCfg",value:Object.assign({},cfgRec,{separar:n})}})}} style={{fontSize:9,padding:"2px 8px",borderRadius:6,border:"1px solid rgba(255,255,255,0.12)",background:"transparent",color:T.t3,cursor:"pointer"}}>são pessoas diferentes</button>
+                  </div>})}
+                </div>
+              </details>
               <details style={{marginBottom:6}}>
-                <summary style={{cursor:"pointer",fontSize:11,color:T.gold,fontWeight:600}}>🔗 Nomes unificados ({unificadosRec.length})</summary>
+                <summary style={{cursor:"pointer",fontSize:11,color:T.gold,fontWeight:600}}>🔗 Nomes unificados ({unificadosRec.length+mergesRec.length})</summary>
                 <div style={{marginTop:6,fontSize:10,color:T.t3,lineHeight:1.7}}>
                   {unificadosRec.length===0?"Nenhuma grafia diferente encontrada.":unificadosRec.map(function(u,i){return <div key={i}><strong style={{color:T.t1}}>{u.nome}</strong> ← {u.variantes.slice(1).join(" · ")}</div>})}
+                  {mergesRec.length>0 && <div style={{marginTop:6}}><strong style={{color:T.t1}}>Unidos por semelhança/regra:</strong>{mergesRec.map(function(m,i){return <div key={i}>{m.de} → <strong style={{color:T.t1}}>{m.para}</strong> <span style={{fontStyle:"italic"}}>({m.motivo})</span>{m.motivo!=="unido por você"&&<button onClick={function(){var n=Object.assign({},separarRec);n[m.deK]=true;dp({t:"CONFIG_SET",p:{key:"recCfg",value:Object.assign({},cfgRec,{separar:n})}})}} style={{fontSize:9,padding:"1px 6px",marginLeft:6,borderRadius:6,border:"1px solid rgba(255,255,255,0.12)",background:"transparent",color:T.red,cursor:"pointer"}}>não são a mesma pessoa</button>}</div>})}{Object.keys(separarRec).length>0&&<div style={{marginTop:4}}>Mantidos separados: {Object.keys(separarRec).join(", ")} <button onClick={function(){dp({t:"CONFIG_SET",p:{key:"recCfg",value:Object.assign({},cfgRec,{separar:{}})}})}} style={{fontSize:9,padding:"1px 6px",marginLeft:4,borderRadius:6,border:"1px solid rgba(255,255,255,0.12)",background:"transparent",color:T.t3,cursor:"pointer"}}>desfazer todos</button></div>}</div>}
                   {unificadosRec.length>0 && <div style={{marginTop:4,fontStyle:"italic"}}>Se dois nomes aqui NÃO são a mesma pessoa (ou faltou unir algum), me avise que ajusto.</div>}
                 </div>
               </details>
@@ -38787,7 +38973,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '515';
+  var SW_VERSION = '518';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
