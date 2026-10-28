@@ -2869,11 +2869,19 @@ function rd(st,ac){
   /* Detalhamento de fatura de cartão de crédito (importado em PDF) — st.fin.faturasCartao = [{mesFatura,vencimento,totalFatura,cartoes:[{numero,total,itens:[{data,beneficiario,parcela,valor,tipo,categoria}]}]}].
      Reimportar um PDF do mesmo mês SUBSTITUI a fatura daquele mês (upsert por mesFatura), pra permitir reprocessar sem duplicar. */
   if(ac.t==="FIN_SET_FATURA_CARTAO"){
+    /* v524: cada fatura leva carimbo _ts — o sync mescla faturas por mês (a mais nova vence) em vez de trocar o bloco "fin" inteiro */
     var _fcAtual=((st.fin&&st.fin.faturasCartao)||[]).filter(function(f){return f.mesFatura!==ac.p.mesFatura});
-    return {...st,fin:{...(st.fin||{}),faturasCartao:[..._fcAtual,ac.p]}};
+    return {...st,fin:{...(st.fin||{}),faturasCartao:[..._fcAtual,Object.assign({},ac.p,{_ts:Date.now()})]}};
   }
-  if(ac.t==="FIN_DEL_FATURA_CARTAO") return {...st,fin:{...(st.fin||{}),faturasCartao:((st.fin&&st.fin.faturasCartao)||[]).filter(function(f){return f.mesFatura!==ac.p})}};
-  if(ac.t==="FIN_CLEAR_FATURAS_CARTAO") return {...st,fin:{...(st.fin||{}),faturasCartao:[]}};
+  /* v524: exclusões de fatura viram lápide (faturasExcl[mês]=carimbo) pra não "ressuscitarem" no merge entre dispositivos */
+  if(ac.t==="FIN_DEL_FATURA_CARTAO"){
+    var _exD=Object.assign({},(st.fin&&st.fin.faturasExcl)||{});_exD[ac.p]=Date.now();
+    return {...st,fin:{...(st.fin||{}),faturasExcl:_exD,faturasCartao:((st.fin&&st.fin.faturasCartao)||[]).filter(function(f){return f.mesFatura!==ac.p})}};
+  }
+  if(ac.t==="FIN_CLEAR_FATURAS_CARTAO"){
+    var _exC=Object.assign({},(st.fin&&st.fin.faturasExcl)||{});((st.fin&&st.fin.faturasCartao)||[]).forEach(function(f){_exC[f.mesFatura]=Date.now()});
+    return {...st,fin:{...(st.fin||{}),faturasExcl:_exC,faturasCartao:[]}};
+  }
 
   /* === PARCEIROS — programa de indicação/comissão (aba própria no menu lateral) ===
      st.parceiros = {parceiros:[...], indicacoes:[...]}. Cada parceiro tem seu tipo de comissão
@@ -38255,6 +38263,22 @@ function App({authUser}){
     var vivos={};(cl||[]).forEach(function(c){vivos[c.id]=true;});
     return (it||[]).filter(function(i){return !(i&&i.cid&&excl[i.cid]&&!vivos[i.cid]);});
   };
+  /* v524: faturas de cartão são mescladas por mês entre local e remoto (a de carimbo mais novo vence; lápide só vale se for mais nova que a fatura).
+     Antes o bloco "fin" era trocado inteiro por quem tinha mais entradas — uma fatura importada no celular sumia quando o outro dispositivo salvava/atualizava. */
+  var mergeFaturasFin=function(finBase,finLocal,finRemoto){
+    var excl=exclUniao((finLocal&&finLocal.faturasExcl)||{},(finRemoto&&finRemoto.faturasExcl)||{});
+    var byMes={};
+    [(finLocal&&finLocal.faturasCartao)||[],(finRemoto&&finRemoto.faturasCartao)||[]].forEach(function(arr){
+      arr.forEach(function(f){var cur=byMes[f.mesFatura];if(!cur||(f._ts||0)>(cur._ts||0))byMes[f.mesFatura]=f;});
+    });
+    var lista=Object.keys(byMes).map(function(k){return byMes[k]}).filter(function(f){return !(excl[f.mesFatura]&&excl[f.mesFatura]>=(f._ts||0));});
+    return Object.assign({},finBase||{entradas:[],despesas:[]},{faturasCartao:lista,faturasExcl:excl});
+  };
+  var assinaturaFaturas=function(fin){
+    var a=((fin&&fin.faturasCartao)||[]).map(function(f){return f.mesFatura+":"+(f._ts||0)}).sort().join(",");
+    var e=Object.keys((fin&&fin.faturasExcl)||{}).sort().map(function(k){return k+":"+fin.faturasExcl[k]}).join(",");
+    return a+"|"+e;
+  };
   var mergeClientes=function(localCl,remoteCl,excl){
     excl=excl||{};
     var localById={},remoteById={};
@@ -38345,25 +38369,27 @@ function App({authUser}){
           var clMesclados=mergeClientes(d.cl,data.cl,exclM);
           var _cfgLocalX=Object.assign({},d.config||{},{_clExcl:exclM});
           var _faltaExclRemoto=Object.keys(exclM).some(function(k){return !(((data.config||{})._clExcl||{})[k]>=exclM[k]);});
+          var _finMescl=mergeFaturasFin(localTemMaisDados?finRef.current:data.fin,finRef.current,data.fin);
+          var _faltaFatRemoto=assinaturaFaturas(_finMescl)!==assinaturaFaturas(data.fin);
           if(localTemMaisDados){
             console.log("[Sync] Local tem mais dados"+(pendingFlagLocal?" (havia mudança pendente de sessão anterior)":"")+". Fazendo UPLOAD.");
             pendingLocalRef.current=true;
-            _salvarFirestore(clMesclados,{it:itSemExcl(d.it,clMesclados,exclM),lds:d.lds||[],fin:finRef.current||{entradas:[],despesas:[]},parceiros:d.parceiros||{parceiros:[],indicacoes:[]},overviewMercado:ovRef.current||{},config:_cfgLocalX,ag:d.ag||[],tpAg:d.tpAg||[]}).then(function(){
+            _salvarFirestore(clMesclados,{it:itSemExcl(d.it,clMesclados,exclM),lds:d.lds||[],fin:_finMescl,parceiros:d.parceiros||{parceiros:[],indicacoes:[]},overviewMercado:ovRef.current||{},config:_cfgLocalX,ag:d.ag||[],tpAg:d.tpAg||[]}).then(function(){
               pendingLocalRef.current=false;
               try{localStorage.removeItem("courinvest_pending_v1")}catch(e){}
             }).catch(function(e){console.warn("Upload migration failed:",e)});
             skipNextSaveRef.current=true;
-            dp({t:"REPLACE_ALL",p:{cl:clMesclados,it:itSemExcl(d.it,clMesclados,exclM),lds:d.lds||[],fin:finRef.current||{entradas:[],despesas:[]},parceiros:d.parceiros||{parceiros:[],indicacoes:[]},overviewMercado:ovRef.current||{},config:_cfgLocalX,ag:d.ag||[],tpAg:d.tpAg||[]}});
+            dp({t:"REPLACE_ALL",p:{cl:clMesclados,it:itSemExcl(d.it,clMesclados,exclM),lds:d.lds||[],fin:_finMescl,parceiros:d.parceiros||{parceiros:[],indicacoes:[]},overviewMercado:ovRef.current||{},config:_cfgLocalX,ag:d.ag||[],tpAg:d.tpAg||[]}});
             sSyncState("synced");
             isInitialLoadRef.current=false;
             return;
           }
           /* se há lápides locais que o Firestore ainda não tem, NÃO pula o salvamento — assim elas sobem */
-          skipNextSaveRef.current=!_faltaExclRemoto;
+          skipNextSaveRef.current=!_faltaExclRemoto&&!_faltaFatRemoto;
           var _localOv=ovRef.current||{};
           var _mergedOv=Object.assign({},data.overviewMercado||{},_localOv);
           var _mergedCfg=Object.assign({},data.config||{},d.config||{},{_clExcl:exclM});
-          dp({t:"REPLACE_ALL",p:{cl:clMesclados,it:itSemExcl(data.it,clMesclados,exclM),lds:data.lds||[],fin:data.fin||{entradas:[],despesas:[]},parceiros:data.parceiros||{parceiros:[],indicacoes:[]},overviewMercado:_mergedOv,config:_mergedCfg,ag:data.ag||[],tpAg:data.tpAg||[]}});
+          dp({t:"REPLACE_ALL",p:{cl:clMesclados,it:itSemExcl(data.it,clMesclados,exclM),lds:data.lds||[],fin:_finMescl,parceiros:data.parceiros||{parceiros:[],indicacoes:[]},overviewMercado:_mergedOv,config:_mergedCfg,ag:data.ag||[],tpAg:data.tpAg||[]}});
           console.log("[Sync] Carregado do Firestore: "+data.cl.length+" clientes, mesclados: "+clMesclados.length);
         }
       }else{
@@ -38492,6 +38518,8 @@ function App({authUser}){
       var localEnt=((finRef.current&&finRef.current.entradas)||[]).length;
       var remoteEnt=((data.fin&&data.fin.entradas)||[]).length;
       var finParaUsar=(localEnt>remoteEnt)?(finRef.current||{entradas:[],despesas:[]}):(data.fin||{entradas:[],despesas:[]});
+      finParaUsar=mergeFaturasFin(finParaUsar,finRef.current,data.fin);
+      var _faltaFatSnap=assinaturaFaturas(finParaUsar)!==assinaturaFaturas(data.fin);
       if(localEnt>remoteEnt) console.log("[Sync] onSnapshot: mantendo fin local ("+localEnt+" > "+remoteEnt+" do Firestore)");
       else console.log("[Sync] onSnapshot: usando fin do Firestore ("+remoteEnt+" entradas)");
       /* CORREÇÃO DE PERDA DE DADOS: antes essa atualização em tempo real substituía a lista de
@@ -38507,7 +38535,7 @@ function App({authUser}){
       var clMescladosSnap=mergeClientes(clRef.current,data.cl,exclSnap);
       var _faltaExclSnap=Object.keys(exclSnap).some(function(k){return !(((data.config||{})._clExcl||{})[k]>=exclSnap[k]);});
       /* lápides locais que o remoto não tem (ex: outro dispositivo com versão antiga sobrescreveu) → deixa salvar de novo */
-      skipNextSaveRef.current=!_faltaExclSnap;
+      skipNextSaveRef.current=!_faltaExclSnap&&!_faltaFatSnap;
       dp({t:"REPLACE_ALL",p:{cl:clMescladosSnap,it:itSemExcl(data.it,clMescladosSnap,exclSnap),lds:data.lds||[],fin:finParaUsar,parceiros:data.parceiros||{parceiros:[],indicacoes:[]},overviewMercado:data.overviewMercado||{},config:Object.assign({},data.config||{},{_clExcl:exclSnap}),ag:data.ag||[],tpAg:data.tpAg||[]}});
     }
     return function(){if(unsub)unsub()};
@@ -39065,7 +39093,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '523';
+  var SW_VERSION = '524';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
