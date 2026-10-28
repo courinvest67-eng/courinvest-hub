@@ -5572,7 +5572,11 @@ var REB_SUB={
   rv:[{id:"acoes",l:"Ações",cor:"#34D399",dica:"Ações e BDRs"},{id:"fii",l:"Fundos Imobiliários (FIIs)",cor:"#38BDF8",dica:"FIIs de tijolo e papel"},{id:"fiagro",l:"Fiagros",cor:"#FBBF24",dica:"Fiagros listados (ex.: RZAG11)"},{id:"infra",l:"FI-Infra",cor:"#A78BFA",dica:"FI-Infra listados na B3 (ex.: KDIF11)"},{id:"etf",l:"ETFs (BR)",cor:"#F472B6",dica:"ETFs listados na B3"},{id:"fundos",l:"Fundos de ações",cor:"#FB923C",dica:"Fundos de ações e FIPs abertos"},{id:"outros",l:"Outros RV",cor:"#94A3B8",dica:"Demais ativos de renda variável"}],
   ext:[{id:"stocks",l:"Stocks",cor:"#34D399",dica:"Ações no exterior"},{id:"reits",l:"REITs",cor:"#38BDF8",dica:"REITs / imobiliário internacional"},{id:"etf",l:"ETFs",cor:"#F472B6",dica:"ETFs EUA/Europa"},{id:"bonds",l:"Bonds",cor:"#FBBF24",dica:"Treasuries e bonds"},{id:"caixa",l:"Caixa / monetário",cor:"#A78BFA",dica:"Dólar/euro em conta e fundos monetários"},{id:"outros",l:"Outros exterior",cor:"#94A3B8",dica:"Demais ativos no exterior"}]
 };
+/* ETFs negociados na B3 (inclui ETFs de renda fixa, como IB5M11): contam como RV › ETFs (BR), seja qual for o tipo vindo da importação */
+var REB_TK_ETFBR="IB5M11 IMAB11 B5P211 FIXA11 IRFM11 NTNB11 LFTS11 IMBB11 DEBB11 BOVA11 BOVV11 SMAL11 IVVB11 DIVO11 PIBB11 HASH11 GOLD11 SPXI11 NASD11 WRLD11 BBSD11 ECOO11 XINA11 MATB11 FIND11 GOVE11 TECK11 BRAX11 ACWI11 EURP11 QBTC11 ETHE11 QETH11 BITI11 SOLX11 XFIX11 B5MB11 IMAB11".split(" ");
+function rebEhEtfBr(a){return REB_TK_ETFBR.indexOf(String(a&&a.tk||"").trim().toUpperCase())>=0}
 function rebClasseAtivo(a){
+  if(rebEhEtfBr(a))return"rv";
   /* FI-Infra com ticker de bolsa (ex.: KDIF11) é renda variável; cotas de fundo (debêntures incentivadas) seguem em renda fixa */
   if(a&&a.tp==="fundo_infra"&&/^[A-Z]{4}1[1-3]$/.test(String(a.tk||"").trim().toUpperCase()))return"rv";
   return REB_TP_CLASSE[a.tp]||"rv";
@@ -5581,6 +5585,7 @@ var REB_TK_FIAGRO="RZAG11 RZTR11 KNCA11 CRAA11 SNAG11 VGIA11 XPCA11 FGAA11 BTAL1
 var REB_TK_INFRA="KDIF11 IFRA11 BDIF11 NUIF11 CPTI11 JURO11 BIDB11 XPID11 XPIE11 CDII11 SNID11 BODB11 OGIN11".split(" ");
 function rebSubAtivo(a,cl){
   var tp=a.tp,tk=String(a.tk||"").trim().toUpperCase(),nm=String(a.nm||"").toUpperCase();
+  if(cl==="rv"&&rebEhEtfBr(a))return"etf";
   if(cl==="rv"&&(tp==="fii"||tp==="fiagro"||tp==="fundo_infra")){
     if(tp==="fundo_infra"||REB_TK_INFRA.indexOf(tk)>=0||/\bINFRA/.test(nm))return"infra";
     if(tp==="fiagro"||REB_TK_FIAGRO.indexOf(tk)>=0||/FIAGRO|\bAGRO/.test(nm))return"fiagro";
