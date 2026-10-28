@@ -24915,16 +24915,35 @@ function FinanceiroView({data:d,dispatch:dp}){
           return String(n||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().replace(/&/g," ").replace(/[^A-Z0-9 ]/g," ").split(/\s+/).filter(function(w){return w&&w!=="E"&&w!=="DE"&&w!=="DA"&&w!=="DO"&&w!=="DAS"&&w!=="DOS"}).join(" ")||"DESCONHECIDO";
         };
 
-        var auditRec={usados:0,consultoria:0,semData:0,duplicados:0,multiplos:0,outros:{}};
+        var auditRec={usados:0,consultoria:0,semData:0,duplicados:0,multiplos:0,consultForcado:0,outros:{}};
         var cliRec={},mesesComDadosSet={},vistosRec={};
+        /* Clientes lançados como "Consultoria" mas que na prática são recorrentes (pagam todo mês) — tratados como Gestão Financeira.
+           Decisão do Igor (28/10/2026): Francisco Couri. Outros podem ser somados pela tela (Ajustes manuais). */
+        var cfgRecIni=(d&&d.config&&d.config.recCfg)||{};
+        var consRecForcado=Object.assign({"FRANCISCO COURI":true,"FRANCISCO R COURI":true,"FRANCISCO ROBERTO COURI":true},cfgRecIni.consultRec||{});
         var fixMojiRec=function(n){
           n=String(n||"");
           if(/[\u00c3\u00c2]/.test(n)){try{var f=decodeURIComponent(escape(n));if(f&&f.indexOf("\ufffd")<0)return f}catch(err){}}
           return n;
         };
+        var primeiroRecChave={};
         entradas.forEach(function(e){
-          var sv=clsServRec(e.servico);
+          var sv0=clsServRec(e.servico);
+          if((sv0==="GP"||sv0==="GF")&&e.data){var k0=chaveRecNome(fixMojiRec(e.cliente));if(!primeiroRecChave[k0]||e.data<primeiroRecChave[k0])primeiroRecChave[k0]=e.data}
+        });
+        /* Só vale a partir do 1º pagamento recorrente de verdade daquele cliente (a Consultoria avulsa do começo continua pontual) */
+        var svEntradaRec=function(e){
+          var sv0=clsServRec(e.servico);
+          if(sv0==="CONS"){
+            var k1=chaveRecNome(fixMojiRec(e.cliente));
+            if(consRecForcado[k1]&&e.data&&(!primeiroRecChave[k1]||e.data>=primeiroRecChave[k1]))return"GF";
+          }
+          return sv0;
+        };
+        entradas.forEach(function(e){
+          var sv=svEntradaRec(e);
           if(sv==="CONS"){auditRec.consultoria++;return}
+          if(sv==="GF"&&clsServRec(e.servico)==="CONS")auditRec.consultForcado++;
           if(sv===null){var kOut=(e.servico||"").trim()||"(sem serviço)";auditRec.outros[kOut]=(auditRec.outros[kOut]||0)+1;return}
           if(!e.data){auditRec.semData++;return}
           var kDup=e.data+"|"+chaveRecNome(fixMojiRec(e.cliente))+"|"+(+e.valor).toFixed(2)+"|"+sv;
@@ -25216,7 +25235,7 @@ function FinanceiroView({data:d,dispatch:dp}){
         var byMonthTicket={};
         entradas.forEach(function(e){
           if(!e.data)return;
-          var svT=clsServRec(e.servico),ehGP=svT==="GP",ehGF=svT==="GF";
+          var svT=svEntradaRec(e),ehGP=svT==="GP",ehGF=svT==="GF";
           if(!ehGP&&!ehGF)return;
           var m=e.data.substring(0,7);
           if(!byMonthTicket[m])byMonthTicket[m]={totalGeral:0,totalGP:0,totalGF:0,cliGeral:{},cliGP:{},cliGF:{}};
@@ -25500,7 +25519,7 @@ function FinanceiroView({data:d,dispatch:dp}){
                 {auditRec.usados} lançamento(s) de GP/GF usados · {dataMonths.length} mês(es) com planilha ({mesGlobalInicio?fDRec(mesGlobalInicio+"-01").substring(3):"—"} a {mesMaisRecenteComDados?fDRec(mesMaisRecenteComDados+"-01").substring(3):"—"}) · {Object.keys(cliRec).length} cliente(s) únicos · {reativacoesRec.length} reativação(ões)
               </div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,marginBottom:10}}>
-                <div style={{padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:8,fontSize:10,color:T.t3}}>🚫 <strong style={{color:T.t1}}>{auditRec.consultoria}</strong> lançamento(s) de Consultoria ignorados (pontual)</div>
+                <div style={{padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:8,fontSize:10,color:T.t3}}>🚫 <strong style={{color:T.t1}}>{auditRec.consultoria}</strong> lançamento(s) de Consultoria ignorados (pontual){auditRec.consultForcado>0?" · "+auditRec.consultForcado+" tratados como recorrentes (cliente marcado)":""}</div>
                 <div style={{padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:8,fontSize:10,color:T.t3}}>📅 <strong style={{color:auditRec.semData>0?T.orange:T.t1}}>{auditRec.semData}</strong> sem data · <strong style={{color:auditRec.duplicados>0?T.orange:T.t1}}>{auditRec.duplicados}</strong> duplicados exatos (ignorados) · <strong style={{color:T.t1}}>{auditRec.multiplos}</strong> mês(es) com 2+ pagamentos do mesmo serviço (vale o último)</div>
                 <div style={{padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:8,fontSize:10,color:T.t3}}>👀 <strong style={{color:emObservacaoRec.length>0?T.orange:T.t1}}>{emObservacaoRec.length}</strong> ativo(s) em observação (1 mês sem pagar)</div>
                 <div style={{padding:"8px 10px",background:"rgba(255,255,255,0.02)",borderRadius:8,fontSize:10,color:T.t3}}>⏱️ <strong style={{color:perdasNoUltimoMes>0?T.orange:T.t1}}>{perdasNoUltimoMes}</strong> perda(s) confirmada(s) no último mês importado</div>
@@ -25528,6 +25547,19 @@ function FinanceiroView({data:d,dispatch:dp}){
                     de.value="";para.value="";
                   }} style={{fontSize:10,padding:"4px 10px",borderRadius:6,border:"1px solid "+T.gold,background:T.goldD,color:T.gold,cursor:"pointer",fontWeight:600}}>Unir</button>
                 </div>
+                <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",marginTop:8}}>
+                  <span>Consultoria que é recorrente:</span>
+                  <input id="recConsNome" list="recNomesList" placeholder="nome do cliente (ex.: Francisco Couri)" style={{padding:"4px 8px",background:T.w3,border:"1px solid "+T.bdr,borderRadius:6,color:T.t1,fontSize:10,minWidth:190}}/>
+                  <button onClick={function(){
+                    var inp=document.getElementById("recConsNome");
+                    if(!inp.value.trim())return;
+                    var n=Object.assign({},cfgRecIni.consultRec||{});n[chaveRecNome(fixMojiRec(inp.value))]=true;
+                    dp({t:"CONFIG_SET",p:{key:"recCfg",value:Object.assign({},cfgRec,{consultRec:n})}});
+                    inp.value="";
+                  }} style={{fontSize:10,padding:"4px 10px",borderRadius:6,border:"1px solid "+T.gold,background:T.goldD,color:T.gold,cursor:"pointer",fontWeight:600}}>Tratar como recorrente</button>
+                </div>
+                <div style={{marginTop:4,fontStyle:"italic"}}>Lançamentos de Consultoria desse cliente passam a contar como Gestão Financeira (já aplicado: Francisco Couri).</div>
+                {Object.keys(cfgRecIni.consultRec||{}).map(function(k){return <div key={k}>📌 {k} — Consultoria tratada como recorrente <button onClick={function(){var n=Object.assign({},cfgRecIni.consultRec||{});delete n[k];dp({t:"CONFIG_SET",p:{key:"recCfg",value:Object.assign({},cfgRec,{consultRec:n})}})}} style={{fontSize:9,padding:"1px 6px",marginLeft:4,borderRadius:6,border:"1px solid rgba(255,255,255,0.12)",background:"transparent",color:T.red,cursor:"pointer"}}>desfazer</button></div>})}
                 {Object.keys(aliasRec).length>0 && <div style={{marginTop:6}}>{Object.keys(aliasRec).map(function(k){return <div key={k}>🔗 {k} → {aliasRec[k]} <button onClick={function(){var n=Object.assign({},aliasRec);delete n[k];dp({t:"CONFIG_SET",p:{key:"recCfg",value:Object.assign({},cfgRec,{aliases:n})}})}} style={{fontSize:9,padding:"1px 6px",marginLeft:4,borderRadius:6,border:"1px solid rgba(255,255,255,0.12)",background:"transparent",color:T.red,cursor:"pointer"}}>desfazer</button></div>})}</div>}
                 {Object.keys(jaEraRec).length>0 && <div style={{marginTop:6}}>{Object.keys(jaEraRec).map(function(k){return <div key={k}>📌 {k} marcado como "já era cliente" <button onClick={function(){var n=Object.assign({},jaEraRec);delete n[k];dp({t:"CONFIG_SET",p:{key:"recCfg",value:Object.assign({},cfgRec,{jaEra:n})}})}} style={{fontSize:9,padding:"1px 6px",marginLeft:4,borderRadius:6,border:"1px solid rgba(255,255,255,0.12)",background:"transparent",color:T.red,cursor:"pointer"}}>desfazer</button></div>})}</div>}
               </div>
@@ -39033,7 +39065,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '522';
+  var SW_VERSION = '523';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
