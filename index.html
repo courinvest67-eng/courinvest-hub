@@ -1665,7 +1665,20 @@ const feeBaseDoCliente=function(c){
   var valorFixo=+(part.valorFixoDeduzir||0)||0;
   var base=Math.max(0,patTotal-exclReserva-exclHolding-exclPrev-exclRF-exclCaixa-exclCripto-exclInst-valorFixo);
   var taxa=0,fee=0,modoFee="fixo";
-  if(c.txRegressiva){
+  /* v526: HÍBRIDO (GF + Patrimônio). Abaixo do patrimônio mínimo (padrão R$ 200k, mesmo threshold da tabela regressiva) o cliente paga o FEE FIXO da GF;
+     a partir dele, vale a taxa sobre o patrimônio. c.servicoPrincipal ("planejamento"/"patrimonio") força o modo manualmente. */
+  var _hibFixo=false;
+  if(Array.isArray(c.sv)&&c.sv.includes("patrimonio")&&c.sv.includes("planejamento")){
+    var _thHib=c.txRegressivaThreshold||200000;
+    if(c.servicoPrincipal==="planejamento")_hibFixo=true;
+    else if(c.servicoPrincipal==="patrimonio")_hibFixo=false;
+    else _hibFixo=(c.feeFixo||0)>0&&base<_thHib;
+  }
+  if(_hibFixo){
+    fee=toBRL(c.feeFixo||0,c.feeMoeda||moedaCli(c).code);
+    taxa=base>0?(fee/base*100):0;
+    modoFee="fixo_hibrido";
+  } else if(c.txRegressiva){
     /* Modelo híbrido: abaixo do threshold usa fee fixo, acima usa tabela regressiva */
     var threshold=c.txRegressivaThreshold||200000; /* padrão R$200k */
     var feeFixoAbaixo=c.txRegressivaFeeFixo||0;    /* ex: R$350 */
@@ -1710,6 +1723,20 @@ const RC=r=>r==="Conservador"?"green":r==="Conservador/Moderado"?"green":r==="Mo
 /* v510: cliente HÍBRIDO = tem Gestão Financeira E Gestão de Patrimônio (ex.: começou na GF e migrou pra GP, mas segue
    acompanhado no Meu Vista). Cobrança: ignora o fee fixo da GF, vale só a taxa sobre o patrimônio. */
 const ehHibrido=function(c){return !!(c&&Array.isArray(c.sv)&&c.sv.includes("patrimonio")&&c.sv.includes("planejamento"));};
+/* v526: serviço PRINCIPAL do híbrido = o que está sendo cobrado hoje. "planejamento" (fee fixo, patrimônio abaixo do mínimo) ou "patrimonio" (taxa sobre o patrimônio).
+   Usado pra o cliente aparecer em UMA lista só (Clientes, receita do Dashboard) e a receita não ser contada duas vezes. Não-híbrido → null. */
+const servicoPrincipal=function(c){
+  if(!ehHibrido(c))return null;
+  return feeBaseDoCliente(c).modoFee==="fixo_hibrido"?"planejamento":"patrimonio";
+};
+/* O cliente deve aparecer na lista/contagem do serviço `sv`? (híbrido só no serviço principal) */
+const noServicoLista=function(c,sv){
+  if(!c||!Array.isArray(c.sv)||!c.sv.includes(sv))return false;
+  if(!ehHibrido(c)||(sv!=="patrimonio"&&sv!=="planejamento"))return true;
+  return servicoPrincipal(c)===sv;
+};
+/* Receita mensal do cliente dentro da Gestão Financeira (híbrido em fee fixo usa o fee fixo calculado) */
+const feeGFBRL=function(c){return ehHibrido(c)?(servicoPrincipal(c)==="planejamento"?feeBaseDoCliente(c).fee:0):feeMensalBRL(c);};
 /* Selos de serviço: híbrido aparece como UM selo "🔀 Híbrido" em vez de dois */
 const svBadges=function(sv,curto){
   sv=Array.isArray(sv)?sv:[];
@@ -3523,8 +3550,8 @@ function Dash({data:d,onSel:os,goTo}){
   });
   const instColors={"Genial":"#D4A328","BTG Pactual":"#38BDF8","XP":"#A78BFA","Inter":"#F59E0B","Itaú":"#2DD4A0","Bradesco":"#EF6461","Nubank":"#A78BFA","Rico":"#F59E0B","Clear":"#38BDF8","Avenue":"#6EE7B7","Vest":"#34D399","Safra":"#FBBF24"};
 
-  const clPat=cl.filter(c=>c.sv.includes("patrimonio"));
-  const clFin=cl.filter(c=>c.sv.includes("planejamento"));
+  const clPat=cl.filter(c=>noServicoLista(c,"patrimonio"));
+  const clFin=cl.filter(c=>noServicoLista(c,"planejamento"));
   const clMiles=cl.filter(c=>c.sv.includes("milhas"));
   /* getPatReal: pega o patrimônio efetivo do cliente, vindo de patGorila > pat > soma _ativosImport.
      IMPORTANTE: Não filtra por serviço — qualquer cliente que tem ativos importados
@@ -3544,7 +3571,7 @@ function Dash({data:d,onSel:os,goTo}){
   const mrrPat=clPat.reduce((a,c)=>a+feeBaseDoCliente(c).fee,0);
   /* mrrFin agora usa feeMensalBRL — converte fee em moeda estrangeira pra BRL.
      Ex: Sara €100/mês × 5.50 = R$ 550. Cliente BR fee R$ 800 = R$ 800. */
-  const mrrFin=clFin.reduce((a,c)=>a+feeMensalBRL(c),0);
+  const mrrFin=clFin.reduce((a,c)=>a+feeGFBRL(c),0);
   const mrrMiles=0; 
   const mrr=mrrPat+mrrFin+mrrMiles;
   const arr=mrr*12;
@@ -5103,8 +5130,8 @@ function Dash({data:d,onSel:os,goTo}){
                 </div>
                 <div style={{borderTop:"1px solid "+T.bdrL,paddingTop:12}}>
                   <div style={{fontSize:9,color:T.t3,fontWeight:700,letterSpacing:.8,marginBottom:8,textTransform:"uppercase"}}>Por cliente</div>
-                  {clFin.filter(function(c){return feeMensalBRL(c)>0 && matchBuscaReceita(c)}).sort(function(a,b){return feeMensalBRL(b)-feeMensalBRL(a)}).map(function(c,i){
-                    var fee=feeMensalBRL(c);
+                  {clFin.filter(function(c){return feeGFBRL(c)>0 && matchBuscaReceita(c)}).sort(function(a,b){return feeGFBRL(b)-feeGFBRL(a)}).map(function(c,i){
+                    var fee=feeGFBRL(c);
                     var pct=mrrFin>0?(fee/mrrFin*100):0;
                     return <div key={c.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid "+T.bdrL}}>
                       <div style={{width:18,height:18,borderRadius:"50%",background:i===0?"rgba(56,189,248,0.2)":"rgba(255,255,255,0.05)",color:i===0?T.cyan:T.t3,fontSize:9,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{i+1}</div>
@@ -5113,9 +5140,9 @@ function Dash({data:d,onSel:os,goTo}){
                       <div style={{fontSize:11,fontWeight:700,color:T.cyan,fontFamily:"'JetBrains Mono',monospace",flexShrink:0}}>{fm(fee)}</div>
                     </div>;
                   })}
-                  {clFin.filter(function(c){return feeMensalBRL(c)===0 && !ehHibrido(c) && matchBuscaReceita(c)}).length>0 && (
+                  {clFin.filter(function(c){return feeGFBRL(c)===0 && matchBuscaReceita(c)}).length>0 && (
                     <div style={{fontSize:9,color:T.t3,fontStyle:"italic",marginTop:6}}>
-                      {clFin.filter(function(c){return feeMensalBRL(c)===0 && !ehHibrido(c) && matchBuscaReceita(c)}).length} cliente(s) sem fee configurado
+                      {clFin.filter(function(c){return feeGFBRL(c)===0 && matchBuscaReceita(c)}).length} cliente(s) sem fee configurado
                     </div>
                   )}
                 </div>
@@ -7322,8 +7349,8 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
   };
 
   const[soHib,sSoHib]=useState(false);
-  const nHib=d.cl.filter(c=>c.sv.includes(fi)&&ehHibrido(c)).length;
-  const fl=d.cl.filter(c=>c.sv.includes(fi)&&(!soHib||ehHibrido(c))&&c.nome.toLowerCase().includes(se.toLowerCase()));
+  const nHib=d.cl.filter(c=>noServicoLista(c,fi)&&ehHibrido(c)).length;
+  const fl=d.cl.filter(c=>noServicoLista(c,fi)&&(!soHib||ehHibrido(c))&&c.nome.toLowerCase().includes(se.toLowerCase()));
   const fiCores={patrimonio:{c:T.gold,bg:T.goldD},planejamento:{c:T.cyan,bg:T.cyanD},consultoria:{c:T.orange,bg:T.orangeD}};
   return (
     <div>
@@ -7750,7 +7777,7 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
               })() : (<><div style={{minWidth:0}}><div style={{fontSize:10,color:T.t3,fontWeight:600}}>FEE MENSAL</div><div style={{fontSize:18,fontWeight:800,color:T.cyan,fontFamily:"'JetBrains Mono'",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{fmCli(c.feeFixo,c)}</div></div><div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:10,color:T.t3,fontWeight:600,whiteSpace:"nowrap"}}>BASE IPCA</div><div style={{fontSize:14,fontWeight:600,color:T.t2,marginTop:2,whiteSpace:"nowrap"}}>{c.feeBase||"—"}</div></div></>)}
             </div>
             <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center",justifyContent:"space-between"}}>
-              <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{svBadges(c.sv)}</div>
+              <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>{svBadges(c.sv)}{ehHibrido(c)&&(function(){var fixo=servicoPrincipal(c)==="planejamento";return <span title={fixo?"Patrimônio ainda abaixo do mínimo pra cobrança variável: paga o fee fixo mensal":"Patrimônio acima do mínimo: paga a taxa sobre o patrimônio"} style={{fontSize:9,color:T.t3}}>{fixo?"cobra fee fixo "+fm(feeBaseDoCliente(c).fee):"cobra % do patrimônio"}</span>})()}</div>
               {c.sv.includes("patrimonio") && (function(){
                 /* v525: data da última importação da carteira (Gorila) — verde ≤8 dias, dourado ≤30, vermelho >30 ou nunca */
                 var ts=c._ativosTs||0;
@@ -7842,9 +7869,9 @@ function NewClientForm({onSave,onClose}){
         </div>
       )}
       {f.sv.includes("planejamento")&&f.sv.includes("patrimonio") && (
-        <div style={{padding:"10px 12px",background:"rgba(167,139,250,0.08)",border:"1px solid rgba(167,139,250,0.25)",borderRadius:10,fontSize:11,color:T.t2,lineHeight:1.5}}>🔀 <strong style={{color:T.purple}}>Cliente híbrido</strong> — acompanhado no Meu Vista (Gestão Financeira) e com carteira (Patrimônio). A cobrança considera <strong>somente a taxa sobre o patrimônio</strong>; o fee fixo da GF fica ignorado.</div>
+        <div style={{padding:"10px 12px",background:"rgba(167,139,250,0.08)",border:"1px solid rgba(167,139,250,0.25)",borderRadius:10,fontSize:11,color:T.t2,lineHeight:1.5}}>🔀 <strong style={{color:T.purple}}>Cliente híbrido</strong> — acompanhado no Meu Vista (Gestão Financeira) e com carteira (Patrimônio). Enquanto o patrimônio estiver <strong>abaixo de R$ 200 mil</strong>, cobra o <strong>fee fixo</strong> abaixo; a partir daí, só a taxa sobre o patrimônio. Aparece em uma lista só (a do serviço cobrado).</div>
       )}
-      {f.sv.includes("planejamento")&&!f.sv.includes("patrimonio") && (
+      {f.sv.includes("planejamento") && (
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,padding:12,background:T.w3,borderRadius:10}}>
           <div>
             <div style={{fontSize:9,color:T.t3,fontWeight:600,marginBottom:3}}>VALOR MENSAL (R$){f.tipoCli!=="individual" && <span style={{color:T.gold,marginLeft:6,fontWeight:700}}>· +55% Casal/Família</span>}</div>
@@ -15633,7 +15660,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
             <div style={{textAlign:"right"}}>
               <div style={{fontSize:9,color:T.t3,fontWeight:600,display:"flex",alignItems:"center",gap:5,justifyContent:"flex-end"}}>
                 RECEITA
-                {c.sv.includes("planejamento") && !c.sv.includes("patrimonio") && (
+                {c.sv.includes("planejamento") && (
                   <button onClick={function(){sFeeTmp(c.feeFixo||0);sFeeBaseTmp(c.feeBase||"");sShowFeeEdit(true)}} title="Editar fee mensal" style={{padding:"2px 7px",borderRadius:5,border:"1px dashed rgba(255,255,255,0.08)",background:"transparent",color:T.t3,fontSize:9,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:2,fontWeight:600}}>✏️ Editar</button>
                 )}
               </div>
@@ -15678,7 +15705,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       {}
       <Mo open={showSvcChange} onClose={()=>sShowSvcChange(false)} title="Alterar Serviço">
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <div style={{fontSize:12,color:T.t2,marginBottom:4}}>Selecione o serviço do cliente. Cliente que tem Gestão Financeira (Meu Vista) e também Gestão de Patrimônio é <strong style={{color:T.purple}}>Híbrido</strong>: a cobrança ignora o fee fixo e vale só a taxa sobre o patrimônio.</div>
+          <div style={{fontSize:12,color:T.t2,marginBottom:4}}>Selecione o serviço do cliente. Cliente que tem Gestão Financeira (Meu Vista) e também Gestão de Patrimônio é <strong style={{color:T.purple}}>Híbrido</strong>: enquanto o patrimônio estiver abaixo de R$ 200 mil cobra o <strong>fee fixo</strong>; a partir daí, só a taxa sobre o patrimônio. O cliente aparece em uma lista só (a do serviço cobrado).</div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             {[["patrimonio","Gestão de Patrimônio","💎",T.gold],["planejamento","Gestão Financeira","📊",T.cyan],["hibrido","Híbrido (GF + Patrimônio)","🔀",T.purple],["consultoria","Consultoria","🗂️",T.orange]].map(function(arr){
               var k=arr[0],label=arr[1],ic=arr[2],cor=arr[3];
@@ -15700,6 +15727,17 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
               );
             })}
           </div>
+          {ehHibrido(c) && (
+            <div style={{borderTop:"1px solid "+T.w3,paddingTop:12}}>
+              <div style={{fontSize:11,fontWeight:600,color:T.t2,marginBottom:6}}>Cobrança do híbrido <span style={{color:T.t3,fontWeight:500}}>(hoje: {servicoPrincipal(c)==="planejamento"?"fee fixo":"% do patrimônio"})</span></div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {[[undefined,"Automático (pelo patrimônio)"],["planejamento","Sempre fee fixo"],["patrimonio","Sempre % do patrimônio"]].map(function(o){
+                  var ativoO=(c.servicoPrincipal||undefined)===o[0];
+                  return <button key={String(o[0])} onClick={function(){dp({t:"UC",p:{id:c.id,servicoPrincipal:o[0]||""}})}} style={{padding:"8px 12px",borderRadius:10,fontSize:11,fontWeight:600,cursor:"pointer",border:ativoO?"2px solid "+T.purple:"1px solid "+T.bdrL,background:ativoO?"rgba(167,139,250,0.12)":"transparent",color:ativoO?T.purple:T.t2}}>{o[1]}</button>;
+                })}
+              </div>
+            </div>
+          )}
           <div style={{borderTop:"1px solid "+T.w3,paddingTop:12}}>
             <div style={{fontSize:11,fontWeight:600,color:T.t2,marginBottom:8}}>Serviço adicional:</div>
             <button onClick={function(){
@@ -39105,7 +39143,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '525';
+  var SW_VERSION = '526';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
