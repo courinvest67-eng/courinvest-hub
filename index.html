@@ -23700,6 +23700,379 @@ var beneficiariosEstornadosNaFatura=function(cartoes){
   return estornados;
 };
 
+/* v527 — normalização de nomes de clientes das planilhas de NF extraída do FinanceiroView */
+function buildCanonCliente(entradas){
+  var CLIENTE_ALIAS_MANUAL={
+    "Marcus Goyatá":"Marcus Condé Goyatá Lopes"
+  };
+  var _normTok=function(s){return(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").trim().toUpperCase().split(/\s+/).filter(Boolean)};
+  var clienteCanonMap=(function(){
+    var uniq=Array.from(new Set(entradas.map(function(e){return(e.cliente||"").trim()}).filter(Boolean)));
+    var toks=uniq.map(function(n){return{nome:n,tk:_normTok(n)}});
+    toks.sort(function(a,b){return b.tk.length-a.tk.length||b.nome.length-a.nome.length});
+    var map={};
+    toks.forEach(function(t){map[t.nome]=t.nome});
+    for(var i=0;i<toks.length;i++){
+      var maior=toks[i];
+      if(map[maior.nome]!==maior.nome)continue;
+      for(var j=i+1;j<toks.length;j++){
+        var menor=toks[j];
+        if(map[menor.nome]!==menor.nome)continue;
+        if(menor.tk.length<2||menor.tk.length>=maior.tk.length)continue;
+        var contido=menor.tk.every(function(w){return maior.tk.indexOf(w)>=0});
+        if(contido)map[menor.nome]=maior.nome;
+      }
+    }
+    Object.keys(CLIENTE_ALIAS_MANUAL).forEach(function(k){map[k]=CLIENTE_ALIAS_MANUAL[k]});
+    return map;
+  })();
+  var canonCliente=function(nome){var n=(nome||"").trim();if(!n)return"Desconhecido";return clienteCanonMap[n]||n};
+  return canonCliente;
+}
+
+/* v527 — motor de RECORRENTES extraído de dentro do FinanceiroView pra poder ser reaproveitado
+   (aba Metas usa os mesmos números de captações/perdas/MRR da aba Financeiro › Recorrentes). */
+function calcRecorrentesEngine(entradas,canonCliente,visaoRec,d){
+        var GRACE_MESES=2;
+        var diffMeses=function(ymA,ymB){var pa=ymA.split("-").map(Number),pb=ymB.split("-").map(Number);return(pb[0]-pa[0])*12+(pb[1]-pa[1])};
+        var somaMeses=function(ym,n){var p=ym.split("-").map(Number);var dt=new Date(p[0],p[1]-1+n,1);return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")};
+
+        /* v515 — INTELIGÊNCIA DE RECORRENTES (ciclos de vida por cliente).
+           1) Só GP/GF contam. Consultoria (pontual) é ignorada. O serviço é classificado por
+              texto normalizado (sem acento/caixa/espaços), então "Gestao de Patrimonio " e
+              "GESTÃO DE PATRIMÔNIO" valem o mesmo — antes só o texto idêntico era aceito.
+           2) Nome do cliente unificado por chave normalizada (sem acento, caixa, "&"/"e"/"de"/"da").
+           3) Linha do tempo = só meses que TÊM lançamento GP/GF importado. Mês sem nenhuma
+              planilha não conta como "ausência" de ninguém.
+           4) Cada cliente tem CICLOS: começa no 1º mês em que paga; continua enquanto não ficar
+              GRACE_MESES (2) meses seguidos sem aparecer. Ausência de 1 mês não é perda nem
+              captação. 2 meses seguidos = PERDA (confirmada no 2º mês ausente). Se voltar depois,
+              o novo ciclo é uma NOVA CAPTAÇÃO (reativação).
+           5) O 1º mês importado é a "base inicial" (não dá pra saber quando eles entraram): não
+              conta como captação. */
+        var clsServRec=function(s){
+          var t=String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().trim();
+          if(!t)return null;
+          if(t.indexOf("consult")>=0)return"CONS";
+          if(t.indexOf("patrim")>=0)return"GP";
+          if(t.indexOf("gest")>=0&&t.indexOf("financ")>=0)return"GF";
+          if(t.indexOf("planej")>=0)return"GF";
+          return null;
+        };
+        var chaveRecNome=function(n){
+          return String(n||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().replace(/&/g," ").replace(/[^A-Z0-9 ]/g," ").split(/\s+/).filter(function(w){return w&&w!=="E"&&w!=="DE"&&w!=="DA"&&w!=="DO"&&w!=="DAS"&&w!=="DOS"}).join(" ")||"DESCONHECIDO";
+        };
+
+        var auditRec={usados:0,consultoria:0,semData:0,duplicados:0,multiplos:0,consultForcado:0,outros:{}};
+        var cliRec={},mesesComDadosSet={},vistosRec={};
+        /* Clientes lançados como "Consultoria" mas que na prática são recorrentes (pagam todo mês) — tratados como Gestão Financeira.
+           Decisão do Igor (28/10/2026): Francisco Couri. Outros podem ser somados pela tela (Ajustes manuais). */
+        var cfgRecIni=(d&&d.config&&d.config.recCfg)||{};
+        var consRecForcado=Object.assign({"FRANCISCO COURI":true,"FRANCISCO R COURI":true,"FRANCISCO ROBERTO COURI":true},cfgRecIni.consultRec||{});
+        var fixMojiRec=function(n){
+          n=String(n||"");
+          if(/[\u00c3\u00c2]/.test(n)){try{var f=decodeURIComponent(escape(n));if(f&&f.indexOf("\ufffd")<0)return f}catch(err){}}
+          return n;
+        };
+        var primeiroRecChave={};
+        entradas.forEach(function(e){
+          var sv0=clsServRec(e.servico);
+          if((sv0==="GP"||sv0==="GF")&&e.data){var k0=chaveRecNome(fixMojiRec(e.cliente));if(!primeiroRecChave[k0]||e.data<primeiroRecChave[k0])primeiroRecChave[k0]=e.data}
+        });
+        /* Só vale a partir do 1º pagamento recorrente de verdade daquele cliente (a Consultoria avulsa do começo continua pontual) */
+        var svEntradaRec=function(e){
+          var sv0=clsServRec(e.servico);
+          if(sv0==="CONS"){
+            var k1=chaveRecNome(fixMojiRec(e.cliente));
+            if(consRecForcado[k1]&&e.data&&(!primeiroRecChave[k1]||e.data>=primeiroRecChave[k1]))return"GF";
+          }
+          return sv0;
+        };
+        entradas.forEach(function(e){
+          var sv=svEntradaRec(e);
+          if(sv==="CONS"){auditRec.consultoria++;return}
+          if(sv==="GF"&&clsServRec(e.servico)==="CONS")auditRec.consultForcado++;
+          if(sv===null){var kOut=(e.servico||"").trim()||"(sem serviço)";auditRec.outros[kOut]=(auditRec.outros[kOut]||0)+1;return}
+          if(!e.data){auditRec.semData++;return}
+          var kDup=e.data+"|"+chaveRecNome(fixMojiRec(e.cliente))+"|"+(+e.valor).toFixed(2)+"|"+sv;
+          if(vistosRec[kDup]){auditRec.duplicados++;return}
+          vistosRec[kDup]=true;
+          auditRec.usados++;
+          var ym=e.data.substring(0,7);
+          var nomeCanon=fixMojiRec(canonCliente(e.cliente));
+          var chave=chaveRecNome(nomeCanon);
+          mesesComDadosSet[ym]=true;
+          if(!cliRec[chave])cliRec[chave]={chave:chave,nomes:{},meses:{}};
+          var cr=cliRec[chave];
+          cr.nomes[nomeCanon]=(cr.nomes[nomeCanon]||0)+1;
+          if(!cr.meses[ym])cr.meses[ym]={gp:0,gf:0,gpD:"",gfD:"",tot:0,dMin:e.data,dMax:e.data};
+          var mm=cr.meses[ym];
+          /* Ticket do mês = ÚLTIMO pagamento do mês por serviço (2 pagamentos no mesmo mês costumam ser atraso/reenvio — somar dobra o valor) */
+          if(sv==="GP"){if(mm.gpD){auditRec.multiplos++}if(e.data>=mm.gpD){mm.gp=e.valor;mm.gpD=e.data}}
+          else{if(mm.gfD){auditRec.multiplos++}if(e.data>=mm.gfD){mm.gf=e.valor;mm.gfD=e.data}}
+          mm.tot=mm.gp+mm.gf;
+          if(e.data<mm.dMin)mm.dMin=e.data;
+          if(e.data>mm.dMax)mm.dMax=e.data;
+        });
+
+        /* ===== Unificação de nomes (manual + automática por semelhança) ===== */
+        var cfgRec=(d&&d.config&&d.config.recCfg)||{};
+        /* Decisões do Igor (27/10/2026) — valem sempre; as escolhas feitas pela tela somam a estas. */
+        var REC_ALIAS_PADRAO={"EDUARDA":"EDUARDA CARVALHO","PEDRO IVO CLEMENTE":"PEDRO IVO BATISTA","VALERIA":"VALERIA PESTANA","HIVE MKT LTDA":"BEELIKE AGENCIA DIGITAL LTDA"};
+        var REC_SEPARAR_PADRAO={"BRUNO NOGUEIRA SAKAYA":true,"BRUNO CARVALHO":true,"VALERIA BORGES PEREIRA COSTEMALLE":true};
+        var aliasRec=Object.assign({},REC_ALIAS_PADRAO,cfgRec.aliases||{});
+        var jaEraRec=cfgRec.jaEra||{};
+        var separarRec=Object.assign({},REC_SEPARAR_PADRAO,cfgRec.separar||{});
+        var inicioConfRec=cfgRec.inicioConfiavel||"";
+        var redirRec={},mergesRec=[];
+        var chaveFinalRec=function(k){var g=0;while(redirRec[k]&&g++<50)k=redirRec[k];return k};
+        var levRec=function(a,b){
+          if(a===b)return 0;
+          var prev=[],cur,i,j;
+          for(j=0;j<=b.length;j++)prev[j]=j;
+          for(i=1;i<=a.length;i++){
+            cur=[i];
+            for(j=1;j<=b.length;j++)cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a.charAt(i-1)===b.charAt(j-1)?0:1));
+            prev=cur;
+          }
+          return prev[b.length];
+        };
+        var tokFuzzy=function(a,b){return a!==b&&a.length>=4&&b.length>=4&&levRec(a,b)<=1};
+        var nomeTopRec=function(cr){return Object.keys(cr.nomes).sort(function(a,b){return cr.nomes[b]-cr.nomes[a]||b.length-a.length})[0]};
+        var mergeInto=function(from,to,motivo){
+          var f=cliRec[from],t=cliRec[to];
+          if(!f||!t||from===to)return false;
+          mergesRec.push({de:nomeTopRec(f),para:nomeTopRec(t),motivo:motivo,deK:from});
+          Object.keys(f.nomes).forEach(function(n){t.nomes[n]=(t.nomes[n]||0)+f.nomes[n]});
+          Object.keys(f.meses).forEach(function(m){
+            var a=f.meses[m],b=t.meses[m];
+            if(!b){t.meses[m]=a;return}
+            if(a.gpD&&(!b.gpD||a.gpD>b.gpD)){b.gp=a.gp;b.gpD=a.gpD}
+            if(a.gfD&&(!b.gfD||a.gfD>b.gfD)){b.gf=a.gf;b.gfD=a.gfD}
+            b.tot=b.gp+b.gf;
+            if(a.dMin<b.dMin)b.dMin=a.dMin;
+            if(a.dMax>b.dMax)b.dMax=a.dMax;
+          });
+          delete cliRec[from];
+          redirRec[from]=to;
+          return true;
+        };
+        Object.keys(aliasRec).forEach(function(k){
+          var alvo=chaveFinalRec(aliasRec[k]);
+          if(cliRec[k]&&cliRec[alvo])mergeInto(k,alvo,"unido por você");
+          else if(cliRec[k]&&!cliRec[alvo]){/* alvo sem lançamento GP/GF: ignora */}
+        });
+        /* Automático: (A) nomes com 2+ palavras cujas palavras do mais curto estão no mais longo, tolerando 1 letra de diferença
+           em UMA palavra (Alan/Allan); (B) nome de 1 palavra só ("Érika") que bate com o 1º nome de UM único cliente maior. */
+        (function(){
+          var guard=0,mudou=true;
+          while(mudou&&guard++<400){
+            mudou=false;
+            var arr=Object.keys(cliRec).map(function(k){return{k:k,tk:k.split(" ")}});
+            arr.sort(function(a,b){return b.tk.length-a.tk.length||b.k.length-a.k.length});
+            for(var i=0;i<arr.length&&!mudou;i++){
+              for(var j=i+1;j<arr.length&&!mudou;j++){
+                var L=arr[i],S=arr[j];
+                if(!cliRec[L.k]||!cliRec[S.k]||S.tk.length<2||S.tk.length>L.tk.length||separarRec[S.k])continue;
+                var usados={},fuzzy=0,ok=true;
+                /* palavra a palavra: igual > inicial (C = Carvalho) / truncada no fim (Pov = Povoleri) > 1 letra diferente */
+                var casaTok=function(x,ix,y,iy,modo){
+                  if(modo===0)return x===y;
+                  if(modo===1){
+                    if(x.length===1&&y.length>1&&y.charAt(0)===x)return true;
+                    if(y.length===1&&x.length>1&&x.charAt(0)===y)return true;
+                    if(ix===S.tk.length-1&&x.length>=2&&y.length>x.length&&y.indexOf(x)===0)return true;
+                    if(iy===L.tk.length-1&&y.length>=2&&x.length>y.length&&x.indexOf(y)===0)return true;
+                    return false;
+                  }
+                  return tokFuzzy(y,x);
+                };
+                for(var a=0;a<S.tk.length&&ok;a++){
+                  var achou=-1,modoUsado=-1;
+                  for(var modo=0;modo<3&&achou<0;modo++){
+                    for(var b=0;b<L.tk.length;b++){if(usados[b])continue;if(casaTok(S.tk[a],a,L.tk[b],b,modo)){achou=b;modoUsado=modo;break}}
+                  }
+                  if(achou<0)ok=false;else{usados[achou]=true;if(modoUsado===2)fuzzy++}
+                }
+                if(ok&&fuzzy<=1){
+                  if(mergeInto(S.k,L.k,fuzzy?"grafia parecida":"nome contido no outro"))mudou=true;
+                }
+              }
+            }
+          }
+          /* Regra B */
+          var chaves=Object.keys(cliRec);
+          chaves.forEach(function(k){
+            var S=cliRec[k];
+            if(!S||k.indexOf(" ")>=0||separarRec[k])return;
+            var cands=Object.keys(cliRec).filter(function(o){
+              if(o===k||o.indexOf(" ")<0)return false;
+              var p=o.split(" ")[0];
+              return p===k||tokFuzzy(p,k);
+            });
+            if(cands.length!==1)return;
+            mergeInto(k,cands[0],"só o 1º nome — único cliente com esse nome");
+          });
+        })();
+
+        /* Sugestões (NÃO aplicadas sozinhas): mesmo 1º nome, nunca pagaram no mesmo mês e um começou até 4 meses depois do outro
+           parar — típico de sobrenome trocado/grafado diferente. Aparecem na auditoria com botão "são a mesma pessoa". */
+        var sugestoesRec=[];
+        (function(){
+          var ks=Object.keys(cliRec);
+          var im=function(m){var p=m.split("-");return(+p[0])*12+(+p[1])};
+          for(var i=0;i<ks.length;i++){
+            for(var j=i+1;j<ks.length;j++){
+              var a=ks[i],b=ks[j];
+              if(a.split(" ")[0]!==b.split(" ")[0]||separarRec[a]||separarRec[b])continue;
+              var ma=Object.keys(cliRec[a].meses).sort(),mb=Object.keys(cliRec[b].meses).sort();
+              var umaPalavra=a.indexOf(" ")<0||b.indexOf(" ")<0;
+              var sobrepoe=ma.some(function(m){return cliRec[b].meses[m]});
+              if(sobrepoe&&!umaPalavra)continue;
+              var fa=ma[0],la=ma[ma.length-1],fb=mb[0],lb=mb[mb.length-1];
+              var gap=fb>la?im(fb)-im(la):(fa>lb?im(fa)-im(lb):0);
+              if(gap>4)continue;
+              var antigo=la<lb?a:b,novo=la<lb?b:a;
+              sugestoesRec.push({de:antigo,para:novo,nomeDe:nomeTopRec(cliRec[antigo]),nomePara:nomeTopRec(cliRec[novo]),
+                deIni:antigo===a?fa:fb,deFim:antigo===a?la:lb,paraIni:novo===a?fa:fb,paraFim:novo===a?la:lb,fim:la>lb?la:lb});
+            }
+          }
+          sugestoesRec.sort(function(x,y){return y.fim.localeCompare(x.fim)});
+        })();
+
+        var dataMonths=Object.keys(mesesComDadosSet).sort();
+        var idxM={};dataMonths.forEach(function(m,i){idxM[m]=i});
+        var lastIdxRec=dataMonths.length-1;
+        var mesMaisRecenteComDados=dataMonths.length?dataMonths[lastIdxRec]:null;
+        var mesGlobalInicio=dataMonths.length?dataMonths[0]:null;
+        var primeiroMesSv={GP:null,GF:null};
+        Object.keys(cliRec).forEach(function(k){Object.keys(cliRec[k].meses).forEach(function(m){
+          var mm=cliRec[k].meses[m];
+          if(mm.gp>0&&(!primeiroMesSv.GP||m<primeiroMesSv.GP))primeiroMesSv.GP=m;
+          if(mm.gf>0&&(!primeiroMesSv.GF||m<primeiroMesSv.GF))primeiroMesSv.GF=m;
+        })});
+        var mesesSemDadosRec=[];
+        if(mesGlobalInicio){for(var mi=mesGlobalInicio;mi<mesMaisRecenteComDados;mi=somaMeses(mi,1)){if(!mesesComDadosSet[mi])mesesSemDadosRec.push(mi)}}
+
+        var listaClientesRec=[];
+        var emObservacaoRec=[];
+        var unificadosRec=[];
+        Object.keys(cliRec).forEach(function(chave){
+          var cr=cliRec[chave];
+          var nomesArr=Object.keys(cr.nomes).sort(function(a,b){return cr.nomes[b]-cr.nomes[a]||b.length-a.length});
+          var nomeExib=nomesArr[0];
+          if(nomesArr.length>1)unificadosRec.push({nome:nomeExib,variantes:nomesArr});
+          var ms=Object.keys(cr.meses).sort();
+          var ciclos=[],cur=null;
+          ms.forEach(function(m){
+            if(cur&&(idxM[m]-idxM[cur.fim])>=GRACE_MESES+1){ciclos.push(cur);cur=null}
+            if(!cur)cur={ini:m,fim:m,meses:[m]};
+            else{cur.fim=m;cur.meses.push(m)}
+          });
+          if(cur)ciclos.push(cur);
+          ciclos.forEach(function(cy,i){
+            var mIni=cr.meses[cy.ini],mFim=cr.meses[cy.fim];
+            var temGP=cy.meses.some(function(m){return cr.meses[m].gp>0}),temGF=cy.meses.some(function(m){return cr.meses[m].gf>0});
+            var idxFim=idxM[cy.fim];
+            var ehUltimo=i===ciclos.length-1;
+            var perdido=ehUltimo?(lastIdxRec-idxFim>=GRACE_MESES):true;
+            var item={
+              chave:chave+"#"+i,cliente:chave,nome:nomeExib,
+              primeiroMes:cy.ini,ultimoMes:cy.fim,
+              primeiraData:mIni.dMin,ultimaData:mFim.dMax,
+              valorPrimeiro:mIni.tot,valorUltimo:mFim.tot,
+              temGP:temGP,temGF:temGF,
+              fimGP:mFim.gp>0,fimGF:mFim.gf>0,
+              servicoLabel:temGP&&temGF?"GP + GF":temGP?"Gestão de Patrimônio":"Gestão Financeira",
+              perdido:perdido,
+              mesPerda:perdido?dataMonths[idxFim+GRACE_MESES]:null,
+              mesesSemPagar:diffMeses(cy.fim,mesMaisRecenteComDados),
+              mesesCasa:diffMeses(cy.ini,cy.fim)+1,
+              mesesPagos:cy.meses.length,
+              reativacao:i>0,
+              voltouApos:i>0?diffMeses(ciclos[i-1].fim,cy.ini)-1:0,
+              voltou:!ehUltimo,
+              baseInicial:false
+            };
+            if(i===0){
+              var baseSv=(mIni.gp>0||mIni.gf>0)&&(mIni.gp>0?cy.ini===primeiroMesSv.GP:true)&&(mIni.gf>0?cy.ini===primeiroMesSv.GF:true);
+              if(jaEraRec[chave]){item.baseInicial=true;item.baseMotivo="marcada por você"}
+              else if(inicioConfRec&&cy.ini<=inicioConfRec){item.baseInicial=true;item.baseMotivo="até o início confiável"}
+              else if(baseSv){item.baseInicial=true;item.baseMotivo="1º mês de dados do serviço"}
+            }
+            listaClientesRec.push(item);
+            if(ehUltimo&&!perdido&&lastIdxRec-idxFim===1)emObservacaoRec.push(item);
+          });
+        });
+
+        var nomesDatalistRec=Object.keys(cliRec).map(function(k){return nomeTopRec(cliRec[k])}).sort();
+        var ativosRec=listaClientesRec.filter(function(c){return!c.perdido});
+        var perdidosRecTodos=listaClientesRec.filter(function(c){return c.perdido});
+        var ativosSoGP=ativosRec.filter(function(c){return c.fimGP&&!c.fimGF}).length;
+        var ativosSoGF=ativosRec.filter(function(c){return c.fimGF&&!c.fimGP}).length;
+        var ativosAmbos=ativosRec.filter(function(c){return c.fimGP&&c.fimGF}).length;
+        var ativosGP=ativosSoGP+ativosAmbos,ativosGF=ativosSoGF+ativosAmbos;
+        var mrrAtivoRec=ativosRec.reduce(function(a,c){return a+c.valorUltimo},0);
+        var reativacoesRec=listaClientesRec.filter(function(c){return c.reativacao});
+
+        var MN_CURTO_REC=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+        var monthsList=[];
+        if(mesGlobalInicio&&mesMaisRecenteComDados){
+          var partsIni=mesGlobalInicio.split("-").map(Number);
+          var cursorMes=new Date(partsIni[0],partsIni[1]-1,1);
+          var partsFim=mesMaisRecenteComDados.split("-").map(Number);
+          var endMes=new Date(partsFim[0],partsFim[1]-1,1);
+          var guardMes=0;
+          while(cursorMes<=endMes&&guardMes<600){
+            monthsList.push(cursorMes.getFullYear()+"-"+String(cursorMes.getMonth()+1).padStart(2,"0"));
+            cursorMes.setMonth(cursorMes.getMonth()+1);
+            guardMes++;
+          }
+        }
+
+        var historicoRec=monthsList.map(function(ym){
+          var novos=listaClientesRec.filter(function(c){return c.primeiroMes===ym&&!c.baseInicial});
+          var perdidos=listaClientesRec.filter(function(c){return c.perdido&&c.mesPerda===ym});
+          var baseIni=listaClientesRec.filter(function(c){return c.baseInicial&&c.primeiroMes===ym}).length;
+          var acumulado=listaClientesRec.filter(function(c){return c.primeiroMes<=ym&&(!c.mesPerda||c.mesPerda>ym)}).length;
+          var mrrGanho=novos.reduce(function(a,c){return a+c.valorPrimeiro},0);
+          var mrrPerdido=perdidos.reduce(function(a,c){return a+c.valorUltimo},0);
+          return{ym:ym,label:MN_CURTO_REC[+ym.substring(5,7)-1]+"/"+ym.substring(2,4),novos:novos,perdidos:perdidos,baseIni:baseIni,semDados:!mesesComDadosSet[ym],saldo:novos.length-perdidos.length,acumulado:acumulado,mrrGanho:mrrGanho,mrrPerdido:mrrPerdido};
+        });
+        var maxEvolRec=Math.max.apply(null,historicoRec.map(function(h){return Math.max(h.novos.length,h.perdidos.length)}).concat([1]));
+
+        /* ===== Agregação por ANO do gráfico de Entradas/Perdas (visão alternativa, pedida) ===== */
+        var historicoRecAno=(function(){
+          var porAno={};
+          historicoRec.forEach(function(h){
+            var ano=h.ym.substring(0,4);
+            if(!porAno[ano])porAno[ano]={novos:[],perdidos:[],mrrGanho:0,mrrPerdido:0,acumuladoFim:0};
+            porAno[ano].novos=porAno[ano].novos.concat(h.novos);
+            porAno[ano].perdidos=porAno[ano].perdidos.concat(h.perdidos);
+            porAno[ano].mrrGanho+=h.mrrGanho;
+            porAno[ano].mrrPerdido+=h.mrrPerdido;
+            porAno[ano].acumuladoFim=h.acumulado;
+          });
+          return Object.keys(porAno).sort().map(function(ano){
+            var a=porAno[ano];
+            return{ym:ano,label:ano,novos:a.novos,perdidos:a.perdidos,saldo:a.novos.length-a.perdidos.length,acumulado:a.acumuladoFim,mrrGanho:a.mrrGanho,mrrPerdido:a.mrrPerdido};
+          });
+        })();
+        var dadosEntradasPerdas=visaoRec==="anual"?historicoRecAno:historicoRec;
+        var maxEvolRecView=Math.max.apply(null,dadosEntradasPerdas.map(function(h){return Math.max(h.novos.length,h.perdidos.length)}).concat([1]));
+
+        var last12=historicoRec.slice(-12);
+        var novos12=last12.reduce(function(a,h){return a+h.novos.length},0);
+        var perdidos12=last12.reduce(function(a,h){return a+h.perdidos.length},0);
+        var mrrGanho12=last12.reduce(function(a,h){return a+h.mrrGanho},0);
+        var mrrPerdido12=last12.reduce(function(a,h){return a+h.mrrPerdido},0);
+        /* Churn 12m = perdas na janela ÷ base média de recorrentes na janela (cliente que sai e volta conta como perda + captação) */
+        var baseMedia12=last12.length?last12.reduce(function(a,h){return a+h.acumulado},0)/last12.length:0;
+        var churnGeral=baseMedia12>0?(perdidos12/baseMedia12*100):0;
+        var perdasNoUltimoMes=mesMaisRecenteComDados?perdidosRecTodos.filter(function(c){return c.mesPerda===mesMaisRecenteComDados}).length:0;
+        return {GRACE_MESES:GRACE_MESES,diffMeses:diffMeses,somaMeses:somaMeses,clsServRec:clsServRec,chaveRecNome:chaveRecNome,auditRec:auditRec,cliRec:cliRec,cfgRecIni:cfgRecIni,consRecForcado:consRecForcado,fixMojiRec:fixMojiRec,primeiroRecChave:primeiroRecChave,svEntradaRec:svEntradaRec,cfgRec:cfgRec,REC_ALIAS_PADRAO:REC_ALIAS_PADRAO,REC_SEPARAR_PADRAO:REC_SEPARAR_PADRAO,aliasRec:aliasRec,jaEraRec:jaEraRec,separarRec:separarRec,inicioConfRec:inicioConfRec,redirRec:redirRec,chaveFinalRec:chaveFinalRec,levRec:levRec,tokFuzzy:tokFuzzy,nomeTopRec:nomeTopRec,mergeInto:mergeInto,sugestoesRec:sugestoesRec,dataMonths:dataMonths,idxM:idxM,lastIdxRec:lastIdxRec,mesMaisRecenteComDados:mesMaisRecenteComDados,mesGlobalInicio:mesGlobalInicio,primeiroMesSv:primeiroMesSv,mesesSemDadosRec:mesesSemDadosRec,listaClientesRec:listaClientesRec,emObservacaoRec:emObservacaoRec,unificadosRec:unificadosRec,nomesDatalistRec:nomesDatalistRec,ativosRec:ativosRec,perdidosRecTodos:perdidosRecTodos,ativosSoGP:ativosSoGP,ativosSoGF:ativosSoGF,ativosAmbos:ativosAmbos,ativosGP:ativosGP,mrrAtivoRec:mrrAtivoRec,reativacoesRec:reativacoesRec,MN_CURTO_REC:MN_CURTO_REC,monthsList:monthsList,historicoRec:historicoRec,maxEvolRec:maxEvolRec,historicoRecAno:historicoRecAno,dadosEntradasPerdas:dadosEntradasPerdas,maxEvolRecView:maxEvolRecView,last12:last12,novos12:novos12,perdidos12:perdidos12,mrrGanho12:mrrGanho12,mrrPerdido12:mrrPerdido12,baseMedia12:baseMedia12,churnGeral:churnGeral,perdasNoUltimoMes:perdasNoUltimoMes,mesesComDadosSet:mesesComDadosSet,vistosRec:vistosRec,mergesRec:mergesRec,ativosGF:ativosGF};
+}
+
 function FinanceiroView({data:d,dispatch:dp}){
   const[fTab,sFTab]=useState("importar");
   /* === RESPONSIVE: detecção reativa de mobile === usado em vários pontos do layout abaixo
@@ -23929,31 +24302,7 @@ function FinanceiroView({data:d,dispatch:dp}){
      (apelidos totalmente diferentes do nome de cadastro, por exemplo) podem ser adicionados
      manualmente em CLIENTE_ALIAS_MANUAL (chave = como está lançado na planilha, valor = nome
      oficial a usar). */
-  var CLIENTE_ALIAS_MANUAL={
-    "Marcus Goyatá":"Marcus Condé Goyatá Lopes"
-  };
-  var _normTok=function(s){return(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").trim().toUpperCase().split(/\s+/).filter(Boolean)};
-  var clienteCanonMap=(function(){
-    var uniq=Array.from(new Set(entradas.map(function(e){return(e.cliente||"").trim()}).filter(Boolean)));
-    var toks=uniq.map(function(n){return{nome:n,tk:_normTok(n)}});
-    toks.sort(function(a,b){return b.tk.length-a.tk.length||b.nome.length-a.nome.length});
-    var map={};
-    toks.forEach(function(t){map[t.nome]=t.nome});
-    for(var i=0;i<toks.length;i++){
-      var maior=toks[i];
-      if(map[maior.nome]!==maior.nome)continue;
-      for(var j=i+1;j<toks.length;j++){
-        var menor=toks[j];
-        if(map[menor.nome]!==menor.nome)continue;
-        if(menor.tk.length<2||menor.tk.length>=maior.tk.length)continue;
-        var contido=menor.tk.every(function(w){return maior.tk.indexOf(w)>=0});
-        if(contido)map[menor.nome]=maior.nome;
-      }
-    }
-    Object.keys(CLIENTE_ALIAS_MANUAL).forEach(function(k){map[k]=CLIENTE_ALIAS_MANUAL[k]});
-    return map;
-  })();
-  var canonCliente=function(nome){var n=(nome||"").trim();if(!n)return"Desconhecido";return clienteCanonMap[n]||n};
+  var canonCliente=buildCanonCliente(entradas);
 
   /* ── Classificação de remuneração dos sócios ── */
   var CAT_REMUNERACAO=["Pró-Labore","Pró Labore","Pro-Labore","Pro Labore","Prolabore","Pró labore",
@@ -24943,343 +25292,8 @@ function FinanceiroView({data:d,dispatch:dp}){
            a fonte confiável de "quem pagou, quando, e quanto".
            v515: regras novas — ver o bloco "INTELIGÊNCIA DE RECORRENTES" logo abaixo (ciclos de
            vida; Consultoria fora; perda = 2 meses seguidos ausente; volta = nova captação). */
-        var GRACE_MESES=2;
-        var diffMeses=function(ymA,ymB){var pa=ymA.split("-").map(Number),pb=ymB.split("-").map(Number);return(pb[0]-pa[0])*12+(pb[1]-pa[1])};
-        var somaMeses=function(ym,n){var p=ym.split("-").map(Number);var dt=new Date(p[0],p[1]-1+n,1);return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")};
-
-        /* v515 — INTELIGÊNCIA DE RECORRENTES (ciclos de vida por cliente).
-           1) Só GP/GF contam. Consultoria (pontual) é ignorada. O serviço é classificado por
-              texto normalizado (sem acento/caixa/espaços), então "Gestao de Patrimonio " e
-              "GESTÃO DE PATRIMÔNIO" valem o mesmo — antes só o texto idêntico era aceito.
-           2) Nome do cliente unificado por chave normalizada (sem acento, caixa, "&"/"e"/"de"/"da").
-           3) Linha do tempo = só meses que TÊM lançamento GP/GF importado. Mês sem nenhuma
-              planilha não conta como "ausência" de ninguém.
-           4) Cada cliente tem CICLOS: começa no 1º mês em que paga; continua enquanto não ficar
-              GRACE_MESES (2) meses seguidos sem aparecer. Ausência de 1 mês não é perda nem
-              captação. 2 meses seguidos = PERDA (confirmada no 2º mês ausente). Se voltar depois,
-              o novo ciclo é uma NOVA CAPTAÇÃO (reativação).
-           5) O 1º mês importado é a "base inicial" (não dá pra saber quando eles entraram): não
-              conta como captação. */
-        var clsServRec=function(s){
-          var t=String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().trim();
-          if(!t)return null;
-          if(t.indexOf("consult")>=0)return"CONS";
-          if(t.indexOf("patrim")>=0)return"GP";
-          if(t.indexOf("gest")>=0&&t.indexOf("financ")>=0)return"GF";
-          if(t.indexOf("planej")>=0)return"GF";
-          return null;
-        };
-        var chaveRecNome=function(n){
-          return String(n||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().replace(/&/g," ").replace(/[^A-Z0-9 ]/g," ").split(/\s+/).filter(function(w){return w&&w!=="E"&&w!=="DE"&&w!=="DA"&&w!=="DO"&&w!=="DAS"&&w!=="DOS"}).join(" ")||"DESCONHECIDO";
-        };
-
-        var auditRec={usados:0,consultoria:0,semData:0,duplicados:0,multiplos:0,consultForcado:0,outros:{}};
-        var cliRec={},mesesComDadosSet={},vistosRec={};
-        /* Clientes lançados como "Consultoria" mas que na prática são recorrentes (pagam todo mês) — tratados como Gestão Financeira.
-           Decisão do Igor (28/10/2026): Francisco Couri. Outros podem ser somados pela tela (Ajustes manuais). */
-        var cfgRecIni=(d&&d.config&&d.config.recCfg)||{};
-        var consRecForcado=Object.assign({"FRANCISCO COURI":true,"FRANCISCO R COURI":true,"FRANCISCO ROBERTO COURI":true},cfgRecIni.consultRec||{});
-        var fixMojiRec=function(n){
-          n=String(n||"");
-          if(/[\u00c3\u00c2]/.test(n)){try{var f=decodeURIComponent(escape(n));if(f&&f.indexOf("\ufffd")<0)return f}catch(err){}}
-          return n;
-        };
-        var primeiroRecChave={};
-        entradas.forEach(function(e){
-          var sv0=clsServRec(e.servico);
-          if((sv0==="GP"||sv0==="GF")&&e.data){var k0=chaveRecNome(fixMojiRec(e.cliente));if(!primeiroRecChave[k0]||e.data<primeiroRecChave[k0])primeiroRecChave[k0]=e.data}
-        });
-        /* Só vale a partir do 1º pagamento recorrente de verdade daquele cliente (a Consultoria avulsa do começo continua pontual) */
-        var svEntradaRec=function(e){
-          var sv0=clsServRec(e.servico);
-          if(sv0==="CONS"){
-            var k1=chaveRecNome(fixMojiRec(e.cliente));
-            if(consRecForcado[k1]&&e.data&&(!primeiroRecChave[k1]||e.data>=primeiroRecChave[k1]))return"GF";
-          }
-          return sv0;
-        };
-        entradas.forEach(function(e){
-          var sv=svEntradaRec(e);
-          if(sv==="CONS"){auditRec.consultoria++;return}
-          if(sv==="GF"&&clsServRec(e.servico)==="CONS")auditRec.consultForcado++;
-          if(sv===null){var kOut=(e.servico||"").trim()||"(sem serviço)";auditRec.outros[kOut]=(auditRec.outros[kOut]||0)+1;return}
-          if(!e.data){auditRec.semData++;return}
-          var kDup=e.data+"|"+chaveRecNome(fixMojiRec(e.cliente))+"|"+(+e.valor).toFixed(2)+"|"+sv;
-          if(vistosRec[kDup]){auditRec.duplicados++;return}
-          vistosRec[kDup]=true;
-          auditRec.usados++;
-          var ym=e.data.substring(0,7);
-          var nomeCanon=fixMojiRec(canonCliente(e.cliente));
-          var chave=chaveRecNome(nomeCanon);
-          mesesComDadosSet[ym]=true;
-          if(!cliRec[chave])cliRec[chave]={chave:chave,nomes:{},meses:{}};
-          var cr=cliRec[chave];
-          cr.nomes[nomeCanon]=(cr.nomes[nomeCanon]||0)+1;
-          if(!cr.meses[ym])cr.meses[ym]={gp:0,gf:0,gpD:"",gfD:"",tot:0,dMin:e.data,dMax:e.data};
-          var mm=cr.meses[ym];
-          /* Ticket do mês = ÚLTIMO pagamento do mês por serviço (2 pagamentos no mesmo mês costumam ser atraso/reenvio — somar dobra o valor) */
-          if(sv==="GP"){if(mm.gpD){auditRec.multiplos++}if(e.data>=mm.gpD){mm.gp=e.valor;mm.gpD=e.data}}
-          else{if(mm.gfD){auditRec.multiplos++}if(e.data>=mm.gfD){mm.gf=e.valor;mm.gfD=e.data}}
-          mm.tot=mm.gp+mm.gf;
-          if(e.data<mm.dMin)mm.dMin=e.data;
-          if(e.data>mm.dMax)mm.dMax=e.data;
-        });
-
-        /* ===== Unificação de nomes (manual + automática por semelhança) ===== */
-        var cfgRec=(d&&d.config&&d.config.recCfg)||{};
-        /* Decisões do Igor (27/10/2026) — valem sempre; as escolhas feitas pela tela somam a estas. */
-        var REC_ALIAS_PADRAO={"EDUARDA":"EDUARDA CARVALHO","PEDRO IVO CLEMENTE":"PEDRO IVO BATISTA","VALERIA":"VALERIA PESTANA","HIVE MKT LTDA":"BEELIKE AGENCIA DIGITAL LTDA"};
-        var REC_SEPARAR_PADRAO={"BRUNO NOGUEIRA SAKAYA":true,"BRUNO CARVALHO":true,"VALERIA BORGES PEREIRA COSTEMALLE":true};
-        var aliasRec=Object.assign({},REC_ALIAS_PADRAO,cfgRec.aliases||{});
-        var jaEraRec=cfgRec.jaEra||{};
-        var separarRec=Object.assign({},REC_SEPARAR_PADRAO,cfgRec.separar||{});
-        var inicioConfRec=cfgRec.inicioConfiavel||"";
-        var redirRec={},mergesRec=[];
-        var chaveFinalRec=function(k){var g=0;while(redirRec[k]&&g++<50)k=redirRec[k];return k};
-        var levRec=function(a,b){
-          if(a===b)return 0;
-          var prev=[],cur,i,j;
-          for(j=0;j<=b.length;j++)prev[j]=j;
-          for(i=1;i<=a.length;i++){
-            cur=[i];
-            for(j=1;j<=b.length;j++)cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a.charAt(i-1)===b.charAt(j-1)?0:1));
-            prev=cur;
-          }
-          return prev[b.length];
-        };
-        var tokFuzzy=function(a,b){return a!==b&&a.length>=4&&b.length>=4&&levRec(a,b)<=1};
-        var nomeTopRec=function(cr){return Object.keys(cr.nomes).sort(function(a,b){return cr.nomes[b]-cr.nomes[a]||b.length-a.length})[0]};
-        var mergeInto=function(from,to,motivo){
-          var f=cliRec[from],t=cliRec[to];
-          if(!f||!t||from===to)return false;
-          mergesRec.push({de:nomeTopRec(f),para:nomeTopRec(t),motivo:motivo,deK:from});
-          Object.keys(f.nomes).forEach(function(n){t.nomes[n]=(t.nomes[n]||0)+f.nomes[n]});
-          Object.keys(f.meses).forEach(function(m){
-            var a=f.meses[m],b=t.meses[m];
-            if(!b){t.meses[m]=a;return}
-            if(a.gpD&&(!b.gpD||a.gpD>b.gpD)){b.gp=a.gp;b.gpD=a.gpD}
-            if(a.gfD&&(!b.gfD||a.gfD>b.gfD)){b.gf=a.gf;b.gfD=a.gfD}
-            b.tot=b.gp+b.gf;
-            if(a.dMin<b.dMin)b.dMin=a.dMin;
-            if(a.dMax>b.dMax)b.dMax=a.dMax;
-          });
-          delete cliRec[from];
-          redirRec[from]=to;
-          return true;
-        };
-        Object.keys(aliasRec).forEach(function(k){
-          var alvo=chaveFinalRec(aliasRec[k]);
-          if(cliRec[k]&&cliRec[alvo])mergeInto(k,alvo,"unido por você");
-          else if(cliRec[k]&&!cliRec[alvo]){/* alvo sem lançamento GP/GF: ignora */}
-        });
-        /* Automático: (A) nomes com 2+ palavras cujas palavras do mais curto estão no mais longo, tolerando 1 letra de diferença
-           em UMA palavra (Alan/Allan); (B) nome de 1 palavra só ("Érika") que bate com o 1º nome de UM único cliente maior. */
-        (function(){
-          var guard=0,mudou=true;
-          while(mudou&&guard++<400){
-            mudou=false;
-            var arr=Object.keys(cliRec).map(function(k){return{k:k,tk:k.split(" ")}});
-            arr.sort(function(a,b){return b.tk.length-a.tk.length||b.k.length-a.k.length});
-            for(var i=0;i<arr.length&&!mudou;i++){
-              for(var j=i+1;j<arr.length&&!mudou;j++){
-                var L=arr[i],S=arr[j];
-                if(!cliRec[L.k]||!cliRec[S.k]||S.tk.length<2||S.tk.length>L.tk.length||separarRec[S.k])continue;
-                var usados={},fuzzy=0,ok=true;
-                /* palavra a palavra: igual > inicial (C = Carvalho) / truncada no fim (Pov = Povoleri) > 1 letra diferente */
-                var casaTok=function(x,ix,y,iy,modo){
-                  if(modo===0)return x===y;
-                  if(modo===1){
-                    if(x.length===1&&y.length>1&&y.charAt(0)===x)return true;
-                    if(y.length===1&&x.length>1&&x.charAt(0)===y)return true;
-                    if(ix===S.tk.length-1&&x.length>=2&&y.length>x.length&&y.indexOf(x)===0)return true;
-                    if(iy===L.tk.length-1&&y.length>=2&&x.length>y.length&&x.indexOf(y)===0)return true;
-                    return false;
-                  }
-                  return tokFuzzy(y,x);
-                };
-                for(var a=0;a<S.tk.length&&ok;a++){
-                  var achou=-1,modoUsado=-1;
-                  for(var modo=0;modo<3&&achou<0;modo++){
-                    for(var b=0;b<L.tk.length;b++){if(usados[b])continue;if(casaTok(S.tk[a],a,L.tk[b],b,modo)){achou=b;modoUsado=modo;break}}
-                  }
-                  if(achou<0)ok=false;else{usados[achou]=true;if(modoUsado===2)fuzzy++}
-                }
-                if(ok&&fuzzy<=1){
-                  if(mergeInto(S.k,L.k,fuzzy?"grafia parecida":"nome contido no outro"))mudou=true;
-                }
-              }
-            }
-          }
-          /* Regra B */
-          var chaves=Object.keys(cliRec);
-          chaves.forEach(function(k){
-            var S=cliRec[k];
-            if(!S||k.indexOf(" ")>=0||separarRec[k])return;
-            var cands=Object.keys(cliRec).filter(function(o){
-              if(o===k||o.indexOf(" ")<0)return false;
-              var p=o.split(" ")[0];
-              return p===k||tokFuzzy(p,k);
-            });
-            if(cands.length!==1)return;
-            mergeInto(k,cands[0],"só o 1º nome — único cliente com esse nome");
-          });
-        })();
-
-        /* Sugestões (NÃO aplicadas sozinhas): mesmo 1º nome, nunca pagaram no mesmo mês e um começou até 4 meses depois do outro
-           parar — típico de sobrenome trocado/grafado diferente. Aparecem na auditoria com botão "são a mesma pessoa". */
-        var sugestoesRec=[];
-        (function(){
-          var ks=Object.keys(cliRec);
-          var im=function(m){var p=m.split("-");return(+p[0])*12+(+p[1])};
-          for(var i=0;i<ks.length;i++){
-            for(var j=i+1;j<ks.length;j++){
-              var a=ks[i],b=ks[j];
-              if(a.split(" ")[0]!==b.split(" ")[0]||separarRec[a]||separarRec[b])continue;
-              var ma=Object.keys(cliRec[a].meses).sort(),mb=Object.keys(cliRec[b].meses).sort();
-              var umaPalavra=a.indexOf(" ")<0||b.indexOf(" ")<0;
-              var sobrepoe=ma.some(function(m){return cliRec[b].meses[m]});
-              if(sobrepoe&&!umaPalavra)continue;
-              var fa=ma[0],la=ma[ma.length-1],fb=mb[0],lb=mb[mb.length-1];
-              var gap=fb>la?im(fb)-im(la):(fa>lb?im(fa)-im(lb):0);
-              if(gap>4)continue;
-              var antigo=la<lb?a:b,novo=la<lb?b:a;
-              sugestoesRec.push({de:antigo,para:novo,nomeDe:nomeTopRec(cliRec[antigo]),nomePara:nomeTopRec(cliRec[novo]),
-                deIni:antigo===a?fa:fb,deFim:antigo===a?la:lb,paraIni:novo===a?fa:fb,paraFim:novo===a?la:lb,fim:la>lb?la:lb});
-            }
-          }
-          sugestoesRec.sort(function(x,y){return y.fim.localeCompare(x.fim)});
-        })();
-
-        var dataMonths=Object.keys(mesesComDadosSet).sort();
-        var idxM={};dataMonths.forEach(function(m,i){idxM[m]=i});
-        var lastIdxRec=dataMonths.length-1;
-        var mesMaisRecenteComDados=dataMonths.length?dataMonths[lastIdxRec]:null;
-        var mesGlobalInicio=dataMonths.length?dataMonths[0]:null;
-        var primeiroMesSv={GP:null,GF:null};
-        Object.keys(cliRec).forEach(function(k){Object.keys(cliRec[k].meses).forEach(function(m){
-          var mm=cliRec[k].meses[m];
-          if(mm.gp>0&&(!primeiroMesSv.GP||m<primeiroMesSv.GP))primeiroMesSv.GP=m;
-          if(mm.gf>0&&(!primeiroMesSv.GF||m<primeiroMesSv.GF))primeiroMesSv.GF=m;
-        })});
-        var mesesSemDadosRec=[];
-        if(mesGlobalInicio){for(var mi=mesGlobalInicio;mi<mesMaisRecenteComDados;mi=somaMeses(mi,1)){if(!mesesComDadosSet[mi])mesesSemDadosRec.push(mi)}}
-
-        var listaClientesRec=[];
-        var emObservacaoRec=[];
-        var unificadosRec=[];
-        Object.keys(cliRec).forEach(function(chave){
-          var cr=cliRec[chave];
-          var nomesArr=Object.keys(cr.nomes).sort(function(a,b){return cr.nomes[b]-cr.nomes[a]||b.length-a.length});
-          var nomeExib=nomesArr[0];
-          if(nomesArr.length>1)unificadosRec.push({nome:nomeExib,variantes:nomesArr});
-          var ms=Object.keys(cr.meses).sort();
-          var ciclos=[],cur=null;
-          ms.forEach(function(m){
-            if(cur&&(idxM[m]-idxM[cur.fim])>=GRACE_MESES+1){ciclos.push(cur);cur=null}
-            if(!cur)cur={ini:m,fim:m,meses:[m]};
-            else{cur.fim=m;cur.meses.push(m)}
-          });
-          if(cur)ciclos.push(cur);
-          ciclos.forEach(function(cy,i){
-            var mIni=cr.meses[cy.ini],mFim=cr.meses[cy.fim];
-            var temGP=cy.meses.some(function(m){return cr.meses[m].gp>0}),temGF=cy.meses.some(function(m){return cr.meses[m].gf>0});
-            var idxFim=idxM[cy.fim];
-            var ehUltimo=i===ciclos.length-1;
-            var perdido=ehUltimo?(lastIdxRec-idxFim>=GRACE_MESES):true;
-            var item={
-              chave:chave+"#"+i,cliente:chave,nome:nomeExib,
-              primeiroMes:cy.ini,ultimoMes:cy.fim,
-              primeiraData:mIni.dMin,ultimaData:mFim.dMax,
-              valorPrimeiro:mIni.tot,valorUltimo:mFim.tot,
-              temGP:temGP,temGF:temGF,
-              fimGP:mFim.gp>0,fimGF:mFim.gf>0,
-              servicoLabel:temGP&&temGF?"GP + GF":temGP?"Gestão de Patrimônio":"Gestão Financeira",
-              perdido:perdido,
-              mesPerda:perdido?dataMonths[idxFim+GRACE_MESES]:null,
-              mesesSemPagar:diffMeses(cy.fim,mesMaisRecenteComDados),
-              mesesCasa:diffMeses(cy.ini,cy.fim)+1,
-              mesesPagos:cy.meses.length,
-              reativacao:i>0,
-              voltouApos:i>0?diffMeses(ciclos[i-1].fim,cy.ini)-1:0,
-              voltou:!ehUltimo,
-              baseInicial:false
-            };
-            if(i===0){
-              var baseSv=(mIni.gp>0||mIni.gf>0)&&(mIni.gp>0?cy.ini===primeiroMesSv.GP:true)&&(mIni.gf>0?cy.ini===primeiroMesSv.GF:true);
-              if(jaEraRec[chave]){item.baseInicial=true;item.baseMotivo="marcada por você"}
-              else if(inicioConfRec&&cy.ini<=inicioConfRec){item.baseInicial=true;item.baseMotivo="até o início confiável"}
-              else if(baseSv){item.baseInicial=true;item.baseMotivo="1º mês de dados do serviço"}
-            }
-            listaClientesRec.push(item);
-            if(ehUltimo&&!perdido&&lastIdxRec-idxFim===1)emObservacaoRec.push(item);
-          });
-        });
-
-        var nomesDatalistRec=Object.keys(cliRec).map(function(k){return nomeTopRec(cliRec[k])}).sort();
-        var ativosRec=listaClientesRec.filter(function(c){return!c.perdido});
-        var perdidosRecTodos=listaClientesRec.filter(function(c){return c.perdido});
-        var ativosSoGP=ativosRec.filter(function(c){return c.fimGP&&!c.fimGF}).length;
-        var ativosSoGF=ativosRec.filter(function(c){return c.fimGF&&!c.fimGP}).length;
-        var ativosAmbos=ativosRec.filter(function(c){return c.fimGP&&c.fimGF}).length;
-        var ativosGP=ativosSoGP+ativosAmbos,ativosGF=ativosSoGF+ativosAmbos;
-        var mrrAtivoRec=ativosRec.reduce(function(a,c){return a+c.valorUltimo},0);
-        var reativacoesRec=listaClientesRec.filter(function(c){return c.reativacao});
-
-        var MN_CURTO_REC=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
-        var monthsList=[];
-        if(mesGlobalInicio&&mesMaisRecenteComDados){
-          var partsIni=mesGlobalInicio.split("-").map(Number);
-          var cursorMes=new Date(partsIni[0],partsIni[1]-1,1);
-          var partsFim=mesMaisRecenteComDados.split("-").map(Number);
-          var endMes=new Date(partsFim[0],partsFim[1]-1,1);
-          var guardMes=0;
-          while(cursorMes<=endMes&&guardMes<600){
-            monthsList.push(cursorMes.getFullYear()+"-"+String(cursorMes.getMonth()+1).padStart(2,"0"));
-            cursorMes.setMonth(cursorMes.getMonth()+1);
-            guardMes++;
-          }
-        }
-
-        var historicoRec=monthsList.map(function(ym){
-          var novos=listaClientesRec.filter(function(c){return c.primeiroMes===ym&&!c.baseInicial});
-          var perdidos=listaClientesRec.filter(function(c){return c.perdido&&c.mesPerda===ym});
-          var baseIni=listaClientesRec.filter(function(c){return c.baseInicial&&c.primeiroMes===ym}).length;
-          var acumulado=listaClientesRec.filter(function(c){return c.primeiroMes<=ym&&(!c.mesPerda||c.mesPerda>ym)}).length;
-          var mrrGanho=novos.reduce(function(a,c){return a+c.valorPrimeiro},0);
-          var mrrPerdido=perdidos.reduce(function(a,c){return a+c.valorUltimo},0);
-          return{ym:ym,label:MN_CURTO_REC[+ym.substring(5,7)-1]+"/"+ym.substring(2,4),novos:novos,perdidos:perdidos,baseIni:baseIni,semDados:!mesesComDadosSet[ym],saldo:novos.length-perdidos.length,acumulado:acumulado,mrrGanho:mrrGanho,mrrPerdido:mrrPerdido};
-        });
-        var maxEvolRec=Math.max.apply(null,historicoRec.map(function(h){return Math.max(h.novos.length,h.perdidos.length)}).concat([1]));
-
-        /* ===== Agregação por ANO do gráfico de Entradas/Perdas (visão alternativa, pedida) ===== */
-        var historicoRecAno=(function(){
-          var porAno={};
-          historicoRec.forEach(function(h){
-            var ano=h.ym.substring(0,4);
-            if(!porAno[ano])porAno[ano]={novos:[],perdidos:[],mrrGanho:0,mrrPerdido:0,acumuladoFim:0};
-            porAno[ano].novos=porAno[ano].novos.concat(h.novos);
-            porAno[ano].perdidos=porAno[ano].perdidos.concat(h.perdidos);
-            porAno[ano].mrrGanho+=h.mrrGanho;
-            porAno[ano].mrrPerdido+=h.mrrPerdido;
-            porAno[ano].acumuladoFim=h.acumulado;
-          });
-          return Object.keys(porAno).sort().map(function(ano){
-            var a=porAno[ano];
-            return{ym:ano,label:ano,novos:a.novos,perdidos:a.perdidos,saldo:a.novos.length-a.perdidos.length,acumulado:a.acumuladoFim,mrrGanho:a.mrrGanho,mrrPerdido:a.mrrPerdido};
-          });
-        })();
-        var dadosEntradasPerdas=visaoRec==="anual"?historicoRecAno:historicoRec;
-        var maxEvolRecView=Math.max.apply(null,dadosEntradasPerdas.map(function(h){return Math.max(h.novos.length,h.perdidos.length)}).concat([1]));
-
-        var last12=historicoRec.slice(-12);
-        var novos12=last12.reduce(function(a,h){return a+h.novos.length},0);
-        var perdidos12=last12.reduce(function(a,h){return a+h.perdidos.length},0);
-        var mrrGanho12=last12.reduce(function(a,h){return a+h.mrrGanho},0);
-        var mrrPerdido12=last12.reduce(function(a,h){return a+h.mrrPerdido},0);
-        /* Churn 12m = perdas na janela ÷ base média de recorrentes na janela (cliente que sai e volta conta como perda + captação) */
-        var baseMedia12=last12.length?last12.reduce(function(a,h){return a+h.acumulado},0)/last12.length:0;
-        var churnGeral=baseMedia12>0?(perdidos12/baseMedia12*100):0;
-        var perdasNoUltimoMes=mesMaisRecenteComDados?perdidosRecTodos.filter(function(c){return c.mesPerda===mesMaisRecenteComDados}).length:0;
+        var __R=calcRecorrentesEngine(entradas,canonCliente,visaoRec,d);
+        var GRACE_MESES=__R.GRACE_MESES,diffMeses=__R.diffMeses,somaMeses=__R.somaMeses,clsServRec=__R.clsServRec,chaveRecNome=__R.chaveRecNome,auditRec=__R.auditRec,cliRec=__R.cliRec,cfgRecIni=__R.cfgRecIni,consRecForcado=__R.consRecForcado,fixMojiRec=__R.fixMojiRec,primeiroRecChave=__R.primeiroRecChave,svEntradaRec=__R.svEntradaRec,cfgRec=__R.cfgRec,REC_ALIAS_PADRAO=__R.REC_ALIAS_PADRAO,REC_SEPARAR_PADRAO=__R.REC_SEPARAR_PADRAO,aliasRec=__R.aliasRec,jaEraRec=__R.jaEraRec,separarRec=__R.separarRec,inicioConfRec=__R.inicioConfRec,redirRec=__R.redirRec,chaveFinalRec=__R.chaveFinalRec,levRec=__R.levRec,tokFuzzy=__R.tokFuzzy,nomeTopRec=__R.nomeTopRec,mergeInto=__R.mergeInto,sugestoesRec=__R.sugestoesRec,dataMonths=__R.dataMonths,idxM=__R.idxM,lastIdxRec=__R.lastIdxRec,mesMaisRecenteComDados=__R.mesMaisRecenteComDados,mesGlobalInicio=__R.mesGlobalInicio,primeiroMesSv=__R.primeiroMesSv,mesesSemDadosRec=__R.mesesSemDadosRec,listaClientesRec=__R.listaClientesRec,emObservacaoRec=__R.emObservacaoRec,unificadosRec=__R.unificadosRec,nomesDatalistRec=__R.nomesDatalistRec,ativosRec=__R.ativosRec,perdidosRecTodos=__R.perdidosRecTodos,ativosSoGP=__R.ativosSoGP,ativosSoGF=__R.ativosSoGF,ativosAmbos=__R.ativosAmbos,ativosGP=__R.ativosGP,mrrAtivoRec=__R.mrrAtivoRec,reativacoesRec=__R.reativacoesRec,MN_CURTO_REC=__R.MN_CURTO_REC,monthsList=__R.monthsList,historicoRec=__R.historicoRec,maxEvolRec=__R.maxEvolRec,historicoRecAno=__R.historicoRecAno,dadosEntradasPerdas=__R.dadosEntradasPerdas,maxEvolRecView=__R.maxEvolRecView,last12=__R.last12,novos12=__R.novos12,perdidos12=__R.perdidos12,mrrGanho12=__R.mrrGanho12,mrrPerdido12=__R.mrrPerdido12,baseMedia12=__R.baseMedia12,churnGeral=__R.churnGeral,perdasNoUltimoMes=__R.perdasNoUltimoMes,mesesComDadosSet=__R.mesesComDadosSet,vistosRec=__R.vistosRec,mergesRec=__R.mergesRec,ativosGF=__R.ativosGF;
 
         var fDRec=function(s){if(!s)return"—";var p=s.split("-");return p[2]+"/"+p[1]+"/"+p[0]};
         var isMobRec=isMob;
@@ -26419,71 +26433,229 @@ function ParceirosView({data:d,dispatch:dp}){
   );
 }
 
-function MetasConsultor(){
+/* v527 — Aba METAS reescrita: números 100% reais, integrados às demais abas.
+   Fontes: Financeiro (entradas/NF → receita, MRR, ticket, captações, perdas, churn — mesmo motor da aba
+   Recorrentes), Clientes (AUM, carteira Gorila, Mile$), Interações (reuniões/contatos) e Relatórios
+   (particularidades.relatorios[mês].publicado). Os ALVOS são definidos pelo Igor, ficam salvos em
+   d.config.metasCfg (sincroniza com o Firestore) e o "atual" é sempre calculado — nunca digitado. */
+function MetasAlvoInput({valor,step,onCommit,cor}){
+  const[txt,sTxt]=useState(String(valor));
+  useEffect(function(){sTxt(String(valor))},[valor]);
+  var commit=function(){
+    var n=parseFloat(String(txt).replace(",","."));
+    if(isNaN(n)||n<0){sTxt(String(valor));return;}
+    if(n!==valor)onCommit(n);
+  };
+  return <input type="number" step={step||1} value={txt} onChange={function(e){sTxt(e.target.value)}} onBlur={commit}
+    onKeyDown={function(e){if(e.key==="Enter")e.target.blur()}}
+    style={{width:92,padding:"4px 6px",background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:6,color:cor||T.t2,fontSize:12,fontFamily:"'JetBrains Mono'"}}/>;
+}
+
+function MetasConsultor({data:d,dispatch:dp,onGoClient,goTo}){
   const[mTab,sMTab]=useState("okrs");
-  const[okrs,sOkrs]=useState([
-    {id:1,obj:"Crescimento de Receita",kr:[
-      {id:1,desc:"Atingir R$ 50k receita mensal",atual:37600,meta:50000,un:"R$"},
-      {id:2,desc:"Captar 5 novos clientes Patrimônio",atual:2,meta:5,un:"un"},
-      {id:3,desc:"Aumentar ticket médio para R$ 1.200",atual:992,meta:1200,un:"R$"},
-    ]},
-    {id:2,obj:"Excelência no Atendimento",kr:[
-      {id:4,desc:"100% dos clientes com reunião trimestral",atual:7,meta:9,un:"un"},
-      {id:5,desc:"NPS acima de 9.0",atual:8.6,meta:9.0,un:"nota"},
-      {id:6,desc:"Tempo resposta WhatsApp < 2h",atual:1.5,meta:2,un:"h"},
-    ]},
-    {id:3,obj:"Expansão Couri Mile$",kr:[
-      {id:7,desc:"10 assinantes Mile$",atual:3,meta:10,un:"un"},
-      {id:8,desc:"Clientes com Couri Mile$",atual:3,meta:10,un:"clis"},
-    ]},
-    {id:4,obj:"Desenvolvimento Profissional",kr:[
-      {id:9,desc:"Certificação CFP até Dez/26",atual:60,meta:100,un:"%"},
-      {id:10,desc:"12 conteúdos publicados no ano",atual:5,meta:12,un:"un"},
-    ]},
-  ]);
+  const[verTodos,sVerTodos]=useState({});
+  const hoje=new Date();
+  const pad2=function(n){return String(n).padStart(2,"0")};
+  const ymHoje=hoje.getFullYear()+"-"+pad2(hoje.getMonth()+1);
+  const anoHoje=String(hoje.getFullYear());
+  const MESES_N=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+  const lblYM=function(ym){return MESES_N[+ym.substring(5,7)-1]+"/"+ym.substring(2,4)};
+  const cl=(d&&d.cl)||[];
+  const its=(d&&d.it)||[];
+  const entradas=(d&&d.fin&&d.fin.entradas)||[];
+  const recCfg=d&&d.config&&d.config.recCfg;
 
-  const[conquistas]=useState([
-    {id:1,nome:"Primeiro Cliente",desc:"Conquistou o primeiro cliente",ic:"🏆",dt:"2024-03",ok:true},
-    {id:2,nome:"R$ 1M sob gestão",desc:"Patrimônio sob gestão atingiu R$1M",ic:"💎",dt:"2024-08",ok:true},
-    {id:3,nome:"10 Clientes",desc:"Base atingiu 10 clientes ativos",ic:"👥",dt:"2025-03",ok:true},
-    {id:4,nome:"R$ 10M sob gestão",desc:"Patrimônio sob gestão atingiu R$10M",ic:"🏅",dt:"2025-11",ok:true},
-    {id:5,nome:"R$ 30k receita",desc:"Receita mensal atingiu R$30k",ic:"📈",dt:"2025-09",ok:true},
-    {id:6,nome:"R$ 50k receita",desc:"Receita mensal atinge R$50k",ic:"🚀",dt:"",ok:false},
-    {id:7,nome:"20 Clientes",desc:"Base atinge 20 clientes ativos",ic:"🌟",dt:"",ok:false},
-    {id:8,nome:"R$ 50M sob gestão",desc:"Patrimônio sob gestão atinge R$50M",ic:"👑",dt:"",ok:false},
-  ]);
+  /* ---- Motor de recorrentes (o mesmo da aba Financeiro › Recorrentes) ---- */
+  const R=React.useMemo(function(){
+    if(!entradas.length)return null;
+    try{return calcRecorrentesEngine(entradas,buildCanonCliente(entradas),"mensal",d);}
+    catch(e){console.warn("Metas: motor de recorrentes falhou",e);return null;}
+  },[entradas,recCfg]);
 
-  const[streaks]=useState({reunioesSemana:3,diasSemFaltar:45,clientesContatados:7,relatoriosEnviados:8});
+  /* ---- Alvos (definidos pelo usuário, salvos no Hub) ---- */
+  const cfgMetas=(d&&d.config&&d.config.metasCfg)||{};
+  const alvosSalvos=cfgMetas.alvos||{};
+  const DEF={receitaMes:70000,mrr:65000,ticket:1500,clientes:55,captAno:12,churnMax:20,aum:50000000,carteira:90,reuniaoTri:100,contatosMes:80,relatorios:100,miles:10};
+  const alvo=function(k){return alvosSalvos[k]!=null?+alvosSalvos[k]:DEF[k]};
+  const ehPadrao=function(k){return alvosSalvos[k]==null};
+  const setAlvo=function(k,v){
+    var n=Object.assign({},alvosSalvos);
+    if(v===null)delete n[k];else n[k]=v;
+    dp({t:"CONFIG_SET",p:{key:"metasCfg",value:Object.assign({},cfgMetas,{alvos:n})}});
+  };
 
-  
-  var totalKRs=0;var completedKRs=0;
-  okrs.forEach(function(o){o.kr.forEach(function(k){totalKRs++;if(k.atual>=k.meta)completedKRs++})});
-  var overallPct=totalKRs>0?((completedKRs/totalKRs)*100):0;
+  /* ---- Receita (todas as entradas importadas) ---- */
+  const porMes={};
+  entradas.forEach(function(e){if(e&&e.data&&+e.valor){var m=String(e.data).substring(0,7);porMes[m]=(porMes[m]||0)+(+e.valor)}});
+  const mesesRec=Object.keys(porMes).sort();
+  const mesRecRef=mesesRec.length?mesesRec[mesesRec.length-1]:null;
+  const receitaMes=mesRecRef?porMes[mesRecRef]:0;
+  const receitaAno=mesesRec.filter(function(m){return m.substring(0,4)===anoHoje}).reduce(function(a,m){return a+porMes[m]},0);
 
-  var upKR=function(okrId,krId,field,val){
-    sOkrs(function(p){return p.map(function(o){
-      if(o.id!==okrId)return o;
-      return Object.assign({},o,{kr:o.kr.map(function(k){
-        if(k.id!==krId)return k;
-        var up={};up[field]=val;return Object.assign({},k,up);
-      })});
-    })});
+  /* ---- Recorrentes (GP/GF) ---- */
+  const ativosN=R?R.ativosRec.length:0;
+  const mrr=R?R.mrrAtivoRec:0;
+  const ticket=ativosN>0?mrr/ativosN:0;
+  const captAno=R?R.historicoRec.filter(function(h){return h.ym.substring(0,4)===anoHoje}).reduce(function(a,h){return a+h.novos.length},0):0;
+  const perdasAno=R?R.historicoRec.filter(function(h){return h.ym.substring(0,4)===anoHoje}).reduce(function(a,h){return a+h.perdidos.length},0):0;
+  const churn12=R?R.churnGeral:0;
+
+  /* ---- Clientes do cadastro ---- */
+  const clAtivos=cl.filter(function(c){return c.status!=="encerrado"&&c.status!=="inativo"});
+  const getPat=function(c){
+    var p=c.patGorila||c.pat||0;
+    if(p===0&&c._ativosImport&&c._ativosImport.length>0){p=c._ativosImport.reduce(function(s,at){return s+(+at.posR||+at.qtd*+at.pa||0)},0);}
+    return p;
+  };
+  const aum=clAtivos.reduce(function(a,c){return a+getPat(c)},0);
+  const clComPat=clAtivos.filter(function(c){return getPat(c)>0});
+  const diasGorila=function(c){return c._ativosTs?Math.floor((hoje.getTime()-new Date(c._ativosTs).getTime())/864e5):null};
+  const carteirasOk=clComPat.filter(function(c){var x=diasGorila(c);return x!==null&&x<=30});
+  const carteiraPct=clComPat.length?carteirasOk.length/clComPat.length*100:0;
+  const clMiles=clAtivos.filter(function(c){return Array.isArray(c.sv)&&c.sv.includes("milhas")});
+
+  /* ---- Atendimento e rotina ---- */
+  const clAtend=clAtivos.filter(function(c){return Array.isArray(c.sv)&&(c.sv.includes("patrimonio")||c.sv.includes("planejamento"))});
+  const itCid=function(i){return i.cid||i.cliId};
+  const itData=function(i){return String(i.data||i.dt||"").substring(0,10)};
+  const qIni=hoje.getFullYear()+"-"+pad2(Math.floor(hoje.getMonth()/3)*3+1)+"-01";
+  const mesIni=ymHoje+"-01";
+  const nomeTri="T"+(Math.floor(hoje.getMonth()/3)+1)+"/"+anoHoje;
+  const ultReuniao={},ultContato={};
+  its.forEach(function(i){
+    var id=itCid(i),dt=itData(i);if(!id||!dt)return;
+    if(!ultContato[id]||dt>ultContato[id])ultContato[id]=dt;
+    if((i.tipo==="reuniao"||i.tipo==="visita")&&(!ultReuniao[id]||dt>ultReuniao[id]))ultReuniao[id]=dt;
+  });
+  const comReuniaoTri=clAtend.filter(function(c){return ultReuniao[c.id]&&ultReuniao[c.id]>=qIni});
+  const semReuniaoTri=clAtend.filter(function(c){return!(ultReuniao[c.id]&&ultReuniao[c.id]>=qIni)});
+  const reuniaoPct=clAtend.length?comReuniaoTri.length/clAtend.length*100:0;
+  const comContatoMes=clAtend.filter(function(c){return ultContato[c.id]&&ultContato[c.id]>=mesIni});
+  const semContatoMes=clAtend.filter(function(c){return!(ultContato[c.id]&&ultContato[c.id]>=mesIni)});
+  const contatoPct=clAtend.length?comContatoMes.length/clAtend.length*100:0;
+  const mesRef=new Date(hoje.getFullYear(),hoje.getMonth()-1,1);
+  const mesRefKey=mesRef.getFullYear()+"-"+pad2(mesRef.getMonth()+1);
+  const relEnviado=function(c){var r=c.particularidades&&c.particularidades.relatorios&&c.particularidades.relatorios[mesRefKey];return!!(r&&r.publicado)};
+  const relOk=clAtend.filter(relEnviado);
+  const relPend=clAtend.filter(function(c){return!relEnviado(c)});
+  const relPct=clAtend.length?relOk.length/clAtend.length*100:0;
+  const diasDesde=function(dt){return dt?Math.floor((hoje.getTime()-new Date(dt+"T12:00:00").getTime())/864e5):null};
+
+  /* ---- OKRs reais ---- */
+  const fmtV=function(v,un){
+    if(un==="R$")return fm(v);
+    if(un==="R$M")return "R$ "+(v/1e6).toFixed(2).replace(".",",")+" mi";
+    if(un==="%")return (Math.round(v*10)/10).toString().replace(".",",")+"%";
+    return String(Math.round(v*10)/10).replace(".",",");
+  };
+  const okrs=[
+    {id:"rec",obj:"Receita e ticket médio",ic:"💰",go:"financeiro",goL:"Abrir Financeiro",kr:[
+      {k:"receitaMes",desc:"Receita do mês ("+(mesRecRef?lblYM(mesRecRef)+(mesRecRef===ymHoje?", parcial":""):"sem dados")+")",atual:receitaMes,un:"R$",step:1000,fonte:"Financeiro › entradas importadas (todas as receitas do mês)"},
+      {k:"mrr",desc:"Receita recorrente mensal (GP + GF)",atual:mrr,un:"R$",step:1000,fonte:"Financeiro › Recorrentes (último pagamento de cada cliente ativo)"},
+      {k:"ticket",desc:"Ticket médio recorrente",atual:ticket,un:"R$",step:50,fonte:"Receita recorrente ÷ clientes recorrentes ativos"},
+    ]},
+    {id:"cli",obj:"Clientes e captação",ic:"👥",go:"financeiro",goL:"Abrir Financeiro › Recorrentes",kr:[
+      {k:"clientes",desc:"Clientes recorrentes ativos",atual:ativosN,un:"un",step:1,fonte:"Financeiro › Recorrentes (GP/GF; perda = 2 meses sem pagar)"},
+      {k:"captAno",desc:"Captações em "+anoHoje+" (inclui reativações)",atual:captAno,un:"un",step:1,fonte:"Financeiro › Recorrentes › Entradas e Perdas"},
+      {k:"churnMax",desc:"Churn dos últimos 12 meses (máx.)",atual:churn12,un:"%",menor:true,step:1,fonte:"Perdas ÷ base média de recorrentes (12 meses)"},
+    ]},
+    {id:"aum",obj:"AUM e carteira",ic:"💎",go:"clients",goL:"Abrir Clientes",kr:[
+      {k:"aum",desc:"Patrimônio sob gestão (AUM)",atual:aum,un:"R$M",step:1000000,fonte:"Clientes › patrimônio (Gorila/cadastro) dos clientes ativos"},
+      {k:"carteira",desc:"Carteiras atualizadas nos últimos 30 dias",atual:carteiraPct,un:"%",step:5,fonte:"Clientes › data da última importação do Gorila ("+carteirasOk.length+"/"+clComPat.length+")"},
+      {k:"miles",desc:"Clientes com Couri Mile$",atual:clMiles.length,un:"un",step:1,fonte:"Clientes › serviço Milhas"},
+    ]},
+    {id:"atd",obj:"Atendimento e rotina",ic:"🤝",go:"interacoes",goL:"Abrir Interações",kr:[
+      {k:"reuniaoTri",desc:"Clientes com reunião no trimestre ("+nomeTri+")",atual:reuniaoPct,un:"%",step:5,fonte:"Interações › reunião/visita ("+comReuniaoTri.length+"/"+clAtend.length+" clientes GP/GF)"},
+      {k:"contatosMes",desc:"Clientes contatados no mês",atual:contatoPct,un:"%",step:5,fonte:"Interações › qualquer contato em "+lblYM(ymHoje)+" ("+comContatoMes.length+"/"+clAtend.length+")"},
+      {k:"relatorios",desc:"Relatórios de "+lblYM(mesRefKey)+" enviados",atual:relPct,un:"%",step:5,fonte:"Relatórios › publicados ("+relOk.length+"/"+clAtend.length+")"},
+    ]},
+  ];
+  okrs.forEach(function(o){o.kr.forEach(function(k){
+    k.meta=alvo(k.k);
+    k.semAlvo=!(k.meta>0);
+    k.done=!k.semAlvo&&(k.menor?k.atual<=k.meta:k.atual>=k.meta);
+    k.pct=k.semAlvo?0:k.menor?(k.atual<=k.meta?100:Math.max(0,k.meta/k.atual*100)):Math.min(100,k.atual/k.meta*100);
+  })});
+  var totalKRs=0,completedKRs=0,somaPct=0;
+  okrs.forEach(function(o){o.kr.forEach(function(k){if(k.semAlvo)return;totalKRs++;if(k.done)completedKRs++;somaPct+=k.pct})});
+  const overallPct=totalKRs>0?somaPct/totalKRs:0;
+  const corPct=function(p){return p>=100?T.green:p>=60?T.gold:T.orange};
+
+  /* ---- Conquistas (derivadas de números reais) ---- */
+  const primeiraRec=mesesRec.length?mesesRec[0]:null;
+  const primeiroMesRec=function(lim){for(var i=0;i<mesesRec.length;i++){if(porMes[mesesRec[i]]>=lim)return mesesRec[i]}return null};
+  const primeiroMesCli=function(n){if(!R)return null;var h=R.historicoRec.find(function(x){return x.acumulado>=n});return h?h.ym:null};
+  const conquistas=[];
+  conquistas.push({nome:"Primeira receita",desc:"Primeiro lançamento no faturamento importado",ic:"🏆",ok:!!primeiraRec,dt:primeiraRec?lblYM(primeiraRec):""});
+  [10,20,30,50].forEach(function(n){var m=primeiroMesCli(n);conquistas.push({nome:n+" clientes",desc:"Base atinge "+n+" clientes recorrentes ativos",ic:n>=30?"🌟":"👥",ok:ativosN>=n||!!m,dt:m?lblYM(m):""})});
+  [30000,50000,70000,100000].forEach(function(v){var m=primeiroMesRec(v);conquistas.push({nome:"R$ "+(v/1000)+"k de receita",desc:"Receita mensal (entradas) atinge R$ "+(v/1000)+"k",ic:v>=70000?"🚀":"📈",ok:!!m,dt:m?lblYM(m):""})});
+  [1e6,1e7,5e7,1e8].forEach(function(v){conquistas.push({nome:"R$ "+(v>=1e6?(v/1e6)+"M":v)+" sob gestão",desc:"Patrimônio sob gestão atinge R$ "+(v/1e6)+(v===1e6?" milhão":" milhões"),ic:v>=5e7?"👑":v>=1e7?"🏅":"💎",ok:aum>=v,dt:""})});
+  conquistas.push({nome:"Primeiro assinante Mile$",desc:"Cliente com Couri Mile$ cadastrado",ic:"✈️",ok:clMiles.length>0,dt:""});
+
+  /* ---- Próximos marcos: KRs ainda não atingidos, mais próximos primeiro ---- */
+  const faltam=[];
+  okrs.forEach(function(o){o.kr.forEach(function(k){if(!k.semAlvo&&!k.done)faltam.push(k)})});
+  faltam.sort(function(a,b){return b.pct-a.pct});
+  const textoFalta=function(k){
+    var f=k.menor?k.atual-k.meta:k.meta-k.atual;
+    if(k.un==="R$"||k.un==="R$M")return (k.menor?"reduzir ":"faltam ")+fmtV(f,k.un);
+    if(k.un==="%")return (k.menor?"reduzir ":"faltam ")+fmtV(f,"%").replace("%"," p.p.");
+    return (k.menor?"reduzir ":"faltam ")+fmtV(f,"un");
+  };
+
+  /* ---- Evolução 12 meses ---- */
+  const evol=(function(){
+    var out=[];
+    for(var i=11;i>=0;i--){
+      var dt=new Date(hoje.getFullYear(),hoje.getMonth()-i,1);
+      var ym=dt.getFullYear()+"-"+pad2(dt.getMonth()+1);
+      var h=R?R.historicoRec.find(function(x){return x.ym===ym}):null;
+      out.push({ym:ym,rec:porMes[ym]||0,novos:h?h.novos.length:0,perdidos:h?h.perdidos.length:0,base:h?h.acumulado:null});
+    }
+    return out;
+  })();
+  const maxRec=Math.max.apply(null,evol.map(function(x){return x.rec}).concat([1]));
+
+  const semDados=entradas.length===0;
+
+  /* ---- Listas da aba Rotina ---- */
+  const listaCard=function(chave,titulo,ic,itens,render,vazio){
+    var aberto=!!verTodos[chave];
+    var lista=aberto?itens:itens.slice(0,10);
+    return (
+      <Cd style={{padding:18,flex:1,minWidth:260}} hov={false}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+          <h4 style={{margin:0,fontSize:13,fontWeight:700,color:T.gold}}>{ic} {titulo}</h4>
+          <Bg c={itens.length===0?"green":"orange"}>{itens.length}</Bg>
+        </div>
+        {itens.length===0?<div style={{fontSize:11,color:T.green,padding:"8px 0"}}>✅ {vazio}</div>:lista.map(function(c,i){return (
+          <div key={c.id||i} onClick={function(){if(onGoClient)onGoClient(c)}} title="Abrir cliente" style={{display:"flex",justifyContent:"space-between",gap:8,padding:"6px 0",borderTop:i>0?"1px solid rgba(255,255,255,0.03)":"none",fontSize:11,cursor:onGoClient?"pointer":"default"}}>
+            <span style={{fontWeight:600,color:T.t1}}>{c.nome}</span>
+            <span style={{color:T.t3,textAlign:"right"}}>{render(c)}</span>
+          </div>
+        )})}
+        {itens.length>10&&<button onClick={function(){var n=Object.assign({},verTodos);n[chave]=!aberto;sVerTodos(n)}} style={{marginTop:8,background:"none",border:"none",color:T.cyan,fontSize:10,cursor:"pointer",padding:0}}>{aberto?"mostrar menos":"ver todos ("+itens.length+")"}</button>}
+      </Cd>
+    );
   };
 
   return (
     <div>
       <div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap"}}>
-        {[{id:"okrs",l:"🎯 OKRs"},{id:"conquistas",l:"🏆 Conquistas"},{id:"streaks",l:"🔥 Streaks"},{id:"ranking",l:"📊 Desempenho"}].map(function(t){return (
+        {[{id:"okrs",l:"🎯 OKRs"},{id:"conquistas",l:"🏆 Conquistas"},{id:"rotina",l:"🔄 Rotina"},{id:"ranking",l:"📊 Desempenho"}].map(function(t){return (
           <button key={t.id} onClick={function(){sMTab(t.id)}} style={{padding:"8px 16px",borderRadius:12,fontSize:11,fontWeight:600,cursor:"pointer",border:mTab===t.id?"1.5px solid "+T.gold:"1px solid rgba(255,255,255,0.04)",background:mTab===t.id?T.goldD:"transparent",color:mTab===t.id?T.gold:T.t3}}>{t.l}</button>
         )})}
       </div>
 
-      {}
+      {semDados&&<div style={{padding:"10px 14px",marginBottom:12,borderRadius:10,background:"rgba(251,191,36,0.08)",border:"1px solid rgba(251,191,36,0.2)",fontSize:11,color:T.orange}}>
+        ⚠️ Ainda não há entradas importadas — receita, captações e churn aparecem zerados. Importe as planilhas de NF em Financeiro › Importar para alimentar essas metas.
+      </div>}
+
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
         {[
           {l:"PROGRESSO GERAL",v:overallPct.toFixed(0)+"%",c:overallPct>=75?T.green:overallPct>=50?T.gold:T.orange},
-          {l:"KRs CONCLUÍDOS",v:completedKRs+"/"+totalKRs,c:T.cyan},
-          {l:"OBJETIVOS",v:String(okrs.length),c:T.purple},
+          {l:"METAS ATINGIDAS",v:completedKRs+"/"+totalKRs,c:T.cyan},
+          {l:"RECEITA RECORRENTE",v:fm(mrr),c:T.green},
           {l:"CONQUISTAS",v:conquistas.filter(function(c){return c.ok}).length+"/"+conquistas.length,c:T.gold},
         ].map(function(k,i){return (
           <Cd key={i} style={{padding:"12px 16px",flex:1,minWidth:120}} hov={false} glow={i===0}>
@@ -26493,50 +26665,49 @@ function MetasConsultor(){
         )})}
       </div>
 
-      {}
       {mTab==="okrs" && (
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div style={{fontSize:10,color:T.t3,lineHeight:1.5}}>O <b>atual</b> vem sempre dos dados reais do Hub. Só o <b>alvo</b> é editável — digite o novo valor e saia do campo (ou Enter); ele fica salvo e sincronizado.</div>
           {okrs.map(function(o){
-            var krDone=o.kr.filter(function(k){return k.atual>=k.meta}).length;
-            var objPct=o.kr.length>0?((krDone/o.kr.length)*100):0;
+            var com=o.kr.filter(function(k){return!k.semAlvo});
+            var krDone=com.filter(function(k){return k.done}).length;
+            var objPct=com.length>0?com.reduce(function(a,k){return a+k.pct},0)/com.length:0;
             return (
               <Cd key={o.id} style={{padding:20}} hov={false}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
                   <div>
-                    <div style={{fontSize:15,fontWeight:700}}>{o.obj}</div>
-                    <div style={{fontSize:10,color:T.t3,marginTop:2}}>{krDone}/{o.kr.length} resultados-chave concluídos</div>
+                    <div style={{fontSize:15,fontWeight:700}}>{o.ic} {o.obj}</div>
+                    <div style={{fontSize:10,color:T.t3,marginTop:2}}>{krDone}/{com.length} metas atingidas{goTo&&o.go?<span> · <button onClick={function(){goTo(o.go)}} style={{background:"none",border:"none",color:T.cyan,fontSize:10,cursor:"pointer",padding:0,textDecoration:"underline"}}>{o.goL}</button></span>:null}</div>
                   </div>
-                  <div style={{width:48,height:48,borderRadius:"50%",border:"3px solid "+(objPct>=100?T.green:objPct>=50?T.gold:T.orange),display:"flex",alignItems:"center",justifyContent:"center"}}>
-                    <span style={{fontSize:13,fontWeight:800,color:objPct>=100?T.green:T.gold}}>{objPct.toFixed(0)}%</span>
+                  <div style={{width:48,height:48,borderRadius:"50%",border:"3px solid "+corPct(objPct),display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    <span style={{fontSize:13,fontWeight:800,color:corPct(objPct)}}>{objPct.toFixed(0)}%</span>
                   </div>
                 </div>
                 {o.kr.map(function(k){
-                  var pct=k.meta>0?Math.min(100,(k.atual/k.meta)*100):0;
-                  var done=k.atual>=k.meta;
                   return (
-                    <div key={k.id} style={{padding:"12px 0",borderTop:"1px solid rgba(255,255,255,0.03)"}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                    <div key={k.k} style={{padding:"12px 0",borderTop:"1px solid rgba(255,255,255,0.03)"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,gap:8,flexWrap:"wrap"}}>
                         <div style={{display:"flex",alignItems:"center",gap:6}}>
-                          <span style={{fontSize:14}}>{done?"✅":"⬜"}</span>
-                          <span style={{fontSize:12,fontWeight:600,textDecoration:done?"line-through":"none",color:done?T.t3:T.t1}}>{k.desc}</span>
+                          <span style={{fontSize:14}}>{k.done?"✅":"⬜"}</span>
+                          <span style={{fontSize:12,fontWeight:600,color:k.done?T.t3:T.t1}}>{k.desc}</span>
                         </div>
-                        <span style={{fontSize:11,fontWeight:700,color:done?T.green:T.gold,fontFamily:"'JetBrains Mono'"}}>
-                          {k.un==="R$"?fm(k.atual):k.atual} / {k.un==="R$"?fm(k.meta):k.meta}{k.un!=="R$"&&k.un!=="un"?" "+k.un:""}
+                        <span style={{fontSize:11,fontWeight:700,color:k.done?T.green:T.gold,fontFamily:"'JetBrains Mono'"}}>
+                          {fmtV(k.atual,k.un)} {k.menor?"≤":"/"} {k.semAlvo?"—":fmtV(k.meta,k.un)}
                         </span>
                       </div>
                       <div style={{display:"flex",alignItems:"center",gap:8}}>
                         <div style={{flex:1,height:6,background:"rgba(255,255,255,0.03)",borderRadius:3,overflow:"hidden"}}>
-                          <div style={{height:"100%",width:pct+"%",background:done?T.green:pct>=50?T.gold:T.orange,borderRadius:3,transition:"width 0.5s"}}/>
+                          <div style={{height:"100%",width:k.pct+"%",background:corPct(k.pct),borderRadius:3,transition:"width 0.5s"}}/>
                         </div>
-                        <span style={{fontSize:10,fontWeight:700,color:done?T.green:T.t3,minWidth:32}}>{pct.toFixed(0)}%</span>
+                        <span style={{fontSize:10,fontWeight:700,color:k.done?T.green:T.t3,minWidth:32}}>{k.semAlvo?"—":k.pct.toFixed(0)+"%"}</span>
                       </div>
-                      {}
-                      <div style={{display:"flex",gap:6,marginTop:6,alignItems:"center"}}>
-                        <span style={{fontSize:9,color:T.t3}}>Atual:</span>
-                        <input type="number" step={k.un==="R$"?100:k.un==="nota"?0.1:1} value={k.atual} onChange={function(e){upKR(o.id,k.id,"atual",+e.target.value)}} style={{width:80,padding:"4px 6px",background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.04)",borderRadius:6,color:T.gold,fontSize:12,fontWeight:700,fontFamily:"'JetBrains Mono'",outline:"none"}}/>
-                        <span style={{fontSize:9,color:T.t3}}>Meta:</span>
-                        <input type="number" step={k.un==="R$"?100:k.un==="nota"?0.1:1} value={k.meta} onChange={function(e){upKR(o.id,k.id,"meta",+e.target.value)}} style={{width:80,padding:"4px 6px",background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.04)",borderRadius:6,color:T.t2,fontSize:12,fontFamily:"'JetBrains Mono'",outline:"none"}}/>
+                      <div style={{display:"flex",gap:6,marginTop:6,alignItems:"center",flexWrap:"wrap"}}>
+                        <span style={{fontSize:9,color:T.t3}}>Alvo{k.un==="R$M"?" (R$)":k.un==="%"?" (%)":""}:</span>
+                        <MetasAlvoInput valor={k.meta} step={k.step} cor={T.gold} onCommit={function(v){setAlvo(k.k,v)}}/>
+                        {ehPadrao(k.k)?<span style={{fontSize:9,color:T.t3,fontStyle:"italic"}}>alvo padrão — ajuste ao seu objetivo</span>
+                          :<button onClick={function(){setAlvo(k.k,null)}} style={{background:"none",border:"none",color:T.t3,fontSize:9,cursor:"pointer",textDecoration:"underline",padding:0}}>restaurar padrão</button>}
                       </div>
+                      <div style={{fontSize:9,color:T.t3,marginTop:4,opacity:.8}}>Fonte: {k.fonte}</div>
                     </div>
                   );
                 })}
@@ -26546,83 +26717,50 @@ function MetasConsultor(){
         </div>
       )}
 
-      {}
       {mTab==="conquistas" && (
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:10}}>
-          {conquistas.map(function(c){return (
-            <Cd key={c.id} style={{padding:18,textAlign:"center",opacity:c.ok?1:0.4}} hov={false} glow={c.ok}>
+          {conquistas.map(function(c,i){return (
+            <Cd key={i} style={{padding:18,textAlign:"center",opacity:c.ok?1:0.4}} hov={false} glow={c.ok}>
               <div style={{fontSize:36,marginBottom:6}}>{c.ic}</div>
               <div style={{fontSize:14,fontWeight:700,color:c.ok?T.gold:T.t3}}>{c.nome}</div>
               <div style={{fontSize:11,color:T.t3,marginTop:4,lineHeight:1.5}}>{c.desc}</div>
-              {c.ok && <div style={{marginTop:8,fontSize:10,fontWeight:600,color:T.green}}>✅ Conquistado em {c.dt}</div>}
-              {!c.ok && <div style={{marginTop:8,fontSize:10,fontWeight:600,color:T.t3}}>🔒 Não desbloqueado</div>}
+              {c.ok&&<div style={{marginTop:8,fontSize:10,fontWeight:600,color:T.green}}>✅ {c.dt?"Conquistado em "+c.dt:"Conquistado"}</div>}
+              {!c.ok&&<div style={{marginTop:8,fontSize:10,fontWeight:600,color:T.t3}}>🔒 Não desbloqueado</div>}
             </Cd>
           )})}
         </div>
       )}
 
-      {}
-      {mTab==="streaks" && (
-        <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
-          <Cd style={{padding:20,flex:1,minWidth:260}} hov={false}>
-            <h4 style={{margin:"0 0 16px",fontSize:14,fontWeight:700,color:T.gold}}>🔥 Sequências Ativas</h4>
-            {[
-              {l:"Reuniões esta semana",v:streaks.reunioesSemana,meta:5,ic:"📅",c:T.cyan},
-              {l:"Dias consecutivos de trabalho",v:streaks.diasSemFaltar,meta:60,ic:"💪",c:T.green},
-              {l:"Clientes contatados no mês",v:streaks.clientesContatados,meta:9,ic:"📞",c:T.purple},
-              {l:"Relatórios enviados no mês",v:streaks.relatoriosEnviados,meta:9,ic:"📄",c:T.gold},
-            ].map(function(s,i){var pct=s.meta>0?Math.min(100,(s.v/s.meta)*100):0;return (
-              <div key={i} style={{padding:"14px 0",borderBottom:i<3?"1px solid rgba(255,255,255,0.03)":"none"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                  <div style={{display:"flex",gap:8,alignItems:"center"}}><span style={{fontSize:18}}>{s.ic}</span><span style={{fontSize:13,fontWeight:600}}>{s.l}</span></div>
-                  <span style={{fontSize:18,fontWeight:800,color:s.c,fontFamily:"'JetBrains Mono'"}}>{s.v}/{s.meta}</span>
-                </div>
-                <div style={{height:6,background:"rgba(255,255,255,0.03)",borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",width:pct+"%",background:s.c,borderRadius:3,opacity:.7}}/></div>
-              </div>
-            )})}
-          </Cd>
-          <Cd style={{padding:20,flex:1,minWidth:220}} hov={false}>
-            <h4 style={{margin:"0 0 16px",fontSize:14,fontWeight:700,color:T.gold}}>📅 Atividade Recente</h4>
+      {mTab==="rotina" && (
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div style={{fontSize:10,color:T.t3,lineHeight:1.5}}>Pendências de atendimento calculadas das abas Clientes, Interações e Relatórios (clientes GP/GF ativos: {clAtend.length}).</div>
+          <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
+            {listaCard("reu","Sem reunião em "+nomeTri,"🤝",semReuniaoTri.slice().sort(function(a,b){return String(ultReuniao[a.id]||"").localeCompare(String(ultReuniao[b.id]||""))}),function(c){var u=ultReuniao[c.id];return u?"última: "+u.split("-").reverse().join("/"):"nunca registrada"},"Todos os clientes tiveram reunião neste trimestre")}
+            {listaCard("cont","Sem contato em "+lblYM(ymHoje),"📞",semContatoMes.slice().sort(function(a,b){return String(ultContato[a.id]||"").localeCompare(String(ultContato[b.id]||""))}),function(c){var u=ultContato[c.id];var dd=diasDesde(u);return u?"há "+dd+" dias":"sem interação"},"Todos foram contatados neste mês")}
+          </div>
+          <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
+            {listaCard("rel","Relatório de "+lblYM(mesRefKey)+" não enviado","📄",relPend,function(){return "pendente"},"Todos os relatórios do mês foram enviados")}
+            {listaCard("gor","Carteira sem atualização (>30 dias)","📥",clComPat.filter(function(c){var x=diasGorila(c);return x===null||x>30}).sort(function(a,b){return (diasGorila(b)==null?9999:diasGorila(b))-(diasGorila(a)==null?9999:diasGorila(a))}),function(c){var x=diasGorila(c);return x===null?"sem importação":"há "+x+" dias"},"Todas as carteiras estão em dia")}
+          </div>
+          <Cd style={{padding:18}} hov={false}>
+            <h4 style={{margin:"0 0 12px",fontSize:13,fontWeight:700,color:T.gold}}>📅 Atividade recente</h4>
             {(function(){
-              /* Atividade Recente — pega dos últimos itens reais do banco (interações + leads + clientes recentes).
-                 Antes era hardcoded com 6 atividades fake. Agora é gerado dinamicamente. */
               var atividades=[];
-              
               (d.lds||[]).slice().sort(function(a,b){return String(b.dtCriado||"").localeCompare(String(a.dtCriado||""))}).slice(0,3).forEach(function(l){
                 if(l.dtCriado)atividades.push({a:"Novo lead — "+l.nome,tp:l.dtCriado,ic:"🎯",ts:new Date(l.dtCriado).getTime()});
               });
-              
-              (d.cl||[]).filter(function(c){return c.dtCaptacao}).slice().sort(function(a,b){return String(b.dtCaptacao).localeCompare(String(a.dtCaptacao))}).slice(0,3).forEach(function(c){
+              cl.filter(function(c){return c.dtCaptacao}).slice().sort(function(a,b){return String(b.dtCaptacao).localeCompare(String(a.dtCaptacao))}).slice(0,3).forEach(function(c){
                 atividades.push({a:"Cliente captado — "+c.nome,tp:c.dtCaptacao,ic:"✨",ts:new Date(c.dtCaptacao).getTime()});
               });
-              
-              (d.it||[]).slice().sort(function(a,b){return (b.data||"").localeCompare(a.data||"")}).slice(0,3).forEach(function(i){
-                var cli=(d.cl||[]).find(function(x){return x.id===i.cid});
-                if(cli)atividades.push({a:(i.tipo||"Interação")+" — "+cli.nome,tp:i.data||"",ic:"📋",ts:new Date(i.data||0).getTime()});
+              its.slice().sort(function(a,b){return itData(b).localeCompare(itData(a))}).slice(0,3).forEach(function(i){
+                var cli=cl.find(function(x){return x.id===itCid(i)});
+                if(cli)atividades.push({a:(i.tipo||"Interação")+" — "+cli.nome,tp:itData(i),ic:"📋",ts:new Date(itData(i)||0).getTime()});
               });
-              
-              atividades.sort(function(a,b){return b.ts-a.ts});
-              atividades=atividades.slice(0,6);
-              if(atividades.length===0){
-                return <div style={{padding:"30px 10px",textAlign:"center",color:T.t3,fontSize:11}}>
-                  <div style={{fontSize:24,marginBottom:8,opacity:.4}}>📅</div>
-                  <div>Nenhuma atividade ainda</div>
-                  <div style={{fontSize:9,marginTop:4,opacity:.7}}>Cadastre leads, clientes ou registre interações pra ver aqui</div>
-                </div>;
-              }
-              
-              var fmTempo=function(dt){
-                if(!dt)return "";
-                var diff=Date.now()-new Date(dt).getTime();
-                var dias=Math.floor(diff/(86400000));
-                if(dias===0)return "hoje";
-                if(dias===1)return "1d atrás";
-                if(dias<30)return dias+"d atrás";
-                if(dias<365)return Math.floor(dias/30)+"mo atrás";
-                return Math.floor(dias/365)+"y atrás";
-              };
+              atividades=atividades.filter(function(a){return!isNaN(a.ts)}).sort(function(a,b){return b.ts-a.ts}).slice(0,6);
+              if(atividades.length===0)return <div style={{padding:"20px 10px",textAlign:"center",color:T.t3,fontSize:11}}>Nenhuma atividade ainda</div>;
+              var fmTempo=function(dt){var dias=Math.floor((Date.now()-new Date(dt).getTime())/86400000);if(dias<=0)return "hoje";if(dias===1)return "1d atrás";if(dias<30)return dias+"d atrás";if(dias<365)return Math.floor(dias/30)+"m atrás";return Math.floor(dias/365)+"a atrás"};
               return atividades.map(function(a,i){return (
-                <div key={i} style={{display:"flex",gap:10,padding:"8px 0",borderBottom:i<atividades.length-1?"1px solid rgba(255,255,255,0.03)":"none"}}>
+                <div key={i} style={{display:"flex",gap:10,padding:"8px 0",borderTop:i>0?"1px solid rgba(255,255,255,0.03)":"none"}}>
                   <span style={{fontSize:16}}>{a.ic}</span>
                   <div style={{flex:1}}><div style={{fontSize:12,fontWeight:600}}>{a.a}</div><div style={{fontSize:10,color:T.t3}}>{fmTempo(a.tp)}</div></div>
                 </div>
@@ -26632,50 +26770,51 @@ function MetasConsultor(){
         </div>
       )}
 
-      {}
       {mTab==="ranking" && (
         <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
           <Cd style={{padding:20,flex:1.5,minWidth:280}} hov={false}>
-            <h4 style={{margin:"0 0 16px",fontSize:14,fontWeight:700,color:T.gold}}>📊 Indicadores de Desempenho</h4>
-            {[
-              {l:"AUM (Patrimônio sob Gestão)",v:"R$ 12.2M",meta:"R$ 15M",pct:81,c:T.gold},
-              {l:"Receita Recorrente Mensal",v:"R$ 37.6k",meta:"R$ 50k",pct:75,c:T.green},
-              {l:"Clientes Ativos",v:"9",meta:"15",pct:60,c:T.cyan},
-              {l:"Ticket Médio",v:"R$ 992",meta:"R$ 1.200",pct:83,c:T.purple},
-              {l:"Taxa de Retenção",v:"95%",meta:"98%",pct:97,c:T.green},
-              {l:"NPS",v:"8.6",meta:"9.0",pct:96,c:T.gold},
-            ].map(function(s,i){return (
-              <div key={i} style={{marginBottom:14}}>
-                <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                  <span style={{fontSize:12,fontWeight:600}}>{s.l}</span>
-                  <div><span style={{fontSize:13,fontWeight:800,color:s.c,fontFamily:"'JetBrains Mono'"}}>{s.v}</span><span style={{fontSize:10,color:T.t3}}> / {s.meta}</span></div>
-                </div>
-                <div style={{height:6,background:"rgba(255,255,255,0.03)",borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",width:s.pct+"%",background:s.c,borderRadius:3,opacity:.7}}/></div>
-              </div>
-            )})}
+            <h4 style={{margin:"0 0 6px",fontSize:14,fontWeight:700,color:T.gold}}>📊 Receita nos últimos 12 meses</h4>
+            <div style={{fontSize:10,color:T.t3,marginBottom:12}}>Entradas importadas por mês · {anoHoje}: {fm(receitaAno)} · perdas no ano: {perdasAno}</div>
+            <div style={{display:"flex",alignItems:"flex-end",gap:4,height:110}}>
+              {evol.map(function(x){
+                var h=Math.max(2,Math.round(x.rec/maxRec*90));
+                return (
+                  <div key={x.ym} title={lblYM(x.ym)+": "+fm(x.rec)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",height:"100%"}}>
+                    <div style={{width:"100%",height:h,background:x.ym===ymHoje?T.gold:T.green,opacity:x.rec>0?.8:.15,borderRadius:"3px 3px 0 0"}}/>
+                    <div style={{fontSize:8,color:T.t3,marginTop:3}}>{MESES_N[+x.ym.substring(5,7)-1]}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{overflowX:"auto",marginTop:14}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
+                <thead><tr style={{color:T.t3}}><th style={{textAlign:"left",padding:"4px 6px"}}>Mês</th><th style={{textAlign:"right",padding:"4px 6px"}}>Receita</th><th style={{textAlign:"right",padding:"4px 6px"}}>Captados</th><th style={{textAlign:"right",padding:"4px 6px"}}>Perdidos</th><th style={{textAlign:"right",padding:"4px 6px"}}>Base</th></tr></thead>
+                <tbody>
+                  {evol.slice().reverse().map(function(x){return (
+                    <tr key={x.ym} style={{borderTop:"1px solid rgba(255,255,255,0.03)"}}>
+                      <td style={{padding:"4px 6px",color:T.t2}}>{lblYM(x.ym)}</td>
+                      <td style={{padding:"4px 6px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t1}}>{fm(x.rec)}</td>
+                      <td style={{padding:"4px 6px",textAlign:"right",color:T.green}}>{x.novos||"—"}</td>
+                      <td style={{padding:"4px 6px",textAlign:"right",color:T.red}}>{x.perdidos||"—"}</td>
+                      <td style={{padding:"4px 6px",textAlign:"right",color:T.t2}}>{x.base==null?"—":x.base}</td>
+                    </tr>
+                  )})}
+                </tbody>
+              </table>
+            </div>
           </Cd>
           <Cd style={{padding:20,flex:1,minWidth:220}} hov={false}>
-            <h4 style={{margin:"0 0 16px",fontSize:14,fontWeight:700,color:T.gold}}>🎯 Próximos Marcos</h4>
-            {[
-              {l:"R$ 50k receita mensal",falta:"R$ 12.4k",ic:"💰",pct:75},
-              {l:"15 clientes ativos",falta:"6 clientes",ic:"👥",pct:60},
-              {l:"R$ 15M sob gestão",falta:"R$ 2.8M",ic:"💎",pct:81},
-              {l:"Certificação CFP",falta:"40% do conteúdo",ic:"📜",pct:60},
-            ].map(function(m,i){return (
-              <div key={i} style={{padding:12,background:"rgba(255,255,255,0.02)",borderRadius:10,marginBottom:8,border:"1px solid rgba(255,255,255,0.03)"}}>
+            <h4 style={{margin:"0 0 16px",fontSize:14,fontWeight:700,color:T.gold}}>🎯 Próximos marcos</h4>
+            {faltam.length===0&&<div style={{fontSize:11,color:T.green}}>✅ Todas as metas com alvo foram atingidas. Ajuste os alvos na aba OKRs para o próximo ciclo.</div>}
+            {faltam.slice(0,5).map(function(k){return (
+              <div key={k.k} style={{padding:12,background:"rgba(255,255,255,0.02)",borderRadius:10,marginBottom:8,border:"1px solid rgba(255,255,255,0.03)"}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-                  <span style={{fontSize:18}}>{m.ic}</span>
-                  <div style={{flex:1}}><div style={{fontSize:12,fontWeight:700}}>{m.l}</div><div style={{fontSize:10,color:T.t3}}>Falta: {m.falta}</div></div>
-                  <span style={{fontSize:12,fontWeight:800,color:m.pct>=80?T.green:T.gold,fontFamily:"'JetBrains Mono'"}}>{m.pct}%</span>
+                  <div style={{flex:1}}><div style={{fontSize:12,fontWeight:700}}>{k.desc}</div><div style={{fontSize:10,color:T.t3}}>{fmtV(k.atual,k.un)} → {fmtV(k.meta,k.un)} · {textoFalta(k)}</div></div>
+                  <span style={{fontSize:12,fontWeight:800,color:corPct(k.pct),fontFamily:"'JetBrains Mono'"}}>{k.pct.toFixed(0)}%</span>
                 </div>
-                <div style={{height:4,background:"rgba(255,255,255,0.03)",borderRadius:2,overflow:"hidden"}}><div style={{height:"100%",width:m.pct+"%",background:m.pct>=80?T.green:T.gold,borderRadius:2}}/></div>
+                <div style={{height:4,background:"rgba(255,255,255,0.03)",borderRadius:2,overflow:"hidden"}}><div style={{height:"100%",width:k.pct+"%",background:corPct(k.pct),borderRadius:2}}/></div>
               </div>
             )})}
-            <div style={{marginTop:12,padding:12,background:T.goldD,borderRadius:10,textAlign:"center",border:"1px solid rgba(212,163,40,0.15)"}}>
-              <div style={{fontSize:11,fontWeight:700,color:T.gold}}>🏆 Nível atual</div>
-              <div style={{fontSize:22,fontWeight:800,color:T.gold,marginTop:4}}>GOLD</div>
-              <div style={{fontSize:10,color:T.t3,marginTop:2}}>Próximo: PLATINUM (R$ 50k receita)</div>
-            </div>
           </Cd>
         </div>
       )}
@@ -39012,7 +39151,7 @@ function App({authUser}){
           {pg==="financeiro" && <FinanceiroView data={d} dispatch={dp}/>}
           {pg==="parceiros" && <ParceirosView data={d} dispatch={dp}/>}
           {pg==="fiscal" && <FiscalView data={d} dispatch={dp}/>}
-          {pg==="metas" && <MetasConsultor/>}
+          {pg==="metas" && <MetasConsultor data={d} dispatch={dp} onGoClient={function(c){sPg("clients");sSel(c)}} goTo={function(p){sPg(p)}}/>}
           {pg==="comercial" && <ComercialView data={d} dispatch={dp}/>}
           {pg==="agenda" && <Ag d={d} dp={dp} sPg={sPg}/>}
           {pg==="news" && <NewsView data={d} dispatch={dp}/>}
@@ -39143,7 +39282,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '526';
+  var SW_VERSION = '527';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
