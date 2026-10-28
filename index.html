@@ -6061,7 +6061,7 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
               id:newId,nome:(existing?existing.nome:nomeCliente),email:existing?existing.email:"",tel:existing?existing.tel:"",risco:existing?existing.risco:"Moderado",pais:existing?(existing.pais||"BR"):"BR",investExterior:existing?!!existing.investExterior:false,
               sv:existing?existing.sv:["patrimonio"],pat:patReal,patGorila:patReal,
               rend:existing&&existing.rend?existing.rend:0,notas:existing?existing.notas:("Importado em massa em "+new Date().toLocaleDateString("pt-BR")),
-              txGestao:existing?existing.txGestao:0.80,feeFixo:existing?existing.feeFixo:0,feeBase:existing?existing.feeBase:"",
+              txGestao:txGestaoImport(existing,patReal,null),feeFixo:existing?existing.feeFixo:0,feeBase:existing?existing.feeBase:"",
               _ativosImport:existing&&existing._ativosImport&&existing._ativosImport.length>ativos.length?existing._ativosImport:ativos,
               _ativosTs:Date.now(),
               _backupAntesImport:backup,
@@ -6267,7 +6267,7 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
           id:newId,nome:(existing?existing.nome:nomeCliente),email:existing?existing.email:"",tel:existing?existing.tel:"",risco:existing?existing.risco:"Moderado",pais:existing?(existing.pais||"BR"):"BR",investExterior:existing?!!existing.investExterior:false,
           sv:existing?existing.sv:["patrimonio"],pat:patReal,patGorila:patReal,
           rend:existing&&existing.rend?existing.rend:0,notas:existing?existing.notas:("Importado em massa em "+new Date().toLocaleDateString("pt-BR")),
-          txGestao:existing?existing.txGestao:0.80,feeFixo:existing?existing.feeFixo:0,feeBase:existing?existing.feeBase:"",
+          txGestao:txGestaoImport(existing,patReal,null),feeFixo:existing?existing.feeFixo:0,feeBase:existing?existing.feeBase:"",
           _ativosImport:ativos,
           _ativosTs:Date.now(),
           _backupAntesImport:backup,
@@ -6678,14 +6678,14 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
         });
         if(Object.keys(mapa).length>0)objs=objs.map(function(o){if(!o.ativosVinculados||!o.ativosVinculados.length)return o;return Object.assign({},o,{ativosVinculados:o.ativosVinculados.map(function(t){return mapa[t]||t})})});
       }
-      var up={id:existing.id,_ativosImport:finais,_ativosTs:Date.now(),pat:patUsar,patGorila:patUsar,_gorilaRent:gr,_relCourinvest:meta,_backupAntesImport:backup,objetivos:objs};
+      var up={id:existing.id,txGestao:txGestaoImport(existing,patUsar,null),_ativosImport:finais,_ativosTs:Date.now(),pat:patUsar,patGorila:patUsar,_gorilaRent:gr,_relCourinvest:meta,_backupAntesImport:backup,objetivos:objs};
       if(modo==="substituir")up._patrimonioEFG=0;
       dp({t:"UC",p:up});
       msgFim=existing.nome+" atualizado";
     }else{
       var hoje=new Date().toISOString().split("T")[0];
       var newC={id:"c"+Date.now(),nome:parsed.cliente,email:"",tel:"",risco:"Moderado",pais:"BR",investExterior:temExt,sv:["patrimonio"],pat:patUsar,patGorila:patUsar,rend:0,
-        notas:"Importado do Relatório Consolidado Courinvest em "+new Date().toLocaleDateString("pt-BR"),txGestao:0.80,feeFixo:0,feeBase:"",tipoCli:"individual",status:"ativo",
+        notas:"Importado do Relatório Consolidado Courinvest em "+new Date().toLocaleDateString("pt-BR"),txGestao:txGestaoImport(null,patUsar,null),feeFixo:0,feeBase:"",tipoCli:"individual",status:"ativo",
         dtCaptacao:parsed.periodoFim||hoje,_ativosImport:finais,_ativosTs:Date.now(),_gorilaRent:gr,_relCourinvest:meta,
         proventos:[],notasFiscais:[],objetivos:[],_contratos:[],movimentacoes:[],histMensal:[],orcamento:{}};
       dp({t:"RC",p:newC});
@@ -6885,7 +6885,7 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
               id:newId,nome:(existing?existing.nome:nomeCliente),email:existing?existing.email:"",tel:existing?existing.tel:"",risco:existing?existing.risco:"Moderado",pais:existing?(existing.pais||"BR"):"BR",investExterior:existing?!!existing.investExterior:false,
               sv:existing?existing.sv:["patrimonio"],pat:patReal,patGorila:patReal,
               rend:existing&&existing.rend?existing.rend:0,notas:existing?existing.notas:("Importado do Gorila PDF em "+new Date().toLocaleDateString("pt-BR")),
-              txGestao:existing?existing.txGestao:0.80,feeFixo:existing?existing.feeFixo:0,feeBase:existing?existing.feeBase:"",
+              txGestao:txGestaoImport(existing,patReal,null),feeFixo:existing?existing.feeFixo:0,feeBase:existing?existing.feeBase:"",
               _ativosImport:existing&&existing._ativosImport&&existing._ativosImport.length>ativos.length?existing._ativosImport:ativos,
               _ativosTs:Date.now(),
               _backupAntesImport:backup,
@@ -7359,7 +7359,7 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
           patGorila:patReal,
           rend:existing&&existing.rend?existing.rend:0,
           notas:(existing&&existing.notas&&existing.notas!=="")?existing.notas:("Importado do Gorila em "+new Date().toLocaleDateString("pt-BR")),
-          txGestao:(existing&&existing.txGestao!=null)?existing.txGestao:(cfgTxGestao!==null?cfgTxGestao:0.80),
+          txGestao:txGestaoImport(existing,patReal,cfgTxGestao),
           feeFixo:(existing&&existing.feeFixo!=null)?existing.feeFixo:(cfgFeeFixo!==null?cfgFeeFixo:0),
           feeMoeda:pickCfg(cfgFeeMoeda,existing?existing.feeMoeda:"",""), 
           feeMetodo:pickCfg(cfgFeeMetodo,existing?existing.feeMetodo:"",""), 
@@ -29419,6 +29419,20 @@ function servicoSugeridoCI(patrimonio){
   return f?f.servico:"consultoria";
 }
 
+/* v533 — taxa de gestão (% a.m.) que o cliente recebe ao ser importado (novo ou reimportação): vem da TABELA REGRESSIVA pelo
+   patrimônio (até R$ 1 mi = 0,15%; acima = 0,10%), em vez do 0,80% fixo antigo. Valores digitados à mão (≠ 0,80 / 0,083 / 0,15 / 0,10) são
+   preservados; os que são "padrão" (0,80 antigo, 0,083 do cadastro, ou os próprios degraus da tabela) são recalculados a cada importação.
+   Cliente que não tem o serviço Patrimônio não recebe taxa. cfgTx = taxa vinda explícita na planilha (só vale se não houver taxa manual). */
+function txGestaoImport(existing,pat,cfgTx){
+  var ex=existing&&typeof existing.txGestao==="number"?existing.txGestao:null;
+  var padrao=function(v){return v==null||[0.8,0.083,0.15,0.1].some(function(x){return Math.abs(v-x)<1e-9})};
+  var temPat=!existing||!Array.isArray(existing.sv)||existing.sv.indexOf("patrimonio")>=0;
+  if(ex!=null&&!padrao(ex))return ex;
+  if(cfgTx!=null&&cfgTx!=="")return cfgTx;
+  if(!temPat)return ex!=null?ex:0;
+  var tab=txGestaoRegressiva(pat);
+  return tab!=null?tab:(ex!=null?ex:0);
+}
 function txGestaoRegressiva(patrimonio){
   if(!patrimonio||patrimonio<=0)return null;
   if(patrimonio<=1000000)return 0.15;
@@ -40259,7 +40273,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '532';
+  var SW_VERSION = '533';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
