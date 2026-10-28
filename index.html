@@ -5549,197 +5549,722 @@ function Dash({data:d,onSel:os,goTo}){
 }
 
 
-/* ============================================================
-   InteracoesView — Ranking de Interações com clientes
-   Mostra clientes ordenados por dias sem contato + permite
-   registrar nova interação diretamente da tela.
-   ============================================================ */
-function InteracoesView({data:d, dispatch:dp, onGoClient:goClient}){
-  var fm=function(v){return new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL",minimumFractionDigits:0,maximumFractionDigits:0}).format(v||0)};
+/* ===== v534 REB START — Rebalanceamento de carteira (lógica pura) ===== */
+var REB_CLASSES=[
+  {id:"rf",l:"Renda Fixa",ic:"🏦",cor:"#D4A328"},
+  {id:"rv",l:"Renda Variável",ic:"📈",cor:"#34D399"},
+  {id:"ext",l:"Exterior",ic:"🌎",cor:"#38BDF8"},
+  {id:"cx",l:"Caixa / Liquidez",ic:"💵",cor:"#A78BFA"},
+  {id:"alt",l:"Alternativos",ic:"🧩",cor:"#FBBF24"}
+];
+var REB_IDX=[
+  {id:"pos",l:"Pós-fixado (CDI/Selic)",c:"Pós-fixado",cor:"#38BDF8",dica:"CDB/LCA/LCI pós (% do CDI), Tesouro Selic, fundos DI/crédito privado"},
+  {id:"pre",l:"Prefixado",c:"Prefixado",cor:"#FBBF24",dica:"CDB/LCI/LCA prefixados, Tesouro Prefixado (LTN/NTN-F)"},
+  {id:"ipca",l:"Inflação (IPCA+)",c:"IPCA+",cor:"#34D399",dica:"NTN-B, debêntures incentivadas, CRI/CRA IPCA+, CDB IPCA+"},
+  {id:"out",l:"Outros RF (COE, multimercado…)",c:"Outros RF",cor:"#A78BFA",dica:"COE, fundos multimercado e RF sem indexador identificado"}
+];
+var REB_TP_CLASSE={cdb:"rf",lci:"rf",lca:"rf",lc:"rf",cri:"rf",cra:"rf",tesouro:"rf",deb:"rf",debi:"rf",fundo_rf:"rf",fundo_mm:"rf",fundo_camb:"rf",fundo_infra:"rf",coe:"rf",poupanca:"rf",
+  acao:"rv",fii:"rv",fiagro:"rv",fip:"rv",etf_br:"rv",bdr:"rv",fundo_acoes:"rv",
+  stock_us:"ext",etf_int:"ext",etf_eu:"ext",reit:"ext",bond_intl:"ext",fundo_mm_intl:"ext",
+  caixa:"cx",cripto:"alt",prev:"alt",ouro:"alt"};
+var REB_MODELOS=[
+  {id:"cons",l:"Conservador",classes:{rf:80,rv:5,ext:10,cx:5,alt:0},idx:{pos:50,pre:20,ipca:30}},
+  {id:"mod",l:"Moderado",classes:{rf:60,rv:12,ext:20,cx:5,alt:3},idx:{pos:40,pre:25,ipca:35}},
+  {id:"arr",l:"Arrojado",classes:{rf:40,rv:25,ext:25,cx:5,alt:5},idx:{pos:35,pre:25,ipca:40}}
+];
+/* Indexador de um ativo de renda fixa/fundo. Retorna {id:"pos|pre|ipca|out", est:boolean(estimado)} */
+function rebIdxAtivo(a){
+  var tp=a.tp,nm=String(a.nm||a.tk||"").toUpperCase(),sub=String(a._gSubCl||"").toLowerCase();
+  if(tp==="caixa"||tp==="poupanca")return{id:"pos",est:false};
+  if(tp==="coe")return{id:"out",est:false};
+  var fundo=(tp==="fundo_rf"||tp==="fundo_camb"||tp==="fundo_mm"||tp==="fundo_infra");
+  if(!fundo){
+    var pr=parseProdutoRF(a),ix=pr.indexador;
+    if(ix==="CDI"||ix==="CDI+"||ix==="Selic")return{id:"pos",est:false};
+    if(ix==="Prefixado")return{id:"pre",est:false};
+    if(/^IPCA|^IGP/.test(ix))return{id:"ipca",est:false};
+  }
+  if(/NTN-?B|NTNB|IPCA|IGP-?M|INFLA/.test(nm)||/infla/.test(sub))return{id:"ipca",est:!fundo?false:true};
+  if(/LFT|SELIC|\bCDI\b|\bDI\b|P[ÓO]S/.test(nm)||/p[óo]s|juros/.test(sub))return{id:"pos",est:fundo};
+  if(/LTN|NTN-?F|PR[ÉE]-?FIX|PREFIX/.test(nm)||/prefix/.test(sub))return{id:"pre",est:fundo};
+  if(tp==="fundo_mm")return{id:"out",est:true};
+  if(tp==="fundo_infra"||tp==="debi"||/INCENTIV|INFRA/.test(nm))return{id:"ipca",est:true};
+  if(fundo)return{id:"pos",est:true};            /* fundo RF sem pista no nome: maioria é CDI/crédito privado */
+  return{id:"out",est:true};
+}
+/* Liquidez aproximada pelo tipo (sem dado de D+ no extrato): {n:"alta|média|baixa", s:0..1} */
+function rebLiquidez(a,dias){
+  var tp=a.tp,s=0.5;
+  var m={caixa:1,acao:0.95,fii:0.95,fiagro:0.9,etf_br:0.95,bdr:0.9,etf_int:0.9,etf_eu:0.85,reit:0.9,stock_us:0.9,bond_intl:0.8,fundo_mm_intl:0.9,cripto:0.9,
+    tesouro:0.9,fundo_rf:0.75,fundo_camb:0.7,fundo_mm:0.65,fundo_acoes:0.6,fundo_infra:0.5,cdb:0.3,lc:0.3,lci:0.3,lca:0.3,cri:0.2,cra:0.2,deb:0.25,debi:0.25,coe:0.1,prev:0.2,ouro:0.8,poupanca:0.9,fip:0.05};
+  if(m[tp]!=null)s=m[tp];
+  /* título prestes a vencer deixa de precisar de venda: tratado à parte (venc ≤ 90d) */
+  return{s:s,n:s>=0.7?"alta":s>=0.4?"média":"baixa"};
+}
+/* Foto da carteira: pesos por classe, indexador e ativo. */
+function rebCarteira(c){
+  var ai=(c&&c._ativosImport)||[];
+  var out={pat:0,ativos:[],classe:{},idx:{},rfTotal:0,nIgnorados:0,idxEstimado:0};
+  REB_CLASSES.forEach(function(x){out.classe[x.id]=0});
+  REB_IDX.forEach(function(x){out.idx[x.id]=0});
+  var hoje=new Date();hoje.setHours(0,0,0,0);
+  ai.forEach(function(a){
+    var v=+a.posR||((+a.qtd||0)*(+a.pa||0))||0;
+    if(a._liquidado||!(v>0)){out.nIgnorados++;return}
+    var cl=REB_TP_CLASSE[a.tp]||"rv";
+    var ix=cl==="rf"?rebIdxAtivo(a):null;
+    var rv=null;try{rv=resolveVencAtivo(c,a)}catch(e){}
+    var dias=null;if(rv&&rv.iso){dias=Math.ceil((new Date(rv.iso+"T12:00:00")-hoje)/86400000)}
+    var pm=(+a.qtd>0&&+a.pm>0)?(+a.qtd)*(+a.pm):0;
+    var liq=rebLiquidez(a,dias);
+    var it={key:chaveVencAtivo(a),nm:a.nm||a.tk||"Ativo",tk:a.tk,tp:a.tp,inst:a.inst||"—",classe:cl,idx:ix?ix.id:null,idxEst:ix?ix.est:false,valor:v,
+      pm:pm,ganho:pm>0?v-pm:null,dias:dias,vencIso:rv?rv.iso:null,liq:liq.n,liqS:liq.s,semRent:!!a._semRentabilidade};
+    out.ativos.push(it);
+    out.pat+=v;out.classe[cl]+=v;
+    if(ix){out.idx[ix.id]+=v;out.rfTotal+=v;if(ix.est)out.idxEstimado+=v}
+  });
+  out.ativos.sort(function(a,b){return b.valor-a.valor});
+  return out;
+}
+function rebNum(v){var n=parseFloat(v);return isNaN(n)?null:n}
+function rebPolitica(c){
+  var p=(c&&c.rebal)||{};
+  var num=function(v,d){return(typeof v==="number"&&!isNaN(v))?v:d};
+  return{classes:p.classes||{},idx:p.idx||{},idxBase:p.idxBase==="total"?"total":"rf",ativos:p.ativos||{},
+    tolClasse:num(p.tolClasse,5),tolIdx:num(p.tolIdx,5),tolAtivo:num(p.tolAtivo,1),ate:p.ate==="banda"?"banda":"alvo",minMov:num(p.minMov,2000),
+    freqMeses:num(p.freqMeses,3),hist:Array.isArray(p.hist)?p.hist:[]};
+}
+function rebTemAlvo(pol){
+  var n=function(o){return Object.keys(o||{}).filter(function(k){return typeof o[k]==="number"}).length};
+  return{classes:n(pol.classes),idx:n(pol.idx),ativos:n(pol.ativos)};
+}
+function rebStatus(desv,tol){var d=Math.abs(desv);return d<=tol*0.7?"ok":d<=tol?"atencao":"fora"}
+/* Linhas de desvio por nível (só onde há alvo definido). pp = pontos percentuais. */
+function rebDesvios(cart,pol){
+  var PAT=cart.pat||0;
+  var rows={classes:[],idx:[],ativos:[]};
+  if(!(PAT>0))return rows;
+  REB_CLASSES.forEach(function(x){
+    var al=pol.classes[x.id];if(typeof al!=="number")return;
+    var v=cart.classe[x.id]||0,at=v/PAT*100;
+    rows.classes.push({id:x.id,label:x.l,ic:x.ic,cor:x.cor,alvo:al,atual:at,desvio:at-al,valor:v,valorAlvo:al/100*PAT,tol:pol.tolClasse,status:rebStatus(at-al,pol.tolClasse)});
+  });
+  var base=pol.idxBase==="total"?PAT:cart.rfTotal;
+  if(base>0)REB_IDX.forEach(function(x){
+    var al=pol.idx[x.id];if(typeof al!=="number")return;
+    var v=cart.idx[x.id]||0,at=v/base*100;
+    rows.idx.push({id:x.id,label:x.l,cor:x.cor,alvo:al,atual:at,desvio:at-al,valor:v,valorAlvo:al/100*base,tol:pol.tolIdx,status:rebStatus(at-al,pol.tolIdx)});
+  });
+  cart.ativos.forEach(function(a){
+    var al=pol.ativos[a.key];if(typeof al!=="number")return;
+    var at=a.valor/PAT*100;
+    rows.ativos.push({id:a.key,label:a.nm,inst:a.inst,tp:a.tp,alvo:al,atual:at,desvio:at-al,valor:a.valor,valorAlvo:al/100*PAT,tol:pol.tolAtivo,status:rebStatus(at-al,pol.tolAtivo)});
+  });
+  /* alvos de ativos que não existem mais na carteira (vendidos/vencidos) entram como "zerado" pra não sumirem em silêncio */
+  Object.keys(pol.ativos||{}).forEach(function(k){
+    if(typeof pol.ativos[k]!=="number")return;
+    if(!cart.ativos.some(function(a){return a.key===k}))rows.ativos.push({id:k,label:k.split("|")[0],inst:k.split("|")[1]||"",tp:null,alvo:pol.ativos[k],atual:0,desvio:-pol.ativos[k],valor:0,valorAlvo:pol.ativos[k]/100*PAT,tol:pol.tolAtivo,status:pol.ativos[k]>pol.tolAtivo?"fora":"atencao",ausente:true});
+  });
+  return rows;
+}
+function rebMaxDesvio(rows){
+  var m=0,qtdFora=0,qtdAt=0;
+  ["classes","idx","ativos"].forEach(function(k){rows[k].forEach(function(r){var d=Math.abs(r.desvio);if(r.status==="fora")qtdFora++;else if(r.status==="atencao")qtdAt++;if(d>m)m=d})});
+  return{max:m,fora:qtdFora,atencao:qtdAt};
+}
+/* Plano: o que vender/comprar. opts={aporte:R$ (+ aporta, − resgata), modo:"completo"|"so_aporte"} */
+function rebPlano(c,cart,pol,opts){
+  opts=opts||{};
+  var aporte=+opts.aporte||0,modo=opts.modo==="so_aporte"?"so_aporte":"completo";
+  var PAT=cart.pat||0,PATn=Math.max(0,PAT+aporte);
+  var plano={aporte:aporte,modo:modo,patNovo:PATn,nivel:null,moves:[],vendas:[],compras:[],sobra:0,totalVender:0,totalComprar:0,irEstimado:0,avisos:[],depoisClasse:{},depoisIdx:{},depoisAtivo:{},vencProx:{}};
+  if(!(PAT>0))return plano;
+  var te=rebTemAlvo(pol);
+  var moves=[];
+  var edge=function(valor,alvoPct,tolPp,total){
+    var alvoV=alvoPct/100*total;
+    if(pol.ate!=="banda")return alvoV-valor;
+    var atPct=valor/total*100,lo=alvoPct-tolPp,hi=alvoPct+tolPp;
+    if(atPct>hi)return (hi/100*total)-valor;
+    if(atPct<lo)return (lo/100*total)-valor;
+    return 0;
+  };
+  if(te.ativos>0){
+    plano.nivel="ativo";
+    cart.ativos.forEach(function(a){
+      var al=pol.ativos[a.key];if(typeof al!=="number")return;
+      var d=edge(a.valor,al,pol.tolAtivo,PATn);
+      if(modo==="completo"&&pol.ate==="banda"&&Math.abs(a.valor/PAT*100-al)<=pol.tolAtivo)d=0;
+      moves.push({nivel:"ativo",id:a.key,label:a.nm,inst:a.inst,classe:a.classe,idx:a.idx,delta:d,valor:a.valor});
+    });
+    Object.keys(pol.ativos).forEach(function(k){
+      if(typeof pol.ativos[k]!=="number"||cart.ativos.some(function(a){return a.key===k}))return;
+      var d=pol.ativos[k]/100*PATn;
+      moves.push({nivel:"ativo",id:k,label:k.split("|")[0],inst:k.split("|")[1]||"",classe:null,idx:null,delta:d,valor:0,novo:true});
+    });
+  }else{
+    if(te.classes>0){
+      REB_CLASSES.forEach(function(x){
+        var al=pol.classes[x.id];if(typeof al!=="number")return;
+        var v=cart.classe[x.id]||0;
+        moves.push({nivel:"classe",id:x.id,label:x.l,classe:x.id,idx:null,delta:edge(v,al,pol.tolClasse,PATn),valor:v});
+      });
+    }
+    if(te.idx>0&&cart.rfTotal>=0){
+      /* destino do RF: se há alvo de classe pro RF, o total de RF vem dele; senão, mantém o RF atual (+ aporte se não há alvo de nenhuma classe) */
+      var rfDest=(typeof pol.classes.rf==="number")?pol.classes.rf/100*PATn:(te.classes>0?cart.rfTotal:cart.rfTotal+aporte);
+      /* buckets sem alvo ficam como estão: os alvos dos demais dividem o que sobra do RF (evita comprar a mais) */
+      var keepIdx=0;if(pol.idxBase!=="total")REB_IDX.forEach(function(x){if(typeof pol.idx[x.id]!=="number")keepIdx+=cart.idx[x.id]||0});
+      var baseIdx=pol.idxBase==="total"?PATn:Math.max(0,rfDest-keepIdx);
+      var idxMoves=[];
+      REB_IDX.forEach(function(x){
+        var al=pol.idx[x.id];if(typeof al!=="number")return;
+        var v=cart.idx[x.id]||0;
+        var d=edge(v,al,pol.tolIdx,baseIdx);
+        idxMoves.push({nivel:"idx",id:x.id,label:x.l,classe:"rf",idx:x.id,delta:d,valor:v});
+      });
+      /* Os movimentos de RF passam a ser os dos indexadores (detalham o movimento da classe RF) */
+      moves=moves.filter(function(m){return!(m.nivel==="classe"&&m.id==="rf")});
+      moves=moves.concat(idxMoves);
+    }
+  }
+  /* movimento mínimo */
+  moves.forEach(function(m){if(Math.abs(m.delta)<pol.minMov)m.delta=0});
+  if(modo==="so_aporte"){
+    var orcamento=Math.max(0,aporte);
+    var falta=0;moves.forEach(function(m){if(m.delta>0)falta+=m.delta});
+    moves.forEach(function(m){
+      if(m.delta<0)m.delta=0;
+      else if(m.delta>0)m.delta=falta>0?(falta<=orcamento?m.delta:m.delta*orcamento/falta):0;
+    });
+    plano.sobraAporte=Math.max(0,orcamento-moves.reduce(function(s,m){return s+Math.max(0,m.delta)},0));
+    if(plano.sobraAporte>pol.minMov)plano.avisos.push("Sobram "+rebBRL0(plano.sobraAporte)+" do aporte além do necessário para atingir os alvos — distribua conforme os pesos-alvo ou mantenha em caixa.");
+    if(orcamento<=0)plano.avisos.push("Modo \"só com aporte\": informe um aporte positivo para ver onde aplicar.");
+  }
+  moves=moves.filter(function(m){return Math.abs(m.delta)>=1});
+  plano.moves=moves;
+  moves.forEach(function(m){if(m.delta<0)plano.totalVender+=-m.delta;else plano.totalComprar+=m.delta});
+  plano.sobra=plano.totalVender+aporte-plano.totalComprar;  /* + sobra caixa / − falta caixa depois do plano */
+  /* Vendas concretas: candidatos por prioridade (liquidez alta → IR menor → posição maior) */
+  var tipoIR=function(tp){return(typeof TIPOS!=="undefined"&&TIPOS[tp])?TIPOS[tp].ir:15};
+  moves.filter(function(m){return m.delta<0}).forEach(function(m){
+    var need=-m.delta;
+    var cands;
+    if(m.nivel==="ativo")cands=cart.ativos.filter(function(a){return a.key===m.id});
+    else if(m.nivel==="idx")cands=cart.ativos.filter(function(a){return a.idx===m.id});
+    else cands=cart.ativos.filter(function(a){return a.classe===m.id});
+    var sc=cands.map(function(a){
+      var g=(a.ganho!=null&&a.ganho>0)?a.ganho/a.valor:0;
+      var irPct=g*tipoIR(a.tp);               /* % do valor vendido que vira imposto (estimativa) */
+      var venceLogo=a.dias!=null&&a.dias>=0&&a.dias<=90;
+      var tier=a.liqS>=0.7?2:a.liqS>=0.4?1:0;
+      return{a:a,irPct:irPct,venceLogo:venceLogo,tier:tier,irB:Math.round(irPct*2)/2};
+    }).sort(function(x,y){return y.tier-x.tier||x.irB-y.irB||y.a.valor-x.a.valor});
+    var resta=need;
+    sc.forEach(function(s){
+      if(resta<1)return;
+      if(m.nivel!=="ativo"&&s.a.liqS<0.25&&!s.venceLogo&&sc.some(function(o){return o.a.liqS>=0.25&&o.a.valor>0}))return;   /* evita vender CDB/CRI ilíquido se há alternativa */
+      var take=Math.min(resta,s.a.valor);
+      var ir=take*s.irPct/100;
+      var motivo=m.nivel==="ativo"?"acima do peso-alvo":(m.nivel==="idx"?"indexador acima do alvo ("+m.label+")":"classe acima do alvo ("+m.label+")");
+      plano.vendas.push({key:s.a.key,nm:s.a.nm,inst:s.a.inst,tp:s.a.tp,valor:take,total:s.a.valor,parcial:take<s.a.valor-1,liq:s.a.liq,ir:ir,irPct:s.irPct,dias:s.a.dias,motivo:motivo,bucket:m.label});
+      plano.irEstimado+=ir;resta-=take;
+    });
+    if(resta>=1)plano.avisos.push("Faltam "+rebBRL0(resta)+" para vender em \""+m.label+"\" sem usar posições ilíquidas — considere deixar os vencimentos próximos financiarem o ajuste.");
+  });
+  /* Compras: por bucket (e ativos nominais quando o alvo é por ativo) */
+  moves.filter(function(m){return m.delta>0}).forEach(function(m){
+    var dica=m.nivel==="idx"?(REB_IDX.filter(function(x){return x.id===m.id})[0]||{}).dica:
+             m.nivel==="classe"?({rf:"Renda fixa conforme os indexadores-alvo",rv:"Ações, FIIs, ETFs BR e fundos de ações",ext:"ETFs/BDRs/fundos no exterior",cx:"Tesouro Selic, fundo DI ou conta remunerada",alt:"Cripto, ouro, previdência"})[m.id]:
+             (m.novo?"Posição nova (alvo definido, ainda sem posição)":"Reforçar a posição");
+    plano.compras.push({label:m.label,nivel:m.nivel,valor:m.delta,inst:m.inst||"",dica:dica||""});
+  });
+  /* Vencimentos próximos (≤ 90 dias) por bucket: financiam compras sem venda */
+  cart.ativos.forEach(function(a){
+    if(a.dias!=null&&a.dias>=0&&a.dias<=90&&a.classe==="rf"){
+      plano.vencProx[a.idx]=(plano.vencProx[a.idx]||0)+a.valor;
+    }
+  });
+  plano.vencProxTotal=Object.keys(plano.vencProx).reduce(function(s,k){return s+plano.vencProx[k]},0);
+  /* Depois do plano */
+  var dC={},dI={},dA={};
+  REB_CLASSES.forEach(function(x){dC[x.id]=cart.classe[x.id]||0});
+  REB_IDX.forEach(function(x){dI[x.id]=cart.idx[x.id]||0});
+  cart.ativos.forEach(function(a){dA[a.key]=a.valor});
+  moves.forEach(function(m){
+    if(m.nivel==="ativo"){dA[m.id]=(dA[m.id]||0)+m.delta;if(m.classe){dC[m.classe]+=m.delta;if(m.idx)dI[m.idx]+=m.delta}}
+    else if(m.nivel==="idx"){dI[m.id]+=m.delta;dC.rf+=m.delta}
+    else dC[m.id]+=m.delta;
+  });
+  plano.depoisClasse=dC;plano.depoisIdx=dI;plano.depoisAtivo=dA;
+  var patDepois=0;Object.keys(dC).forEach(function(k){patDepois+=dC[k]});
+  plano.patDepois=patDepois+Math.max(0,plano.sobra); /* sobra de caixa fica no patrimônio */
+  if(plano.sobra>0){dC.cx=(dC.cx||0)+plano.sobra}
+  if(plano.sobra<-1&&modo==="completo")plano.avisos.push("O plano compra "+rebBRL0(-plano.sobra)+" a mais do que vende + aporte — a diferença sairia do caixa/aporte. Ajuste os alvos (a soma ideal é 100%).");
+  if(te.classes>0){var sc2=0;REB_CLASSES.forEach(function(x){if(typeof pol.classes[x.id]==="number")sc2+=pol.classes[x.id]});if(Math.abs(sc2-100)>0.5)plano.avisos.push("Os alvos por classe somam "+sc2.toFixed(1).replace(".",",")+"% (o ideal é 100%).")}
+  if(te.idx>0){var si=0;REB_IDX.forEach(function(x){if(typeof pol.idx[x.id]==="number")si+=pol.idx[x.id]});if(Math.abs(si-100)>0.5)plano.avisos.push("Os alvos por indexador somam "+si.toFixed(1).replace(".",",")+"% (o ideal é 100%).")}
+  return plano;
+}
+function rebBRL0(v){return "R$ "+Math.round(+v||0).toLocaleString("pt-BR")}
+function rebPct1(v){return (+v||0).toFixed(1).replace(".",",")+"%"}
+/* ===== v534 REB END ===== */
+
+/* ===== v534 REB VIEW — aba "Rebalanceamento" (substitui a aba Interações) ===== */
+/* Input numérico com estado local: só grava ao sair do campo/Enter; vazio = remove o alvo. */
+function RebNumInput({value,onCommit,suffix,width,placeholder,color,disabled}){
+  var _s=useState(value==null?"":String(value).replace(".",","));var txt=_s[0],setTxt=_s[1];
+  useEffect(function(){setTxt(value==null?"":String(Math.round(value*100)/100).replace(".",","))},[value]);
+  var commit=function(){
+    var t=String(txt).trim().replace(",",".");
+    if(t===""){onCommit(null);return}
+    var n=parseFloat(t);
+    if(isNaN(n)||n<0){setTxt(value==null?"":String(value).replace(".",","));return}
+    onCommit(Math.round(n*100)/100);
+  };
+  return <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
+    <input type="text" inputMode="decimal" disabled={disabled} value={txt} placeholder={placeholder||"—"} onChange={function(e){setTxt(e.target.value)}} onBlur={commit} onKeyDown={function(e){if(e.key==="Enter")e.target.blur()}}
+      style={{width:width||64,padding:"6px 8px",borderRadius:8,border:"1px solid "+T.bdrL,background:"rgba(255,255,255,0.03)",color:color||T.gold,fontSize:12,fontWeight:700,textAlign:"right",outline:"none",fontFamily:"'JetBrains Mono'"}}/>
+    {suffix&&<span style={{fontSize:11,color:T.t3}}>{suffix}</span>}
+  </span>;
+}
+/* Barra de desvio: preenchimento = peso atual; faixa = alvo ± tolerância; traço = alvo */
+function RebBar({atual,alvo,tol,max,cor,height}){
+  var h=height||10;
+  var m=Math.max(max||0,1);
+  var pc=function(v){return Math.max(0,Math.min(100,v/m*100))};
+  var lo=alvo!=null?pc(Math.max(0,alvo-tol)):0,hi=alvo!=null?pc(alvo+tol):0;
+  return <div style={{position:"relative",height:h,borderRadius:h/2,background:"rgba(255,255,255,0.05)",overflow:"visible"}}>
+    {alvo!=null&&<div style={{position:"absolute",left:lo+"%",width:Math.max(0,hi-lo)+"%",top:0,bottom:0,background:"rgba(255,255,255,0.10)",borderRadius:2}}/>}
+    <div style={{position:"absolute",left:0,top:2,bottom:2,width:pc(atual)+"%",background:cor,borderRadius:h/2,opacity:0.92}}/>
+    {alvo!=null&&<div style={{position:"absolute",left:pc(alvo)+"%",top:-3,bottom:-3,width:2,background:"#fff",borderRadius:1,opacity:0.85}}/>}
+  </div>;
+}
+var REB_ST={ok:{c:"#34D399",l:"Dentro da faixa"},atencao:{c:"#FBBF24",l:"Perto do limite"},fora:{c:"#F87171",l:"Fora da faixa"}};
+
+function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
+  var _a=useState(null);var selId=_a[0],setSelId=_a[1];
+  var _b=useState("");var busca=_b[0],setBusca=_b[1];
+  var _c=useState("todos");var filtro=_c[0],setFiltro=_c[1];
+  var _d=useState("diag");var aba=_d[0],setAba=_d[1];
+  var _e=useState("0");var aporteTxt=_e[0],setAporteTxt=_e[1];
+  var _f=useState("completo");var modo=_f[0],setModo=_f[1];
+  var _g=useState("");var buscaAtv=_g[0],setBuscaAtv=_g[1];
+  var _h=useState("");var msg=_h[0],setMsg=_h[1];
+  var _i=useState("");var notaReg=_i[0],setNotaReg=_i[1];
+  var _j=useState("");var copiarDe=_j[0],setCopiarDe=_j[1];
+  var flash=function(t){setMsg(t);setTimeout(function(){setMsg("")},3500)};
+  var BRL=function(v){return rebBRL0(v)};
   var hoje=new Date();hoje.setHours(0,0,0,0);
 
-  var [filtro, sFiltro] = React.useState("todos");
-  var [busca, sBusca] = React.useState("");
-  var [addFor, sAddFor] = React.useState(null); // cliente selecionado para add interação
-  var [form, sForm] = React.useState({tipo:"reuniao",nota:"",data:new Date().toISOString().split("T")[0]});
-  var [msg, sMsg] = React.useState("");
+  /* ---------- visão geral (todos os clientes com carteira) ---------- */
+  var linhas=React.useMemo(function(){
+    return (d.cl||[]).filter(function(c){return (c.status||"ativo")==="ativo"&&c._ativosImport&&c._ativosImport.length>0}).map(function(c){
+      var cart=rebCarteira(c);if(!(cart.pat>0))return null;
+      var pol=rebPolitica(c),te=rebTemAlvo(pol);
+      var rows=rebDesvios(cart,pol),dv=rebMaxDesvio(rows);
+      var temPol=(te.classes+te.idx+te.ativos)>0;
+      var plano=temPol?rebPlano(c,cart,pol,{aporte:0,modo:"completo"}):null;
+      var ult=pol.hist.length?pol.hist[0].data:null;
+      var vencida=false;
+      if(temPol){
+        if(!ult)vencida=true;
+        else{var dt=new Date(ult+"T12:00:00");dt.setMonth(dt.getMonth()+pol.freqMeses);vencida=dt<hoje}
+      }
+      return{c:c,cart:cart,pol:pol,te:te,rows:rows,dv:dv,temPol:temPol,plano:plano,ult:ult,vencida:vencida};
+    }).filter(Boolean);
+  },[d.cl]);
+  var kpi=React.useMemo(function(){
+    var com=linhas.filter(function(l){return l.temPol});
+    var fora=com.filter(function(l){return l.dv.fora>0});
+    return{total:linhas.length,com:com.length,sem:linhas.length-com.length,fora:fora.length,
+      mov:fora.reduce(function(s,l){return s+(l.plano?l.plano.totalVender:0)},0),
+      aum:linhas.reduce(function(s,l){return s+l.cart.pat},0),
+      venc:com.filter(function(l){return l.vencida}).length};
+  },[linhas]);
 
-  var tiposInt = [
-    {v:"reuniao",    l:"Reunião",       ic:"🤝"},
-    {v:"ligacao",    l:"Ligação",       ic:"📞"},
-    {v:"whatsapp",   l:"WhatsApp",      ic:"💬"},
-    {v:"email",      l:"E-mail",        ic:"📧"},
-    {v:"relatorio",  l:"Relatório",     ic:"📊"},
-    {v:"visita",     l:"Visita",        ic:"🏢"},
-    {v:"outro",      l:"Outro",         ic:"📌"},
-  ];
+  var lista=linhas.filter(function(l){
+    if(busca&&l.c.nome.toLowerCase().indexOf(busca.toLowerCase())<0)return false;
+    if(filtro==="fora")return l.temPol&&l.dv.fora>0;
+    if(filtro==="ok")return l.temPol&&l.dv.fora===0;
+    if(filtro==="sem")return !l.temPol;
+    if(filtro==="venc")return l.temPol&&l.vencida;
+    return true;
+  }).sort(function(a,b){
+    if(a.temPol!==b.temPol)return a.temPol?-1:1;
+    return b.dv.max-a.dv.max||b.cart.pat-a.cart.pat;
+  });
 
-  var clientes = (d.cl||[])
-    .filter(function(c){return (c.status||"ativo")==="ativo"})
-    .map(function(c){
-      var ints = (d.it||[]).filter(function(i){return i.cid===c.id})
-                            .sort(function(a,b){return (b.data||"").localeCompare(a.data||"")});
-      var dtRef = ints.length>0 ? new Date(ints[0].data) : new Date(c.dtCaptacao||"2024-01-01");
-      var dias = Math.floor((hoje - dtRef)/86400000);
-      return {c:c, dias:dias, ultima:ints[0]||null, total:ints.length, ints:ints};
-    })
-    .filter(function(r){
-      if(filtro==="critico") return r.dias>=30;
-      if(filtro==="atencao") return r.dias>=15 && r.dias<30;
-      if(filtro==="ok")      return r.dias<15;
-      return true;
-    })
-    .filter(function(r){
-      if(!busca) return true;
-      return r.c.nome.toLowerCase().indexOf(busca.toLowerCase())>=0;
-    })
-    .sort(function(a,b){return b.dias-a.dias});
+  var sel=selId?linhas.filter(function(l){return l.c.id===selId})[0]:null;
 
-  var total = (d.cl||[]).filter(function(c){return (c.status||"ativo")==="ativo"}).length;
-  var criticos = (d.cl||[]).filter(function(c){
-    var ints=(d.it||[]).filter(function(i){return i.cid===c.id});
-    var dtRef=ints.length>0?new Date(ints.sort(function(a,b){return (b.data||"").localeCompare(a.data||"")})[0].data):new Date(c.dtCaptacao||"2024-01-01");
-    return Math.floor((hoje-dtRef)/86400000)>=30;
-  }).length;
-  var atencao = (d.cl||[]).filter(function(c){
-    var ints=(d.it||[]).filter(function(i){return i.cid===c.id});
-    var dtRef=ints.length>0?new Date(ints.sort(function(a,b){return (b.data||"").localeCompare(a.data||"")})[0].data):new Date(c.dtCaptacao||"2024-01-01");
-    var d2=Math.floor((hoje-dtRef)/86400000);
-    return d2>=15&&d2<30;
-  }).length;
-  var emDia = total - criticos - atencao;
-
-  var corDias = function(d){return d>=30?T.red:d>=15?T.orange:T.green};
-
-  var registrar = function(){
-    if(!addFor||!form.data)return;
-    dp({t:"AI",p:{cid:addFor.c.id,tipo:form.tipo,nota:form.nota,data:form.data}});
-    sMsg("✅ Interação registrada com "+addFor.c.nome.split(" ")[0]+"!");
-    sAddFor(null);
-    sForm({tipo:"reuniao",nota:"",data:new Date().toISOString().split("T")[0]});
-    setTimeout(function(){sMsg("")},2500);
+  /* ---------- gravação da política ---------- */
+  var salvar=function(c,patch){dp({t:"UC",p:{id:c.id,rebal:Object.assign({},c.rebal||{},patch)}})};
+  var setMapa=function(c,campo,chave,valor){
+    var cur=Object.assign({},(c.rebal&&c.rebal[campo])||{});
+    if(valor==null)delete cur[chave];else cur[chave]=valor;
+    var o={};o[campo]=cur;salvar(c,o);
   };
 
-  return (
-    <div style={{padding:"24px 28px",maxWidth:900,margin:"0 auto"}}>
+  /* ---------- tela de um cliente ---------- */
+  var renderCliente=function(L){
+    var c=L.c,cart=L.cart,pol=L.pol;
+    var aporte=parseFloat(String(aporteTxt).replace(/\./g,"").replace(",","."))||0;
+    var plano=rebPlano(c,cart,pol,{aporte:aporte,modo:modo});
+    var rows=L.rows;
+    var tabBtn=function(id,l){var on=aba===id;return <button key={id} onClick={function(){setAba(id)}} style={{padding:"9px 16px",borderRadius:12,border:on?"1px solid "+T.gold:"1px solid "+T.bdrL,background:on?"rgba(212,163,40,0.10)":"transparent",color:on?T.gold:T.t2,fontSize:12,fontWeight:700,cursor:"pointer"}}>{l}</button>};
+    var somaClasses=0;REB_CLASSES.forEach(function(x){if(typeof pol.classes[x.id]==="number")somaClasses+=pol.classes[x.id]});
+    var somaIdx=0;REB_IDX.forEach(function(x){if(typeof pol.idx[x.id]==="number")somaIdx+=pol.idx[x.id]});
+    var somaAtv=0;Object.keys(pol.ativos).forEach(function(k){if(typeof pol.ativos[k]==="number")somaAtv+=pol.ativos[k]});
+    var chipSoma=function(v,alvo100){var ok=Math.abs(v-100)<=0.5;return <span style={{fontSize:11,fontWeight:700,color:ok?T.green:(v>100?T.red:T.orange),fontFamily:"'JetBrains Mono'"}}>soma {String(Math.round(v*10)/10).replace(".",",")}%{ok?" ✓":""}</span>};
 
-      {/* HEADER STATS */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:22}}>
-        {[
-          {l:"Crítico (30d+)",  v:criticos, c:T.red,    sub:"contato urgente",    fi:"critico"},
-          {l:"Atenção (15–29d)",v:atencao,  c:T.orange, sub:"acompanhar em breve", fi:"atencao"},
-          {l:"Em dia (<15d)",   v:emDia,    c:T.green,  sub:"bem relacionados",   fi:"ok"},
-        ].map(function(s){return (
-          <div key={s.fi} onClick={function(){sFiltro(filtro===s.fi?"todos":s.fi)}}
-            style={{background:T.card,border:"1px solid "+(filtro===s.fi?s.c:T.bdrL),borderRadius:14,padding:"14px 18px",cursor:"pointer",transition:"all 0.2s"}}>
-            <div style={{fontSize:11,color:T.t3,marginBottom:4,fontWeight:600,letterSpacing:.5}}>{s.l.toUpperCase()}</div>
-            <div style={{fontSize:28,fontWeight:800,color:s.c,fontFamily:"'JetBrains Mono'",lineHeight:1}}>{s.v}</div>
-            <div style={{fontSize:10,color:T.t3,marginTop:4}}>{s.sub}</div>
-          </div>
-        )})}
-      </div>
-
-      {/* BUSCA */}
-      <div style={{position:"relative",marginBottom:16}}>
-        <input value={busca} onChange={function(e){sBusca(e.target.value)}}
-          placeholder="Buscar cliente..." 
-          style={{width:"100%",padding:"10px 14px 10px 38px",borderRadius:10,border:"1px solid "+T.bdrL,background:T.card,color:T.t1,fontSize:13,boxSizing:"border-box",outline:"none"}}/>
-        <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:14,opacity:.4}}>🔍</span>
-      </div>
-
-      {/* MSG */}
-      {msg && <div style={{padding:"10px 14px",background:T.green+"18",border:"1px solid "+T.green+"44",borderRadius:10,color:T.green,fontSize:12,fontWeight:600,marginBottom:12}}>{msg}</div>}
-
-      {/* LISTA */}
-      <div style={{display:"flex",flexDirection:"column",gap:6}}>
-        {clientes.length===0 && (
-          <div style={{textAlign:"center",padding:40,color:T.t3,fontSize:13}}>
-            {busca?"Nenhum cliente encontrado":"🎉 Todos os clientes estão em dia!"}
-          </div>
-        )}
-        {clientes.map(function(r,idx){
-          var cor = corDias(r.dias);
-          var barPct = Math.min(100,(r.dias/90)*100);
-          var tipoIc = (tiposInt.find(function(t){return t.v===(r.ultima&&r.ultima.tipo)}) || {ic:"📌"}).ic;
-          var isOpen = addFor && addFor.c.id === r.c.id;
-          return (
-            <div key={r.c.id} style={{background:T.card,borderRadius:14,border:"1px solid "+(r.dias>=30?T.red+"33":r.dias>=15?T.orange+"22":T.bdrL),overflow:"hidden",transition:"all 0.2s"}}>
-              {/* LINHA PRINCIPAL */}
-              <div style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",cursor:"pointer"}}
-                onClick={function(){sAddFor(isOpen?null:r)}}>
-                <div style={{fontSize:12,fontWeight:700,color:T.t3,width:24,textAlign:"right",flexShrink:0}}>#{idx+1}</div>
-                <Av name={r.c.nome} sz={36}/>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
-                    <span style={{fontSize:13,fontWeight:700,color:T.t1}}>{r.c.nome}</span>
-                    {(r.c.sv||[]).map(function(s){
-                      var lb={patrimonio:"GP",planejamento:"GF",assessoria:"AS"}[s];
-                      if(!lb)return null;
-                      return <span key={s} style={{fontSize:8,fontWeight:700,color:T.t3,background:"rgba(255,255,255,0.06)",padding:"1px 5px",borderRadius:4}}>{lb}</span>;
-                    })}
+    /* --- Diagnóstico --- */
+    var diag=function(){
+      var secao=function(titulo,sub,lista,vazio,mostrarSemAlvo){
+        var mx=10;lista.forEach(function(r){mx=Math.max(mx,r.atual,r.alvo+r.tol)});mx=mx*1.08;
+        return <Cd hov={false} style={{padding:18,marginBottom:14}}>
+          <div style={{fontSize:14,fontWeight:800,color:T.t1}}>{titulo}</div>
+          <div style={{fontSize:11,color:T.t3,marginBottom:12}}>{sub}</div>
+          {lista.length===0?<div style={{fontSize:12,color:T.t3,padding:"10px 0"}}>{vazio}</div>:
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              {lista.map(function(r){var st=REB_ST[r.status];return(
+                <div key={r.id}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,marginBottom:4,flexWrap:"wrap"}}>
+                    <span style={{fontSize:12,fontWeight:700,color:T.t1}}>{r.ic?r.ic+" ":""}{r.label}{r.inst?<span style={{color:T.t3,fontWeight:500}}> · {r.inst}</span>:null}{r.ausente?<span style={{color:T.orange}}> (sem posição)</span>:null}</span>
+                    <span style={{fontSize:11,color:T.t3,fontFamily:"'JetBrains Mono'"}}>atual <b style={{color:T.t1}}>{rebPct1(r.atual)}</b> · alvo <b style={{color:T.gold}}>{rebPct1(r.alvo)}</b> ± {rebPct1(r.tol).replace("%","")} · <b style={{color:st.c}}>{r.desvio>=0?"+":""}{String(Math.round(r.desvio*10)/10).replace(".",",")} pp</b></span>
                   </div>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <div style={{flex:1,height:5,background:"rgba(255,255,255,0.06)",borderRadius:4,overflow:"hidden"}}>
-                      <div style={{height:"100%",width:barPct+"%",background:cor,borderRadius:4}}/>
-                    </div>
-                    <span style={{fontSize:10,color:T.t3,flexShrink:0,fontFamily:"'JetBrains Mono'"}}>
-                      {r.ultima ? tipoIc+" "+r.ultima.tipo+(r.ultima.nota?" · "+r.ultima.nota.slice(0,28)+(r.ultima.nota.length>28?"…":""):"") : "sem registro"}
-                    </span>
-                  </div>
+                  <RebBar atual={r.atual} alvo={r.alvo} tol={r.tol} max={mx} cor={st.c}/>
+                  {r.status!=="ok"&&<div style={{fontSize:10,color:st.c,marginTop:3}}>{r.delta===undefined?"":""}{r.valorAlvo-r.valor>0?"Faltam ":"Sobram "}{BRL(Math.abs(r.valorAlvo-r.valor))} para chegar ao alvo</div>}
                 </div>
-                <div style={{textAlign:"right",flexShrink:0,minWidth:48}}>
-                  <div style={{fontSize:18,fontWeight:800,color:cor,fontFamily:"'JetBrains Mono'",lineHeight:1}}>{r.dias}d</div>
-                  <div style={{fontSize:9,color:T.t3,marginTop:2}}>{r.total} registros</div>
-                </div>
-                <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
-                  <button onClick={function(e){e.stopPropagation();sAddFor(isOpen?null:r);sForm({tipo:"reuniao",nota:"",data:new Date().toISOString().split("T")[0]})}}
-                    style={{padding:"5px 10px",borderRadius:8,border:"1px solid "+T.gold+"55",background:isOpen?T.goldD:"transparent",color:T.gold,fontSize:10,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
-                    {isOpen?"✕ Fechar":"+ Registrar"}
-                  </button>
-                  <button onClick={function(e){e.stopPropagation();goClient(r.c)}}
-                    style={{padding:"5px 10px",borderRadius:8,border:"1px solid "+T.bdrL,background:"transparent",color:T.t3,fontSize:10,cursor:"pointer",whiteSpace:"nowrap"}}>
-                    Ver perfil →
-                  </button>
-                </div>
-              </div>
-
-              {/* FORM ADD INTERAÇÃO */}
-              {isOpen && (
-                <div style={{padding:"14px 16px 16px",borderTop:"1px solid "+T.bdrL,background:"rgba(255,255,255,0.02)"}}>
-                  <div style={{fontSize:11,fontWeight:700,color:T.gold,marginBottom:10}}>Nova interação com {r.c.nome.split(" ")[0]}</div>
-                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
-                    {tiposInt.map(function(t){return(
-                      <button key={t.v} onClick={function(){sForm(function(f){return Object.assign({},f,{tipo:t.v})})}}
-                        style={{padding:"5px 10px",borderRadius:8,border:"1px solid "+(form.tipo===t.v?T.gold:T.bdrL),background:form.tipo===t.v?T.goldD:"transparent",color:form.tipo===t.v?T.gold:T.t3,fontSize:11,cursor:"pointer",fontWeight:form.tipo===t.v?700:400}}>
-                        {t.ic} {t.l}
-                      </button>
-                    )})}
-                  </div>
-                  <div style={{display:"flex",gap:8,marginBottom:10}}>
-                    <input type="date" value={form.data} onChange={function(e){sForm(function(f){return Object.assign({},f,{data:e.target.value})})}}
-                      style={{padding:"8px 12px",borderRadius:8,border:"1px solid "+T.bdrL,background:T.bg2,color:T.t1,fontSize:12,outline:"none"}}/>
-                    <input value={form.nota} onChange={function(e){sForm(function(f){return Object.assign({},f,{nota:e.target.value})})}}
-                      placeholder="Nota sobre o contato (opcional)..."
-                      style={{flex:1,padding:"8px 12px",borderRadius:8,border:"1px solid "+T.bdrL,background:T.bg2,color:T.t1,fontSize:12,outline:"none"}}/>
-                  </div>
-                  <div style={{display:"flex",gap:8}}>
-                    <button onClick={registrar}
-                      style={{padding:"8px 20px",borderRadius:10,border:"none",background:T.grd,color:"#000",fontSize:12,fontWeight:700,cursor:"pointer"}}>
-                      ✅ Salvar interação
-                    </button>
-                    <button onClick={function(){sAddFor(null)}}
-                      style={{padding:"8px 14px",borderRadius:10,border:"1px solid "+T.bdrL,background:"transparent",color:T.t3,fontSize:12,cursor:"pointer"}}>
-                      Cancelar
-                    </button>
-                  </div>
-                </div>
-              )}
+              )})}
+            </div>}
+        </Cd>;
+      };
+      var atvFora=rows.ativos.slice().sort(function(a,b){return Math.abs(b.desvio)-Math.abs(a.desvio)}).slice(0,12);
+      /* composição atual por indexador, mesmo sem alvo */
+      var baseIdx=pol.idxBase==="total"?cart.pat:cart.rfTotal;
+      return <div>
+        {secao("Por classe de ativo","Barra = peso atual · faixa = alvo ± tolerância · traço = alvo",rows.classes,"Nenhum alvo por classe definido — abra a aba Política para começar (ou aplique um modelo).")}
+        {secao("Por indexador"+(pol.idxBase==="total"?" (% do patrimônio)":" (% da Renda Fixa)"),"Pós-fixado × prefixado × inflação — e quanto da fatia é estimado pelo nome do fundo",rows.idx,"Nenhum alvo por indexador definido.")}
+        <Cd hov={false} style={{padding:18,marginBottom:14}}>
+          <div style={{fontSize:14,fontWeight:800,color:T.t1,marginBottom:2}}>Composição atual da Renda Fixa por indexador</div>
+          <div style={{fontSize:11,color:T.t3,marginBottom:12}}>{BRL(cart.rfTotal)} em renda fixa{cart.idxEstimado>0?" · "+BRL(cart.idxEstimado)+" classificados por estimativa (fundos sem indexador explícito no nome)":""}</div>
+          {cart.rfTotal>0?<div>
+            <div style={{display:"flex",height:22,borderRadius:8,overflow:"hidden",marginBottom:10}}>
+              {REB_IDX.map(function(x){var v=cart.idx[x.id]||0;if(!(v>0))return null;return <div key={x.id} title={x.l+" "+BRL(v)} style={{width:(v/cart.rfTotal*100)+"%",background:x.cor,opacity:0.9}}/>})}
             </div>
-          );
-        })}
+            <div style={{display:"flex",flexWrap:"wrap",gap:14}}>
+              {REB_IDX.map(function(x){var v=cart.idx[x.id]||0;if(!(v>0))return null;return <span key={x.id} style={{fontSize:11,color:T.t2}}><span style={{display:"inline-block",width:9,height:9,borderRadius:3,background:x.cor,marginRight:6}}/>{x.c}: <b style={{color:T.t1}}>{rebPct1(v/cart.rfTotal*100)}</b> <span style={{color:T.t3}}>({BRL(v)})</span></span>})}
+            </div>
+          </div>:<div style={{fontSize:12,color:T.t3}}>Sem renda fixa na carteira.</div>}
+        </Cd>
+        {secao("Ativos fora do peso-alvo","Só aparecem ativos com peso-alvo definido na aba Política",atvFora,"Nenhum peso-alvo por ativo definido (opcional). Use \"Fixar pesos atuais\" na aba Política para começar.")}
+      </div>;
+    };
+
+    /* --- Política --- */
+    var politica=function(){
+      var aplicarModelo=function(m){
+        var cl={},ix={};REB_CLASSES.forEach(function(x){if(m.classes[x.id]!=null)cl[x.id]=m.classes[x.id]});REB_IDX.forEach(function(x){if(m.idx[x.id]!=null)ix[x.id]=m.idx[x.id]});
+        salvar(c,{classes:cl,idx:ix,idxBase:"rf"});flash("✅ Modelo "+m.l+" aplicado — ajuste os pesos como quiser");
+      };
+      var fixarAtuais=function(escopo){
+        if(escopo==="classes"){var cl={};REB_CLASSES.forEach(function(x){var v=Math.round((cart.classe[x.id]||0)/cart.pat*1000)/10;if(v>0)cl[x.id]=v});salvar(c,{classes:cl})}
+        else if(escopo==="idx"){var base=pol.idxBase==="total"?cart.pat:cart.rfTotal;var ix={};REB_IDX.forEach(function(x){var v=base>0?Math.round((cart.idx[x.id]||0)/base*1000)/10:0;if(v>0)ix[x.id]=v});salvar(c,{idx:ix})}
+        else{var at={};cart.ativos.forEach(function(a){at[a.key]=Math.round(a.valor/cart.pat*1000)/10});salvar(c,{ativos:at})}
+        flash("✅ Pesos atuais gravados como alvo");
+      };
+      var copiar=function(){
+        var o=(d.cl||[]).filter(function(x){return x.id===copiarDe})[0];
+        if(!o||!o.rebal){flash("⚠ Esse cliente ainda não tem política definida");return}
+        salvar(c,{classes:Object.assign({},o.rebal.classes||{}),idx:Object.assign({},o.rebal.idx||{}),idxBase:o.rebal.idxBase||"rf",tolClasse:o.rebal.tolClasse,tolIdx:o.rebal.tolIdx,tolAtivo:o.rebal.tolAtivo,ate:o.rebal.ate,minMov:o.rebal.minMov});
+        flash("✅ Política copiada de "+o.nome+" (alvos por classe e indexador)");
+      };
+      var comPol=(d.cl||[]).filter(function(x){return x.id!==c.id&&x.rebal&&(Object.keys(x.rebal.classes||{}).length+Object.keys(x.rebal.idx||{}).length)>0});
+      var atvFil=cart.ativos.filter(function(a){return !buscaAtv||(a.nm+" "+a.inst).toLowerCase().indexOf(buscaAtv.toLowerCase())>=0});
+      var th={padding:"8px 10px",textAlign:"left",fontSize:10,color:T.t3,fontWeight:700,letterSpacing:0.4,textTransform:"uppercase"};
+      return <div>
+        <Cd hov={false} style={{padding:16,marginBottom:14}}>
+          <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
+            <span style={{fontSize:12,fontWeight:800,color:T.t1,marginRight:6}}>Começar de um modelo:</span>
+            {REB_MODELOS.map(function(m){return <Bt key={m.id} v="secondary" onClick={function(){aplicarModelo(m)}} style={{fontSize:11,padding:"7px 12px"}}>{m.l}</Bt>})}
+            <Bt v="secondary" onClick={function(){fixarAtuais("classes");fixarAtuais("idx")}} style={{fontSize:11,padding:"7px 12px"}}>📌 Usar pesos atuais</Bt>
+            {comPol.length>0&&<span style={{display:"inline-flex",gap:6,alignItems:"center"}}>
+              <select value={copiarDe} onChange={function(e){setCopiarDe(e.target.value)}} style={{...inpS,width:170,padding:"7px 10px",fontSize:11}}><option value="">Copiar de outro cliente…</option>{comPol.map(function(x){return <option key={x.id} value={x.id}>{x.nome}</option>})}</select>
+              <Bt v="secondary" onClick={copiar} style={{fontSize:11,padding:"7px 12px"}}>Copiar</Bt>
+            </span>}
+          </div>
+          <div style={{fontSize:10.5,color:T.t3,marginTop:8,lineHeight:1.5}}>Os modelos são só ponto de partida (edite livremente). Deixe um campo vazio para não ter alvo naquele item.</div>
+        </Cd>
+
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:14,marginBottom:14}}>
+          <Cd hov={false} style={{padding:16}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><span style={{fontSize:13,fontWeight:800,color:T.t1}}>Alvo por classe</span>{chipSoma(somaClasses)}</div>
+            {REB_CLASSES.map(function(x){var at=(cart.classe[x.id]||0)/cart.pat*100;return(
+              <div key={x.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"6px 0",borderTop:"1px solid "+T.bdrL}}>
+                <span style={{fontSize:12,color:T.t1}}>{x.ic} {x.l}<span style={{display:"block",fontSize:10,color:T.t3}}>hoje {rebPct1(at)}</span></span>
+                <RebNumInput value={pol.classes[x.id]} suffix="%" onCommit={function(v){setMapa(c,"classes",x.id,v)}}/>
+              </div>)})}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:8,paddingTop:8,borderTop:"1px solid "+T.bdrL}}><span style={{fontSize:11,color:T.t3}}>Tolerância (± pontos)</span><RebNumInput value={pol.tolClasse} suffix="pp" onCommit={function(v){salvar(c,{tolClasse:v==null?5:v})}}/></div>
+            <div style={{marginTop:8}}><Bt v="ghost" onClick={function(){fixarAtuais("classes")}} style={{fontSize:11,padding:"4px 0"}}>📌 Fixar pesos atuais</Bt></div>
+          </Cd>
+          <Cd hov={false} style={{padding:16}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><span style={{fontSize:13,fontWeight:800,color:T.t1}}>Alvo por indexador</span>{chipSoma(somaIdx)}</div>
+            <div style={{display:"flex",gap:6,marginBottom:8}}>
+              {[["rf","% da Renda Fixa"],["total","% do patrimônio"]].map(function(o){var on=pol.idxBase===o[0];return <button key={o[0]} onClick={function(){salvar(c,{idxBase:o[0]})}} style={{padding:"5px 10px",borderRadius:10,fontSize:10.5,fontWeight:700,cursor:"pointer",border:on?"1px solid "+T.gold:"1px solid "+T.bdrL,background:on?"rgba(212,163,40,0.10)":"transparent",color:on?T.gold:T.t3}}>{o[1]}</button>})}
+            </div>
+            {REB_IDX.map(function(x){var base=pol.idxBase==="total"?cart.pat:cart.rfTotal;var at=base>0?(cart.idx[x.id]||0)/base*100:0;return(
+              <div key={x.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"6px 0",borderTop:"1px solid "+T.bdrL}}>
+                <span style={{fontSize:12,color:T.t1}}><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:x.cor,marginRight:6}}/>{x.l}<span style={{display:"block",fontSize:10,color:T.t3}}>hoje {rebPct1(at)}</span></span>
+                <RebNumInput value={pol.idx[x.id]} suffix="%" onCommit={function(v){setMapa(c,"idx",x.id,v)}}/>
+              </div>)})}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:8,paddingTop:8,borderTop:"1px solid "+T.bdrL}}><span style={{fontSize:11,color:T.t3}}>Tolerância (± pontos)</span><RebNumInput value={pol.tolIdx} suffix="pp" onCommit={function(v){salvar(c,{tolIdx:v==null?5:v})}}/></div>
+            <div style={{marginTop:8}}><Bt v="ghost" onClick={function(){fixarAtuais("idx")}} style={{fontSize:11,padding:"4px 0"}}>📌 Fixar pesos atuais</Bt></div>
+          </Cd>
+          <Cd hov={false} style={{padding:16}}>
+            <div style={{fontSize:13,fontWeight:800,color:T.t1,marginBottom:8}}>Regras do rebalanceamento</div>
+            <div style={{fontSize:11,color:T.t3,marginBottom:4}}>Rebalancear até…</div>
+            <div style={{display:"flex",gap:6,marginBottom:10}}>
+              {[["alvo","o peso-alvo"],["banda","a borda da faixa"]].map(function(o){var on=pol.ate===o[0];return <button key={o[0]} onClick={function(){salvar(c,{ate:o[0]})}} style={{padding:"5px 10px",borderRadius:10,fontSize:10.5,fontWeight:700,cursor:"pointer",border:on?"1px solid "+T.gold:"1px solid "+T.bdrL,background:on?"rgba(212,163,40,0.10)":"transparent",color:on?T.gold:T.t3}}>{o[1]}</button>})}
+            </div>
+            <div style={{fontSize:10,color:T.t3,lineHeight:1.5,marginBottom:10}}>"Borda da faixa" gira menos a carteira (e paga menos imposto): só leva o item para dentro da tolerância.</div>
+            {[["Movimento mínimo (R$)","minMov",pol.minMov,"R$"],["Tolerância por ativo (± pp)","tolAtivo",pol.tolAtivo,"pp"],["Revisar a cada (meses)","freqMeses",pol.freqMeses,"m"]].map(function(r){return(
+              <div key={r[1]} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"6px 0",borderTop:"1px solid "+T.bdrL}}>
+                <span style={{fontSize:11,color:T.t2}}>{r[0]}</span>
+                <RebNumInput value={r[2]} suffix={r[3]} onCommit={function(v){var o={};o[r[1]]=v==null?r[2]:v;salvar(c,o)}} width={80}/>
+              </div>)})}
+          </Cd>
+        </div>
+
+        <Cd hov={false} style={{padding:16}}>
+          <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:10}}>
+            <div><div style={{fontSize:13,fontWeight:800,color:T.t1}}>Peso-alvo por ativo <span style={{fontSize:11,color:T.t3,fontWeight:500}}>(opcional — % do patrimônio)</span></div>
+              <div style={{fontSize:10.5,color:T.t3}}>Quando há pesos por ativo, o plano usa esse nível. Alvos definidos: {Object.keys(pol.ativos).length} · somam {String(Math.round(somaAtv*10)/10).replace(".",",")}% (o que fica sem alvo não é mexido)</div></div>
+            <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+              <input value={buscaAtv} onChange={function(e){setBuscaAtv(e.target.value)}} placeholder="Buscar ativo…" style={{...inpS,width:160,padding:"7px 10px",fontSize:11}}/>
+              <Bt v="secondary" onClick={function(){fixarAtuais("ativos")}} style={{fontSize:11,padding:"7px 12px"}}>📌 Fixar pesos atuais</Bt>
+              <Bt v="secondary" onClick={function(){salvar(c,{ativos:{}});flash("Pesos por ativo removidos")}} style={{fontSize:11,padding:"7px 12px"}}>Limpar</Bt>
+            </div>
+          </div>
+          <div style={{maxHeight:420,overflow:"auto",border:"1px solid "+T.bdrL,borderRadius:10}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}>
+              <thead><tr style={{background:"rgba(255,255,255,0.03)",position:"sticky",top:0}}><th style={th}>Ativo</th><th style={th}>Classe</th><th style={th}>Indexador</th><th style={{...th,textAlign:"right"}}>Valor</th><th style={{...th,textAlign:"right"}}>Peso hoje</th><th style={{...th,textAlign:"right"}}>Peso-alvo</th></tr></thead>
+              <tbody>
+                {atvFil.map(function(a){var cl=REB_CLASSES.filter(function(x){return x.id===a.classe})[0];var ix=a.idx?REB_IDX.filter(function(x){return x.id===a.idx})[0]:null;return(
+                  <tr key={a.key} style={{borderTop:"1px solid "+T.bdrL}}>
+                    <td style={{padding:"6px 10px",color:T.t1}}>{a.nm}<span style={{color:T.t3}}> · {a.inst}</span></td>
+                    <td style={{padding:"6px 10px",color:T.t3}}>{cl?cl.l:a.classe}</td>
+                    <td style={{padding:"6px 10px",color:T.t3}}>{ix?ix.c+(a.idxEst?" ≈":""):"—"}</td>
+                    <td style={{padding:"6px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t2}}>{BRL(a.valor)}</td>
+                    <td style={{padding:"6px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t2}}>{rebPct1(a.valor/cart.pat*100)}</td>
+                    <td style={{padding:"4px 10px",textAlign:"right"}}><RebNumInput value={pol.ativos[a.key]} suffix="%" width={58} onCommit={function(v){setMapa(c,"ativos",a.key,v)}}/></td>
+                  </tr>)})}
+              </tbody>
+            </table>
+          </div>
+        </Cd>
+      </div>;
+    };
+
+    /* --- Plano --- */
+    var textoResumo=function(){
+      var t="⚖️ Rebalanceamento — "+c.nome+" ("+new Date().toLocaleDateString("pt-BR")+")\n";
+      t+="Patrimônio: "+BRL(cart.pat)+(aporte?(" · "+(aporte>0?"aporte":"resgate")+" de "+BRL(Math.abs(aporte))):"")+"\n\n";
+      if(plano.vendas.length){t+="VENDER / RESGATAR:\n";plano.vendas.forEach(function(v){t+="• "+v.nm+" ("+v.inst+") — "+BRL(v.valor)+(v.parcial?" (parcial)":"")+"\n"})}
+      if(plano.compras.length){t+="\nAPLICAR:\n";plano.compras.forEach(function(v){t+="• "+v.label+" — "+BRL(v.valor)+(v.dica?" ("+v.dica+")":"")+"\n"})}
+      if(!plano.vendas.length&&!plano.compras.length)t+="Carteira dentro da política — nada a fazer.\n";
+      if(plano.irEstimado>0)t+="\nIR estimado nas vendas: ~"+BRL(plano.irEstimado)+" (estimativa).\n";
+      return t;
+    };
+    var copiarTexto=function(){
+      var t=textoResumo();
+      var ok=false;try{if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t);ok=true}}catch(e){}
+      if(!ok){try{var ta=document.createElement("textarea");ta.value=t;document.body.appendChild(ta);ta.select();document.execCommand("copy");document.body.removeChild(ta);ok=true}catch(e2){}}
+      flash(ok?"📋 Resumo copiado":"⚠ Não consegui copiar");
+    };
+    var baixarExcel=function(){
+      try{
+        var rowsX=[];
+        plano.vendas.forEach(function(v){rowsX.push({Ação:"Vender/Resgatar",Item:v.nm,Custodiante:v.inst,Valor:Math.round(v.valor*100)/100,"Parcial?":v.parcial?"sim":"não",Liquidez:v.liq,"IR estimado":Math.round(v.ir*100)/100,Motivo:v.motivo})});
+        plano.compras.forEach(function(v){rowsX.push({Ação:"Aplicar",Item:v.label,Custodiante:v.inst||"",Valor:Math.round(v.valor*100)/100,"Parcial?":"",Liquidez:"","IR estimado":"",Motivo:v.dica})});
+        if(!rowsX.length){flash("Nada a exportar — carteira dentro da política");return}
+        var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rowsX),"Rebalanceamento");
+        XLSX.writeFile(wb,"rebalanceamento_"+c.nome.replace(/[^\w]+/g,"_")+"_"+new Date().toISOString().split("T")[0]+".xlsx");
+      }catch(e){flash("⚠ Erro ao gerar Excel: "+e.message)}
+    };
+    var registrar=function(){
+      var hojeIso=new Date().toISOString().split("T")[0];
+      var reg={ts:Date.now(),data:hojeIso,patrimonio:cart.pat,maxDesvio:L.dv.max,nMov:plano.moves.length,totalVender:plano.totalVender,totalComprar:plano.totalComprar,aporte:aporte,modo:modo,nota:notaReg,
+        movs:plano.moves.map(function(m){return{label:m.label,nivel:m.nivel,delta:Math.round(m.delta)}})};
+      var hist=[reg].concat(pol.hist).slice(0,24);
+      salvar(c,{hist:hist});
+      dp({t:"AI",p:{cid:c.id,tipo:"outro",data:hojeIso,nota:"Rebalanceamento de carteira registrado: "+plano.moves.length+" movimento(s), "+BRL(plano.totalVender)+" a vender / "+BRL(plano.totalComprar)+" a aplicar."+(notaReg?" "+notaReg:"")}});
+      setNotaReg("");flash("✅ Rebalanceamento registrado no histórico (e nas interações do cliente)");
+    };
+    var plan=function(){
+      var te=L.te;
+      var semAlvo=(te.classes+te.idx+te.ativos)===0;
+      var nivelTxt=plano.nivel==="ativo"?"por ativo":(te.idx>0&&te.classes>0?"por classe + indexador":te.idx>0?"por indexador":"por classe");
+      var depoisRows=[];
+      if(!semAlvo&&plano.moves.length>0){
+        var tot=plano.patDepois>0?plano.patDepois:cart.pat;
+        REB_CLASSES.forEach(function(x){var al=pol.classes[x.id];if(typeof al!=="number")return;depoisRows.push({id:"c"+x.id,label:x.l,antes:(cart.classe[x.id]||0)/cart.pat*100,depois:(plano.depoisClasse[x.id]||0)/tot*100,alvo:al,tol:pol.tolClasse})});
+        var baseD=pol.idxBase==="total"?tot:Math.max(1,Object.keys(plano.depoisIdx).reduce(function(s,k){return s+plano.depoisIdx[k]},0));
+        var baseA=pol.idxBase==="total"?cart.pat:cart.rfTotal;
+        REB_IDX.forEach(function(x){var al=pol.idx[x.id];if(typeof al!=="number")return;depoisRows.push({id:"i"+x.id,label:x.l,antes:baseA>0?(cart.idx[x.id]||0)/baseA*100:0,depois:(plano.depoisIdx[x.id]||0)/baseD*100,alvo:al,tol:pol.tolIdx})});
+      }
+      var th={padding:"7px 10px",textAlign:"left",fontSize:10,color:T.t3,fontWeight:700,letterSpacing:0.4,textTransform:"uppercase"};
+      return <div>
+        <Cd hov={false} style={{padding:16,marginBottom:14}}>
+          <div style={{display:"flex",flexWrap:"wrap",gap:14,alignItems:"center"}}>
+            <div>
+              <div style={{fontSize:11,color:T.t3,marginBottom:4}}>Aporte (+) ou resgate (−) previsto</div>
+              <input value={aporteTxt} onChange={function(e){setAporteTxt(e.target.value)}} style={{...inpS,width:170,padding:"8px 10px",fontFamily:"'JetBrains Mono'",color:T.gold}}/>
+            </div>
+            <div>
+              <div style={{fontSize:11,color:T.t3,marginBottom:4}}>Como rebalancear</div>
+              <div style={{display:"flex",gap:6}}>
+                {[["completo","Comprar e vender"],["so_aporte","Só com aporte (sem vender)"]].map(function(o){var on=modo===o[0];return <button key={o[0]} onClick={function(){setModo(o[0])}} style={{padding:"8px 12px",borderRadius:10,fontSize:11,fontWeight:700,cursor:"pointer",border:on?"1px solid "+T.gold:"1px solid "+T.bdrL,background:on?"rgba(212,163,40,0.10)":"transparent",color:on?T.gold:T.t3}}>{o[1]}</button>})}
+              </div>
+            </div>
+            <div style={{fontSize:11,color:T.t3,lineHeight:1.5,maxWidth:340}}>Nível usado: <b style={{color:T.t1}}>{semAlvo?"—":nivelTxt}</b> · {pol.ate==="banda"?"até a borda da faixa":"até o peso-alvo"} · movimentos abaixo de {BRL(pol.minMov)} são ignorados.</div>
+          </div>
+        </Cd>
+        {semAlvo?<Cd hov={false} style={{padding:24,textAlign:"center"}}><div style={{fontSize:30}}>🎯</div><div style={{fontSize:13,fontWeight:700,color:T.t1,marginTop:6}}>Defina a política primeiro</div><div style={{fontSize:11,color:T.t3,margin:"6px 0 12px"}}>Sem pesos-alvo não há como sugerir movimentos.</div><Bt onClick={function(){setAba("politica")}}>Ir para a Política</Bt></Cd>:<div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,marginBottom:14}}>
+            <KCard compact label="A vender / resgatar" valor={BRL(plano.totalVender)} cor={T.red} sub={plano.vendas.length+" posição(ões)"}/>
+            <KCard compact label="A aplicar" valor={BRL(plano.totalComprar)} cor={T.green} sub={plano.compras.length+" destino(s)"}/>
+            <KCard compact label={plano.sobra>=0?"Sobra de caixa":"Falta de caixa"} valor={BRL(Math.abs(plano.sobra))} cor={Math.abs(plano.sobra)<1?T.t2:(plano.sobra>0?T.cyan:T.orange)} sub="após o plano"/>
+            <KCard compact label="IR estimado" valor={BRL(plano.irEstimado)} cor={T.orange} sub="estimativa nas vendas"/>
+          </div>
+          {plano.avisos.length>0&&<div style={{fontSize:11,color:T.t2,lineHeight:1.6,padding:"10px 12px",borderRadius:10,border:"1px solid rgba(224,168,92,0.35)",background:"rgba(224,168,92,0.07)",marginBottom:14}}>{plano.avisos.map(function(a,i){return <div key={i}>• {a}</div>})}</div>}
+          {plano.moves.length===0?<Cd hov={false} style={{padding:24,textAlign:"center"}}><div style={{fontSize:30}}>✅</div><div style={{fontSize:13,fontWeight:700,color:T.green,marginTop:6}}>Carteira dentro da política</div><div style={{fontSize:11,color:T.t3,marginTop:4}}>Nenhum movimento necessário agora.</div></Cd>:<div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(340px,1fr))",gap:14,marginBottom:14}}>
+              <Cd hov={false} style={{padding:16}}>
+                <div style={{fontSize:13,fontWeight:800,color:T.red,marginBottom:8}}>🔻 Vender / resgatar</div>
+                {plano.vendas.length===0?<div style={{fontSize:11,color:T.t3}}>Nenhuma venda necessária.</div>:
+                <div style={{maxHeight:340,overflow:"auto"}}>
+                  {plano.vendas.map(function(v,i){return(
+                    <div key={i} style={{padding:"8px 0",borderTop:i?"1px solid "+T.bdrL:"none"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",gap:8}}><span style={{fontSize:12,fontWeight:700,color:T.t1}}>{v.nm}</span><span style={{fontSize:12,fontWeight:800,color:T.red,fontFamily:"'JetBrains Mono'",whiteSpace:"nowrap"}}>{BRL(v.valor)}</span></div>
+                      <div style={{fontSize:10,color:T.t3,marginTop:2}}>{v.inst} · liquidez {v.liq}{v.parcial?" · parcial de "+BRL(v.total):" · posição inteira"}{v.ir>0?" · IR ≈ "+BRL(v.ir):""}{v.dias!=null&&v.dias>=0&&v.dias<=90?" · vence em "+v.dias+"d":""}</div>
+                      <div style={{fontSize:10,color:T.t3}}>{v.motivo}</div>
+                    </div>)})}
+                </div>}
+              </Cd>
+              <Cd hov={false} style={{padding:16}}>
+                <div style={{fontSize:13,fontWeight:800,color:T.green,marginBottom:8}}>🔺 Aplicar</div>
+                {plano.compras.length===0?<div style={{fontSize:11,color:T.t3}}>Nenhuma compra necessária.</div>:
+                <div>
+                  {plano.compras.map(function(v,i){return(
+                    <div key={i} style={{padding:"8px 0",borderTop:i?"1px solid "+T.bdrL:"none"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",gap:8}}><span style={{fontSize:12,fontWeight:700,color:T.t1}}>{v.label}</span><span style={{fontSize:12,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'",whiteSpace:"nowrap"}}>{BRL(v.valor)}</span></div>
+                      {v.dica&&<div style={{fontSize:10,color:T.t3,marginTop:2}}>{v.dica}</div>}
+                    </div>)})}
+                </div>}
+                {plano.vencProxTotal>0&&<div style={{fontSize:10.5,color:T.cyan,marginTop:10,lineHeight:1.5}}>⏰ {BRL(plano.vencProxTotal)} de renda fixa vencem nos próximos 90 dias — dá para usar esse dinheiro nas compras sem vender nada.</div>}
+              </Cd>
+            </div>
+            {depoisRows.length>0&&<Cd hov={false} style={{padding:16,marginBottom:14}}>
+              <div style={{fontSize:13,fontWeight:800,color:T.t1,marginBottom:2}}>Antes × depois do plano</div>
+              <div style={{fontSize:11,color:T.t3,marginBottom:10}}>Traço branco = alvo · faixa = tolerância</div>
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {depoisRows.map(function(r){var mx=Math.max(10,r.antes,r.depois,r.alvo+r.tol)*1.08;var stD=rebStatus(r.depois-r.alvo,r.tol);return(
+                  <div key={r.id}>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}><span style={{color:T.t1,fontWeight:700}}>{r.label}</span><span style={{color:T.t3,fontFamily:"'JetBrains Mono'"}}>{rebPct1(r.antes)} → <b style={{color:REB_ST[stD].c}}>{rebPct1(r.depois)}</b> · alvo {rebPct1(r.alvo)}</span></div>
+                    <RebBar atual={r.antes} alvo={r.alvo} tol={r.tol} max={mx} cor="rgba(255,255,255,0.35)" height={7}/>
+                    <div style={{height:4}}/>
+                    <RebBar atual={r.depois} alvo={r.alvo} tol={r.tol} max={mx} cor={REB_ST[stD].c} height={7}/>
+                  </div>)})}
+              </div>
+            </Cd>}
+            <Cd hov={false} style={{padding:16}}>
+              <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
+                <Bt v="secondary" onClick={copiarTexto} style={{fontSize:11,padding:"8px 14px"}}>📋 Copiar resumo</Bt>
+                <Bt v="secondary" onClick={baixarExcel} style={{fontSize:11,padding:"8px 14px"}}>📥 Baixar Excel</Bt>
+                <input value={notaReg} onChange={function(e){setNotaReg(e.target.value)}} placeholder="Observação (opcional)" style={{...inpS,flex:1,minWidth:180,padding:"8px 10px",fontSize:11}}/>
+                <Bt onClick={registrar} style={{fontSize:11,padding:"8px 14px"}}>✅ Registrar como feito</Bt>
+              </div>
+              <div style={{fontSize:10,color:T.t3,marginTop:8,lineHeight:1.5}}>Registrar guarda a data, os movimentos e o desvio no histórico do cliente e cria uma interação. Não envia ordem a nenhuma corretora. IR e liquidez são estimativas (o extrato não traz data de compra nem prazo de resgate).</div>
+            </Cd>
+          </div>}
+        </div>}
+      </div>;
+    };
+
+    /* --- Histórico --- */
+    var historico=function(){
+      return <Cd hov={false} style={{padding:16}}>
+        <div style={{fontSize:13,fontWeight:800,color:T.t1,marginBottom:10}}>Histórico de rebalanceamentos</div>
+        {pol.hist.length===0?<div style={{fontSize:12,color:T.t3}}>Nada registrado ainda. Na aba Plano, use "Registrar como feito" depois de executar.</div>:
+          pol.hist.map(function(h,i){return(
+            <div key={i} style={{padding:"10px 0",borderTop:i?"1px solid "+T.bdrL:"none"}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}><b style={{fontSize:12,color:T.t1}}>{fD(h.data)}</b><span style={{fontSize:11,color:T.t3,fontFamily:"'JetBrains Mono'"}}>patrimônio {BRL(h.patrimonio)} · desvio máx {String(Math.round(h.maxDesvio*10)/10).replace(".",",")} pp · vendeu {BRL(h.totalVender)} · aplicou {BRL(h.totalComprar)}</span></div>
+              {h.nota&&<div style={{fontSize:11,color:T.t2,marginTop:2}}>{h.nota}</div>}
+              <div style={{fontSize:10,color:T.t3,marginTop:2}}>{(h.movs||[]).slice(0,8).map(function(m){return m.label+" "+(m.delta>=0?"+":"")+Math.round(m.delta/1000)+"k"}).join(" · ")}</div>
+            </div>)})}
+      </Cd>;
+    };
+
+    return <div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <Bt v="secondary" onClick={function(){setSelId(null);setAba("diag")}} style={{fontSize:12,padding:"8px 14px"}}>← Voltar</Bt>
+          <div><div style={{fontSize:18,fontWeight:800,color:T.t1}}>{c.nome}</div><div style={{fontSize:11,color:T.t3}}>Patrimônio {BRL(cart.pat)} · {cart.ativos.length} ativos · última revisão {L.ult?fD(L.ult):"nunca"}{L.vencida?" · ⚠ revisão atrasada":""}</div></div>
+        </div>
+        <Bt v="ghost" onClick={function(){onGoClient&&onGoClient(c)}} style={{fontSize:11}}>Abrir ficha do cliente →</Bt>
       </div>
+      {msg&&<div style={{padding:"9px 14px",borderRadius:10,background:"rgba(212,163,40,0.10)",border:"1px solid rgba(212,163,40,0.3)",color:T.gold,fontSize:12,fontWeight:600,marginBottom:12}}>{msg}</div>}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
+        {tabBtn("diag","📊 Diagnóstico")}{tabBtn("politica","🎯 Política (alvos)")}{tabBtn("plano","⚖️ Plano de rebalanceamento")}{tabBtn("hist","🕘 Histórico ("+pol.hist.length+")")}
+      </div>
+      {aba==="diag"&&diag()}{aba==="politica"&&politica()}{aba==="plano"&&plan()}{aba==="hist"&&historico()}
+    </div>;
+  };
+
+  /* ---------- visão geral ---------- */
+  var chipF=function(id,l,n){var on=filtro===id;return <button key={id} onClick={function(){setFiltro(id)}} style={{padding:"7px 12px",borderRadius:12,fontSize:11,fontWeight:700,cursor:"pointer",border:on?"1px solid "+T.gold:"1px solid "+T.bdrL,background:on?"rgba(212,163,40,0.10)":"transparent",color:on?T.gold:T.t2}}>{l} <span style={{opacity:0.7}}>({n})</span></button>};
+  if(sel)return <div>{renderCliente(sel)}</div>;
+  return <div>
+    <div style={{marginBottom:16}}>
+      <h2 style={{margin:0,fontSize:20,fontWeight:800,color:T.t1}}>⚖️ Rebalanceamento de carteira</h2>
+      <div style={{fontSize:12,color:T.t3,marginTop:4,lineHeight:1.6}}>Defina o peso-alvo por classe, indexador (pós × pré × IPCA) e ativo. O Hub acompanha o desvio de cada carteira e sugere o que vender e onde aplicar — incluindo o caminho "só com aporte".</div>
     </div>
-  );
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,marginBottom:16}}>
+      <KCard compact label="Carteiras monitoradas" valor={String(kpi.com)} cor={T.gold} sub={kpi.sem+" ainda sem política"}/>
+      <KCard compact label="Fora da faixa" valor={String(kpi.fora)} cor={kpi.fora>0?T.red:T.green} sub={kpi.fora>0?"pedem ação":"tudo em ordem"}/>
+      <KCard compact label="A movimentar" valor={BRL(kpi.mov)} cor={T.orange} sub="vendas das carteiras fora"/>
+      <KCard compact label="Revisões atrasadas" valor={String(kpi.venc)} cor={kpi.venc>0?T.orange:T.green} sub="sem rebalancear no prazo"/>
+    </div>
+    <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center",marginBottom:14}}>
+      <input value={busca} onChange={function(e){setBusca(e.target.value)}} placeholder="Buscar cliente…" style={{...inpS,flex:1,minWidth:180,borderRadius:14}}/>
+      {chipF("todos","Todos",linhas.length)}{chipF("fora","Fora da faixa",kpi.fora)}{chipF("ok","Dentro da política",kpi.com-kpi.fora)}{chipF("venc","Revisão atrasada",kpi.venc)}{chipF("sem","Sem política",kpi.sem)}
+    </div>
+    {lista.length===0?<Cd hov={false} style={{padding:30,textAlign:"center",color:T.t3,fontSize:13}}>{linhas.length===0?"Nenhum cliente com carteira importada ainda. Importe a carteira (Gorila ou Relatório Consolidado) para usar o rebalanceamento.":"Nenhum cliente neste filtro."}</Cd>:
+    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+      {lista.map(function(l){
+        var st=!l.temPol?null:(l.dv.fora>0?REB_ST.fora:(l.dv.atencao>0?REB_ST.atencao:REB_ST.ok));
+        return <Cd key={l.c.id} hov={true} onClick={function(){setSelId(l.c.id);setAba(l.temPol?"diag":"politica");setAporteTxt("0")}} style={{padding:"14px 16px",cursor:"pointer"}}>
+          <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:14,justifyContent:"space-between"}}>
+            <div style={{minWidth:190,flex:"1 1 190px"}}>
+              <div style={{fontSize:14,fontWeight:800,color:T.t1}}>{l.c.nome}</div>
+              <div style={{fontSize:11,color:T.t3}}>{BRL(l.cart.pat)} · {l.cart.ativos.length} ativos{l.ult?" · revisado em "+fD(l.ult):""}{l.vencida?" · ⚠ atrasada":""}</div>
+            </div>
+            <div style={{flex:"2 1 260px",minWidth:220}}>
+              <div style={{display:"flex",height:12,borderRadius:6,overflow:"hidden",background:"rgba(255,255,255,0.04)"}}>
+                {REB_CLASSES.map(function(x){var v=l.cart.classe[x.id]||0;if(!(v>0))return null;return <div key={x.id} title={x.l+" "+rebPct1(v/l.cart.pat*100)} style={{width:(v/l.cart.pat*100)+"%",background:x.cor,opacity:0.85}}/>})}
+              </div>
+              <div style={{fontSize:10,color:T.t3,marginTop:4}}>{REB_CLASSES.map(function(x){var v=l.cart.classe[x.id]||0;return v>0?({rf:"RF",rv:"RV",ext:"Exterior",cx:"Caixa",alt:"Alt."}[x.id]||x.l)+" "+Math.round(v/l.cart.pat*100)+"%":null}).filter(Boolean).join(" · ")}</div>
+            </div>
+            <div style={{textAlign:"right",minWidth:150}}>
+              {l.temPol?<div>
+                <span style={{fontSize:11,fontWeight:800,color:st.c,padding:"3px 10px",borderRadius:20,background:st.c+"1f",border:"1px solid "+st.c+"40"}}>{l.dv.fora>0?l.dv.fora+" fora da faixa":(l.dv.atencao>0?"quase no limite":"dentro da política")}</span>
+                <div style={{fontSize:10.5,color:T.t3,marginTop:4}}>desvio máx. {String(Math.round(l.dv.max*10)/10).replace(".",",")} pp{l.plano&&l.plano.totalVender>0&&l.dv.fora>0?" · mover "+BRL(l.plano.totalVender):""}</div>
+              </div>:<span style={{fontSize:11,fontWeight:700,color:T.t3,padding:"3px 10px",borderRadius:20,border:"1px dashed "+T.bdrL}}>Definir política →</span>}
+            </div>
+          </div>
+        </Cd>;
+      })}
+    </div>}
+  </div>;
 }
 
 function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
@@ -26771,7 +27296,7 @@ function MetasConsultor({data:d,dispatch:dp,onGoClient,goTo}){
       {k:"carteira",desc:"Carteiras atualizadas nos últimos 30 dias",atual:carteiraPct,un:"%",step:5,fonte:"Clientes › data da última importação do Gorila ("+carteirasOk.length+"/"+clComPat.length+")"},
       {k:"miles",desc:"Clientes com Couri Mile$",atual:clMiles.length,un:"un",step:1,fonte:"Clientes › serviço Milhas"},
     ]},
-    {id:"atd",obj:"Atendimento e rotina",ic:"🤝",go:"interacoes",goL:"Abrir Interações",kr:[
+    {id:"atd",obj:"Atendimento e rotina",ic:"🤝",go:"clients",goL:"Abrir Clientes",kr:[
       {k:"reuniaoTri",desc:"Clientes com reunião no trimestre ("+nomeTri+")",atual:reuniaoPct,un:"%",step:5,fonte:"Interações › reunião/visita ("+comReuniaoTri.length+"/"+clAtend.length+" clientes GP/GF)"},
       {k:"contatosMes",desc:"Clientes contatados no mês",atual:contatoPct,un:"%",step:5,fonte:"Interações › qualquer contato em "+lblYM(ymHoje)+" ("+comContatoMes.length+"/"+clAtend.length+")"},
       {k:"relatorios",desc:"Relatórios de "+lblYM(mesRefKey)+" enviados",atual:relPct,un:"%",step:5,fonte:"Relatórios › publicados ("+relOk.length+"/"+clAtend.length+")"},
@@ -35704,7 +36229,7 @@ function PropostasView({data,dispatch}){
   return null;
 }
 
-const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"interacoes",l:"Interações",i:"📡"},{id:"vencimentos",l:"Vencimentos",i:"⏰"},{id:"simuladores",l:"Simuladores",i:"🧮"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"parceiros",l:"Parceiros",i:"🤝"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"irAnual",l:"Relatório IR",i:"📑"}];
+const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"rebal",l:"Rebalanceamento",i:"⚖️"},{id:"vencimentos",l:"Vencimentos",i:"⏰"},{id:"simuladores",l:"Simuladores",i:"🧮"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"parceiros",l:"Parceiros",i:"🤝"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"irAnual",l:"Relatório IR",i:"📑"}];
 
 /* ============ AUTH + FIRESTORE SYNC ============ */
 
@@ -39835,7 +40360,7 @@ function App({authUser}){
     });
   },[notsReais,pushPerm]);
   const go=function(p){sPg(p);sSel(null);sShowMenu(false)};
-  const titles={dashboard:"Dashboard",clients:sel?sel.nome:"Clientes",interacoes:"Interações",vencimentos:"Vencimentos de Renda Fixa",simuladores:"Simuladores — Carro e Imóvel",financeiro:"Financeiro da Empresa",comercial:"Comercial",metas:"Painel de Metas",agenda:"Agenda",news:"Notícias & Mercado",import:"Importar",irAnual:"Relatório Anual de IR"};
+  const titles={dashboard:"Dashboard",clients:sel?sel.nome:"Clientes",rebal:"Rebalanceamento de Carteira",vencimentos:"Vencimentos de Renda Fixa",simuladores:"Simuladores — Carro e Imóvel",financeiro:"Financeiro da Empresa",comercial:"Comercial",metas:"Painel de Metas",agenda:"Agenda",news:"Notícias & Mercado",import:"Importar",irAnual:"Relatório Anual de IR"};
 
   
   const[isMobile,setMobile]=useState(window.innerWidth<768);
@@ -40135,7 +40660,7 @@ function App({authUser}){
         <div style={{flex:1,overflow:"auto",padding:isMobile?14:28,background:"radial-gradient(ellipse at 15% -5%,rgba(212,163,40,0.03),transparent 45%),radial-gradient(ellipse at 85% 100%,rgba(56,189,248,0.015),transparent 45%)"}} onClick={function(){sShowN(false)}}>
           {pg==="dashboard" && <Dash data={d} onSel={function(c){sPg("clients");sSel(c)}} goTo={function(p){sPg(p)}}/>}
           {pg==="clients" && !sel && <CL data={d} onSel={function(c){sSel(c)}} dispatch={dp} fi={clFi} sFi={sClFi}/>}
-          {pg==="interacoes" && <InteracoesView data={d} dispatch={dp} onGoClient={function(c){sPg("clients");sSel(c)}}/>}
+          {pg==="rebal" && <RebalanceamentoView data={d} dispatch={dp} onGoClient={function(c){sPg("clients");sSel(c)}}/>}
           {pg==="simuladores" && <SimuladoresView/>}
           {pg==="vencimentos" && <VencimentosView data={d} dispatch={dp} taxasBCB={taxasBCB} taxaBCBStatus={taxaBCBStatus} onGoClient={function(c){sPg("clients");sSel(c)}}/>}
           {pg==="clients" && sel && <CD client={sel} data={d} dispatch={dp} onBack={function(){sSel(null)}} taxasBCB={taxasBCB} taxaBCBStatus={taxaBCBStatus}/>}
@@ -40273,7 +40798,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '533';
+  var SW_VERSION = '534';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
