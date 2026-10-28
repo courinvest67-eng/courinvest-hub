@@ -5567,6 +5567,57 @@ var REB_TP_CLASSE={cdb:"rf",lci:"rf",lca:"rf",lc:"rf",cri:"rf",cra:"rf",tesouro:
   acao:"rv",fii:"rv",fiagro:"rv",fip:"rv",etf_br:"rv",bdr:"rv",fundo_acoes:"rv",
   stock_us:"ext",etf_int:"ext",etf_eu:"ext",reit:"ext",bond_intl:"ext",fundo_mm_intl:"ext",
   caixa:"cx",cripto:"alt",prev:"alt",ouro:"alt"};
+/* Tipos dentro de Renda Variável e Exterior (alvo em % da classe) */
+var REB_SUB={
+  rv:[{id:"acoes",l:"Ações",cor:"#34D399",dica:"Ações e BDRs"},{id:"fii",l:"Fundos Imobiliários (FIIs)",cor:"#38BDF8",dica:"FIIs de tijolo e papel"},{id:"fiagro",l:"Fiagros",cor:"#FBBF24",dica:"Fiagros listados (ex.: RZAG11)"},{id:"infra",l:"FI-Infra",cor:"#A78BFA",dica:"FI-Infra listados na B3 (ex.: KDIF11)"},{id:"etf",l:"ETFs (BR)",cor:"#F472B6",dica:"ETFs listados na B3"},{id:"fundos",l:"Fundos de ações",cor:"#FB923C",dica:"Fundos de ações e FIPs abertos"},{id:"outros",l:"Outros RV",cor:"#94A3B8",dica:"Demais ativos de renda variável"}],
+  ext:[{id:"stocks",l:"Stocks",cor:"#34D399",dica:"Ações no exterior"},{id:"reits",l:"REITs",cor:"#38BDF8",dica:"REITs / imobiliário internacional"},{id:"etf",l:"ETFs",cor:"#F472B6",dica:"ETFs EUA/Europa"},{id:"bonds",l:"Bonds",cor:"#FBBF24",dica:"Treasuries e bonds"},{id:"caixa",l:"Caixa / monetário",cor:"#A78BFA",dica:"Dólar/euro em conta e fundos monetários"},{id:"outros",l:"Outros exterior",cor:"#94A3B8",dica:"Demais ativos no exterior"}]
+};
+function rebClasseAtivo(a){
+  /* FI-Infra com ticker de bolsa (ex.: KDIF11) é renda variável; cotas de fundo (debêntures incentivadas) seguem em renda fixa */
+  if(a&&a.tp==="fundo_infra"&&/^[A-Z]{4}1[1-3]$/.test(String(a.tk||"").trim().toUpperCase()))return"rv";
+  return REB_TP_CLASSE[a.tp]||"rv";
+}
+var REB_TK_FIAGRO="RZAG11 RZTR11 KNCA11 CRAA11 SNAG11 VGIA11 XPCA11 FGAA11 BTAL11 GCRA11 OIAG11 AAGR11 RURA11 VCRA11 DAMA11 NCRA11 ARRI11".split(" ");
+var REB_TK_INFRA="KDIF11 IFRA11 BDIF11 NUIF11 CPTI11 JURO11 BIDB11 XPID11 XPIE11 CDII11 SNID11 BODB11 OGIN11".split(" ");
+function rebSubAtivo(a,cl){
+  var tp=a.tp,tk=String(a.tk||"").trim().toUpperCase(),nm=String(a.nm||"").toUpperCase();
+  if(cl==="rv"&&(tp==="fii"||tp==="fiagro"||tp==="fundo_infra")){
+    if(tp==="fundo_infra"||REB_TK_INFRA.indexOf(tk)>=0||/\bINFRA/.test(nm))return"infra";
+    if(tp==="fiagro"||REB_TK_FIAGRO.indexOf(tk)>=0||/FIAGRO|\bAGRO/.test(nm))return"fiagro";
+    return"fii";
+  }
+  if(cl==="rv"){return({acao:"acoes",bdr:"acoes",fii:"fii",fiagro:"fiagro",fundo_infra:"infra",etf_br:"etf",fundo_acoes:"fundos",fip:"fundos"})[tp]||"outros"}
+  if(cl==="ext"){return({stock_us:"stocks",reit:"reits",etf_int:"etf",etf_eu:"etf",bond_intl:"bonds",fundo_mm_intl:"caixa"})[tp]||"outros"}
+  return null;
+}
+function rebSubInfo(cl,id){return(REB_SUB[cl]||[]).filter(function(x){return x.id===id})[0]||null}
+function rebClsInfo(id){return REB_CLASSES.filter(function(x){return x.id===id})[0]||{l:id}}
+/* Grupo de um ativo = menor nível com alvo definido (indexador na RF, tipo em RV/Exterior, senão a classe) */
+function rebGid(a,pol){
+  if(a.classe==="rf"&&a.idx&&typeof pol.idx[a.idx]==="number")return"idx:"+a.idx;
+  if((a.classe==="rv"||a.classe==="ext")&&a.sub&&pol.sub[a.classe]&&typeof pol.sub[a.classe][a.sub]==="number")return"sub:"+a.classe+":"+a.sub;
+  return"cls:"+a.classe;
+}
+function rebGidLabel(gid){
+  var p=gid.split(":");
+  if(p[0]==="idx"){var x=REB_IDX.filter(function(y){return y.id===p[1]})[0];return x?x.l:p[1]}
+  if(p[0]==="sub"){var si=rebSubInfo(p[1],p[2]);return rebClsInfo(p[1]).l+" › "+(si?si.l:p[2])}
+  return rebClsInfo(p[1]).l;
+}
+function rebAlvoAtivo(pol,a){
+  if(typeof pol.ativos[a.key]==="number")return pol.ativos[a.key];
+  if(a.keyAlt&&typeof pol.ativos[a.keyAlt]==="number")return pol.ativos[a.keyAlt];
+  return null;
+}
+/* Destinos possíveis para um ativo-alvo ainda sem posição: "rv:fii", "ext:stocks", "rf:pos", "cx", "alt" */
+function rebGrupoOpcoes(){
+  var o=[];
+  REB_SUB.rv.forEach(function(x){o.push({v:"rv:"+x.id,l:"RV › "+x.l})});
+  REB_SUB.ext.forEach(function(x){o.push({v:"ext:"+x.id,l:"Exterior › "+x.l})});
+  REB_IDX.forEach(function(x){o.push({v:"rf:"+x.id,l:"RF › "+x.c})});
+  o.push({v:"cx",l:"Caixa"});o.push({v:"alt",l:"Alternativos"});
+  return o;
+}
 var REB_MODELOS=[
   {id:"cons",l:"Conservador",classes:{rf:80,rv:5,ext:10,cx:5,alt:0},idx:{pos:50,pre:20,ipca:30}},
   {id:"mod",l:"Moderado",classes:{rf:60,rv:12,ext:20,cx:5,alt:3},idx:{pos:40,pre:25,ipca:35}},
@@ -5604,24 +5655,40 @@ function rebLiquidez(a,dias){
 /* Foto da carteira: pesos por classe, indexador e ativo. */
 function rebCarteira(c){
   var ai=(c&&c._ativosImport)||[];
-  var out={pat:0,ativos:[],classe:{},idx:{},rfTotal:0,nIgnorados:0,idxEstimado:0};
+  var out={pat:0,ativos:[],classe:{},idx:{},sub:{rv:{},ext:{}},rfTotal:0,nIgnorados:0,idxEstimado:0};
   REB_CLASSES.forEach(function(x){out.classe[x.id]=0});
   REB_IDX.forEach(function(x){out.idx[x.id]=0});
+  REB_SUB.rv.forEach(function(x){out.sub.rv[x.id]=0});REB_SUB.ext.forEach(function(x){out.sub.ext[x.id]=0});
   var hoje=new Date();hoje.setHours(0,0,0,0);
   ai.forEach(function(a){
     var v=+a.posR||((+a.qtd||0)*(+a.pa||0))||0;
     if(a._liquidado||!(v>0)){out.nIgnorados++;return}
-    var cl=REB_TP_CLASSE[a.tp]||"rv";
+    var cl=rebClasseAtivo(a);
     var ix=cl==="rf"?rebIdxAtivo(a):null;
+    var sb=rebSubAtivo(a,cl);
+    /* reclassificação manual por ativo (c.rebal.regrupar["TK|"]="rv:fiagro") */
+    var rgm=(c&&c.rebal&&c.rebal.regrupar)||{},keyA=(String(a.tk||"").trim()?String(a.tk).trim().toUpperCase()+"|":chaveVencAtivo(a)),ov=rgm[chaveVencAtivo(a)]||rgm[keyA];
+    if(ov){var go=String(ov).split(":");cl=go[0];sb=(cl==="rv"||cl==="ext")?(go[1]||"outros"):null;ix=cl==="rf"?{id:go[1]||"out",est:false}:null}
     var rv=null;try{rv=resolveVencAtivo(c,a)}catch(e){}
     var dias=null;if(rv&&rv.iso){dias=Math.ceil((new Date(rv.iso+"T12:00:00")-hoje)/86400000)}
     var pm=(+a.qtd>0&&+a.pm>0)?(+a.qtd)*(+a.pm):0;
     var liq=rebLiquidez(a,dias);
-    var it={key:chaveVencAtivo(a),nm:a.nm||a.tk||"Ativo",tk:a.tk,tp:a.tp,inst:a.inst||"—",classe:cl,idx:ix?ix.id:null,idxEst:ix?ix.est:false,valor:v,
+    var it={key:chaveVencAtivo(a),keyAlt:(String(a.tk||"").trim()?String(a.tk).trim().toUpperCase()+"|":chaveVencAtivo(a)),nm:a.nm||a.tk||"Ativo",tk:a.tk,tp:a.tp,inst:a.inst||"—",classe:cl,idx:ix?ix.id:null,idxEst:ix?ix.est:false,sub:sb,valor:v,
       pm:pm,ganho:pm>0?v-pm:null,dias:dias,vencIso:rv?rv.iso:null,liq:liq.n,liqS:liq.s,semRent:!!a._semRentabilidade};
     out.ativos.push(it);
     out.pat+=v;out.classe[cl]+=v;
+    if(sb&&out.sub[cl])out.sub[cl][sb]+=v;
     if(ix){out.idx[ix.id]+=v;out.rfTotal+=v;if(ix.est)out.idxEstimado+=v}
+  });
+  /* ativos-alvo ainda sem posição (ex.: "quero 10% em HGLG11") entram como posição zerada */
+  var novos=(c&&c.rebal&&Array.isArray(c.rebal.novos))?c.rebal.novos:[];
+  novos.forEach(function(n){
+    var tk=String(n.tk||"").trim().toUpperCase();if(!tk)return;
+    if(out.ativos.some(function(a){return a.keyAlt===tk+"|"}))return;
+    var g=String(n.g||"").split(":"),cl=g[0]||"rv",sb=null,ix=null;
+    if(cl==="rv"||cl==="ext")sb=g[1]||"outros";
+    if(cl==="rf")ix=g[1]||"out";
+    out.ativos.push({key:tk+"|",keyAlt:tk+"|",nm:n.nm||tk,tk:tk,tp:null,inst:"—",classe:cl,idx:ix,idxEst:false,sub:sb,valor:0,pm:0,ganho:null,dias:null,vencIso:null,liq:"alta",liqS:0.9,semRent:false,novo:true});
   });
   out.ativos.sort(function(a,b){return b.valor-a.valor});
   return out;
@@ -5630,19 +5697,20 @@ function rebNum(v){var n=parseFloat(v);return isNaN(n)?null:n}
 function rebPolitica(c){
   var p=(c&&c.rebal)||{};
   var num=function(v,d){return(typeof v==="number"&&!isNaN(v))?v:d};
-  return{classes:p.classes||{},idx:p.idx||{},idxBase:p.idxBase==="total"?"total":"rf",ativos:p.ativos||{},
-    tolClasse:num(p.tolClasse,5),tolIdx:num(p.tolIdx,5),tolAtivo:num(p.tolAtivo,1),ate:p.ate==="banda"?"banda":"alvo",minMov:num(p.minMov,2000),
+  var sub=p.sub||{};
+  return{classes:p.classes||{},idx:p.idx||{},idxBase:p.idxBase==="total"?"total":"rf",sub:{rv:sub.rv||{},ext:sub.ext||{}},ativos:p.ativos||{},ativoBase:p.ativoBase==="pat"?"pat":"grupo",novos:Array.isArray(p.novos)?p.novos:[],
+    tolClasse:num(p.tolClasse,5),tolIdx:num(p.tolIdx,5),tolSub:num(p.tolSub,5),tolAtivo:num(p.tolAtivo,2),ate:p.ate==="banda"?"banda":"alvo",minMov:num(p.minMov,2000),
     freqMeses:num(p.freqMeses,3),hist:Array.isArray(p.hist)?p.hist:[]};
 }
 function rebTemAlvo(pol){
   var n=function(o){return Object.keys(o||{}).filter(function(k){return typeof o[k]==="number"}).length};
-  return{classes:n(pol.classes),idx:n(pol.idx),ativos:n(pol.ativos)};
+  return{classes:n(pol.classes),idx:n(pol.idx),sub:n(pol.sub.rv)+n(pol.sub.ext),ativos:n(pol.ativos)};
 }
 function rebStatus(desv,tol){var d=Math.abs(desv);return d<=tol*0.7?"ok":d<=tol?"atencao":"fora"}
 /* Linhas de desvio por nível (só onde há alvo definido). pp = pontos percentuais. */
 function rebDesvios(cart,pol){
   var PAT=cart.pat||0;
-  var rows={classes:[],idx:[],ativos:[]};
+  var rows={classes:[],idx:[],sub:[],ativos:[]};
   if(!(PAT>0))return rows;
   REB_CLASSES.forEach(function(x){
     var al=pol.classes[x.id];if(typeof al!=="number")return;
@@ -5655,21 +5723,35 @@ function rebDesvios(cart,pol){
     var v=cart.idx[x.id]||0,at=v/base*100;
     rows.idx.push({id:x.id,label:x.l,cor:x.cor,alvo:al,atual:at,desvio:at-al,valor:v,valorAlvo:al/100*base,tol:pol.tolIdx,status:rebStatus(at-al,pol.tolIdx)});
   });
+  ["rv","ext"].forEach(function(cl){
+    var bs=cart.classe[cl]||0;if(!(bs>0))return;
+    REB_SUB[cl].forEach(function(x){
+      var al=pol.sub[cl][x.id];if(typeof al!=="number")return;
+      var v=cart.sub[cl][x.id]||0,at=v/bs*100;
+      rows.sub.push({id:x.id,cls:cl,label:x.l,cor:x.cor,alvo:al,atual:at,desvio:at-al,valor:v,valorAlvo:al/100*bs,tol:pol.tolSub,status:rebStatus(at-al,pol.tolSub)});
+    });
+  });
+  /* ativos: % do grupo (indexador/tipo/classe) ou % do patrimônio, conforme a política */
+  var gcur={};cart.ativos.forEach(function(a){var g=rebGid(a,pol);gcur[g]=(gcur[g]||0)+a.valor});
+  var keys={};
   cart.ativos.forEach(function(a){
-    var al=pol.ativos[a.key];if(typeof al!=="number")return;
-    var at=a.valor/PAT*100;
-    rows.ativos.push({id:a.key,label:a.nm,inst:a.inst,tp:a.tp,alvo:al,atual:at,desvio:at-al,valor:a.valor,valorAlvo:al/100*PAT,tol:pol.tolAtivo,status:rebStatus(at-al,pol.tolAtivo)});
+    keys[a.key]=1;keys[a.keyAlt]=1;
+    var al=rebAlvoAtivo(pol,a);if(al==null)return;
+    var gid=rebGid(a,pol),bs=pol.ativoBase==="pat"?PAT:(gcur[gid]||0);
+    if(!(bs>0))return;
+    var at=a.valor/bs*100;
+    rows.ativos.push({id:a.key,label:a.nm,inst:a.inst,tp:a.tp,gid:gid,grupo:rebGidLabel(gid),alvo:al,atual:at,desvio:at-al,valor:a.valor,valorAlvo:al/100*bs,tol:pol.tolAtivo,status:rebStatus(at-al,pol.tolAtivo),novo:!!a.novo});
   });
   /* alvos de ativos que não existem mais na carteira (vendidos/vencidos) entram como "zerado" pra não sumirem em silêncio */
   Object.keys(pol.ativos||{}).forEach(function(k){
-    if(typeof pol.ativos[k]!=="number")return;
-    if(!cart.ativos.some(function(a){return a.key===k}))rows.ativos.push({id:k,label:k.split("|")[0],inst:k.split("|")[1]||"",tp:null,alvo:pol.ativos[k],atual:0,desvio:-pol.ativos[k],valor:0,valorAlvo:pol.ativos[k]/100*PAT,tol:pol.tolAtivo,status:pol.ativos[k]>pol.tolAtivo?"fora":"atencao",ausente:true});
+    if(typeof pol.ativos[k]!=="number"||keys[k])return;
+    rows.ativos.push({id:k,label:k.split("|")[0],inst:k.split("|")[1]||"",tp:null,alvo:pol.ativos[k],atual:0,desvio:-pol.ativos[k],valor:0,valorAlvo:0,tol:pol.tolAtivo,status:pol.ativos[k]>pol.tolAtivo?"fora":"atencao",ausente:true});
   });
   return rows;
 }
 function rebMaxDesvio(rows){
   var m=0,qtdFora=0,qtdAt=0;
-  ["classes","idx","ativos"].forEach(function(k){rows[k].forEach(function(r){var d=Math.abs(r.desvio);if(r.status==="fora")qtdFora++;else if(r.status==="atencao")qtdAt++;if(d>m)m=d})});
+  ["classes","idx","sub","ativos"].forEach(function(k){(rows[k]||[]).forEach(function(r){var d=Math.abs(r.desvio);if(r.status==="fora")qtdFora++;else if(r.status==="atencao")qtdAt++;if(d>m)m=d})});
   return{max:m,fora:qtdFora,atencao:qtdAt};
 }
 /* Plano: o que vender/comprar. opts={aporte:R$ (+ aporta, − resgata), modo:"completo"|"so_aporte"} */
@@ -5677,55 +5759,95 @@ function rebPlano(c,cart,pol,opts){
   opts=opts||{};
   var aporte=+opts.aporte||0,modo=opts.modo==="so_aporte"?"so_aporte":"completo";
   var PAT=cart.pat||0,PATn=Math.max(0,PAT+aporte);
-  var plano={aporte:aporte,modo:modo,patNovo:PATn,nivel:null,moves:[],vendas:[],compras:[],sobra:0,totalVender:0,totalComprar:0,irEstimado:0,avisos:[],depoisClasse:{},depoisIdx:{},depoisAtivo:{},vencProx:{}};
+  var plano={aporte:aporte,modo:modo,patNovo:PATn,nivel:null,moves:[],vendas:[],compras:[],sobra:0,totalVender:0,totalComprar:0,irEstimado:0,avisos:[],depoisClasse:{},depoisIdx:{},depoisSub:{rv:{},ext:{}},depoisAtivo:{},vencProx:{}};
   if(!(PAT>0))return plano;
   var te=rebTemAlvo(pol);
   var moves=[];
   var edge=function(valor,alvoPct,tolPp,total){
     var alvoV=alvoPct/100*total;
     if(pol.ate!=="banda")return alvoV-valor;
-    var atPct=valor/total*100,lo=alvoPct-tolPp,hi=alvoPct+tolPp;
+    var atPct=total>0?valor/total*100:0,lo=alvoPct-tolPp,hi=alvoPct+tolPp;
     if(atPct>hi)return (hi/100*total)-valor;
     if(atPct<lo)return (lo/100*total)-valor;
     return 0;
   };
-  if(te.ativos>0){
+  var legado=te.ativos>0&&pol.ativoBase==="pat";
+  var alvoDe={};cart.ativos.forEach(function(a){var al=rebAlvoAtivo(pol,a);if(al!=null)alvoDe[a.key]=al});
+  var temAlvoAtivo=function(a){return alvoDe[a.key]!=null};
+  if(legado){
+    /* modo antigo: pesos por ativo em % do patrimônio substituem os demais níveis */
     plano.nivel="ativo";
     cart.ativos.forEach(function(a){
-      var al=pol.ativos[a.key];if(typeof al!=="number")return;
+      var al=alvoDe[a.key];if(al==null)return;
       var d=edge(a.valor,al,pol.tolAtivo,PATn);
-      if(modo==="completo"&&pol.ate==="banda"&&Math.abs(a.valor/PAT*100-al)<=pol.tolAtivo)d=0;
-      moves.push({nivel:"ativo",id:a.key,label:a.nm,inst:a.inst,classe:a.classe,idx:a.idx,delta:d,valor:a.valor});
+      moves.push({nivel:"ativo",id:a.key,label:a.nm,inst:a.inst,classe:a.classe,idx:a.idx,sub:a.sub,delta:d,valor:a.valor,novo:!!a.novo});
     });
     Object.keys(pol.ativos).forEach(function(k){
-      if(typeof pol.ativos[k]!=="number"||cart.ativos.some(function(a){return a.key===k}))return;
-      var d=pol.ativos[k]/100*PATn;
-      moves.push({nivel:"ativo",id:k,label:k.split("|")[0],inst:k.split("|")[1]||"",classe:null,idx:null,delta:d,valor:0,novo:true});
+      if(typeof pol.ativos[k]!=="number"||cart.ativos.some(function(a){return a.key===k||a.keyAlt===k}))return;
+      moves.push({nivel:"ativo",id:k,label:k.split("|")[0],inst:k.split("|")[1]||"",classe:null,idx:null,sub:null,delta:pol.ativos[k]/100*PATn,valor:0,novo:true});
     });
   }else{
+    var idxOn=te.idx>0&&cart.rfTotal>=0;
+    var subOn={rv:false,ext:false};
+    ["rv","ext"].forEach(function(cl){subOn[cl]=Object.keys(pol.sub[cl]).some(function(k){return typeof pol.sub[cl][k]==="number"})});
+    var classDest=function(cl){return typeof pol.classes[cl]==="number"?pol.classes[cl]/100*PATn:(cl==="rf"&&te.classes===0?cart.classe.rf+aporte:cart.classe[cl]||0)};
     if(te.classes>0){
       REB_CLASSES.forEach(function(x){
         var al=pol.classes[x.id];if(typeof al!=="number")return;
+        if(x.id==="rf"&&idxOn)return;
+        if((x.id==="rv"||x.id==="ext")&&subOn[x.id])return;
         var v=cart.classe[x.id]||0;
-        moves.push({nivel:"classe",id:x.id,label:x.l,classe:x.id,idx:null,delta:edge(v,al,pol.tolClasse,PATn),valor:v});
+        moves.push({nivel:"classe",gid:"cls:"+x.id,id:x.id,label:x.l,classe:x.id,idx:null,sub:null,delta:edge(v,al,pol.tolClasse,PATn),valor:v});
       });
     }
-    if(te.idx>0&&cart.rfTotal>=0){
-      /* destino do RF: se há alvo de classe pro RF, o total de RF vem dele; senão, mantém o RF atual (+ aporte se não há alvo de nenhuma classe) */
-      var rfDest=(typeof pol.classes.rf==="number")?pol.classes.rf/100*PATn:(te.classes>0?cart.rfTotal:cart.rfTotal+aporte);
+    if(idxOn){
       /* buckets sem alvo ficam como estão: os alvos dos demais dividem o que sobra do RF (evita comprar a mais) */
+      var rfDest=classDest("rf");
       var keepIdx=0;if(pol.idxBase!=="total")REB_IDX.forEach(function(x){if(typeof pol.idx[x.id]!=="number")keepIdx+=cart.idx[x.id]||0});
       var baseIdx=pol.idxBase==="total"?PATn:Math.max(0,rfDest-keepIdx);
-      var idxMoves=[];
       REB_IDX.forEach(function(x){
         var al=pol.idx[x.id];if(typeof al!=="number")return;
         var v=cart.idx[x.id]||0;
-        var d=edge(v,al,pol.tolIdx,baseIdx);
-        idxMoves.push({nivel:"idx",id:x.id,label:x.l,classe:"rf",idx:x.id,delta:d,valor:v});
+        moves.push({nivel:"idx",gid:"idx:"+x.id,id:x.id,label:x.l,classe:"rf",idx:x.id,sub:null,delta:edge(v,al,pol.tolIdx,baseIdx),valor:v});
       });
-      /* Os movimentos de RF passam a ser os dos indexadores (detalham o movimento da classe RF) */
-      moves=moves.filter(function(m){return!(m.nivel==="classe"&&m.id==="rf")});
-      moves=moves.concat(idxMoves);
+    }
+    ["rv","ext"].forEach(function(cl){
+      if(!subOn[cl])return;
+      var dest=classDest(cl),keep=0;
+      REB_SUB[cl].forEach(function(x){if(typeof pol.sub[cl][x.id]!=="number")keep+=cart.sub[cl][x.id]||0});
+      var base=Math.max(0,dest-keep);
+      REB_SUB[cl].forEach(function(x){
+        var al=pol.sub[cl][x.id];if(typeof al!=="number")return;
+        var v=cart.sub[cl][x.id]||0;
+        moves.push({nivel:"sub",gid:"sub:"+cl+":"+x.id,id:x.id,label:rebClsInfo(cl).l+" › "+x.l,classe:cl,idx:null,sub:x.id,delta:edge(v,al,pol.tolSub,base),valor:v});
+      });
+    });
+    /* pesos por ativo dentro do grupo (% do grupo): o resto do grupo segue o movimento do grupo */
+    if(te.ativos>0){
+      plano.nivel="ativo";
+      var gcur={};cart.ativos.forEach(function(a){var g=rebGid(a,pol);gcur[g]=(gcur[g]||0)+a.valor});
+      var gmv=function(gid){return moves.filter(function(m){return m.gid===gid})[0]||null};
+      var somaG={},ativoMoves=[];
+      cart.ativos.forEach(function(a){
+        var al=alvoDe[a.key];if(al==null)return;
+        var gid=rebGid(a,pol),gm=gmv(gid);
+        var gdest=(gcur[gid]||0)+(gm?gm.delta:0);
+        var d=edge(a.valor,al,pol.tolAtivo,gdest);
+        if(Math.abs(d)<pol.minMov)d=0;
+        somaG[gid]=(somaG[gid]||0)+al;
+        ativoMoves.push({nivel:"ativo",gid:gid+"#a",grp:gid,id:a.key,label:a.nm,inst:a.inst,classe:a.classe,idx:a.idx,sub:a.sub,delta:d,valor:a.valor,novo:!!a.novo});
+      });
+      var somaD={};ativoMoves.forEach(function(m){somaD[m.grp]=(somaD[m.grp]||0)+m.delta});
+      Object.keys(somaG).forEach(function(gid){
+        if(somaG[gid]>100.5)plano.avisos.push("Os pesos por ativo em \""+rebGidLabel(gid)+"\" somam "+somaG[gid].toFixed(1).replace(".",",")+"% do grupo (máximo 100%).");
+        var gm=gmv(gid),p=gid.split(":");
+        if(gm){gm.delta-=somaD[gid]||0;gm.resto=true}
+        else{
+          var nv=p[0]==="idx"?"idx":p[0]==="sub"?"sub":"classe";
+          moves.push({nivel:nv,gid:gid,id:p[0]==="sub"?p[2]:p[0]==="idx"?p[1]:p[1],label:rebGidLabel(gid),classe:p[0]==="idx"?"rf":p[1],idx:p[0]==="idx"?p[1]:null,sub:p[0]==="sub"?p[2]:null,delta:-(somaD[gid]||0),valor:gcur[gid]||0,resto:true});
+        }
+      });
+      moves=moves.concat(ativoMoves);
     }
   }
   /* movimento mínimo */
@@ -5750,9 +5872,17 @@ function rebPlano(c,cart,pol,opts){
   moves.filter(function(m){return m.delta<0}).forEach(function(m){
     var need=-m.delta;
     var cands;
-    if(m.nivel==="ativo")cands=cart.ativos.filter(function(a){return a.key===m.id});
-    else if(m.nivel==="idx")cands=cart.ativos.filter(function(a){return a.idx===m.id});
-    else cands=cart.ativos.filter(function(a){return a.classe===m.id});
+    if(m.nivel==="ativo")cands=cart.ativos.filter(function(a){return a.key===m.id&&a.valor>0});
+    else{
+      var excl=(te.ativos>0&&!legado);
+      cands=cart.ativos.filter(function(a){
+        if(!(a.valor>0))return false;
+        if(m.gid&&m.gid.indexOf("#")<0&&excl)return rebGid(a,pol)===m.gid&&!temAlvoAtivo(a);
+        if(m.nivel==="idx")return a.idx===m.id;
+        if(m.nivel==="sub")return a.classe===m.classe&&a.sub===m.id;
+        return a.classe===m.id;
+      });
+    }
     var sc=cands.map(function(a){
       var g=(a.ganho!=null&&a.ganho>0)?a.ganho/a.valor:0;
       var irPct=g*tipoIR(a.tp);               /* % do valor vendido que vira imposto (estimativa) */
@@ -5766,7 +5896,7 @@ function rebPlano(c,cart,pol,opts){
       if(m.nivel!=="ativo"&&s.a.liqS<0.25&&!s.venceLogo&&sc.some(function(o){return o.a.liqS>=0.25&&o.a.valor>0}))return;   /* evita vender CDB/CRI ilíquido se há alternativa */
       var take=Math.min(resta,s.a.valor);
       var ir=take*s.irPct/100;
-      var motivo=m.nivel==="ativo"?"acima do peso-alvo":(m.nivel==="idx"?"indexador acima do alvo ("+m.label+")":"classe acima do alvo ("+m.label+")");
+      var motivo=m.nivel==="ativo"?"acima do peso-alvo":(m.nivel==="idx"?"indexador acima do alvo ("+m.label+")":m.nivel==="sub"?"tipo acima do alvo ("+m.label+")":"classe acima do alvo ("+m.label+")");
       plano.vendas.push({key:s.a.key,nm:s.a.nm,inst:s.a.inst,tp:s.a.tp,valor:take,total:s.a.valor,parcial:take<s.a.valor-1,liq:s.a.liq,ir:ir,irPct:s.irPct,dias:s.a.dias,motivo:motivo,bucket:m.label});
       plano.irEstimado+=ir;resta-=take;
     });
@@ -5775,9 +5905,12 @@ function rebPlano(c,cart,pol,opts){
   /* Compras: por bucket (e ativos nominais quando o alvo é por ativo) */
   moves.filter(function(m){return m.delta>0}).forEach(function(m){
     var dica=m.nivel==="idx"?(REB_IDX.filter(function(x){return x.id===m.id})[0]||{}).dica:
+             m.nivel==="sub"?(rebSubInfo(m.classe,m.id)||{}).dica:
              m.nivel==="classe"?({rf:"Renda fixa conforme os indexadores-alvo",rv:"Ações, FIIs, ETFs BR e fundos de ações",ext:"ETFs/BDRs/fundos no exterior",cx:"Tesouro Selic, fundo DI ou conta remunerada",alt:"Cripto, ouro, previdência"})[m.id]:
              (m.novo?"Posição nova (alvo definido, ainda sem posição)":"Reforçar a posição");
-    plano.compras.push({label:m.label,nivel:m.nivel,valor:m.delta,inst:m.inst||"",dica:dica||""});
+    var lab=m.label;
+    if(m.resto){lab+=" — demais ativos";dica="Distribuir entre os ativos do grupo sem peso-alvo definido"}
+    plano.compras.push({label:lab,nivel:m.nivel,valor:m.delta,inst:m.inst||"",dica:dica||""});
   });
   /* Vencimentos próximos (≤ 90 dias) por bucket: financiam compras sem venda */
   cart.ativos.forEach(function(a){
@@ -5787,22 +5920,28 @@ function rebPlano(c,cart,pol,opts){
   });
   plano.vencProxTotal=Object.keys(plano.vencProx).reduce(function(s,k){return s+plano.vencProx[k]},0);
   /* Depois do plano */
-  var dC={},dI={},dA={};
+  var dC={},dI={},dA={},dS={rv:{},ext:{}};
   REB_CLASSES.forEach(function(x){dC[x.id]=cart.classe[x.id]||0});
   REB_IDX.forEach(function(x){dI[x.id]=cart.idx[x.id]||0});
+  ["rv","ext"].forEach(function(cl){REB_SUB[cl].forEach(function(x){dS[cl][x.id]=cart.sub[cl][x.id]||0})});
   cart.ativos.forEach(function(a){dA[a.key]=a.valor});
   moves.forEach(function(m){
-    if(m.nivel==="ativo"){dA[m.id]=(dA[m.id]||0)+m.delta;if(m.classe){dC[m.classe]+=m.delta;if(m.idx)dI[m.idx]+=m.delta}}
+    if(m.nivel==="ativo"){
+      dA[m.id]=(dA[m.id]||0)+m.delta;
+      if(m.classe&&dC[m.classe]!=null){dC[m.classe]+=m.delta;if(m.idx)dI[m.idx]+=m.delta;if(m.sub&&dS[m.classe]&&dS[m.classe][m.sub]!=null)dS[m.classe][m.sub]+=m.delta}
+    }
     else if(m.nivel==="idx"){dI[m.id]+=m.delta;dC.rf+=m.delta}
+    else if(m.nivel==="sub"){dS[m.classe][m.id]+=m.delta;dC[m.classe]+=m.delta}
     else dC[m.id]+=m.delta;
   });
-  plano.depoisClasse=dC;plano.depoisIdx=dI;plano.depoisAtivo=dA;
+  plano.depoisClasse=dC;plano.depoisIdx=dI;plano.depoisSub=dS;plano.depoisAtivo=dA;
   var patDepois=0;Object.keys(dC).forEach(function(k){patDepois+=dC[k]});
   plano.patDepois=patDepois+Math.max(0,plano.sobra); /* sobra de caixa fica no patrimônio */
   if(plano.sobra>0){dC.cx=(dC.cx||0)+plano.sobra}
   if(plano.sobra<-1&&modo==="completo")plano.avisos.push("O plano compra "+rebBRL0(-plano.sobra)+" a mais do que vende + aporte — a diferença sairia do caixa/aporte. Ajuste os alvos (a soma ideal é 100%).");
   if(te.classes>0){var sc2=0;REB_CLASSES.forEach(function(x){if(typeof pol.classes[x.id]==="number")sc2+=pol.classes[x.id]});if(Math.abs(sc2-100)>0.5)plano.avisos.push("Os alvos por classe somam "+sc2.toFixed(1).replace(".",",")+"% (o ideal é 100%).")}
   if(te.idx>0){var si=0;REB_IDX.forEach(function(x){if(typeof pol.idx[x.id]==="number")si+=pol.idx[x.id]});if(Math.abs(si-100)>0.5)plano.avisos.push("Os alvos por indexador somam "+si.toFixed(1).replace(".",",")+"% (o ideal é 100%).")}
+  ["rv","ext"].forEach(function(cl){var ss=0,n=0;Object.keys(pol.sub[cl]).forEach(function(k){if(typeof pol.sub[cl][k]==="number"){ss+=pol.sub[cl][k];n++}});if(n>0&&Math.abs(ss-100)>0.5)plano.avisos.push("Os alvos por tipo em "+rebClsInfo(cl).l+" somam "+ss.toFixed(1).replace(".",",")+"% (o ideal é 100%).")});
   return plano;
 }
 function rebBRL0(v){return "R$ "+Math.round(+v||0).toLocaleString("pt-BR")}
@@ -5852,6 +5991,8 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
   var _h=useState("");var msg=_h[0],setMsg=_h[1];
   var _i=useState("");var notaReg=_i[0],setNotaReg=_i[1];
   var _j=useState("");var copiarDe=_j[0],setCopiarDe=_j[1];
+  var _k=useState("");var novoTk=_k[0],setNovoTk=_k[1];
+  var _l=useState("rv:fii");var novoG=_l[0],setNovoG=_l[1];
   var flash=function(t){setMsg(t);setTimeout(function(){setMsg("")},3500)};
   var BRL=function(v){return rebBRL0(v)};
   var hoje=new Date();hoje.setHours(0,0,0,0);
@@ -5862,7 +6003,7 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
       var cart=rebCarteira(c);if(!(cart.pat>0))return null;
       var pol=rebPolitica(c),te=rebTemAlvo(pol);
       var rows=rebDesvios(cart,pol),dv=rebMaxDesvio(rows);
-      var temPol=(te.classes+te.idx+te.ativos)>0;
+      var temPol=(te.classes+te.idx+te.sub+te.ativos)>0;
       var plano=temPol?rebPlano(c,cart,pol,{aporte:0,modo:"completo"}):null;
       var ult=pol.hist.length?pol.hist[0].data:null;
       var vencida=false;
@@ -5903,6 +6044,12 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
     if(valor==null)delete cur[chave];else cur[chave]=valor;
     var o={};o[campo]=cur;salvar(c,o);
   };
+  var setSub=function(c,cls,id,valor){
+    var cur=(c.rebal&&c.rebal.sub)||{};
+    var nv={rv:Object.assign({},cur.rv||{}),ext:Object.assign({},cur.ext||{})};
+    if(valor==null)delete nv[cls][id];else nv[cls][id]=valor;
+    salvar(c,{sub:nv});
+  };
 
   /* ---------- tela de um cliente ---------- */
   var renderCliente=function(L){
@@ -5928,7 +6075,7 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
               {lista.map(function(r){var st=REB_ST[r.status];return(
                 <div key={r.id}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,marginBottom:4,flexWrap:"wrap"}}>
-                    <span style={{fontSize:12,fontWeight:700,color:T.t1}}>{r.ic?r.ic+" ":""}{r.label}{r.inst?<span style={{color:T.t3,fontWeight:500}}> · {r.inst}</span>:null}{r.ausente?<span style={{color:T.orange}}> (sem posição)</span>:null}</span>
+                    <span style={{fontSize:12,fontWeight:700,color:T.t1}}>{r.ic?r.ic+" ":""}{r.label}{r.inst&&r.inst!=="—"?<span style={{color:T.t3,fontWeight:500}}> · {r.inst}</span>:null}{r.grupo?<span style={{color:T.t3,fontWeight:500}}> · {r.grupo}</span>:null}{r.novo?<span style={{color:T.cyan}}> (nova posição)</span>:null}{r.ausente?<span style={{color:T.orange}}> (sem posição)</span>:null}</span>
                     <span style={{fontSize:11,color:T.t3,fontFamily:"'JetBrains Mono'"}}>atual <b style={{color:T.t1}}>{rebPct1(r.atual)}</b> · alvo <b style={{color:T.gold}}>{rebPct1(r.alvo)}</b> ± {rebPct1(r.tol).replace("%","")} · <b style={{color:st.c}}>{r.desvio>=0?"+":""}{String(Math.round(r.desvio*10)/10).replace(".",",")} pp</b></span>
                   </div>
                   <RebBar atual={r.atual} alvo={r.alvo} tol={r.tol} max={mx} cor={st.c}/>
@@ -5944,6 +6091,12 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
       return <div>
         {secao("Por classe de ativo","Barra = peso atual · faixa = alvo ± tolerância · traço = alvo",rows.classes,"Nenhum alvo por classe definido — abra a aba Política para começar (ou aplique um modelo).")}
         {secao("Por indexador"+(pol.idxBase==="total"?" (% do patrimônio)":" (% da Renda Fixa)"),"Pós-fixado × prefixado × inflação — e quanto da fatia é estimado pelo nome do fundo",rows.idx,"Nenhum alvo por indexador definido.")}
+        {["rv","ext"].map(function(cl){
+          var tot=cart.classe[cl]||0;
+          var comp=REB_SUB[cl].filter(function(x){return (cart.sub[cl][x.id]||0)>0}).map(function(x){return x.l+" "+rebPct1((cart.sub[cl][x.id]||0)/tot*100)}).join(" · ");
+          if(!(tot>0)&&rows.sub.filter(function(r){return r.cls===cl}).length===0)return null;
+          return <div key={cl}>{secao("Dentro de "+rebClsInfo(cl).l+" (% da classe)",(tot>0?BRL(tot)+" na classe"+(comp?" · hoje: "+comp:""):"Sem posição na classe"),rows.sub.filter(function(r){return r.cls===cl}),"Nenhum alvo por tipo definido para "+rebClsInfo(cl).l+" — defina na aba Política.")}</div>;
+        })}
         <Cd hov={false} style={{padding:18,marginBottom:14}}>
           <div style={{fontSize:14,fontWeight:800,color:T.t1,marginBottom:2}}>Composição atual da Renda Fixa por indexador</div>
           <div style={{fontSize:11,color:T.t3,marginBottom:12}}>{BRL(cart.rfTotal)} em renda fixa{cart.idxEstimado>0?" · "+BRL(cart.idxEstimado)+" classificados por estimativa (fundos sem indexador explícito no nome)":""}</div>
@@ -5956,7 +6109,7 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
             </div>
           </div>:<div style={{fontSize:12,color:T.t3}}>Sem renda fixa na carteira.</div>}
         </Cd>
-        {secao("Ativos fora do peso-alvo","Só aparecem ativos com peso-alvo definido na aba Política",atvFora,"Nenhum peso-alvo por ativo definido (opcional). Use \"Fixar pesos atuais\" na aba Política para começar.")}
+        {secao("Ativos fora do peso-alvo",(pol.ativoBase==="pat"?"Peso-alvo em % do patrimônio":"Peso-alvo em % do grupo (indexador, tipo ou classe do ativo)")+" — só aparecem ativos com alvo definido",atvFora,"Nenhum peso-alvo por ativo definido (opcional). Use \"Fixar pesos atuais\" na aba Política para começar.")}
       </div>;
     };
 
@@ -5967,26 +6120,42 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
         salvar(c,{classes:cl,idx:ix,idxBase:"rf"});flash("✅ Modelo "+m.l+" aplicado — ajuste os pesos como quiser");
       };
       var fixarAtuais=function(escopo){
+        if(escopo==="tudo"){
+          var cl0={};REB_CLASSES.forEach(function(x){var v=Math.round((cart.classe[x.id]||0)/cart.pat*1000)/10;if(v>0)cl0[x.id]=v});
+          var base0=pol.idxBase==="total"?cart.pat:cart.rfTotal;var ix0={};REB_IDX.forEach(function(x){var v=base0>0?Math.round((cart.idx[x.id]||0)/base0*1000)/10:0;if(v>0)ix0[x.id]=v});
+          var sb0={rv:{},ext:{}};["rv","ext"].forEach(function(k){var t=cart.classe[k]||0;if(t>0)REB_SUB[k].forEach(function(x){var v=Math.round((cart.sub[k][x.id]||0)/t*1000)/10;if(v>0)sb0[k][x.id]=v})});
+          salvar(c,{classes:cl0,idx:ix0,sub:sb0});flash("✅ Pesos atuais gravados como alvo (classe, indexador e tipo)");return;
+        }
+        if(escopo==="sub"){
+          var sb1={rv:{},ext:{}};["rv","ext"].forEach(function(k){var t=cart.classe[k]||0;if(t>0)REB_SUB[k].forEach(function(x){var v=Math.round((cart.sub[k][x.id]||0)/t*1000)/10;if(v>0)sb1[k][x.id]=v})});
+          salvar(c,{sub:sb1});flash("✅ Pesos atuais por tipo gravados como alvo");return;
+        }
         if(escopo==="classes"){var cl={};REB_CLASSES.forEach(function(x){var v=Math.round((cart.classe[x.id]||0)/cart.pat*1000)/10;if(v>0)cl[x.id]=v});salvar(c,{classes:cl})}
         else if(escopo==="idx"){var base=pol.idxBase==="total"?cart.pat:cart.rfTotal;var ix={};REB_IDX.forEach(function(x){var v=base>0?Math.round((cart.idx[x.id]||0)/base*1000)/10:0;if(v>0)ix[x.id]=v});salvar(c,{idx:ix})}
-        else{var at={};cart.ativos.forEach(function(a){at[a.key]=Math.round(a.valor/cart.pat*1000)/10});salvar(c,{ativos:at})}
+        else{
+          var at={},gc={};
+          cart.ativos.forEach(function(a){var g=rebGid(a,pol);gc[g]=(gc[g]||0)+a.valor});
+          cart.ativos.forEach(function(a){if(!(a.valor>0))return;var bs=pol.ativoBase==="pat"?cart.pat:(gc[rebGid(a,pol)]||0);if(bs>0)at[a.key]=Math.round(a.valor/bs*1000)/10});
+          salvar(c,{ativos:at});
+        }
         flash("✅ Pesos atuais gravados como alvo");
       };
       var copiar=function(){
         var o=(d.cl||[]).filter(function(x){return x.id===copiarDe})[0];
         if(!o||!o.rebal){flash("⚠ Esse cliente ainda não tem política definida");return}
-        salvar(c,{classes:Object.assign({},o.rebal.classes||{}),idx:Object.assign({},o.rebal.idx||{}),idxBase:o.rebal.idxBase||"rf",tolClasse:o.rebal.tolClasse,tolIdx:o.rebal.tolIdx,tolAtivo:o.rebal.tolAtivo,ate:o.rebal.ate,minMov:o.rebal.minMov});
-        flash("✅ Política copiada de "+o.nome+" (alvos por classe e indexador)");
+        var os=o.rebal.sub||{};salvar(c,{classes:Object.assign({},o.rebal.classes||{}),idx:Object.assign({},o.rebal.idx||{}),sub:{rv:Object.assign({},os.rv||{}),ext:Object.assign({},os.ext||{})},idxBase:o.rebal.idxBase||"rf",tolClasse:o.rebal.tolClasse,tolIdx:o.rebal.tolIdx,tolSub:o.rebal.tolSub,tolAtivo:o.rebal.tolAtivo,ate:o.rebal.ate,minMov:o.rebal.minMov});
+        flash("✅ Política copiada de "+o.nome+" (alvos por classe, indexador e tipo)");
       };
-      var comPol=(d.cl||[]).filter(function(x){return x.id!==c.id&&x.rebal&&(Object.keys(x.rebal.classes||{}).length+Object.keys(x.rebal.idx||{}).length)>0});
-      var atvFil=cart.ativos.filter(function(a){return !buscaAtv||(a.nm+" "+a.inst).toLowerCase().indexOf(buscaAtv.toLowerCase())>=0});
+      var comPol=(d.cl||[]).filter(function(x){return x.id!==c.id&&x.rebal&&(Object.keys(x.rebal.classes||{}).length+Object.keys(x.rebal.idx||{}).length+Object.keys((x.rebal.sub&&x.rebal.sub.rv)||{}).length+Object.keys((x.rebal.sub&&x.rebal.sub.ext)||{}).length)>0});
+      var atvFil=cart.ativos.filter(function(a){return !buscaAtv||(a.nm+" "+a.inst+" "+(a.tk||"")).toLowerCase().indexOf(buscaAtv.toLowerCase())>=0});
+      var gcurV={};cart.ativos.forEach(function(a){var g=rebGid(a,pol);gcurV[g]=(gcurV[g]||0)+a.valor});
       var th={padding:"8px 10px",textAlign:"left",fontSize:10,color:T.t3,fontWeight:700,letterSpacing:0.4,textTransform:"uppercase"};
       return <div>
         <Cd hov={false} style={{padding:16,marginBottom:14}}>
           <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
             <span style={{fontSize:12,fontWeight:800,color:T.t1,marginRight:6}}>Começar de um modelo:</span>
             {REB_MODELOS.map(function(m){return <Bt key={m.id} v="secondary" onClick={function(){aplicarModelo(m)}} style={{fontSize:11,padding:"7px 12px"}}>{m.l}</Bt>})}
-            <Bt v="secondary" onClick={function(){fixarAtuais("classes");fixarAtuais("idx")}} style={{fontSize:11,padding:"7px 12px"}}>📌 Usar pesos atuais</Bt>
+            <Bt v="secondary" onClick={function(){fixarAtuais("tudo")}} style={{fontSize:11,padding:"7px 12px"}}>📌 Usar pesos atuais</Bt>
             {comPol.length>0&&<span style={{display:"inline-flex",gap:6,alignItems:"center"}}>
               <select value={copiarDe} onChange={function(e){setCopiarDe(e.target.value)}} style={{...inpS,width:170,padding:"7px 10px",fontSize:11}}><option value="">Copiar de outro cliente…</option>{comPol.map(function(x){return <option key={x.id} value={x.id}>{x.nome}</option>})}</select>
               <Bt v="secondary" onClick={copiar} style={{fontSize:11,padding:"7px 12px"}}>Copiar</Bt>
@@ -6019,6 +6188,20 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:8,paddingTop:8,borderTop:"1px solid "+T.bdrL}}><span style={{fontSize:11,color:T.t3}}>Tolerância (± pontos)</span><RebNumInput value={pol.tolIdx} suffix="pp" onCommit={function(v){salvar(c,{tolIdx:v==null?5:v})}}/></div>
             <div style={{marginTop:8}}><Bt v="ghost" onClick={function(){fixarAtuais("idx")}} style={{fontSize:11,padding:"4px 0"}}>📌 Fixar pesos atuais</Bt></div>
           </Cd>
+          {["rv","ext"].map(function(cl){
+            var ss=0;REB_SUB[cl].forEach(function(x){if(typeof pol.sub[cl][x.id]==="number")ss+=pol.sub[cl][x.id]});
+            var tot=cart.classe[cl]||0;
+            return <Cd key={cl} hov={false} style={{padding:16}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}><span style={{fontSize:13,fontWeight:800,color:T.t1}}>Dentro de {rebClsInfo(cl).l}</span>{chipSoma(ss)}</div>
+              <div style={{fontSize:10.5,color:T.t3,marginBottom:6}}>% da classe · {tot>0?BRL(tot)+" hoje":"sem posição hoje"}</div>
+              {REB_SUB[cl].map(function(x){var at=tot>0?(cart.sub[cl][x.id]||0)/tot*100:0;return(
+                <div key={x.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"6px 0",borderTop:"1px solid "+T.bdrL}}>
+                  <span style={{fontSize:12,color:T.t1}}><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:x.cor,marginRight:6}}/>{x.l}<span style={{display:"block",fontSize:10,color:T.t3}}>hoje {rebPct1(at)}</span></span>
+                  <RebNumInput value={pol.sub[cl][x.id]} suffix="%" onCommit={function(v){setSub(c,cl,x.id,v)}}/>
+                </div>)})}
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:8,paddingTop:8,borderTop:"1px solid "+T.bdrL}}><span style={{fontSize:11,color:T.t3}}>Tolerância (± pontos)</span><RebNumInput value={pol.tolSub} suffix="pp" onCommit={function(v){salvar(c,{tolSub:v==null?5:v})}}/></div>
+              <div style={{marginTop:8}}><Bt v="ghost" onClick={function(){fixarAtuais("sub")}} style={{fontSize:11,padding:"4px 0"}}>📌 Fixar pesos atuais</Bt></div>
+            </Cd>})}
           <Cd hov={false} style={{padding:16}}>
             <div style={{fontSize:13,fontWeight:800,color:T.t1,marginBottom:8}}>Regras do rebalanceamento</div>
             <div style={{fontSize:11,color:T.t3,marginBottom:4}}>Rebalancear até…</div>
@@ -6035,27 +6218,46 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
         </div>
 
         <Cd hov={false} style={{padding:16}}>
-          <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:10}}>
-            <div><div style={{fontSize:13,fontWeight:800,color:T.t1}}>Peso-alvo por ativo <span style={{fontSize:11,color:T.t3,fontWeight:500}}>(opcional — % do patrimônio)</span></div>
-              <div style={{fontSize:10.5,color:T.t3}}>Quando há pesos por ativo, o plano usa esse nível. Alvos definidos: {Object.keys(pol.ativos).length} · somam {String(Math.round(somaAtv*10)/10).replace(".",",")}% (o que fica sem alvo não é mexido)</div></div>
-            <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-              <input value={buscaAtv} onChange={function(e){setBuscaAtv(e.target.value)}} placeholder="Buscar ativo…" style={{...inpS,width:160,padding:"7px 10px",fontSize:11}}/>
-              <Bt v="secondary" onClick={function(){fixarAtuais("ativos")}} style={{fontSize:11,padding:"7px 12px"}}>📌 Fixar pesos atuais</Bt>
-              <Bt v="secondary" onClick={function(){salvar(c,{ativos:{}});flash("Pesos por ativo removidos")}} style={{fontSize:11,padding:"7px 12px"}}>Limpar</Bt>
+          <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:8}}>
+            <div><div style={{fontSize:13,fontWeight:800,color:T.t1}}>Peso-alvo por ativo <span style={{fontSize:11,color:T.t3,fontWeight:500}}>(opcional)</span></div>
+              <div style={{fontSize:10.5,color:T.t3,lineHeight:1.5}}>{pol.ativoBase==="pat"?"Em % do patrimônio — quando há pesos assim, o plano usa só esse nível.":"Em % do grupo do ativo (tipo em RV/Exterior, indexador na RF). Ex.: 10% em HGLG11 = 10% dos Fundos Imobiliários. O que não tem peso-alvo acompanha o grupo."} Alvos definidos: {Object.keys(pol.ativos).length}.</div></div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {[["grupo","% do grupo"],["pat","% do patrimônio"]].map(function(o){var on=pol.ativoBase===o[0];return <button key={o[0]} onClick={function(){salvar(c,{ativoBase:o[0],ativos:{}});flash("Base trocada — pesos por ativo zerados para não misturar escalas")}} style={{padding:"5px 10px",borderRadius:10,fontSize:10.5,fontWeight:700,cursor:"pointer",border:on?"1px solid "+T.gold:"1px solid "+T.bdrL,background:on?"rgba(212,163,40,0.10)":"transparent",color:on?T.gold:T.t3}}>{o[1]}</button>})}
             </div>
           </div>
-          <div style={{maxHeight:420,overflow:"auto",border:"1px solid "+T.bdrL,borderRadius:10}}>
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:10,padding:"10px 12px",borderRadius:10,border:"1px dashed "+T.bdrL}}>
+            <span style={{fontSize:11,fontWeight:700,color:T.t2}}>➕ Alvo para ativo que ainda não tem:</span>
+            <input value={novoTk} onChange={function(e){setNovoTk(e.target.value.toUpperCase())}} placeholder="Ticker (ex.: HGLG11)" style={{...inpS,width:150,padding:"7px 10px",fontSize:11}}/>
+            <select value={novoG} onChange={function(e){setNovoG(e.target.value)}} style={{...inpS,width:200,padding:"7px 10px",fontSize:11}}>{rebGrupoOpcoes().map(function(o){return <option key={o.v} value={o.v}>{o.l}</option>})}</select>
+            <Bt v="secondary" onClick={function(){var tk=novoTk.trim().toUpperCase();if(!tk)return;if(pol.novos.some(function(n){return String(n.tk).toUpperCase()===tk})||cart.ativos.some(function(a){return a.keyAlt===tk+"|"})){flash("⚠ "+tk+" já está na lista abaixo");return}salvar(c,{novos:pol.novos.concat([{tk:tk,nm:tk,g:novoG}])});setNovoTk("");flash("✅ "+tk+" adicionado — digite o peso-alvo na tabela")}} style={{fontSize:11,padding:"7px 12px"}}>Adicionar</Bt>
+          </div>
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:10}}>
+            <input value={buscaAtv} onChange={function(e){setBuscaAtv(e.target.value)}} placeholder="Buscar ativo…" style={{...inpS,width:160,padding:"7px 10px",fontSize:11}}/>
+            <Bt v="secondary" onClick={function(){fixarAtuais("ativos")}} style={{fontSize:11,padding:"7px 12px"}}>📌 Fixar pesos atuais</Bt>
+            <Bt v="secondary" onClick={function(){salvar(c,{ativos:{}});flash("Pesos por ativo removidos")}} style={{fontSize:11,padding:"7px 12px"}}>Limpar</Bt>
+            <span style={{fontSize:10.5,color:T.t3}}>Dica: o campo "Grupo" permite reclassificar um ativo (ex.: um FII que na verdade é Fiagro).</span>
+          </div>
+          <div style={{maxHeight:460,overflow:"auto",border:"1px solid "+T.bdrL,borderRadius:10}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}>
-              <thead><tr style={{background:"rgba(255,255,255,0.03)",position:"sticky",top:0}}><th style={th}>Ativo</th><th style={th}>Classe</th><th style={th}>Indexador</th><th style={{...th,textAlign:"right"}}>Valor</th><th style={{...th,textAlign:"right"}}>Peso hoje</th><th style={{...th,textAlign:"right"}}>Peso-alvo</th></tr></thead>
+              <thead><tr style={{background:"rgba(255,255,255,0.03)",position:"sticky",top:0}}><th style={th}>Ativo</th><th style={th}>Grupo</th><th style={{...th,textAlign:"right"}}>Valor</th><th style={{...th,textAlign:"right"}}>{pol.ativoBase==="pat"?"% patrim.":"% do grupo"}</th><th style={{...th,textAlign:"right"}}>Peso-alvo</th></tr></thead>
               <tbody>
-                {atvFil.map(function(a){var cl=REB_CLASSES.filter(function(x){return x.id===a.classe})[0];var ix=a.idx?REB_IDX.filter(function(x){return x.id===a.idx})[0]:null;return(
+                {atvFil.map(function(a){
+                  var gid=rebGid(a,pol);var bs=pol.ativoBase==="pat"?cart.pat:(gcurV[gid]||0);
+                  var effG=a.classe==="rf"?"rf:"+(a.idx||"out"):((a.classe==="rv"||a.classe==="ext")?a.classe+":"+a.sub:a.classe);
+                  var rgm=(c.rebal&&c.rebal.regrupar)||{};var manual=!!(rgm[a.key]||rgm[a.keyAlt]);
+                  return(
                   <tr key={a.key} style={{borderTop:"1px solid "+T.bdrL}}>
-                    <td style={{padding:"6px 10px",color:T.t1}}>{a.nm}<span style={{color:T.t3}}> · {a.inst}</span></td>
-                    <td style={{padding:"6px 10px",color:T.t3}}>{cl?cl.l:a.classe}</td>
-                    <td style={{padding:"6px 10px",color:T.t3}}>{ix?ix.c+(a.idxEst?" ≈":""):"—"}</td>
+                    <td style={{padding:"6px 10px",color:T.t1}}>{a.nm}{a.inst&&a.inst!=="—"?<span style={{color:T.t3}}> · {a.inst}</span>:null}{a.novo?<span style={{color:T.cyan,fontSize:10}}> · nova posição <button onClick={function(){salvar(c,{novos:pol.novos.filter(function(n){return String(n.tk).toUpperCase()!==a.tk}),ativos:Object.fromEntries(Object.entries(pol.ativos).filter(function(e){return e[0]!==a.key}))})}} style={{background:"none",border:"none",color:T.red,cursor:"pointer",fontSize:11}}>remover</button></span>:null}</td>
+                    <td style={{padding:"4px 10px"}}>
+                      {a.novo?<span style={{color:T.t3}}>{rebGidLabel(gid)}</span>:
+                      <select value={effG} onChange={function(e){var v=e.target.value;var cur=Object.assign({},(c.rebal&&c.rebal.regrupar)||{});if(v==="__auto"){delete cur[a.keyAlt];delete cur[a.key]}else{cur[a.keyAlt]=v}salvar(c,{regrupar:cur})}} style={{...inpS,width:170,padding:"4px 6px",fontSize:10.5,color:manual?T.gold:T.t2}}>
+                        <option value="__auto">↺ Automático</option>
+                        {rebGrupoOpcoes().map(function(o){return <option key={o.v} value={o.v}>{o.l}</option>})}
+                      </select>}
+                    </td>
                     <td style={{padding:"6px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t2}}>{BRL(a.valor)}</td>
-                    <td style={{padding:"6px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t2}}>{rebPct1(a.valor/cart.pat*100)}</td>
-                    <td style={{padding:"4px 10px",textAlign:"right"}}><RebNumInput value={pol.ativos[a.key]} suffix="%" width={58} onCommit={function(v){setMapa(c,"ativos",a.key,v)}}/></td>
+                    <td style={{padding:"6px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t2}}>{bs>0?rebPct1(a.valor/bs*100):"—"}</td>
+                    <td style={{padding:"4px 10px",textAlign:"right"}}><RebNumInput value={rebAlvoAtivo(pol,a)} suffix="%" width={58} onCommit={function(v){setMapa(c,"ativos",a.novo?a.keyAlt:a.key,v)}}/></td>
                   </tr>)})}
               </tbody>
             </table>
@@ -6101,12 +6303,13 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
     };
     var plan=function(){
       var te=L.te;
-      var semAlvo=(te.classes+te.idx+te.ativos)===0;
-      var nivelTxt=plano.nivel==="ativo"?"por ativo":(te.idx>0&&te.classes>0?"por classe + indexador":te.idx>0?"por indexador":"por classe");
+      var semAlvo=(te.classes+te.idx+te.sub+te.ativos)===0;
+      var nivelTxt=(te.ativos>0&&pol.ativoBase==="pat")?"por ativo (% do patrimônio)":[te.classes>0?"classe":null,te.idx>0?"indexador":null,te.sub>0?"tipo":null,te.ativos>0?"ativo":null].filter(Boolean).join(" + ");
       var depoisRows=[];
       if(!semAlvo&&plano.moves.length>0){
         var tot=plano.patDepois>0?plano.patDepois:cart.pat;
         REB_CLASSES.forEach(function(x){var al=pol.classes[x.id];if(typeof al!=="number")return;depoisRows.push({id:"c"+x.id,label:x.l,antes:(cart.classe[x.id]||0)/cart.pat*100,depois:(plano.depoisClasse[x.id]||0)/tot*100,alvo:al,tol:pol.tolClasse})});
+        ["rv","ext"].forEach(function(cl){REB_SUB[cl].forEach(function(x){var al=pol.sub[cl][x.id];if(typeof al!=="number")return;var aT=cart.classe[cl]||0,dT=plano.depoisClasse[cl]||0;depoisRows.push({id:"s"+cl+x.id,label:rebClsInfo(cl).l.replace("Renda Variável","RV")+" › "+x.l,antes:aT>0?(cart.sub[cl][x.id]||0)/aT*100:0,depois:dT>0?(plano.depoisSub[cl][x.id]||0)/dT*100:0,alvo:al,tol:pol.tolSub})})});
         var baseD=pol.idxBase==="total"?tot:Math.max(1,Object.keys(plano.depoisIdx).reduce(function(s,k){return s+plano.depoisIdx[k]},0));
         var baseA=pol.idxBase==="total"?cart.pat:cart.rfTotal;
         REB_IDX.forEach(function(x){var al=pol.idx[x.id];if(typeof al!=="number")return;depoisRows.push({id:"i"+x.id,label:x.l,antes:baseA>0?(cart.idx[x.id]||0)/baseA*100:0,depois:(plano.depoisIdx[x.id]||0)/baseD*100,alvo:al,tol:pol.tolIdx})});
@@ -6252,7 +6455,7 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
               <div style={{display:"flex",height:12,borderRadius:6,overflow:"hidden",background:"rgba(255,255,255,0.04)"}}>
                 {REB_CLASSES.map(function(x){var v=l.cart.classe[x.id]||0;if(!(v>0))return null;return <div key={x.id} title={x.l+" "+rebPct1(v/l.cart.pat*100)} style={{width:(v/l.cart.pat*100)+"%",background:x.cor,opacity:0.85}}/>})}
               </div>
-              <div style={{fontSize:10,color:T.t3,marginTop:4}}>{REB_CLASSES.map(function(x){var v=l.cart.classe[x.id]||0;return v>0?({rf:"RF",rv:"RV",ext:"Exterior",cx:"Caixa",alt:"Alt."}[x.id]||x.l)+" "+Math.round(v/l.cart.pat*100)+"%":null}).filter(Boolean).join(" · ")}</div>
+              <div style={{fontSize:10,color:T.t3,marginTop:4}}>{REB_CLASSES.map(function(x){var v=l.cart.classe[x.id]||0;return v>0?x.l.split(" ")[0]+" "+Math.round(v/l.cart.pat*100)+"%":null}).filter(Boolean).join(" · ")}</div>
             </div>
             <div style={{textAlign:"right",minWidth:150}}>
               {l.temPol?<div>
