@@ -5679,7 +5679,7 @@ function rebCarteira(c){
     var pm=(+a.qtd>0&&+a.pm>0)?(+a.qtd)*(+a.pm):0;
     var liq=rebLiquidez(a,dias);
     var it={key:chaveVencAtivo(a),keyAlt:(String(a.tk||"").trim()?String(a.tk).trim().toUpperCase()+"|":chaveVencAtivo(a)),nm:a.nm||a.tk||"Ativo",tk:a.tk,tp:a.tp,inst:a.inst||"—",classe:cl,idx:ix?ix.id:null,idxEst:ix?ix.est:false,sub:sb,valor:v,
-      pm:pm,ganho:pm>0?v-pm:null,dias:dias,vencIso:rv?rv.iso:null,liq:liq.n,liqS:liq.s,semRent:!!a._semRentabilidade};
+      pm:pm,ganho:pm>0?v-pm:null,dias:dias,vencIso:rv?rv.iso:null,liq:liq.n,liqS:liq.s,semRent:!!a._semRentabilidade,gSub:a._gSubCl};
     out.ativos.push(it);
     out.pat+=v;out.classe[cl]+=v;
     if(sb&&out.sub[cl])out.sub[cl][sb]+=v;
@@ -5949,6 +5949,96 @@ function rebPlano(c,cart,pol,opts){
   ["rv","ext"].forEach(function(cl){var ss=0,n=0;Object.keys(pol.sub[cl]).forEach(function(k){if(typeof pol.sub[cl][k]==="number"){ss+=pol.sub[cl][k];n++}});if(n>0&&Math.abs(ss-100)>0.5)plano.avisos.push("Os alvos por tipo em "+rebClsInfo(cl).l+" somam "+ss.toFixed(1).replace(".",",")+"% (o ideal é 100%).")});
   return plano;
 }
+/* ---------- Sensibilidade a juros (duration) ---------- */
+var REB_TK_DUR_US={BND:6.0,AGG:6.0,IAGG:6.0,SCHZ:6.0,SHY:1.9,VGSH:1.9,SCHO:1.9,VCSH:2.7,TIP:6.5,SCHP:6.5,VCLT:12.5,LQD:8.5,HYG:3.2,TLT:16,VGLT:15,IEF:6.5,VGIT:5.2,GOVT:6.0,MBB:6.0,BNDX:7.0,EMB:7.0,TFLO:0.1,BOXX:0.1,SGOV:0.1,BIL:0.1,USFR:0.1};
+/* Duração (Macaulay/modificada) e convexidade de um fluxo: principal em T anos, cupom anual opcional (pago semestralmente), taxa y a.a. */
+function rebDurFluxo(T,y,cupom){
+  T=Math.max(0.01,T);y=Math.max(0.0001,y);
+  var cf=[];
+  if(cupom>0){for(var t=T;t>0.01;t-=0.5)cf.push({t:t,v:cupom/2})}
+  cf.push({t:T,v:1});
+  var pv=0,sd=0,sc=0;
+  cf.forEach(function(x){var p=x.v/Math.pow(1+y,x.t);pv+=p;sd+=x.t*p;sc+=x.t*(x.t+1)*p});
+  var mac=sd/pv;
+  return{mac:mac,mod:mac/(1+y),conv:sc/(pv*Math.pow(1+y,2))};
+}
+function rebTaxaNum(txt,apos){
+  var s=String(txt||"");
+  var m=apos?s.match(/\+\s*(\d{1,2}(?:[.,]\d+)?)/):s.match(/(\d{1,3}(?:[.,]\d+)?)/);
+  return m?parseFloat(m[1].replace(",",".")):null;
+}
+/* Retorna {tipo:"pos|pre|real|us|nenhum", mod, conv, est, nota} para um ativo da carteira (item de rebCarteira) */
+function rebJurosAtivo(a,def){
+  def=def||{};
+  var out={tipo:"nenhum",mod:0,conv:0,est:false,nota:""};
+  var tp=a.tp,tk=String(a.tk||"").trim().toUpperCase(),nm=String(a.nm||"");
+  var fundo=/^fundo_/.test(tp||"")||/FUNDO|FIF|FIC|FI\b|CLASSE/i.test(nm)&&!/^(CDB|LCI|LCA|LC|CRI|CRA|DEB|NTN|LTN|LFT|TESOURO)/i.test(nm);
+  if(a.classe==="ext"){
+    if(REB_TK_DUR_US[tk]!=null){out.tipo="us";out.mod=REB_TK_DUR_US[tk];out.conv=out.mod*out.mod+out.mod;out.est=true;out.nota="duration típica do ETF";return out}
+    if(tp==="bond_intl"){out.tipo="us";out.mod=5;out.conv=30;out.est=true;out.nota="Treasury: duration estimada";return out}
+    if(tp==="fundo_mm_intl"){out.tipo="us";out.mod=0.1;out.conv=0.2;out.est=true;out.nota="caixa/monetário no exterior";return out}
+    return out;
+  }
+  if(a.classe==="cx"){out.tipo="pos";out.nota="caixa";return out}
+  if(a.classe!=="rf")return out;
+  if(tp==="coe"){out.nota="COE: payoff próprio, não modelado";return out}
+  if(a.idx==="pos"){out.tipo="pos";out.nota="pós-fixado: sem marcação relevante a juros";return out}
+  var pr=null;try{pr=parseProdutoRF({nm:nm,tk:a.tk,_gSubCl:a.gSub})}catch(e){}
+  var T=(a.dias!=null&&a.dias>0)?a.dias/365:(a.dias!=null&&a.dias<=0&&!fundo?0.02:null);
+  if(a.idx==="pre"){
+    var y=rebTaxaNum(pr&&pr.taxa,false);var yEst=false;if(y==null||y<=0||y>40){y=def.pre||14;yEst=true}
+    out.tipo="pre";
+    if(T==null){
+      if(fundo){out.mod=1.5;out.conv=4;out.est=true;out.nota="fundo prefixado: duration estimada";return out}
+      T=3;out.est=true;out.nota="sem vencimento: prazo de 3 anos assumido";
+    }
+    var cup=(tp==="tesouro"&&/NTN-?F|JUROS/i.test(nm))?0.10:0;
+    var d=rebDurFluxo(T,y/100,cup);out.mod=d.mod;out.conv=d.conv;out.est=out.est||yEst;if(yEst&&!out.nota)out.nota="taxa não informada: "+String(y).replace(".",",")+"% a.a. de referência";
+    return out;
+  }
+  if(a.idx==="ipca"){
+    var yr=rebTaxaNum(pr&&pr.taxa,true);var yrEst=false;if(yr==null||yr<=0||yr>25){yr=def.real||7.5;yrEst=true}
+    out.tipo="real";
+    if(T==null){
+      if(fundo){out.mod=(tp==="fundo_infra"?3.5:2.5);out.conv=out.mod*out.mod+out.mod;out.est=true;out.nota="fundo de inflação/infra: duration estimada";return out}
+      T=4;out.est=true;out.nota="sem vencimento: prazo de 4 anos assumido";
+    }
+    var cup2=(tp==="tesouro"&&/NTN-?B/i.test(nm)&&!/princ/i.test(nm))||(tp==="tesouro"&&/juros semestrais/i.test(nm))?0.06:0;
+    var d2=rebDurFluxo(T,yr/100,cup2);
+    var f=(tp==="deb"||tp==="debi"||tp==="cri"||tp==="cra")?0.8:1;  /* amortização/cupom encurta a duration de crédito estruturado */
+    out.mod=d2.mod*f;out.conv=d2.conv*f;out.est=out.est||yrEst||f<1;if(!out.nota)out.nota=yrEst?"taxa real não informada: "+String(yr).replace(".",",")+"% a.a. de referência":(f<1?"crédito com fluxo: duration reduzida em 20%":"");
+    return out;
+  }
+  /* "out": multimercado e RF sem indexador */
+  if(tp==="fundo_mm"||tp==="fundo_camb"){out.tipo="pre";out.mod=0.5;out.conv=1;out.est=true;out.nota="multimercado: sensibilidade estimada baixa";return out}
+  return out;
+}
+/* sh={nom,real,us} em pontos-base (bps). Retorna impacto marcado a mercado + carrego dos pós-fixados em 12 meses. */
+function rebJuros(cart,sh){
+  sh=sh||{};var nom=+sh.nom||0,real=(sh.real==null?nom:+sh.real)||0,us=+sh.us||0;
+  var rows=[],tot={imp:0,dv01:0,valorSens:0,valorDur:0,durPond:0,rfValor:0};
+  var grp={pos:{l:"Pós-fixado / caixa",valor:0,imp:0,dv01:0,durV:0},pre:{l:"Prefixado",valor:0,imp:0,dv01:0,durV:0},real:{l:"Inflação (IPCA+)",valor:0,imp:0,dv01:0,durV:0},us:{l:"Bonds e caixa no exterior",valor:0,imp:0,dv01:0,durV:0}};
+  var carry=0,cob={estimado:0,modelado:0,naoModelado:0};
+  cart.ativos.forEach(function(a){
+    if(!(a.valor>0))return;
+    var j=rebJurosAtivo(a,{pre:+sh.yPre||0,real:+sh.yReal||0});
+    if(j.tipo==="nenhum"){if(a.classe==="rf")cob.naoModelado+=a.valor;return}
+    var dy=(j.tipo==="pre"?nom:j.tipo==="real"?real:j.tipo==="us"?us:0)/10000;
+    var imp=a.valor*(-j.mod*dy+0.5*j.conv*dy*dy);
+    var dv=a.valor*j.mod*0.0001;
+    if(j.tipo==="pos"){carry+=a.valor*nom/10000}
+    var g=grp[j.tipo];g.valor+=a.valor;g.imp+=imp;g.dv01+=dv;g.durV+=j.mod*a.valor;
+    if(j.tipo!=="pos"){if(j.est)cob.estimado+=a.valor;else cob.modelado+=a.valor}
+    rows.push({key:a.key,nm:a.nm,inst:a.inst,valor:a.valor,tipo:j.tipo,mod:j.mod,conv:j.conv,est:j.est,nota:j.nota,dias:a.dias,dv01:dv,imp:imp});
+    if(a.classe==="rf"&&j.tipo!=="pos"){tot.valorDur+=a.valor;tot.durPond+=j.mod*a.valor}
+    tot.imp+=imp;tot.dv01+=dv;if(j.tipo!=="pos"&&j.mod>0.3)tot.valorSens+=a.valor;
+  });
+  rows.sort(function(x,y){return y.dv01-x.dv01});
+  tot.durMediaRF=cart.rfTotal>0?tot.durPond/cart.rfTotal:0;      /* duration média da renda fixa toda (pós = 0) */
+  tot.durMediaSens=tot.valorDur>0?tot.durPond/tot.valorDur:0;     /* só da parte sensível (pré, IPCA+ e fundos) */
+  tot.impPct=cart.pat>0?tot.imp/cart.pat*100:0;
+  return{rows:rows,grp:grp,tot:tot,carry12:carry,cob:cob,nom:nom,real:real,us:us};
+}
 function rebBRL0(v){return "R$ "+Math.round(+v||0).toLocaleString("pt-BR")}
 function rebPct1(v){return (+v||0).toFixed(1).replace(".",",")+"%"}
 /* ===== v534 REB END ===== */
@@ -5983,7 +6073,154 @@ function RebBar({atual,alvo,tol,max,cor,height}){
     {alvo!=null&&<div style={{position:"absolute",left:pc(alvo)+"%",top:-3,bottom:-3,width:2,background:"#fff",borderRadius:1,opacity:0.85}}/>}
   </div>;
 }
+/* Linha "antes → depois": uma única barra. Trecho listrado verde = comprar, vermelho = vender; traço branco = alvo; faixa pontilhada = tolerância */
+function RebMov({label,antes,depois,alvo,tol,max,dv}){
+  var st=REB_ST[rebStatus(depois-alvo,tol)];
+  var m=Math.max(max||0,1);
+  var pc=function(v){return Math.max(0,Math.min(100,v/m*100))};
+  var lo=pc(Math.max(0,alvo-tol)),hi=pc(alvo+tol);
+  var base=Math.min(antes,depois),up=depois>=antes;
+  var listra=up?"repeating-linear-gradient(45deg,#34D399 0,#34D399 4px,rgba(52,211,153,0.35) 4px,rgba(52,211,153,0.35) 8px)":"repeating-linear-gradient(45deg,#F87171 0,#F87171 4px,rgba(248,113,113,0.35) 4px,rgba(248,113,113,0.35) 8px)";
+  var f1=function(v){return String(Math.round(v*10)/10).replace(".",",")+"%"};
+  return <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:"6px 16px",padding:"10px 0",borderTop:"1px solid "+T.bdrL}}>
+    <div style={{flex:"1 1 150px",minWidth:130,fontSize:12,fontWeight:700,color:T.t1}}>{label}</div>
+    <div style={{flex:"3 1 220px",minWidth:180}}>
+      <div style={{position:"relative",height:14,borderRadius:7,background:"rgba(255,255,255,0.05)"}}>
+        <div style={{position:"absolute",left:lo+"%",width:Math.max(0,hi-lo)+"%",top:-2,bottom:-2,background:"rgba(212,163,40,0.14)",border:"1px dashed rgba(212,163,40,0.45)",borderRadius:4}}/>
+        <div style={{position:"absolute",left:0,top:0,bottom:0,width:pc(base)+"%",background:st.c,borderRadius:"7px 0 0 7px",opacity:0.95}}/>
+        {Math.abs(depois-antes)*1>0.05&&<div style={{position:"absolute",left:pc(base)+"%",width:Math.max(0.4,pc(Math.max(antes,depois))-pc(base))+"%",top:0,bottom:0,background:listra,borderRadius:"0 7px 7px 0"}}/>}
+        <div style={{position:"absolute",left:pc(alvo)+"%",top:-5,bottom:-5,width:2,background:"#fff",borderRadius:1}}/>
+      </div>
+    </div>
+    <div style={{flex:"0 0 200px",textAlign:"right"}}>
+      <div style={{fontSize:12,fontFamily:"'JetBrains Mono'",color:T.t3}}>{f1(antes)} → <b style={{color:st.c}}>{f1(depois)}</b></div>
+      <div style={{fontSize:10.5,color:T.t3}}>alvo {f1(alvo)}{Math.abs(dv)>=1?<span> · <b style={{color:dv>0?T.green:T.red}}>{dv>0?"comprar ":"vender "}{rebBRL0(Math.abs(dv))}</b></span>:null}</div>
+    </div>
+  </div>;
+}
 var REB_ST={ok:{c:"#34D399",l:"Dentro da faixa"},atencao:{c:"#FBBF24",l:"Perto do limite"},fora:{c:"#F87171",l:"Fora da faixa"}};
+
+/* ===== Painel de sensibilidade a juros ===== */
+function RebJurosPanel({cart}){
+  var _a=useState(100);var mag=_a[0],setMag=_a[1];
+  var _b=useState(1);var kReal=_b[0],setKReal=_b[1];
+  var _c=useState(false);var usOn=_c[0],setUsOn=_c[1];
+  var _d=useState(14);var yPre=_d[0],setYPre=_d[1];
+  var _e=useState(7.5);var yReal=_e[0],setYReal=_e[1];
+  var BRL=function(v){return rebBRL0(v)};
+  var sg=function(v){return (v>=0?"+":"−")+rebBRL0(Math.abs(v))};
+  var cor=function(v){return v>0.5?T.green:v<-0.5?T.red:T.t2};
+  var f1=function(v){return String(Math.round(v*10)/10).replace(".",",")};
+  var f2=function(v){return String(Math.round(v*100)/100).replace(".",",")};
+  var mk=function(bps){return rebJuros(cart,{nom:bps,real:bps*kReal,us:usOn?bps:0,yPre:yPre,yReal:yReal})};
+  var alta=mk(mag),queda=mk(-mag),base=mk(0);
+  var cen=[-300,-200,-100,-50,50,100,200,300].map(function(b){var r=mk(b);return{b:b,imp:r.tot.imp,pct:r.tot.impPct,carry:r.carry12,saldo:r.tot.imp+r.carry12}});
+  var mxC=1;cen.forEach(function(x){mxC=Math.max(mxC,Math.abs(x.imp),Math.abs(x.saldo))});
+  var th={padding:"7px 10px",textAlign:"left",fontSize:10,color:T.t3,fontWeight:700,letterSpacing:0.4,textTransform:"uppercase"};
+  var pctSens=cart.pat>0?base.tot.valorSens/cart.pat*100:0;
+  var chip=function(on,l,fn,k){return <button key={k||l} onClick={fn} style={{padding:"6px 12px",borderRadius:10,fontSize:11,fontWeight:700,cursor:"pointer",border:on?"1px solid "+T.gold:"1px solid "+T.bdrL,background:on?"rgba(212,163,40,0.10)":"transparent",color:on?T.gold:T.t2}}>{l}</button>};
+  var card=function(titulo,r,ic,sinal){
+    var gg=["pre","real","us"].map(function(k){return r.grp[k]}).filter(function(g){return g.valor>0});
+    var carryTxt=sinal>0?"rendem "+f2(mag/100)+" p.p. a mais":"rendem "+f2(mag/100)+" p.p. a menos";
+    return <Cd hov={false} style={{padding:18,flex:"1 1 320px",minWidth:280,borderTop:"3px solid "+(r.tot.imp>=0?T.green:T.red)}}>
+      <div style={{fontSize:13,fontWeight:800,color:T.t1}}>{ic} {titulo}</div>
+      <div style={{fontSize:11,color:T.t3,marginBottom:10}}>Efeito imediato no valor de mercado (marcação a mercado)</div>
+      <div style={{fontSize:26,fontWeight:800,color:cor(r.tot.imp),fontFamily:"'JetBrains Mono'"}}>{sg(r.tot.imp)}</div>
+      <div style={{fontSize:12,color:cor(r.tot.imp),fontWeight:700}}>{(r.tot.impPct>=0?"+":"−")+f2(Math.abs(r.tot.impPct))+"% do patrimônio"}</div>
+      <div style={{marginTop:12,paddingTop:10,borderTop:"1px solid "+T.bdrL}}>
+        {gg.map(function(g){return <div key={g.l} style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"2px 0"}}><span style={{color:T.t2}}>{g.l}</span><b style={{color:cor(g.imp),fontFamily:"'JetBrains Mono'"}}>{sg(g.imp)}</b></div>})}
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"6px 0 2px",marginTop:4,borderTop:"1px dashed "+T.bdrL}}><span style={{color:T.t2}}>Carrego em 12 meses dos pós-fixados ({BRL(r.grp.pos.valor)})</span><b style={{color:cor(r.carry12),fontFamily:"'JetBrains Mono'"}}>{sg(r.carry12)}</b></div>
+        <div style={{fontSize:10,color:T.t3,lineHeight:1.5}}>Se o choque durar 12 meses, os pós-fixados {carryTxt} (bruto de IR).</div>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:12.5,padding:"8px 0 0",marginTop:6,borderTop:"1px solid "+T.bdrL}}><b style={{color:T.t1}}>Saldo estimado em 12 meses</b><b style={{color:cor(r.tot.imp+r.carry12),fontFamily:"'JetBrains Mono'"}}>{sg(r.tot.imp+r.carry12)}</b></div>
+      </div>
+    </Cd>;
+  };
+  var gr=Object.keys(base.grp).map(function(k){return{k:k,g:base.grp[k],a:alta.grp[k],q:queda.grp[k]}}).filter(function(x){return x.g.valor>0});
+  var top=alta.rows.slice(0,10);
+  var topQ={};queda.rows.forEach(function(r){topQ[r.key]=r});
+  if(!(cart.pat>0))return null;
+  return <div>
+    <Cd hov={false} style={{padding:16,marginBottom:14}}>
+      <div style={{fontSize:14,fontWeight:800,color:T.t1,marginBottom:4}}>📉 Sensibilidade da carteira à taxa de juros futura</div>
+      <div style={{fontSize:11.5,color:T.t2,lineHeight:1.6,marginBottom:10}}>Simula um deslocamento paralelo da curva de juros: quando a taxa sobe, títulos prefixados e IPCA+ (e fundos de prazo longo) perdem valor de mercado; quando cai, valorizam. Pós-fixados quase não oscilam, mas passam a render mais (ou menos) ao longo do tempo. Quem leva o título até o vencimento recebe a taxa contratada — a perda ou o ganho abaixo só é realizado se vender antes.</div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center"}}>
+        <span style={{fontSize:11,fontWeight:700,color:T.t2}}>Choque de</span>
+        {[50,100,200,300].map(function(v){return chip(mag===v,"±"+v+" bps",function(){setMag(v)},"m"+v)})}
+        <RebNumInput value={mag} suffix="bps" width={64} onCommit={function(v){setMag(v==null||v<=0?100:Math.min(1000,v))}}/>
+        <span style={{fontSize:11,color:T.t3}}>(100 bps = 1 ponto percentual)</span>
+      </div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:14,alignItems:"center",marginTop:12,paddingTop:10,borderTop:"1px solid "+T.bdrL}}>
+        <span style={{fontSize:11,color:T.t2}}>Juro real (IPCA+) acompanha:</span>
+        {[[1,"100%"],[0.5,"50%"],[0,"0%"]].map(function(o){return chip(kReal===o[0],o[1],function(){setKReal(o[0])},"k"+o[0])})}
+        <label style={{fontSize:11,color:T.t2,display:"inline-flex",alignItems:"center",gap:6,cursor:"pointer"}}><input type="checkbox" checked={usOn} onChange={function(e){setUsOn(e.target.checked)}}/> juros dos EUA também se movem (bonds/ETFs no exterior)</label>
+        <span style={{fontSize:11,color:T.t3}}>Taxa de referência quando o título não informa: pré <RebNumInput value={yPre} suffix="%" width={50} onCommit={function(v){setYPre(v==null||v<=0?14:v)}}/> · real <RebNumInput value={yReal} suffix="%" width={50} onCommit={function(v){setYReal(v==null||v<=0?7.5:v)}}/></span>
+      </div>
+    </Cd>
+
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,marginBottom:14}}>
+      <KCard compact label="Duration da renda fixa" valor={f1(base.tot.durMediaRF)+" anos"} cor={T.gold} sub={"inclui pós-fixados (≈ 0)"}/>
+      <KCard compact label="Duration da parte sensível" valor={f1(base.tot.durMediaSens)+" anos"} cor={T.cyan} sub="pré, IPCA+ e fundos de prazo"/>
+      <KCard compact label="Risco por 1 bp" valor={BRL(base.tot.dv01)} cor={T.orange} sub="perda (ou ganho) a cada 0,01 p.p."/>
+      <KCard compact label="Patrimônio sensível" valor={f1(pctSens)+"%"} cor={T.purple} sub={BRL(base.tot.valorSens)}/>
+    </div>
+
+    <div style={{display:"flex",flexWrap:"wrap",gap:14,marginBottom:14}}>
+      {card("Juros SOBEM "+mag+" bps",alta,"📈",1)}
+      {card("Juros CAEM "+mag+" bps",queda,"📉",-1)}
+    </div>
+
+    <Cd hov={false} style={{padding:16,marginBottom:14}}>
+      <div style={{fontSize:13,fontWeight:800,color:T.t1,marginBottom:2}}>Cenários de choque paralelo</div>
+      <div style={{fontSize:11,color:T.t3,marginBottom:8}}>Verde = ganho, vermelho = perda · "saldo 12m" soma o efeito imediato com o carrego dos pós-fixados</div>
+      <div style={{overflowX:"auto"}}>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5,minWidth:560}}>
+        <thead><tr><th style={th}>Cenário</th><th style={th}>Efeito imediato</th><th style={{...th,textAlign:"right"}}>R$</th><th style={{...th,textAlign:"right"}}>% patrim.</th><th style={{...th,textAlign:"right"}}>Carrego pós 12m</th><th style={{...th,textAlign:"right"}}>Saldo 12m</th></tr></thead>
+        <tbody>{cen.map(function(x){return <tr key={x.b} style={{borderTop:"1px solid "+T.bdrL}}>
+          <td style={{padding:"7px 10px",fontWeight:700,color:T.t1,whiteSpace:"nowrap"}}>{x.b>0?"Juros +":"Juros −"}{Math.abs(x.b)} bps</td>
+          <td style={{padding:"7px 10px",width:"28%"}}><div style={{position:"relative",height:10,background:"rgba(255,255,255,0.05)",borderRadius:5}}><div style={{position:"absolute",left:"50%",top:-2,bottom:-2,width:1,background:"rgba(255,255,255,0.35)"}}/><div style={{position:"absolute",top:1,bottom:1,borderRadius:4,background:x.imp>=0?T.green:T.red,left:x.imp>=0?"50%":(50-Math.abs(x.imp)/mxC*50)+"%",width:(Math.abs(x.imp)/mxC*50)+"%"}}/></div></td>
+          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:cor(x.imp),fontWeight:700}}>{sg(x.imp)}</td>
+          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:cor(x.imp)}}>{(x.pct>=0?"+":"−")+f2(Math.abs(x.pct))+"%"}</td>
+          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:cor(x.carry)}}>{sg(x.carry)}</td>
+          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:cor(x.saldo),fontWeight:700}}>{sg(x.saldo)}</td>
+        </tr>})}</tbody>
+      </table></div>
+    </Cd>
+
+    <Cd hov={false} style={{padding:16,marginBottom:14}}>
+      <div style={{fontSize:13,fontWeight:800,color:T.t1,marginBottom:8}}>Quem carrega o risco (±{mag} bps)</div>
+      <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5,minWidth:520}}>
+        <thead><tr><th style={th}>Grupo</th><th style={{...th,textAlign:"right"}}>Valor</th><th style={{...th,textAlign:"right"}}>Duration</th><th style={{...th,textAlign:"right"}}>Se sobe</th><th style={{...th,textAlign:"right"}}>Se cai</th></tr></thead>
+        <tbody>{gr.map(function(x){return <tr key={x.k} style={{borderTop:"1px solid "+T.bdrL}}>
+          <td style={{padding:"7px 10px",color:T.t1,fontWeight:700}}>{x.g.l}</td>
+          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t2}}>{BRL(x.g.valor)}</td>
+          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t2}}>{x.g.valor>0?f1(x.g.durV/x.g.valor)+" a":"—"}</td>
+          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:x.k==="pos"?T.t3:cor(x.a.imp)}}>{x.k==="pos"?"≈ R$ 0":sg(x.a.imp)}</td>
+          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:x.k==="pos"?T.t3:cor(x.q.imp)}}>{x.k==="pos"?"≈ R$ 0":sg(x.q.imp)}</td>
+        </tr>})}</tbody>
+      </table></div>
+    </Cd>
+
+    <Cd hov={false} style={{padding:16,marginBottom:14}}>
+      <div style={{fontSize:13,fontWeight:800,color:T.t1,marginBottom:2}}>Posições mais sensíveis (±{mag} bps)</div>
+      <div style={{fontSize:11,color:T.t3,marginBottom:8}}>≈ = duration estimada (taxa ou vencimento não informados no extrato)</div>
+      <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5,minWidth:620}}>
+        <thead><tr><th style={th}>Ativo</th><th style={th}>Tipo</th><th style={{...th,textAlign:"right"}}>Valor</th><th style={{...th,textAlign:"right"}}>Duration</th><th style={{...th,textAlign:"right"}}>Se sobe</th><th style={{...th,textAlign:"right"}}>Se cai</th></tr></thead>
+        <tbody>{top.map(function(r){var q=topQ[r.key];return <tr key={r.key} style={{borderTop:"1px solid "+T.bdrL}}>
+          <td style={{padding:"7px 10px",color:T.t1}}>{r.nm}<span style={{color:T.t3}}>{r.inst&&r.inst!=="—"?" · "+r.inst:""}</span>{r.nota?<div style={{fontSize:10,color:T.t3}}>{r.nota}</div>:null}</td>
+          <td style={{padding:"7px 10px",color:T.t3}}>{r.tipo==="pre"?"Prefixado":r.tipo==="real"?"IPCA+":"Exterior"}</td>
+          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t2}}>{BRL(r.valor)}</td>
+          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t2}}>{r.est?"≈ ":""}{f1(r.mod)} a</td>
+          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:cor(r.imp)}}>{sg(r.imp)}</td>
+          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:cor(q?q.imp:0)}}>{sg(q?q.imp:0)}</td>
+        </tr>})}</tbody>
+      </table></div>
+    </Cd>
+
+    <div style={{fontSize:10.5,color:T.t3,lineHeight:1.65,padding:"4px 6px 10px"}}>
+      <b style={{color:T.t2}}>Premissas.</b> Deslocamento paralelo da curva, calculado por duration modificada e convexidade a partir da taxa e do vencimento de cada título (Tesouro com cupom considera os juros semestrais; crédito estruturado tem a duration reduzida em 20%). Fundos de renda fixa sem vencimento usam duration típica da categoria. Não considera marcação por risco de crédito/spread, imposto, nem o efeito indireto dos juros sobre ações e FIIs (renda variável fora do cálculo). COE fica de fora ({BRL(base.cob.naoModelado)} em RF sem modelo). Estimativa para apoio à conversa com o cliente — não é previsão de juros nem recomendação.
+    </div>
+  </div>;
+}
 
 function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
   var _a=useState(null);var selId=_a[0],setSelId=_a[1];
@@ -5998,6 +6235,7 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
   var _j=useState("");var copiarDe=_j[0],setCopiarDe=_j[1];
   var _k=useState("");var novoTk=_k[0],setNovoTk=_k[1];
   var _l=useState("rv:fii");var novoG=_l[0],setNovoG=_l[1];
+  var _m=useState({});var colap=_m[0],setColap=_m[1];
   var flash=function(t){setMsg(t);setTimeout(function(){setMsg("")},3500)};
   var BRL=function(v){return rebBRL0(v)};
   var hoje=new Date();hoje.setHours(0,0,0,0);
@@ -6154,6 +6392,15 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
       var comPol=(d.cl||[]).filter(function(x){return x.id!==c.id&&x.rebal&&(Object.keys(x.rebal.classes||{}).length+Object.keys(x.rebal.idx||{}).length+Object.keys((x.rebal.sub&&x.rebal.sub.rv)||{}).length+Object.keys((x.rebal.sub&&x.rebal.sub.ext)||{}).length)>0});
       var atvFil=cart.ativos.filter(function(a){return !buscaAtv||(a.nm+" "+a.inst+" "+(a.tk||"")).toLowerCase().indexOf(buscaAtv.toLowerCase())>=0});
       var gcurV={};cart.ativos.forEach(function(a){var g=rebGid(a,pol);gcurV[g]=(gcurV[g]||0)+a.valor});
+      var estrut=REB_CLASSES.map(function(x){
+        var itens=atvFil.filter(function(a){return a.classe===x.id});
+        var subs=[];
+        var mk=function(id,l,cor,gid,alvoG,lista,total){if(lista.length)subs.push({id:id,l:l,cor:cor,itens:lista,gid:gid,alvoG:alvoG,total:total})};
+        if(x.id==="rf")REB_IDX.forEach(function(y){mk(y.id,y.l,y.cor,"idx:"+y.id,pol.idx[y.id],itens.filter(function(a){return (a.idx||"out")===y.id}),cart.idx[y.id]||0)});
+        else if(x.id==="rv"||x.id==="ext")REB_SUB[x.id].forEach(function(y){mk(y.id,y.l,y.cor,"sub:"+x.id+":"+y.id,pol.sub[x.id][y.id],itens.filter(function(a){return a.sub===y.id}),cart.sub[x.id][y.id]||0)});
+        else mk("x",null,null,"cls:"+x.id,null,itens,cart.classe[x.id]||0);
+        return{cls:x,itens:itens,subs:subs};
+      }).filter(function(g){return g.itens.length>0});
       var th={padding:"8px 10px",textAlign:"left",fontSize:10,color:T.t3,fontWeight:700,letterSpacing:0.4,textTransform:"uppercase"};
       return <div>
         <Cd hov={false} style={{padding:16,marginBottom:14}}>
@@ -6240,33 +6487,51 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
             <input value={buscaAtv} onChange={function(e){setBuscaAtv(e.target.value)}} placeholder="Buscar ativo…" style={{...inpS,width:160,padding:"7px 10px",fontSize:11}}/>
             <Bt v="secondary" onClick={function(){fixarAtuais("ativos")}} style={{fontSize:11,padding:"7px 12px"}}>📌 Fixar pesos atuais</Bt>
             <Bt v="secondary" onClick={function(){salvar(c,{ativos:{}});flash("Pesos por ativo removidos")}} style={{fontSize:11,padding:"7px 12px"}}>Limpar</Bt>
-            <span style={{fontSize:10.5,color:T.t3}}>Dica: o campo "Grupo" permite reclassificar um ativo (ex.: um FII que na verdade é Fiagro).</span>
+            <span style={{fontSize:10.5,color:T.t3}}>Dica: use "Mover para" para reclassificar um ativo (ex.: um FII que na verdade é Fiagro). Clique no título da classe para recolher.</span>
           </div>
-          <div style={{maxHeight:460,overflow:"auto",border:"1px solid "+T.bdrL,borderRadius:10}}>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5}}>
-              <thead><tr style={{background:"rgba(255,255,255,0.03)",position:"sticky",top:0}}><th style={th}>Ativo</th><th style={th}>Grupo</th><th style={{...th,textAlign:"right"}}>Valor</th><th style={{...th,textAlign:"right"}}>{pol.ativoBase==="pat"?"% patrim.":"% do grupo"}</th><th style={{...th,textAlign:"right"}}>Peso-alvo</th></tr></thead>
-              <tbody>
-                {atvFil.map(function(a){
-                  var gid=rebGid(a,pol);var bs=pol.ativoBase==="pat"?cart.pat:(gcurV[gid]||0);
-                  var effG=a.classe==="rf"?"rf:"+(a.idx||"out"):((a.classe==="rv"||a.classe==="ext")?a.classe+":"+a.sub:a.classe);
-                  var rgm=(c.rebal&&c.rebal.regrupar)||{};var manual=!!(rgm[a.key]||rgm[a.keyAlt]);
-                  return(
-                  <tr key={a.key} style={{borderTop:"1px solid "+T.bdrL}}>
-                    <td style={{padding:"6px 10px",color:T.t1}}>{a.nm}{a.inst&&a.inst!=="—"?<span style={{color:T.t3}}> · {a.inst}</span>:null}{a.novo?<span style={{color:T.cyan,fontSize:10}}> · nova posição <button onClick={function(){salvar(c,{novos:pol.novos.filter(function(n){return String(n.tk).toUpperCase()!==a.tk}),ativos:Object.fromEntries(Object.entries(pol.ativos).filter(function(e){return e[0]!==a.key}))})}} style={{background:"none",border:"none",color:T.red,cursor:"pointer",fontSize:11}}>remover</button></span>:null}</td>
-                    <td style={{padding:"4px 10px"}}>
-                      {a.novo?<span style={{color:T.t3}}>{rebGidLabel(gid)}</span>:
-                      <select value={effG} onChange={function(e){var v=e.target.value;var cur=Object.assign({},(c.rebal&&c.rebal.regrupar)||{});if(v==="__auto"){delete cur[a.keyAlt];delete cur[a.key]}else{cur[a.keyAlt]=v}salvar(c,{regrupar:cur})}} style={{...inpS,width:170,padding:"4px 6px",fontSize:10.5,color:manual?T.gold:T.t2}}>
-                        <option value="__auto">↺ Automático</option>
-                        {rebGrupoOpcoes().map(function(o){return <option key={o.v} value={o.v}>{o.l}</option>})}
-                      </select>}
-                    </td>
-                    <td style={{padding:"6px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t2}}>{BRL(a.valor)}</td>
-                    <td style={{padding:"6px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t2}}>{bs>0?rebPct1(a.valor/bs*100):"—"}</td>
-                    <td style={{padding:"4px 10px",textAlign:"right"}}><RebNumInput value={rebAlvoAtivo(pol,a)} suffix="%" width={58} onCommit={function(v){setMapa(c,"ativos",a.novo?a.keyAlt:a.key,v)}}/></td>
-                  </tr>)})}
-              </tbody>
-            </table>
-          </div>
+          {estrut.length===0&&<div style={{fontSize:12,color:T.t3,padding:"10px 0"}}>Nenhum ativo encontrado.</div>}
+          {estrut.map(function(g){
+            var cid=g.cls.id;var aberto=buscaAtv?true:!colap[cid];
+            var share=cart.pat>0?(cart.classe[cid]||0)/cart.pat*100:0;
+            var alvoC=pol.classes[cid];
+            return <div key={cid} style={{border:"1px solid "+T.bdrL,borderRadius:12,marginBottom:10,overflow:"hidden"}}>
+              <div onClick={function(){var n=Object.assign({},colap);n[cid]=!colap[cid];setColap(n)}} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"11px 14px",cursor:"pointer",background:"rgba(255,255,255,0.04)",flexWrap:"wrap"}}>
+                <span style={{fontSize:13,fontWeight:800,color:T.t1}}>{aberto?"▾":"▸"} {g.cls.ic} {g.cls.l} <span style={{color:T.t3,fontWeight:500,fontSize:11}}>· {g.itens.length} ativo{g.itens.length===1?"":"s"}</span></span>
+                <span style={{fontSize:11,color:T.t3,fontFamily:"'JetBrains Mono'"}}>{BRL(cart.classe[cid]||0)} · {rebPct1(share)} do patrimônio{typeof alvoC==="number"?" · alvo "+rebPct1(alvoC):""}</span>
+              </div>
+              {aberto&&<table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5,tableLayout:"fixed"}}>
+                <colgroup><col/><col style={{width:150}}/><col style={{width:112}}/><col style={{width:84}}/><col style={{width:104}}/></colgroup>
+                <thead><tr><th style={th}>Ativo</th><th style={th}>Mover para</th><th style={{...th,textAlign:"right"}}>Valor</th><th style={{...th,textAlign:"right"}}>{pol.ativoBase==="pat"?"% patrim.":"% do grupo"}</th><th style={{...th,textAlign:"right"}}>Peso-alvo</th></tr></thead>
+                <tbody>
+                  {g.subs.map(function(sg){
+                    var vSg=sg.itens.reduce(function(t,a){return t+a.valor},0);
+                    return [
+                      sg.l?<tr key={"h"+sg.id} style={{background:"rgba(255,255,255,0.025)",borderTop:"1px solid "+T.bdrL}}><td colSpan={5} style={{padding:"7px 12px"}}>
+                        <span style={{fontSize:11.5,fontWeight:800,color:T.t2}}><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:sg.cor,marginRight:7}}/>{sg.l}</span>
+                        <span style={{fontSize:10.5,color:T.t3,fontFamily:"'JetBrains Mono'",marginLeft:10}}>{BRL(sg.total)} · {rebPct1(cart.classe[cid]>0?sg.total/cart.classe[cid]*100:0)} da classe{typeof sg.alvoG==="number"?" · alvo "+rebPct1(sg.alvoG):""}</span>
+                      </td></tr>:null
+                    ].concat(sg.itens.map(function(a){
+                      var gid=rebGid(a,pol);var bs=pol.ativoBase==="pat"?cart.pat:(gcurV[gid]||0);
+                      var effG=a.classe==="rf"?"rf:"+(a.idx||"out"):((a.classe==="rv"||a.classe==="ext")?a.classe+":"+a.sub:a.classe);
+                      var rgm=(c.rebal&&c.rebal.regrupar)||{};var manual=!!(rgm[a.key]||rgm[a.keyAlt]);
+                      return(
+                      <tr key={a.key} style={{borderTop:"1px solid "+T.bdrL}}>
+                        <td style={{padding:"6px 12px",color:T.t1,wordBreak:"break-word"}}>{a.nm}{a.inst&&a.inst!=="—"?<span style={{color:T.t3}}> · {a.inst}</span>:null}{a.novo?<span style={{color:T.cyan,fontSize:10}}> · nova posição <button onClick={function(){salvar(c,{novos:pol.novos.filter(function(n){return String(n.tk).toUpperCase()!==a.tk}),ativos:Object.fromEntries(Object.entries(pol.ativos).filter(function(e){return e[0]!==a.key}))})}} style={{background:"none",border:"none",color:T.red,cursor:"pointer",fontSize:11}}>remover</button></span>:null}{manual?<span style={{color:T.gold,fontSize:10}}> · reclassificado</span>:null}</td>
+                        <td style={{padding:"4px 8px"}}>
+                          {a.novo?<span style={{color:T.t3,fontSize:10.5}}>—</span>:
+                          <select value={effG} onChange={function(e){var v=e.target.value;var cur=Object.assign({},(c.rebal&&c.rebal.regrupar)||{});if(v==="__auto"){delete cur[a.keyAlt];delete cur[a.key]}else{cur[a.keyAlt]=v}salvar(c,{regrupar:cur})}} style={{...inpS,width:"100%",padding:"4px 6px",fontSize:10.5,color:manual?T.gold:T.t3}}>
+                            <option value="__auto">↺ Automático</option>
+                            {rebGrupoOpcoes().map(function(o){return <option key={o.v} value={o.v}>{o.l}</option>})}
+                          </select>}
+                        </td>
+                        <td style={{padding:"6px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t2}}>{BRL(a.valor)}</td>
+                        <td style={{padding:"6px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t2}}>{bs>0&&a.valor>0?rebPct1(a.valor/bs*100):"—"}</td>
+                        <td style={{padding:"4px 10px",textAlign:"right"}}><RebNumInput value={rebAlvoAtivo(pol,a)} suffix="%" width={54} onCommit={function(v){setMapa(c,"ativos",a.novo?a.keyAlt:a.key,v)}}/></td>
+                      </tr>)}));
+                  })}
+                </tbody>
+              </table>}
+            </div>})}
         </Cd>
       </div>;
     };
@@ -6313,12 +6578,13 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
       var depoisRows=[];
       if(!semAlvo&&plano.moves.length>0){
         var tot=plano.patDepois>0?plano.patDepois:cart.pat;
-        REB_CLASSES.forEach(function(x){var al=pol.classes[x.id];if(typeof al!=="number")return;depoisRows.push({id:"c"+x.id,label:x.l,antes:(cart.classe[x.id]||0)/cart.pat*100,depois:(plano.depoisClasse[x.id]||0)/tot*100,alvo:al,tol:pol.tolClasse})});
-        ["rv","ext"].forEach(function(cl){REB_SUB[cl].forEach(function(x){var al=pol.sub[cl][x.id];if(typeof al!=="number")return;var aT=cart.classe[cl]||0,dT=plano.depoisClasse[cl]||0;depoisRows.push({id:"s"+cl+x.id,label:rebClsInfo(cl).l.replace("Renda Variável","RV")+" › "+x.l,antes:aT>0?(cart.sub[cl][x.id]||0)/aT*100:0,depois:dT>0?(plano.depoisSub[cl][x.id]||0)/dT*100:0,alvo:al,tol:pol.tolSub})})});
+        REB_CLASSES.forEach(function(x){var al=pol.classes[x.id];if(typeof al!=="number")return;depoisRows.push({id:"c"+x.id,grp:"Classes de ativo",label:(x.ic?x.ic+" ":"")+x.l,antes:(cart.classe[x.id]||0)/cart.pat*100,depois:(plano.depoisClasse[x.id]||0)/tot*100,alvo:al,tol:pol.tolClasse,dv:(plano.depoisClasse[x.id]||0)-(cart.classe[x.id]||0)})});
         var baseD=pol.idxBase==="total"?tot:Math.max(1,Object.keys(plano.depoisIdx).reduce(function(s,k){return s+plano.depoisIdx[k]},0));
         var baseA=pol.idxBase==="total"?cart.pat:cart.rfTotal;
-        REB_IDX.forEach(function(x){var al=pol.idx[x.id];if(typeof al!=="number")return;depoisRows.push({id:"i"+x.id,label:x.l,antes:baseA>0?(cart.idx[x.id]||0)/baseA*100:0,depois:(plano.depoisIdx[x.id]||0)/baseD*100,alvo:al,tol:pol.tolIdx})});
+        REB_IDX.forEach(function(x){var al=pol.idx[x.id];if(typeof al!=="number")return;depoisRows.push({id:"i"+x.id,grp:"Renda Fixa por indexador ("+(pol.idxBase==="total"?"% do patrimônio":"% da RF")+")",label:x.l,antes:baseA>0?(cart.idx[x.id]||0)/baseA*100:0,depois:(plano.depoisIdx[x.id]||0)/baseD*100,alvo:al,tol:pol.tolIdx,dv:(plano.depoisIdx[x.id]||0)-(cart.idx[x.id]||0)})});
+        ["rv","ext"].forEach(function(cl){REB_SUB[cl].forEach(function(x){var al=pol.sub[cl][x.id];if(typeof al!=="number")return;var aT=cart.classe[cl]||0,dT=plano.depoisClasse[cl]||0;depoisRows.push({id:"s"+cl+x.id,grp:rebClsInfo(cl).l+" por tipo (% da classe)",label:x.l,antes:aT>0?(cart.sub[cl][x.id]||0)/aT*100:0,depois:dT>0?(plano.depoisSub[cl][x.id]||0)/dT*100:0,alvo:al,tol:pol.tolSub,dv:(plano.depoisSub[cl][x.id]||0)-(cart.sub[cl][x.id]||0)})})});
       }
+      var depoisGrupos=[];depoisRows.forEach(function(r){var g=depoisGrupos.filter(function(x){return x.nome===r.grp})[0];if(!g){g={nome:r.grp,rows:[]};depoisGrupos.push(g)}g.rows.push(r)});
       var th={padding:"7px 10px",textAlign:"left",fontSize:10,color:T.t3,fontWeight:700,letterSpacing:0.4,textTransform:"uppercase"};
       return <div>
         <Cd hov={false} style={{padding:16,marginBottom:14}}>
@@ -6372,17 +6638,20 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
               </Cd>
             </div>
             {depoisRows.length>0&&<Cd hov={false} style={{padding:16,marginBottom:14}}>
-              <div style={{fontSize:13,fontWeight:800,color:T.t1,marginBottom:2}}>Antes × depois do plano</div>
-              <div style={{fontSize:11,color:T.t3,marginBottom:10}}>Traço branco = alvo · faixa = tolerância</div>
-              <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                {depoisRows.map(function(r){var mx=Math.max(10,r.antes,r.depois,r.alvo+r.tol)*1.08;var stD=rebStatus(r.depois-r.alvo,r.tol);return(
-                  <div key={r.id}>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}><span style={{color:T.t1,fontWeight:700}}>{r.label}</span><span style={{color:T.t3,fontFamily:"'JetBrains Mono'"}}>{rebPct1(r.antes)} → <b style={{color:REB_ST[stD].c}}>{rebPct1(r.depois)}</b> · alvo {rebPct1(r.alvo)}</span></div>
-                    <RebBar atual={r.antes} alvo={r.alvo} tol={r.tol} max={mx} cor="rgba(255,255,255,0.35)" height={7}/>
-                    <div style={{height:4}}/>
-                    <RebBar atual={r.depois} alvo={r.alvo} tol={r.tol} max={mx} cor={REB_ST[stD].c} height={7}/>
-                  </div>)})}
+              <div style={{fontSize:14,fontWeight:800,color:T.t1,marginBottom:4}}>Como a carteira fica depois do plano</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:"4px 16px",fontSize:10.5,color:T.t3,marginBottom:6,alignItems:"center"}}>
+                <span><span style={{display:"inline-block",width:18,height:8,borderRadius:3,background:"#34D399",marginRight:5,verticalAlign:"middle"}}/>posição após o plano</span>
+                <span><span style={{display:"inline-block",width:18,height:8,borderRadius:3,background:"repeating-linear-gradient(45deg,#34D399 0,#34D399 3px,rgba(52,211,153,0.35) 3px,rgba(52,211,153,0.35) 6px)",marginRight:5,verticalAlign:"middle"}}/>trecho a comprar</span>
+                <span><span style={{display:"inline-block",width:18,height:8,borderRadius:3,background:"repeating-linear-gradient(45deg,#F87171 0,#F87171 3px,rgba(248,113,113,0.35) 3px,rgba(248,113,113,0.35) 6px)",marginRight:5,verticalAlign:"middle"}}/>trecho a vender</span>
+                <span><span style={{display:"inline-block",width:2,height:12,background:"#fff",marginRight:5,verticalAlign:"middle"}}/>alvo</span>
+                <span><span style={{display:"inline-block",width:18,height:10,border:"1px dashed rgba(212,163,40,0.6)",background:"rgba(212,163,40,0.14)",marginRight:5,verticalAlign:"middle"}}/>tolerância</span>
               </div>
+              {depoisGrupos.map(function(g){
+                var mx=10;g.rows.forEach(function(r){mx=Math.max(mx,r.antes,r.depois,r.alvo+r.tol)});mx=mx*1.06;
+                return <div key={g.nome} style={{marginTop:14}}>
+                  <div style={{fontSize:10.5,fontWeight:800,letterSpacing:0.5,textTransform:"uppercase",color:T.gold,marginBottom:2}}>{g.nome}</div>
+                  {g.rows.map(function(r){return <RebMov key={r.id} label={r.label} antes={r.antes} depois={r.depois} alvo={r.alvo} tol={r.tol} max={mx} dv={r.dv}/>})}
+                </div>})}
             </Cd>}
             <Cd hov={false} style={{padding:16}}>
               <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
@@ -6422,9 +6691,9 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
       </div>
       {msg&&<div style={{padding:"9px 14px",borderRadius:10,background:"rgba(212,163,40,0.10)",border:"1px solid rgba(212,163,40,0.3)",color:T.gold,fontSize:12,fontWeight:600,marginBottom:12}}>{msg}</div>}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
-        {tabBtn("diag","📊 Diagnóstico")}{tabBtn("politica","🎯 Política (alvos)")}{tabBtn("plano","⚖️ Plano de rebalanceamento")}{tabBtn("hist","🕘 Histórico ("+pol.hist.length+")")}
+        {tabBtn("diag","📊 Diagnóstico")}{tabBtn("politica","🎯 Política (alvos)")}{tabBtn("plano","⚖️ Plano de rebalanceamento")}{tabBtn("juros","📉 Juros")}{tabBtn("hist","🕘 Histórico ("+pol.hist.length+")")}
       </div>
-      {aba==="diag"&&diag()}{aba==="politica"&&politica()}{aba==="plano"&&plan()}{aba==="hist"&&historico()}
+      {aba==="juros"&&<RebJurosPanel cart={cart}/>}{aba==="diag"&&diag()}{aba==="politica"&&politica()}{aba==="plano"&&plan()}{aba==="hist"&&historico()}
     </div>;
   };
 
@@ -41006,7 +41275,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '534';
+  var SW_VERSION = '535';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
