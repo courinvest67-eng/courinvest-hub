@@ -5756,6 +5756,8 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
   const[showDup,sShowDup]=useState(false);
   const[dupManterEscolha,sDupManterEscolha]=useState({});
   const[extPreview,sExtPreview]=useState(null);
+  const[rcvPreview,sRcvPreview]=useState(null);
+  const rcvRef=React.useRef(null);
 
   /* === FERRAMENTA DE AUDITORIA — detecta clientes com ativos potencialmente mal classificados ===
      Roda as regras de classificação ATUALIZADAS contra os ativos importados e mostra divergências.
@@ -5993,6 +5995,7 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
           }
           Promise.all(promises).then(function(pages){
             var allText=pages.join("\n");
+            if(/RELAT[ÓO]RIO DE CARTEIRA CONSOLIDADA/i.test(allText)&&/Detalhamento por Produto/i.test(allText)){callback(false,"Relatório Consolidado Courinvest — importe um por vez em \"📑 Importar Relatório Consolidado\" (tem tela de revisão)");return}
             var lines=allText.split("\n").map(function(l){return l.trim()}).filter(function(l){return l});
             var nomeCliente="";
             for(var i=0;i<lines.length;i++){
@@ -6626,9 +6629,84 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
     setTimeout(function(){sGMsg("")},6000);
   };
 
+  /* === v532 — IMPORTADOR DO "RELATÓRIO DE CARTEIRA CONSOLIDADA" (PDF gerado pela Courinvest) ===
+     Para clientes com investimentos que o Gorila não cobre: o relatório consolidado montado por fora vira a
+     carteira do cliente no Hub. Passa por uma tela de revisão (cliente, soma x total declarado, modo) antes de gravar. */
+  var abrirRelConsolidado=function(file,paginas){
+    var parsed=parseRelatorioCourinvest(paginas);
+    if(!parsed.ok){sGMsg("⚠ "+parsed.erros.join(" "));return}
+    var existente=gcAcharClienteExistente(d.cl,parsed.cliente);
+    sRcvPreview({parsed:parsed,fileName:file.name,clienteId:existente?existente.id:"__novo__",modo:"substituir",patUsar:"soma",verTodos:false});
+  };
+  var importRelConsolidado=function(file){
+    if(!file)return;
+    if(!/\.pdf$/i.test(file.name)){sGMsg("⚠ Selecione o PDF do Relatório de Carteira Consolidada");return}
+    sGMsg("⏳ Lendo o relatório consolidado…");
+    rcvLerPaginas(file).then(function(paginas){
+      if(!rcvEhRelatorio(rcvTextoPaginas(paginas))){sGMsg("⚠ Este PDF não é um Relatório de Carteira Consolidada da Courinvest. Para PDF/planilha do Gorila use \"📥 Importar Gorila\".");return}
+      sGMsg("");
+      abrirRelConsolidado(file,paginas);
+    }).catch(function(err){sGMsg("⚠ Erro ao ler o PDF: "+err.message);console.error(err)});
+  };
+  var confirmarRelConsolidado=function(){
+    if(!rcvPreview)return;
+    var parsed=rcvPreview.parsed,modo=rcvPreview.modo;
+    var novo=rcvPreview.clienteId==="__novo__";
+    var existing=novo?null:(d.cl||[]).find(function(c){return c.id===rcvPreview.clienteId});
+    if(!novo&&!existing){sGMsg("⚠ Selecione o cliente antes de confirmar");return}
+    var novos=rcvMontarAtivos(parsed);
+    var antigos=(existing&&existing._ativosImport)||[];
+    var finais=(existing&&modo==="acrescentar")?antigos.filter(function(a){return a._fonteImportacao!=="courinvest"}).concat(novos):novos;
+    var soma=finais.reduce(function(s,a){return s+(+a.posR||0)},0);
+    var patUsar=(rcvPreview.patUsar==="declarado"&&parsed.patrimonio>0&&!(existing&&modo==="acrescentar"))?parsed.patrimonio:soma;
+    var gr=rcvMontarGorilaRent(parsed);
+    var temExt=novos.some(function(a){return["etf_int","etf_eu","reit","stock_us","bond_intl","fundo_mm_intl"].indexOf(a.tp)>=0});
+    var meta={arquivo:rcvPreview.fileName,importadoEm:Date.now(),periodoIni:parsed.periodoIni,periodoFim:parsed.periodoFim,emitidoEm:parsed.emitidoEm,
+      patrimonioDeclarado:parsed.patrimonio,somaPosicoes:parsed.somaPosicoes,resultado:parsed.resultado,nPosicoes:novos.length,modo:modo,
+      custodiantes:parsed.custodiantes,alocClasse:parsed.alocClasse,eventos:parsed.eventos,eventosTotal:parsed.eventosTotal||null,avisos:parsed.avisos};
+    var msgFim="";
+    if(existing){
+      var backup={timestamp:Date.now(),data:(function(){var cc=Object.assign({},existing);delete cc._backupAntesImport;return cc})(),stats:{proventos:(existing.proventos||[]).length,notasFiscais:(existing.notasFiscais||[]).length,interacoes:(existing.interacoes||[]).length,objetivos:(existing.objetivos||[]).length,ativos:antigos.length}};
+      /* mantém objetivos vinculados a ativos: re-mapeia tk antigo → novo pelo nome completo (mesma regra do import do Gorila) */
+      var objs=existing.objetivos||[];
+      if(antigos.length>0&&objs.length>0){
+        var mapa={};
+        antigos.forEach(function(aOld){
+          var nn=String(aOld.nm||"").trim().toLowerCase();if(!nn)return;
+          var mt=finais.find(function(aNew){return String(aNew.nm||"").trim().toLowerCase()===nn});
+          if(mt&&mt.tk!==aOld.tk)mapa[aOld.tk]=mt.tk;
+        });
+        if(Object.keys(mapa).length>0)objs=objs.map(function(o){if(!o.ativosVinculados||!o.ativosVinculados.length)return o;return Object.assign({},o,{ativosVinculados:o.ativosVinculados.map(function(t){return mapa[t]||t})})});
+      }
+      var up={id:existing.id,_ativosImport:finais,_ativosTs:Date.now(),pat:patUsar,patGorila:patUsar,_gorilaRent:gr,_relCourinvest:meta,_backupAntesImport:backup,objetivos:objs};
+      if(modo==="substituir")up._patrimonioEFG=0;
+      dp({t:"UC",p:up});
+      msgFim=existing.nome+" atualizado";
+    }else{
+      var hoje=new Date().toISOString().split("T")[0];
+      var newC={id:"c"+Date.now(),nome:parsed.cliente,email:"",tel:"",risco:"Moderado",pais:"BR",investExterior:temExt,sv:["patrimonio"],pat:patUsar,patGorila:patUsar,rend:0,
+        notas:"Importado do Relatório Consolidado Courinvest em "+new Date().toLocaleDateString("pt-BR"),txGestao:0.80,feeFixo:0,feeBase:"",tipoCli:"individual",status:"ativo",
+        dtCaptacao:parsed.periodoFim||hoje,_ativosImport:finais,_ativosTs:Date.now(),_gorilaRent:gr,_relCourinvest:meta,
+        proventos:[],notasFiscais:[],objetivos:[],_contratos:[],movimentacoes:[],histMensal:[],orcamento:{}};
+      dp({t:"RC",p:newC});
+      msgFim=parsed.cliente+" criado";
+    }
+    sGMsg("✅ "+msgFim+" via Relatório Consolidado • "+novos.length+" ativos • "+fm(patUsar)+(parsed.avisos.length?" • ⚠ "+parsed.avisos.length+" aviso(s) de conferência":""));
+    sRcvPreview(null);
+    setTimeout(function(){sGMsg("")},7000);
+  };
+
   var importGorilaCliente=function(file){
     if(!file)return;
     var isPdf=file.name.match(/\.pdf$/i);
+    /* v532 — PDF pode ser um Relatório de Carteira Consolidada da Courinvest (não é do Gorila): detecta e desvia */
+    if(isPdf&&!file._rcvOk){
+      rcvLerPaginas(file).then(function(paginas){
+        if(rcvEhRelatorio(rcvTextoPaginas(paginas))){abrirRelConsolidado(file,paginas);return}
+        file._rcvOk=true;importGorilaCliente(file);
+      }).catch(function(){file._rcvOk=true;importGorilaCliente(file)});
+      return;
+    }
     
     if(isPdf){
       
@@ -7363,6 +7441,8 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
         <Bt onClick={()=>sShowAdd(true)} style={{fontSize:12,padding:"10px 18px"}}>＋ Novo</Bt>
         <input ref={gorilaRef} type="file" accept=".xlsx,.xls,.csv,.pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf,text/csv,text/plain,*/*" onChange={function(e){if(e.target.files[0])importGorilaCliente(e.target.files[0]);e.target.value=""}} style={{display:"none"}}/>
         <Bt v="secondary" onClick={function(){gorilaRef.current&&gorilaRef.current.click()}} style={{fontSize:11,padding:"10px 14px"}}>📥 Importar Gorila</Bt>
+        <input ref={rcvRef} type="file" accept=".pdf,application/pdf" onChange={function(e){if(e.target.files[0])importRelConsolidado(e.target.files[0]);e.target.value=""}} style={{display:"none"}}/>
+        <Bt v="secondary" onClick={function(){rcvRef.current&&rcvRef.current.click()}} title="PDF do Relatório de Carteira Consolidada montado pela Courinvest (inclui investimentos que o Gorila não tem)" style={{fontSize:11,padding:"10px 14px",background:"rgba(212,163,40,0.08)",color:T.gold,border:"1px solid rgba(212,163,40,0.3)"}}>📑 Importar Relatório Consolidado</Bt>
         <Bt v="secondary" onClick={function(){
           try{
             var lista=d&&d.cl?d.cl:[];
@@ -7566,6 +7646,131 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
                     setTimeout(function(){sGMsg("")},4000);
                   }
                 }} style={{flex:1,background:T.red}}>🗑 Excluir Selecionados</Bt>
+              </div>
+            </div>
+          );
+        })()}
+      </Mo>
+
+      {/* === v532 MODAL REVISÃO — RELATÓRIO DE CARTEIRA CONSOLIDADO (PDF Courinvest) === */}
+      <Mo open={!!rcvPreview} onClose={function(){sRcvPreview(null)}} title="📑 Revisar Relatório Consolidado" wide>
+        {rcvPreview && (function(){
+          var parsed=rcvPreview.parsed;
+          var upd=function(k,v){var o={};o[k]=v;sRcvPreview(Object.assign({},rcvPreview,o))};
+          var fmtP=function(v){return v==null?"—":(v>=0?"+":"")+(v*100).toFixed(2).replace(".",",")+"%"};
+          var fmtD=function(iso){return iso?iso.split("-").reverse().join("/"):"—"};
+          var dif=parsed.patrimonio!=null?(parsed.somaPosicoes-parsed.patrimonio):0;
+          var difOk=Math.abs(dif)<=1;
+          var pPer=(parsed.rent||[]).find(function(r){return r.p==="Período"})||(parsed.rent||[])[0]||null;
+          var existente=rcvPreview.clienteId!=="__novo__"?(d.cl||[]).find(function(c){return c.id===rcvPreview.clienteId}):null;
+          var qtdAntigos=existente&&existente._ativosImport?existente._ativosImport.length:0;
+          var TPL={cdb:"CDB",lci:"LCI",lca:"LCA",lc:"LC",cri:"CRI",cra:"CRA",deb:"Debênture",debi:"Deb. Inc.",tesouro:"Tesouro",coe:"COE",fundo_rf:"Fundo RF",fundo_mm:"Fundo MM",fundo_acoes:"Fundo Ações",fii:"FII",fiagro:"FIAgro",acao:"Ação",etf_br:"ETF BR",etf_int:"ETF Ext.",etf_eu:"ETF Europa",reit:"REIT",stock_us:"Stock",bond_intl:"Bond Ext.",fundo_mm_intl:"Caixa/Fundo Ext.",caixa:"Caixa",prev:"Previdência",cripto:"Cripto",ouro:"Ouro",poupanca:"Poupança",bdr:"BDR"};
+          var porClasse=[];
+          (parsed.posicoes||[]).forEach(function(p){
+            var g=porClasse.find(function(x){return x.classe===p.classe});
+            if(!g){g={classe:p.classe,n:0,soma:0,decl:null};porClasse.push(g)}
+            g.n++;g.soma+=(p.posR||0);
+          });
+          porClasse.forEach(function(g){var a=(parsed.alocClasse||[]).find(function(x){return x.classe===g.classe});if(a)g.decl=a.valor});
+          var semVenc=(parsed.posicoes||[]).filter(function(p){return RCV_TP_VENC.indexOf(p.tp)>=0&&!rcvVencDoNome(p.nome)}).length;
+          var vencAprox=(parsed.posicoes||[]).filter(function(p){var v=RCV_TP_VENC.indexOf(p.tp)>=0?rcvVencDoNome(p.nome):null;return v&&v.aprox}).length;
+          var semRent=(parsed.posicoes||[]).filter(function(p){return p.semRent&&p.tp!=="caixa"}).length;
+          var chip=function(rot,val,sub,cor){return(<div style={{flex:"1 1 150px",padding:"10px 12px",borderRadius:10,border:"1px solid "+T.bdrL,background:"rgba(255,255,255,0.02)"}}><div style={{fontSize:9,fontWeight:700,color:T.t3,letterSpacing:0.5,textTransform:"uppercase"}}>{rot}</div><div style={{fontSize:15,fontWeight:800,color:cor||T.t1,fontFamily:"'JetBrains Mono'",marginTop:2}}>{val}</div>{sub&&<div style={{fontSize:10,color:T.t3,marginTop:2}}>{sub}</div>}</div>)};
+          var radio=function(nome,val,rot,desc){var on=rcvPreview[nome]===val;return(<label key={val} style={{display:"flex",gap:8,alignItems:"flex-start",padding:"8px 10px",borderRadius:10,cursor:"pointer",border:on?"1.5px solid "+T.gold:"1px solid "+T.bdrL,background:on?"rgba(212,163,40,0.07)":"transparent",marginBottom:6}}><input type="radio" checked={on} onChange={function(){upd(nome,val)}} style={{marginTop:3}}/><span><span style={{fontSize:12,fontWeight:700,color:T.t1}}>{rot}</span><span style={{display:"block",fontSize:10.5,color:T.t3,lineHeight:1.5,marginTop:2}}>{desc}</span></span></label>)};
+          return (
+            <div>
+              <div style={{fontSize:12,color:T.t3,marginBottom:12,lineHeight:1.6}}>
+                Relatório <strong style={{color:T.t1}}>{parsed.cliente}</strong> · período {fmtD(parsed.periodoIni)} a {fmtD(parsed.periodoFim)}{parsed.emitidoEm?(" · emitido em "+fmtD(parsed.emitidoEm)):""} · {parsed.posicoes.length} posições lidas · arquivo {rcvPreview.fileName}
+              </div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:14}}>
+                {chip("Patrimônio declarado",parsed.patrimonio!=null?fm(parsed.patrimonio):"—","no resumo do relatório",T.gold)}
+                {chip("Soma das posições",fm(parsed.somaPosicoes),difOk?"confere com o declarado":((dif>0?"+":"")+fm(dif)+" vs declarado"),difOk?T.green:T.orange)}
+                {chip("Resultado do período",parsed.resultado!=null?fm(parsed.resultado):"—",pPer?("carteira "+fmtP(pPer.rent)+" · CDI "+fmtP(pPer.cdi)+" · Ibov "+fmtP(pPer.ibov)):"",parsed.resultado>=0?T.green:T.red)}
+              </div>
+              <div style={{marginBottom:14}}>
+                <div style={{fontSize:11,fontWeight:700,color:T.t2,marginBottom:6}}>Cliente</div>
+                <select value={rcvPreview.clienteId} onChange={function(e){upd("clienteId",e.target.value)}} style={{...inpS,width:"100%"}}>
+                  <option value="__novo__">➕ Criar novo cliente: {parsed.cliente}</option>
+                  {(d.cl||[]).map(function(c){return <option key={c.id} value={c.id}>{c.nome}</option>})}
+                </select>
+                <div style={{fontSize:10,color:existente?T.t3:T.orange,marginTop:6}}>{existente?("Cliente encontrado pelo nome no Hub"+(qtdAntigos>0?(" — hoje tem "+qtdAntigos+" ativos importados."):" — ainda sem ativos importados.")):"Nenhum cliente com esse nome — será criado um cadastro novo (você completa e-mail, telefone e fee depois)."}</div>
+              </div>
+              <div style={{border:"1px solid "+T.bdrL,borderRadius:10,overflow:"hidden",marginBottom:14}}>
+                <table style={{width:"100%",fontSize:11,borderCollapse:"collapse"}}>
+                  <thead><tr style={{background:"rgba(255,255,255,0.03)"}}>
+                    <th style={{padding:8,textAlign:"left"}}>Classe</th>
+                    <th style={{padding:8,textAlign:"right"}}>Posições</th>
+                    <th style={{padding:8,textAlign:"right"}}>Soma lida</th>
+                    <th style={{padding:8,textAlign:"right"}}>Declarado</th>
+                  </tr></thead>
+                  <tbody>
+                    {porClasse.map(function(g,i){var ok=g.decl==null||Math.abs(g.soma-g.decl)<=1;return(
+                      <tr key={i} style={{borderTop:"1px solid "+T.bdrL}}>
+                        <td style={{padding:8,fontWeight:700,color:T.t1}}>{g.classe}</td>
+                        <td style={{padding:8,textAlign:"right",fontFamily:"'JetBrains Mono'"}}>{g.n}</td>
+                        <td style={{padding:8,textAlign:"right",fontFamily:"'JetBrains Mono'",color:ok?T.t1:T.orange}}>{fm(g.soma)}</td>
+                        <td style={{padding:8,textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t3}}>{g.decl!=null?fm(g.decl):"—"}{!ok?" ⚠":""}</td>
+                      </tr>
+                    )})}
+                  </tbody>
+                </table>
+              </div>
+              {(parsed.avisos.length>0||semVenc>0||vencAprox>0||semRent>0)&&(
+                <div style={{fontSize:11,color:T.t2,lineHeight:1.6,padding:"10px 12px",borderRadius:10,border:"1px solid rgba(224,168,92,0.35)",background:"rgba(224,168,92,0.07)",marginBottom:14}}>
+                  <div style={{fontWeight:700,color:T.orange,marginBottom:4}}>⚠ Pontos para conferir</div>
+                  {parsed.avisos.map(function(a,i){return <div key={"a"+i}>• {a}</div>})}
+                  {!difOk&&parsed.custodiantes.length>0&&<div>• O total por custodiante do próprio relatório soma {fm(parsed.totalCust?parsed.totalCust.valor:parsed.patrimonio)}; a diferença está no detalhamento de uma das tabelas (veja as classes com ⚠ acima).</div>}
+                  {vencAprox>0&&<div>• {vencAprox} título(s) trazem só mês/ano no nome — o vencimento foi marcado no último dia do mês (aparece como "data pelo nome" na aba Vencimentos; dá pra ajustar o dia lá).</div>}
+                  {semVenc>0&&<div>• {semVenc} título(s) de renda fixa sem data no nome — ficam em "sem data" na aba Vencimentos até você informar.</div>}
+                  {semRent>0&&<div>• {semRent} posição(ões) sem rentabilidade no relatório (N/D) — entram no patrimônio, mas sem retorno individual.</div>}
+                </div>
+              )}
+              {existente&&qtdAntigos>0&&(
+                <div style={{marginBottom:14}}>
+                  <div style={{fontSize:11,fontWeight:700,color:T.t2,marginBottom:6}}>Como combinar com a carteira que já está no Hub</div>
+                  {radio("modo","substituir","Substituir pela carteira do relatório (recomendado)","O relatório consolidado já traz tudo (Gorila + investimentos extras). Os "+qtdAntigos+(qtdAntigos===1?" ativo atual sai;":" ativos atuais saem;")+" proventos, NFs, objetivos, notas e fee são mantidos, e fica um backup automático do cadastro.")}
+                  {radio("modo","acrescentar","Acrescentar ao que já está no Hub","Mantém os ativos atuais e só soma/atualiza os que vieram do relatório. Pode duplicar posições se o Gorila já tiver os mesmos ativos.")}
+                </div>
+              )}
+              {!difOk&&!(existente&&rcvPreview.modo==="acrescentar")&&(
+                <div style={{marginBottom:14}}>
+                  <div style={{fontSize:11,fontWeight:700,color:T.t2,marginBottom:6}}>Patrimônio total a gravar no cliente</div>
+                  {radio("patUsar","soma","Soma das posições — "+fm(parsed.somaPosicoes),"Coerente com a lista de ativos do Hub (recomendado).")}
+                  {radio("patUsar","declarado","Total declarado no relatório — "+fm(parsed.patrimonio),"Igual ao número impresso no relatório que o cliente recebeu; a lista de ativos continua somando "+fm(parsed.somaPosicoes)+".")}
+                </div>
+              )}
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                <div style={{fontSize:11,fontWeight:700,color:T.t2}}>Posições lidas</div>
+                <button onClick={function(){upd("verTodos",!rcvPreview.verTodos)}} style={{fontSize:10,color:T.gold,background:"transparent",border:"none",cursor:"pointer",fontWeight:700}}>{rcvPreview.verTodos?"Recolher":"Ver todas ("+parsed.posicoes.length+")"}</button>
+              </div>
+              <div style={{maxHeight:rcvPreview.verTodos?360:150,overflow:"auto",border:"1px solid "+T.bdrL,borderRadius:10}}>
+                <table style={{width:"100%",fontSize:10.5,borderCollapse:"collapse"}}>
+                  <thead><tr style={{background:"rgba(255,255,255,0.03)",position:"sticky",top:0}}>
+                    <th style={{padding:6,textAlign:"left"}}>Ativo</th>
+                    <th style={{padding:6,textAlign:"left"}}>Tipo</th>
+                    <th style={{padding:6,textAlign:"left"}}>Custodiante</th>
+                    <th style={{padding:6,textAlign:"right"}}>Posição</th>
+                    <th style={{padding:6,textAlign:"right"}}>Rent. período</th>
+                  </tr></thead>
+                  <tbody>
+                    {parsed.posicoes.map(function(p,i){return(
+                      <tr key={i} style={{borderTop:"1px solid "+T.bdrL}}>
+                        <td style={{padding:6,color:T.t1}}>{p.nome}{p.flag?<span style={{color:T.orange}}> {p.flag}</span>:null}</td>
+                        <td style={{padding:6,color:T.t3}}>{TPL[p.tp]||p.tp}</td>
+                        <td style={{padding:6,color:T.t3}}>{p.inst||"—"}</td>
+                        <td style={{padding:6,textAlign:"right",fontFamily:"'JetBrains Mono'"}}>{fm(p.posR)}</td>
+                        <td style={{padding:6,textAlign:"right",fontFamily:"'JetBrains Mono'",color:p.rentPer==null?T.t3:(p.rentPer>=0?T.green:T.red)}}>{p.rentPer==null?"N/D":fmtP(p.rentPer)}</td>
+                      </tr>
+                    )})}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{fontSize:10,color:T.t3,marginTop:10,lineHeight:1.5}}>
+                O relatório não traz quantidade nem preço médio: cada posição entra com valor atual e retorno informados (o "aplicado" é estimado pelo retorno desde o início). Rentabilidade, benchmarks (CDI/Ibovespa/IPCA) e atribuição por classe alimentam os relatórios do Hub.
+              </div>
+              <div style={{display:"flex",gap:8,marginTop:14,paddingTop:14,borderTop:"1px solid "+T.bdrL}}>
+                <Bt v="secondary" onClick={function(){sRcvPreview(null)}} style={{flex:1}}>Cancelar</Bt>
+                <Bt onClick={confirmarRelConsolidado} style={{flex:1}}>✅ Importar {parsed.posicoes.length} posições</Bt>
               </div>
             </div>
           );
@@ -37516,6 +37721,9 @@ function inferVencNome(a){
   if(m){var i1=normVencData(m[1]);if(i1)return i1}
   m=txt.match(/\b(0?[1-9]|1[0-2])\/(20\d{2})\b/);
   if(m){var i2=normVencData(m[1]+"/"+m[2]);if(i2)return i2}
+  /* v532 — "Out/2033", "NOV/2028" (mês por extenso abreviado + ano) → último dia do mês */
+  m=txt.match(/\b(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[a-zç]*\/(20\d{2})\b/i);
+  if(m){var mmo=RCV_MESES[m[1].toLowerCase()],yy=+m[2];if(mmo&&yy>=2000&&yy<=2100)return yy+"-"+String(mmo).padStart(2,"0")+"-"+String(new Date(yy,mmo,0).getDate()).padStart(2,"0")}
   var low=txt.toLowerCase();
   if(/tesouro|ntn|lft|ltn/.test(low)&&!/renda\+|educa\+|reserva\+/.test(low)){
     var ym=low.match(/\b(20[2-6]\d)\b/);
@@ -37532,10 +37740,14 @@ function inferVencNome(a){
    código. Exemplos reais: "CDB 100% CDI BANCO SANTANDER (BRASIL) 28/07/2029", "CDB 16.7% a.a. C6 BANK 29/03/2027",
    "CRI COGNA EDUCAÇÃO NOV/2028 23K0022041", "NTNB PRINCIPAL - 15/05/2029", "CDB : 15.65%" (este vem sem emissor). */
 function tituloCaseEmissor(s){
+  /* v532 — nome já em caixa mista ("PicPay", "NBC Bank", "Banco do Brasil") vem de fonte bem escrita: preserva.
+     Só normaliza quando vem TODO em maiúsculas (padrão do Gorila). */
+  var _s0=String(s||"").trim();
+  if(_s0&&_s0!==_s0.toUpperCase()&&_s0!==_s0.toLowerCase())return _s0;
   var peq={de:1,da:1,do:1,das:1,dos:1,e:1,em:1,para:1,a:1,o:1};
   return String(s||"").toLowerCase().split(/\s+/).filter(Boolean).map(function(w,i){
     var core=w.replace(/[()]/g,"");
-    if(/^(btg|xp|bmg|bnb|brb|bdmg|abc|ccb|pan|jbs|bv|c6|sa|s\.a\.|s\/a|ltda|fidc|ii|iii|iv|v|vi|vii|viii|ix|x|cdi|rb|btc|cri|cra)$/.test(core))return w.toUpperCase();
+    if(/^(btg|xp|bmg|bnb|brb|bdmg|abc|ccb|pan|jbs|bv|c6|sa|s\.a\.|s\/a|ltda|fidc|ii|iii|iv|v|vi|vii|viii|ix|x|cdi|rb|btc|cri|cra|isa)$/.test(core))return w.toUpperCase();
     if(i>0&&peq[core])return w;
     return w.replace(/(^|[(\-\/])([a-zà-ú])/g,function(m,p,c){return p+c.toUpperCase()});
   }).join(" ");
@@ -37555,23 +37767,32 @@ function parseProdutoRF(a){
   r.tipo=mt[1].toUpperCase().replace("DEBÊNTURE","DEBÊNTURE");
   var rest=raw.slice(mt[0].length);
   var m;
+  /* v532 — código da debênture entre parênteses: "Debênture ISA Energia (TRPLA4) - Out/2033" */
+  var mcod=rest.match(/\(([A-Z]{3,6}\d{1,3})\)/);
+  if(mcod){r.codigo=mcod[1];rest=rest.replace(mcod[0]," ")}
   /* taxa / indexador */
   if((m=rest.match(/(\d{1,3}(?:[.,]\d+)?)\s*%\s*(?:do\s*)?CDI/i))){r.taxa=m[1].replace(".",",")+"% do CDI";r.indexador="CDI";rest=rest.replace(m[0]," ")}
   else if((m=rest.match(/CDI\s*\+\s*(\d{1,3}(?:[.,]\d+)?)\s*%/i))){r.taxa="CDI + "+m[1].replace(".",",")+"%";r.indexador="CDI+";rest=rest.replace(m[0]," ")}
   else if((m=rest.match(/(IPCA|IGP-?M)\s*\+?\s*(\d{1,2}(?:[.,]\d+)?)\s*%/i))){r.taxa=m[1].toUpperCase()+" + "+m[2].replace(".",",")+"%";r.indexador=m[1].toUpperCase()+"+";rest=rest.replace(m[0]," ")}
   else if((m=rest.match(/(\d{1,3}(?:[.,]\d+)?)\s*%\s*(?:a\.?\s?a\.?)?/i))){
     var n=m[1].replace(".",",");
-    if(/juros/.test(sub)){r.taxa=n+"% do CDI";r.indexador="CDI"}
+    if(/juros|p[óo]s-?fixad/.test(sub)){r.taxa=n+"% do CDI";r.indexador="CDI"}
     else if(/infla/.test(sub)){r.taxa="IPCA + "+n+"%";r.indexador="IPCA+"}
     else{r.taxa=n+"% a.a.";r.indexador="Prefixado"}
     rest=rest.replace(m[0]," ");
+  }
+  /* v532 — sem taxa no nome: usa o "Tipo" informado (Pós-Fixado/Prefixado/Inflação) só pra indicar o indexador */
+  if(!r.indexador){
+    if(/p[óo]s-?fixad/.test(sub))r.indexador="CDI";
+    else if(/infla/.test(sub))r.indexador="IPCA+";
+    else if(/pr[ée]-?fixad|prefixad/.test(sub))r.indexador="Prefixado";
   }
   /* datas e código */
   rest=rest.replace(/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g," ").replace(/\b(JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)\/\d{4}\b/ig," ");
   var toks=rest.split(/\s+/).filter(Boolean);
   if(toks.length){
     var last=toks[toks.length-1];
-    if(/\d/.test(last)&&/^[A-Z0-9]{6,14}$/i.test(last)&&(/[A-Z]/i.test(last))){r.codigo=last.toUpperCase();toks.pop()}
+    if(!r.codigo&&/\d/.test(last)&&/^[A-Z0-9]{6,14}$/i.test(last)&&(/[A-Z]/i.test(last))){r.codigo=last.toUpperCase();toks.pop()}
   }
   var em=toks.join(" ").replace(/^[\s:\-–—|]+|[\s:\-–—|]+$/g,"").replace(/\s+-\s+$/,"").trim();
   if(em.length>=3&&!/^[\d.,%\s]+$/.test(em))r.emissor=tituloCaseEmissor(em);
@@ -37580,12 +37801,412 @@ function parseProdutoRF(a){
   else r.titulo=r.tipo+(r.taxa?" "+r.taxa:"");
   return r;
 }
+/* ===== v532 — Importador de "Relatório de Carteira Consolidada" (PDF gerado pela Courinvest) ===== */
+var RCV_MESES={jan:1,fev:2,mar:3,abr:4,mai:5,jun:6,jul:7,ago:8,set:9,out:10,nov:11,dez:12};
+function rcvNum(s){
+  var t=String(s==null?"":s).replace(/R\$/g,"").replace(/\s/g,"").replace(/%/g,"");
+  if(!t||/^(N\/D|—|-)$/i.test(t))return null;
+  if(t.indexOf(",")>=0)t=t.replace(/\./g,"").replace(",",".");
+  var n=parseFloat(t);return isNaN(n)?null:n;
+}
+function rcvBRL(v){return "R$ "+(+v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}
+function rcvPct(s){var n=rcvNum(String(s==null?"":s).replace(/\*+/g,""));return n==null?null:n/100}
+function rcvDataBR(s){var m=String(s||"").match(/(\d{2})\/(\d{2})\/(\d{4})/);return m?m[3]+"-"+m[2]+"-"+m[1]:""}
+/* Agrupa os itens de UMA página em linhas visuais (mesmo Y) — devolve [{y, itens:[{x,str}], txt}] de cima pra baixo */
+function rcvLinhasPagina(itens){
+  var arr=(itens||[]).filter(function(i){return String(i.str).trim()}).sort(function(a,b){return b.y-a.y||a.x-b.x});
+  var linhas=[];
+  arr.forEach(function(it){
+    var l=linhas.length?linhas[linhas.length-1]:null;
+    if(l&&Math.abs(l.y-it.y)<=1.5){l.itens.push({x:it.x,str:String(it.str).trim()})}
+    else linhas.push({y:it.y,itens:[{x:it.x,str:String(it.str).trim()}]});
+  });
+  linhas.forEach(function(l){l.itens.sort(function(a,b){return a.x-b.x});
+    /* "R$" e o número podem vir como itens separados conforme a versão do pdf.js — junta */
+    for(var q=0;q<l.itens.length-1;q++){if(l.itens[q].str==="R$"&&/^-?[\d.]+,\d{2}$/.test(l.itens[q+1].str)){l.itens[q]={x:l.itens[q].x,str:"R$ "+l.itens[q+1].str};l.itens.splice(q+1,1)}}
+    l.txt=l.itens.map(function(i){return i.str}).join(" ").replace(/\s+/g," ").trim()});
+  return linhas;
+}
+function rcvEhRelatorio(textoTodo){
+  return /RELAT[ÓO]RIO DE CARTEIRA CONSOLIDADA/i.test(textoTodo)&&/Courinvest/i.test(textoTodo)&&/Detalhamento por Produto/i.test(textoTodo);
+}
+function rcvNormInst(s){
+  var t=String(s||"").trim();
+  if(/^xp internacional/i.test(t))return "XP Internacional";
+  if(/^xp\b/i.test(t))return "Rico";
+  if(/genial/i.test(t))return "Genial";
+  if(/^c6 global/i.test(t))return "C6 Global Invest";
+  if(/^c6\b/i.test(t))return "C6";
+  if(/santander/i.test(t))return "Banco Santander (Brasil)";
+  if(/^btg/i.test(t))return "BTG Pactual";
+  if(/^inter\b/i.test(t))return "Inter";
+  return t;
+}
+/* Tipo da coluna + nome + classe da seção → tp do Hub (mesmos códigos do import do Gorila) */
+function rcvMapTp(nome,tipoCol,classeSec){
+  var n=String(nome||""),t=String(tipoCol||"").toLowerCase(),cs=String(classeSec||"").toLowerCase();
+  var up=n.toUpperCase();
+  if(/exterior/.test(cs)){
+    if(t==="moeda"||/^d[óo]lar|^saldo/i.test(n))return "fundo_mm_intl";
+    if(t==="treasury"||/bond/.test(t))return "bond_intl";
+    if(t==="etf"){
+      var tk0=up.split(/\s+/)[0];
+      if(/^(O|NNN|STAG|AMT|PLD|SPG|PSA|DLR|VNQ|SCHH|VNQI|XLRE|IYR)$/.test(tk0))return "reit";
+      if(/UCITS|EUNL|IWDA|VWCE|VUAA|SXR8/.test(up))return "etf_eu";
+      return "etf_int";
+    }
+    if(t==="ação"||t==="acao")return "stock_us";
+    if(/fundo/.test(t))return "fundo_mm_intl";
+  }
+  if(/^CDB\b/.test(up))return "cdb";
+  if(/^LCI\b/.test(up))return "lci";
+  if(/^LCA\b/.test(up))return "lca";
+  if(/^LC\b/.test(up))return "lc";
+  if(/^CRI\b/.test(up))return "cri";
+  if(/^CRA\b/.test(up))return "cra";
+  if(/^DEB[ÊE]NTURE/.test(up))return /incentiv/i.test(n)?"debi":"deb";
+  if(/^(TESOURO|NTN|LFT|LTN)/.test(up))return "tesouro";
+  if(/^COE\b/.test(up)||t==="coe")return "coe";
+  if(t==="moeda"||/^caixa|^saldo/i.test(n))return "caixa";
+  if(/previd/.test(t))return "prev";
+  if(/cripto/.test(t))return "cripto";
+  if(/ouro/.test(t))return "ouro";
+  if(/poupan/.test(t))return "poupanca";
+  if(/proventos/.test(t))return "caixa";
+  if(/fii|fiagro/.test(t))return /fiagro/.test(t)?"fiagro":"fii";
+  if(t==="ação"||t==="acao")return "acao";
+  if(t==="bdr")return "bdr";
+  if(t==="etf")return "etf_br";
+  if(/fundo/.test(t)){
+    if(/renda fixa/.test(cs))return "fundo_rf";
+    if(/vari/.test(cs))return "fundo_acoes";
+    return "fundo_mm";
+  }
+  return null;
+}
+/* Último dia do mês de "Out/2033" → "2033-10-31"; ou data completa dd/mm/aaaa → ISO. Retorna {iso, aprox} */
+function rcvVencDoNome(nome){
+  var n=String(nome||"");
+  var m=n.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if(m)return{iso:m[3]+"-"+m[2]+"-"+m[1],aprox:false};
+  m=n.match(/\b(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[a-z]*\/(\d{4})\b/i);
+  if(m){
+    var mo=RCV_MESES[m[1].toLowerCase()],y=+m[2];
+    var ult=new Date(y,mo,0).getDate();
+    return{iso:y+"-"+String(mo).padStart(2,"0")+"-"+String(ult).padStart(2,"0"),aprox:true};
+  }
+  return null;
+}
+/* Parser principal. paginas = [ [ {x,y,str}, ... ], ... ] (um array por página, itens crus do pdf.js) */
+function parseRelatorioCourinvest(paginas){
+  var res={ok:false,erros:[],avisos:[],cliente:"",periodoIni:"",periodoFim:"",emitidoEm:"",patrimonio:null,resultado:null,
+    rent:[],atribuicao:[],alocClasse:[],custodiantes:[],secoes:[],posicoes:[],caixaLinhas:[],eventos:[],ipcaInicio:null};
+  var todasLinhas=[];
+  var txtTodo=[];
+  (paginas||[]).forEach(function(itens,pi){
+    var ls=rcvLinhasPagina(itens).filter(function(l){
+      if(/^P[áa]gina \d+ de \d+$/.test(l.txt))return false;
+      if(/^Courinvest \| Carteira Consolidada/.test(l.txt))return false;
+      return true;
+    });
+    ls.forEach(function(l){l.pg=pi+1;todasLinhas.push(l);txtTodo.push(l.txt)});
+  });
+  var textoTodo=txtTodo.join("\n");
+  if(!rcvEhRelatorio(textoTodo)){res.erros.push("Não é um Relatório de Carteira Consolidada da Courinvest.");return res}
+
+  /* ---- capa ---- */
+  var iTit=todasLinhas.findIndex(function(l){return/^RELAT[ÓO]RIO DE CARTEIRA CONSOLIDADA/i.test(l.txt)});
+  if(iTit>=0&&todasLinhas[iTit+1])res.cliente=todasLinhas[iTit+1].txt;
+  var mP=textoTodo.match(/Per[íi]odo de refer[êe]ncia:\s*(\d{2}\/\d{2}\/\d{4})\s*a\s*(\d{2}\/\d{2}\/\d{4})/i);
+  if(mP){res.periodoIni=rcvDataBR(mP[1]);res.periodoFim=rcvDataBR(mP[2])}
+  var mE=textoTodo.match(/Emitido em:\s*(\d{2}\/\d{2}\/\d{4})/i);
+  if(mE)res.emitidoEm=rcvDataBR(mE[1]);
+
+  /* ---- 1. resumo ---- */
+  var iRes=todasLinhas.findIndex(function(l){return/PATRIM[ÔO]NIO TOTAL/i.test(l.txt)&&/RESULTADO DO PER/i.test(l.txt)});
+  if(iRes>=0){
+    for(var k=iRes+1;k<Math.min(iRes+4,todasLinhas.length);k++){
+      var nums=(todasLinhas[k].txt.match(/R\$\s*[\d.]+,\d{2}/g)||[]).map(rcvNum);
+      if(nums.length>=2){res.patrimonio=nums[0];res.resultado=nums[1];break}
+    }
+  }
+  /* ---- seções numeradas 1..8 (títulos de nível 1) ---- */
+  var idxSec={};
+  todasLinhas.forEach(function(l,i){var m=l.txt.match(/^(\d)\.\s+\S/);if(m&&l.itens.length<=2&&!idxSec[m[1]])idxSec[m[1]]=i});
+  var fatia=function(a,b){return todasLinhas.slice(idxSec[a]!=null?idxSec[a]+1:0,idxSec[b]!=null?idxSec[b]:todasLinhas.length)};
+  /* ---- 2. rentabilidade ---- */
+  if(idxSec["2"]!=null){
+    fatia("2","3").forEach(function(l){
+      var lab=l.itens[0]&&l.itens[0].str;
+      if(!lab||l.itens.length<6)return;
+      if(/^Per[íi]odo|^[ÚU]ltimo M|^Desde o in/i.test(lab)){
+        var v=l.itens.slice(1);
+        var rotulo=/^Per/i.test(lab)?"Período":/^[ÚU]ltimo/i.test(lab)?"Último Mês":"Desde o início";
+        res.rent.push({p:rotulo,rotuloOriginal:lab,sharpe:parseFloat(v[0].str)||0,vol:rcvPct(v[1].str),rent:rcvPct(v[2].str),ibov:rcvPct(v[3].str),cdi:rcvPct(v[4].str),ipca:null});
+      }
+    });
+    var tx2=fatia("2","3").map(function(l){return l.txt}).join(" ");
+    var mi=tx2.match(/IPCA\s*\((-?[\d.,]+)%\)/);
+    if(mi){res.ipcaInicio=rcvPct(mi[1]);var pd=res.rent.find(function(r){return r.p==="Desde o início"});if(pd)pd.ipca=res.ipcaInicio}
+  }
+  /* ---- 3. atribuição ---- */
+  if(idxSec["3"]!=null)fatia("3","4").forEach(function(l){
+    if(l.itens.length===2&&/%$/.test(l.itens[1].str)&&!/^Classe$/i.test(l.itens[0].str))res.atribuicao.push({classe:l.itens[0].str,share:rcvPct(l.itens[1].str)});
+  });
+  /* ---- 4. alocação por classe ---- */
+  if(idxSec["4"]!=null)fatia("4","5").forEach(function(l){
+    if(l.itens.length>=3&&/%$/.test(l.itens[1].str)&&/^R\$/.test(l.itens[2].str))res.alocClasse.push({classe:l.itens[0].str,pct:rcvPct(l.itens[1].str),valor:rcvNum(l.itens[2].str)});
+  });
+  /* ---- 5. alocação por custodiante ---- */
+  if(idxSec["5"]!=null)fatia("5","6").forEach(function(l){
+    if(l.itens.length>=4&&/^R\$/.test(l.itens[1].str)&&/%$/.test(l.itens[2].str)){
+      var item={nome:l.itens[0].str,valor:rcvNum(l.itens[1].str),pct:rcvPct(l.itens[2].str),rent:rcvPct(l.itens[3].str)};
+      if(/^total$/i.test(item.nome))res.totalCust=item;else res.custodiantes.push(item);
+    }
+  });
+
+  /* ---- 7. detalhamento por produto ---- */
+  var ini7=idxSec["7"];
+  var fim7=idxSec["8"]!=null?idxSec["8"]:todasLinhas.length;
+  if(ini7==null){res.erros.push("Seção \"7. Detalhamento por Produto\" não encontrada.");return res}
+  var L=todasLinhas.slice(ini7+1,fim7);
+  var sec=null;          /* seção corrente */
+  var cols=null;         /* geometria do cabeçalho corrente */
+  var linhaPronta=[];    /* [{linha, ehDado}] da seção corrente */
+  var secoes=[];
+  var classeAtual="";
+  L.forEach(function(l){
+    var mh=l.txt.match(/^7\.(\d+)(?:\.(\d+))?\s+(.+)$/);
+    if(mh&&l.itens.length<=3){
+      var titulo=mh[3];
+      var mTot=titulo.match(/^(.*?)\s+[—–-]\s+([\d.,]+)%\s+da carteira\s+\(R\$\s*([\d.,]+)\)/);
+      if(!mh[2]){
+        classeAtual=(mTot?mTot[1]:titulo).trim();
+        sec={classe:classeAtual,subtitulo:"",totalDeclarado:mTot?rcvNum(mTot[3]):null,pctDeclarado:mTot?rcvPct(mTot[2]):null,linhas:[],nivel:2,instSec:"",instrucoes:[]};
+        secoes.push(sec);
+      }else{
+        sec={classe:classeAtual,subtitulo:titulo.trim(),totalDeclarado:null,linhas:[],nivel:3,instSec:titulo.trim()};
+        secoes.push(sec);
+      }
+      cols=null;
+      return;
+    }
+    if(!sec)return;
+    sec.linhas.push(l);
+  });
+  /* Para cada seção, processa tabela */
+  var linhasSemTipo=[];
+  secoes.forEach(function(s){
+    var ls=s.linhas;
+    /* cabeçalhos podem repetir por página; acha o primeiro */
+    var hdr=null,colunas=null;
+    var linhasTab=[];
+    var rows=[]; /* {linhasNome:[...], dado:linha, pg} */
+    var pendente=[];
+    var ultimaPg=0,emNotas=false;
+    for(var i=0;i<ls.length;i++){
+      var l=ls[i];
+      var txt=l.txt;
+      if(/^(Ativo|Origem)\b/.test(l.itens[0].str)&&l.itens.length>=2&&/Posi[çc][ãa]o|Valor/.test(txt)){
+        colunas={};
+        l.itens.forEach(function(it){colunas[it.str]=it.x});
+        colunas._lab=l.itens.map(function(it){return it.str});
+        hdr=l;emNotas=false;continue;
+      }
+      if(!colunas)continue;
+      if(/^\*+\s/.test(txt)){emNotas=true}
+      if(emNotas){s.notas=(s.notas||[]).concat([txt]);continue}
+      linhasTab.push(l);
+    }
+    s.colunas=colunas;
+    if(!colunas)return;
+    var xTipo=colunas["Tipo"];
+    var xCol3=colunas["Conta XP"]!=null?colunas["Conta XP"]:colunas["Custodiante"];
+    var temCol3=xCol3!=null;
+    var ehPosTabela=colunas["Posição"]!=null;
+    var ehDado=function(l){return l.itens.some(function(it){return /^R\$\s*[\d.]+,\d{2}$/.test(it.str)&&(ehPosTabela?it.x>xTipo+20:true)})};
+    /* ---- tabela de Caixa (Origem | Valor) ---- */
+    if(colunas["Origem"]!=null){
+      linhasTab.forEach(function(l){
+        var vi=l.itens.find(function(it){return /^R\$/.test(it.str)});
+        if(!vi)return;
+        var nome=l.itens.filter(function(it){return it!==vi}).map(function(it){return it.str}).join(" ");
+        res.caixaLinhas.push({nome:nome,valor:rcvNum(vi.str),secao:s});
+      });
+      return;
+    }
+    var dadoIdx=[];
+    linhasTab.forEach(function(l,i){if(ehDado(l))dadoIdx.push(i)});
+    var porDado={};
+    dadoIdx.forEach(function(i){porDado[i]={dado:linhasTab[i],acima:[],abaixo:[]}});
+    var orfas=[];
+    linhasTab.forEach(function(l,i){
+      if(dadoIdx.indexOf(i)>=0)return;
+      var melhor=-1,dMelhor=1e9;
+      dadoIdx.forEach(function(j){var d=Math.abs(linhasTab[j].y-l.y);if(linhasTab[j].pg===l.pg&&d<dMelhor){dMelhor=d;melhor=j}});
+      if(melhor>=0&&dMelhor<=9){
+        if(l.y>linhasTab[melhor].y)porDado[melhor].acima.push(l);else porDado[melhor].abaixo.push(l);
+      }else orfas.push({l:l,i:i});
+    });
+    /* órfãs no topo de uma página = continuação da última linha da página anterior */
+    orfas.forEach(function(o){
+      var anterior=-1,dadoMesmaPg=false;
+      dadoIdx.forEach(function(j){if(j<o.i){anterior=j;if(linhasTab[j].pg===o.l.pg)dadoMesmaPg=true}});
+      if(anterior>=0&&!dadoMesmaPg&&linhasTab[anterior].pg<o.l.pg)porDado[anterior].abaixo.push(o.l);
+      else res.avisos.push("Linha solta ignorada: \""+o.l.txt+"\"");
+    });
+    dadoIdx.forEach(function(j){
+      var r=porDado[j];
+      r.acima.sort(function(a,b){return b.y-a.y});
+      r.abaixo.sort(function(a,b){return b.y-a.y});
+      var d=r.dado;
+      var posIt=d.itens.find(function(it){return /^R\$\s*[\d.]+,\d{2}$/.test(it.str)});
+      var antes=d.itens.filter(function(it){return it.x<posIt.x});
+      var depois=d.itens.filter(function(it){return it.x>posIt.x});
+      var partesNome=[],partesTipo=[],partesC3=[];
+      var limNome=(xTipo!=null?xTipo:posIt.x)-2;
+      antes.forEach(function(it){
+        if(it.x<limNome)partesNome.push(it.str);
+        else if(temCol3&&it.x>=xCol3-2)partesC3.push(it.str);
+        else partesTipo.push(it.str);
+      });
+      var nome=r.acima.map(function(l){return l.txt}).concat([partesNome.join(" ")]).concat(r.abaixo.map(function(l){return l.txt})).join(" ").replace(/\s+/g," ").trim();
+      var flag=(nome.match(/\s(\*+)\s*$/)||[])[1]||"";
+      nome=nome.replace(/\s*\*+\s*$/,"").trim();
+      var rents=depois.map(function(it){return it.str});
+      var rentPer=rents.length>=1?rcvPct(rents[0]):null;
+      var rentIni=rents.length>=2?rcvPct(rents[1]):null;
+      /* tabela RV tem uma única coluna "Rentabilidade" (= período) */
+      s.posicoes=s.posicoes||[];
+      var tipoCol=partesTipo.join(" ").trim();
+      var c3=partesC3.join(" ").trim();
+      var pos={nome:nome,tipoCol:tipoCol,col3:c3,posR:rcvNum(posIt.str),rentPer:rentPer,rentIni:rents.length>=2?rentIni:null,flag:flag,
+        semRent:(rentPer==null),pg:d.pg};
+      s.posicoes.push(pos);
+    });
+  });
+
+  /* ---- monta posições finais ---- */
+  var contaDe=function(txt){var m=String(txt||"").match(/(\d{5,9})/);return m?m[1]:""};
+  secoes.forEach(function(s){
+    (s.posicoes||[]).forEach(function(p){
+      var inst="",conta="";
+      if(s.nivel===3&&s.colunas&&s.colunas["Conta XP"]!=null){inst=rcvNormInst(s.instSec);conta=contaDe(p.col3)}
+      else if(p.col3){inst=rcvNormInst(p.col3)}
+      else{
+        var mc=(s.linhas||[]).map(function(l){return l.txt}).join(" ").match(/conta\s+XP\s+(\d{5,9})/i);
+        if(mc){inst="Rico";conta=mc[1]}
+      }
+      var tp=rcvMapTp(p.nome,p.tipoCol,s.classe);
+      if(!tp){linhasSemTipo.push(p.nome+" ("+p.tipoCol+")");tp="fundo_mm"}
+      res.posicoes.push({nome:p.nome,tipoCol:p.tipoCol,tp:tp,classe:s.classe,inst:inst,conta:conta,posR:p.posR,rentPer:p.rentPer,rentIni:p.rentIni,flag:p.flag,semRent:p.semRent,pg:p.pg});
+    });
+  });
+  /* caixa */
+  res.caixaLinhas.forEach(function(c){
+    var mi=c.nome.match(/-\s*([A-Za-zÀ-ú ]+?)\s*\((\d{4,9})\)/);
+    var inst=mi?rcvNormInst(mi[1].trim()):"";
+    var conta=mi?mi[2]:"";
+    res.posicoes.push({nome:c.nome,tipoCol:"Caixa",tp:"caixa",classe:c.secao.classe,inst:inst,conta:conta,posR:c.valor,rentPer:null,rentIni:null,flag:"",semRent:true,pg:0});
+  });
+  if(linhasSemTipo.length)res.avisos.push("Tipo não reconhecido (importado como Fundo Multimercado): "+linhasSemTipo.join("; "));
+
+  /* ---- 8. eventos ---- */
+  if(idxSec["8"]!=null){
+    todasLinhas.slice(idxSec["8"]+1).forEach(function(l){
+      if(l.itens.length===2&&/^R\$/.test(l.itens[1].str)){
+        var o={tipo:l.itens[0].str,valor:rcvNum(l.itens[1].str)};
+        if(/^total$/i.test(o.tipo))res.eventosTotal=o.valor;else if(!/^Tipo de evento$/i.test(o.tipo))res.eventos.push(o);
+      }
+    });
+  }
+  res.secoes=secoes.map(function(s){return{classe:s.classe,subtitulo:s.subtitulo,totalDeclarado:s.totalDeclarado,nivel:s.nivel,n:(s.posicoes||[]).length,notas:s.notas||[]}});
+  /* ---- validações ---- */
+  var soma=res.posicoes.reduce(function(a,p){return a+(p.posR||0)},0);
+  res.somaPosicoes=soma;
+  if(res.patrimonio!=null&&Math.abs(soma-res.patrimonio)>1)res.avisos.push("A soma das posições lidas ("+rcvBRL(soma)+") não bate com o patrimônio declarado no resumo ("+rcvBRL(res.patrimonio)+"), diferença de "+rcvBRL(soma-res.patrimonio)+".");
+  secoes.filter(function(s){return s.nivel===2&&s.totalDeclarado!=null}).forEach(function(s){
+    var sm=res.posicoes.filter(function(p){return p.classe===s.classe}).reduce(function(a,p){return a+(p.posR||0)},0);
+    s.somaLida=sm;
+    if(Math.abs(sm-s.totalDeclarado)>1)res.avisos.push("Seção \""+s.classe+"\": as linhas somam "+rcvBRL(sm)+", mas o título da seção declara "+rcvBRL(s.totalDeclarado)+" (diferença de "+rcvBRL(sm-s.totalDeclarado)+").");
+  });
+  if(!res.cliente)res.erros.push("Nome do cliente não encontrado na capa.");
+  if(!res.posicoes.length)res.erros.push("Nenhuma posição encontrada no detalhamento por produto.");
+  res.ok=res.erros.length===0;
+  return res;
+}
+
+/* Lê o PDF e devolve os itens de texto crus agrupados por página: [[{x,y,str}...], ...] */
+function rcvLerPaginas(file){
+  return new Promise(function(resolve,reject){
+    if(typeof pdfjsLib==="undefined"){reject(new Error("PDF.js não carregado"));return}
+    var reader=new FileReader();
+    reader.onerror=function(){reject(new Error("Falha ao ler "+file.name))};
+    reader.onload=function(e){
+      pdfjsLib.getDocument({data:new Uint8Array(e.target.result)}).promise.then(function(pdf){
+        var ps=[];
+        for(var n=1;n<=pdf.numPages;n++){
+          ps.push(pdf.getPage(n).then(function(page){
+            return page.getTextContent().then(function(tc){
+              return tc.items.map(function(it){return{x:it.transform[4],y:it.transform[5],str:it.str}});
+            });
+          }));
+        }
+        return Promise.all(ps);
+      }).then(resolve).catch(reject);
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+function rcvTextoPaginas(paginas){
+  return (paginas||[]).map(function(it){return rcvLinhasPagina(it).map(function(l){return l.txt}).join("\n")}).join("\n");
+}
+var RCV_TP_VENC=["cdb","lci","lca","lc","cri","cra","tesouro","deb","debi"];
+var RCV_TP_TICKER=["acao","fii","fiagro","etf_br","etf_int","etf_eu","reit","stock_us","bdr"];
+/* Converte as posições lidas do relatório no formato de _ativosImport do Hub (mesmos campos do import do Gorila) */
+function rcvMontarAtivos(parsed){
+  var usados={};
+  var agora=Date.now();
+  return (parsed.posicoes||[]).map(function(p){
+    var tk=String(p.nome||"").trim();
+    if(RCV_TP_TICKER.indexOf(p.tp)>=0){var mt=tk.match(/^([A-Z0-9]{3,7})(?:\s*\(.*\))?$/);if(mt)tk=mt[1]}
+    if(tk.length>40)tk=tk.slice(0,40).replace(/[\s\-–,;(]+$/,"").trim();
+    var base=tk;
+    if(usados[tk]){tk=base+(p.inst?" ("+p.inst+")":"");var n=1;while(usados[tk]){n++;tk=base+" "+n}}
+    usados[tk]=1;
+    var pos=+p.posR||0;
+    var rp=p.rentPer,ri=p.rentIni;
+    var pm=(ri!=null&&ri>-0.95)?pos/(1+ri):pos;
+    var rentPct={},rentRs={};
+    if(rp!=null&&rp>-0.95){rentPct.periodo=rp;rentRs.periodo=pos*rp/(1+rp)}
+    if(ri!=null&&ri>-0.95){rentPct["início da carteira"]=ri;rentRs["início da carteira"]=pos-pm}
+    var vn=RCV_TP_VENC.indexOf(p.tp)>=0?rcvVencDoNome(p.nome):null;
+    var a={tk:tk,nm:p.nome,tp:p.tp,qtd:1,pm:pm,pa:pos,inst:p.inst||"",venc:vn?vn.iso:"",posR:pos,
+      _gClasse:p.classe,_gSubCl:p.tipoCol,_gRentPct:rentPct,_gRentRs:rentRs,_liquidado:false,
+      _fonteImportacao:"courinvest",_importadoEm:agora,_qtdIndisponivel:true};
+    if(p.conta)a._conta=p.conta;
+    if(vn&&vn.aprox)a._vencAprox=true;
+    if(ri!=null)a._pmEstimado=true;
+    if(p.semRent)a._semRentabilidade=true;
+    if(p.flag==="**")a._rentInconsistente=true;
+    return a;
+  });
+}
+/* Monta o c._gorilaRent (mesmo formato do import do Gorila) a partir do relatório */
+function rcvMontarGorilaRent(parsed){
+  var periods=(parsed.rent||[]).map(function(r){return{p:r.p,sharpe:r.sharpe,vol:r.vol,rent:r.rent,ibov:r.ibov,cdi:r.cdi,ipca:r.ipca}});
+  var pPer=(parsed.rent||[]).find(function(r){return r.p==="Período"})||(parsed.rent||[])[0];
+  var rentBase=pPer&&typeof pPer.rent==="number"?pPer.rent:null;
+  var atrib=(parsed.atribuicao||[]).map(function(a){return{classe:a.classe,pct:rentBase!=null?a.share*rentBase:a.share,share:a.share}});
+  return{periods:periods,atribuicao:atrib,resultado:parsed.resultado,dataIni:parsed.periodoIni,dataFim:parsed.periodoFim,aportes:0,retiradas:0,captacao:0,importedAt:Date.now(),_fonte:"courinvest"};
+}
+
 function chaveVencAtivo(a){return String((a&&(a.tk||a.nm))||"")+"|"+String((a&&a.inst)||"")}
 /* Ordem: data digitada pelo usuário (c.vencManual, sobrevive a novos imports) → coluna da planilha → nome do ativo */
 function resolveVencAtivo(c,a){
   var man=c&&c.vencManual&&c.vencManual[chaveVencAtivo(a)];
   if(man){var im=normVencData(man);if(im)return{iso:im,origem:"manual"}}
-  var col=normVencData(a&&a.venc);if(col)return{iso:col,origem:"planilha"};
+  var col=normVencData(a&&a.venc);if(col)return{iso:col,origem:(a&&a._vencAprox)?"nome":"planilha"};
   var inf=inferVencNome(a);if(inf)return{iso:inf,origem:"nome"};
   return null;
 }
@@ -38200,7 +38821,7 @@ function VencimentosView({data:d,dispatch:dp,taxasBCB,taxaBCBStatus,onGoClient})
                   <div style={{fontSize:10,color:T.t3,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                     {v.cliente} · {v.tipoLabel}{v.idxLabel?" · "+v.idxLabel:""} · Corretora: {v.inst}
                     {v.isento&&<span style={{color:T.green,fontWeight:700}}> · Isento IR</span>}
-                    {v.origemData==="nome"&&<span style={{color:"#E0A85C",fontWeight:700}} title="A planilha não trouxe a data; ela foi deduzida pelo nome/ano do título"> · data pelo nome</span>}
+                    {v.origemData==="nome"&&<span style={{color:"#E0A85C",fontWeight:700}} title="Data deduzida do nome do título (só mês/ano ou ano) — confirme o dia exato se precisar"> · data pelo nome</span>}
                   </div>
                   <div style={{fontSize:10,color:T.t2,marginTop:3,display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}} onClick={function(e){e.stopPropagation()}}>
                     {editEm===v.id?(
@@ -39638,7 +40259,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '531';
+  var SW_VERSION = '532';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
