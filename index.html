@@ -4827,8 +4827,10 @@ function Dash({data:d,onSel:os,goTo}){
         cl.forEach(function(c){
           var ativos=c._ativosImport||[];
           ativos.forEach(function(a){
-            if(RF_TYPES.indexOf(a.tp)<0||!a.venc)return;
-            var d=new Date(a.venc);
+            if(RF_TYPES.indexOf(a.tp)<0||a._liquidado||!(a.posR>0))return;
+            var _rv=resolveVencAtivo(c,a);
+            if(!_rv)return;
+            var d=new Date(_rv.iso+"T12:00:00");
             if(isNaN(d.getTime()))return;
             var dias=Math.ceil((d-hoje)/86400000);
             if(dias>=0&&dias<=90){
@@ -6137,7 +6139,7 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
             if(pos<=0 && !foiLiquidadoM1)continue;
             if(preco===0&&qtd>0&&pos>0)preco=pos/qtd;
             if(pm===0&&preco>0)pm=preco;
-            var venc=iV>=0?String(r[iV]||"").trim():"";
+            var venc=iV>=0?normVencData(r[iV]):"";
             /* Lê 5 cols de % e 5 cols de R$ POR POSIÇÃO (índices numéricos) — evita problema de chave duplicada */
             var rentAtivoM1={};
             var rentAtivoRsM1={};
@@ -7093,7 +7095,7 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
             if(pos<=0&&!temEvento)continue;
             if(preco===0&&qtd>0&&pos>0){preco=pos/qtd}
             if(pm===0&&preco>0){pm=preco}
-            var venc=iV>=0?String(r[iV]||"").trim():"";
+            var venc=iV>=0?normVencData(r[iV]):"";
             
             /* Lê 5 cols de % e 5 cols de R$ POR POSIÇÃO numérica — evita conflito de chave */
             var rentAtivo={};
@@ -9316,7 +9318,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
             var posR=pv(r[iPos]);
             var preco=iPreco>=0?pv(r[iPreco]):0;
             var pm=iPM>=0?pv(r[iPM]):0;
-            var venc=iVenc>=0?String(r[iVenc]||"").trim():"";
+            var venc=iVenc>=0?normVencData(r[iVenc]):"";
 
             
             var cl=(classe+" "+subclasse+" "+ativo).toLowerCase();
@@ -26570,12 +26572,68 @@ function MetasConsultor({data:d,dispatch:dp,onGoClient,goTo}){
       {k:"relatorios",desc:"Relatórios de "+lblYM(mesRefKey)+" enviados",atual:relPct,un:"%",step:5,fonte:"Relatórios › publicados ("+relOk.length+"/"+clAtend.length+")"},
     ]},
   ];
+  /* ---- Prazos e datas das metas (v528) ----
+     Cada meta tem um período: mensal (receita do mês, contatos, relatórios, carteira), trimestral (reuniões) ou
+     anual (as demais). Prazo e início padrão acompanham o período corrente (viram sozinhos no mês/trimestre/ano
+     seguinte); quando o Igor define uma data, ela fica salva em config.metasCfg.prazos/inicios e não muda mais. */
+  const setCampo=function(campo,k,v){
+    var n=Object.assign({},cfgMetas[campo]||{});
+    if(v===null||v==="")delete n[k];else n[k]=v;
+    var nv=Object.assign({},cfgMetas);nv[campo]=n;
+    dp({t:"CONFIG_SET",p:{key:"metasCfg",value:nv}});
+  };
+  const isoD=function(dt){return dt.getFullYear()+"-"+pad2(dt.getMonth()+1)+"-"+pad2(dt.getDate())};
+  const PER={receitaMes:"mes",mrr:"ano",ticket:"ano",clientes:"ano",captAno:"ano",churnMax:"ano",aum:"ano",carteira:"mes",miles:"ano",reuniaoTri:"tri",contatosMes:"mes",relatorios:"mes"};
+  const perIni={mes:mesIni,tri:qIni,ano:anoHoje+"-01-01"};
+  const perFim={mes:isoD(new Date(hoje.getFullYear(),hoje.getMonth()+1,0)),tri:isoD(new Date(hoje.getFullYear(),Math.floor(hoje.getMonth()/3)*3+3,0)),ano:anoHoje+"-12-31"};
+  const prazosSalvos=cfgMetas.prazos||{},iniciosSalvos=cfgMetas.inicios||{};
+  const fmtD=function(iso){return iso?iso.split("-").reverse().join("/"):"—"};
+  /* valor da métrica no início do período (pra medir o ritmo): usa o histórico real quando existe */
+  const baseDe=function(k){
+    var per=PER[k.k];
+    if(per==="mes"||per==="tri")return ["carteira","receitaMes"].indexOf(k.k)>=0?null:0;
+    if(k.k==="captAno")return 0;
+    if(!R||["clientes","mrr","ticket"].indexOf(k.k)<0)return null;
+    var dtB=new Date(k.inicio+"T12:00:00");dtB.setDate(dtB.getDate()-1);
+    var ymB=dtB.getFullYear()+"-"+pad2(dtB.getMonth()+1);
+    var nPag=0,soma=0;
+    Object.keys(R.cliRec).forEach(function(ch){var mm=R.cliRec[ch].meses[ymB];if(mm&&mm.tot>0){nPag++;soma+=mm.tot}});
+    if(k.k==="mrr")return soma;
+    if(k.k==="ticket")return nPag>0?soma/nPag:null;
+    var h=R.historicoRec.find(function(x){return x.ym===ymB});
+    return h?h.acumulado:0;
+  };
   okrs.forEach(function(o){o.kr.forEach(function(k){
     k.meta=alvo(k.k);
     k.semAlvo=!(k.meta>0);
     k.done=!k.semAlvo&&(k.menor?k.atual<=k.meta:k.atual>=k.meta);
     k.pct=k.semAlvo?0:k.menor?(k.atual<=k.meta?100:Math.max(0,k.meta/k.atual*100)):Math.min(100,k.atual/k.meta*100);
+    k.prazo=prazosSalvos[k.k]||perFim[PER[k.k]];k.prazoPadrao=!prazosSalvos[k.k];
+    k.inicio=iniciosSalvos[k.k]||perIni[PER[k.k]];k.inicioPadrao=!iniciosSalvos[k.k];
+    var tIni=new Date(k.inicio+"T00:00:00").getTime(),tFim=new Date(k.prazo+"T23:59:59").getTime(),tNow=hoje.getTime();
+    k.diasRest=Math.ceil((tFim-tNow)/864e5);
+    k.tempoPct=tFim>tIni?Math.max(0,Math.min(100,(tNow-tIni)/(tFim-tIni)*100)):100;
+    k.base=baseDe(k);
+    if(k.semAlvo)k.status="sem";
+    else if(k.done)k.status="ok";
+    else if(k.diasRest<0)k.status="vencida";
+    else if(k.base!=null&&!k.menor&&k.meta>k.base){
+      var esp=k.base+(k.meta-k.base)*k.tempoPct/100;
+      var rr=esp>k.base?(k.atual-k.base)/(esp-k.base):1;
+      k.esperado=esp;k.status=rr>=1?"ritmo":rr>=0.7?"atencao":"atrasada";
+    }else if(k.base!=null&&!k.menor&&k.meta<=k.base)k.status="atencao";
+    else k.status="andamento";
+    k.necessario=(!k.menor&&!k.done&&!k.semAlvo&&(k.un==="R$"||k.un==="R$M"||k.un==="un")&&k.diasRest>35)?(k.meta-k.atual)/(k.diasRest/30.44):null;
   })});
+  const ST={ok:{t:"Atingida",c:"green"},ritmo:{t:"No ritmo",c:"green"},atencao:{t:"Atenção",c:"gold"},atrasada:{t:"Atrasada",c:"red"},vencida:{t:"Prazo vencido",c:"red"},andamento:{t:"Em andamento",c:"cyan"},sem:{t:"Sem alvo",c:"purple"}};
+  const txtDias=function(k){
+    if(k.done)return "meta atingida";
+    if(k.diasRest<0)return "venceu há "+(-k.diasRest)+" dia"+(-k.diasRest===1?"":"s");
+    if(k.diasRest===0)return "vence hoje";
+    return "faltam "+k.diasRest+" dia"+(k.diasRest===1?"":"s");
+  };
+  const todosKR=[];okrs.forEach(function(o){o.kr.forEach(function(k){todosKR.push(k)})});
+  const nStatus=function(s){return todosKR.filter(function(k){return k.status===s}).length};
   var totalKRs=0,completedKRs=0,somaPct=0;
   okrs.forEach(function(o){o.kr.forEach(function(k){if(k.semAlvo)return;totalKRs++;if(k.done)completedKRs++;somaPct+=k.pct})});
   const overallPct=totalKRs>0?somaPct/totalKRs:0;
@@ -26655,7 +26713,7 @@ function MetasConsultor({data:d,dispatch:dp,onGoClient,goTo}){
         {[
           {l:"PROGRESSO GERAL",v:overallPct.toFixed(0)+"%",c:overallPct>=75?T.green:overallPct>=50?T.gold:T.orange},
           {l:"METAS ATINGIDAS",v:completedKRs+"/"+totalKRs,c:T.cyan},
-          {l:"RECEITA RECORRENTE",v:fm(mrr),c:T.green},
+          {l:"NO RITMO / ATENÇÃO / ATRASADAS",v:(nStatus("ok")+nStatus("ritmo"))+" / "+nStatus("atencao")+" / "+(nStatus("atrasada")+nStatus("vencida")),c:(nStatus("atrasada")+nStatus("vencida"))>0?T.orange:T.green},
           {l:"CONQUISTAS",v:conquistas.filter(function(c){return c.ok}).length+"/"+conquistas.length,c:T.gold},
         ].map(function(k,i){return (
           <Cd key={i} style={{padding:"12px 16px",flex:1,minWidth:120}} hov={false} glow={i===0}>
@@ -26696,8 +26754,9 @@ function MetasConsultor({data:d,dispatch:dp,onGoClient,goTo}){
                         </span>
                       </div>
                       <div style={{display:"flex",alignItems:"center",gap:8}}>
-                        <div style={{flex:1,height:6,background:"rgba(255,255,255,0.03)",borderRadius:3,overflow:"hidden"}}>
+                        <div title={"Marcador: "+k.tempoPct.toFixed(0)+"% do prazo decorrido"} style={{flex:1,height:6,background:"rgba(255,255,255,0.03)",borderRadius:3,overflow:"hidden",position:"relative"}}>
                           <div style={{height:"100%",width:k.pct+"%",background:corPct(k.pct),borderRadius:3,transition:"width 0.5s"}}/>
+                          {!k.semAlvo&&<div style={{position:"absolute",top:0,bottom:0,left:"calc("+k.tempoPct+"% - 1px)",width:2,background:"rgba(255,255,255,0.55)"}}/>}
                         </div>
                         <span style={{fontSize:10,fontWeight:700,color:k.done?T.green:T.t3,minWidth:32}}>{k.semAlvo?"—":k.pct.toFixed(0)+"%"}</span>
                       </div>
@@ -26707,7 +26766,20 @@ function MetasConsultor({data:d,dispatch:dp,onGoClient,goTo}){
                         {ehPadrao(k.k)?<span style={{fontSize:9,color:T.t3,fontStyle:"italic"}}>alvo padrão — ajuste ao seu objetivo</span>
                           :<button onClick={function(){setAlvo(k.k,null)}} style={{background:"none",border:"none",color:T.t3,fontSize:9,cursor:"pointer",textDecoration:"underline",padding:0}}>restaurar padrão</button>}
                       </div>
-                      <div style={{fontSize:9,color:T.t3,marginTop:4,opacity:.8}}>Fonte: {k.fonte}</div>
+                      <div style={{display:"flex",gap:6,marginTop:6,alignItems:"center",flexWrap:"wrap"}}>
+                        <span style={{fontSize:9,color:T.t3}}>Início:</span>
+                        <input type="date" value={k.inicio} onChange={function(e){setCampo("inicios",k.k,e.target.value)}} style={{padding:"3px 5px",background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:6,color:T.t2,fontSize:11}}/>
+                        <span style={{fontSize:9,color:T.t3}}>Prazo:</span>
+                        <input type="date" value={k.prazo} onChange={function(e){setCampo("prazos",k.k,e.target.value)}} style={{padding:"3px 5px",background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:6,color:T.gold,fontSize:11}}/>
+                        {(!k.prazoPadrao||!k.inicioPadrao)&&<button onClick={function(){setCampo("prazos",k.k,null);setCampo("inicios",k.k,null)}} style={{background:"none",border:"none",color:T.t3,fontSize:9,cursor:"pointer",textDecoration:"underline",padding:0}}>datas padrão</button>}
+                        <Bg c={ST[k.status].c}>{ST[k.status].t}</Bg>
+                        <span style={{fontSize:10,color:k.status==="vencida"?T.red:T.t3}}>{txtDias(k)}</span>
+                      </div>
+                      {!k.semAlvo&&!k.done&&<div style={{fontSize:9,color:T.t3,marginTop:4}}>
+                        {k.esperado!=null?"Pelo prazo, hoje deveria estar em "+fmtV(k.esperado,k.un)+" (parte de "+fmtV(k.base,k.un)+" em "+fmtD(k.inicio)+"). ":""}
+                        {k.necessario!=null?"Ritmo necessário: +"+fmtV(k.necessario,k.un)+" por mês.":""}
+                      </div>}
+                      <div style={{fontSize:9,color:T.t3,marginTop:4,opacity:.8}}>Fonte: {k.fonte}{k.prazoPadrao?" · prazo padrão do período (mês/trimestre/ano corrente)":""}</div>
                     </div>
                   );
                 })}
@@ -26804,7 +26876,14 @@ function MetasConsultor({data:d,dispatch:dp,onGoClient,goTo}){
             </div>
           </Cd>
           <Cd style={{padding:20,flex:1,minWidth:220}} hov={false}>
-            <h4 style={{margin:"0 0 16px",fontSize:14,fontWeight:700,color:T.gold}}>🎯 Próximos marcos</h4>
+            <h4 style={{margin:"0 0 12px",fontSize:14,fontWeight:700,color:T.gold}}>🗓️ Calendário de prazos</h4>
+            {todosKR.filter(function(k){return!k.semAlvo}).slice().sort(function(a,b){return a.prazo.localeCompare(b.prazo)||a.desc.localeCompare(b.desc)}).map(function(k){return (
+              <div key={k.k} style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",padding:"6px 0",borderTop:"1px solid rgba(255,255,255,0.03)",fontSize:11}}>
+                <div style={{flex:1}}><div style={{fontWeight:600,color:T.t1}}>{k.desc}</div><div style={{fontSize:9,color:T.t3}}>até {fmtD(k.prazo)} · {txtDias(k)}</div></div>
+                <Bg c={ST[k.status].c}>{ST[k.status].t}</Bg>
+              </div>
+            )})}
+            <h4 style={{margin:"18px 0 16px",fontSize:14,fontWeight:700,color:T.gold}}>🎯 Próximos marcos</h4>
             {faltam.length===0&&<div style={{fontSize:11,color:T.green}}>✅ Todas as metas com alvo foram atingidas. Ajuste os alvos na aba OKRs para o próximo ciclo.</div>}
             {faltam.slice(0,5).map(function(k){return (
               <div key={k.k} style={{padding:12,background:"rgba(255,255,255,0.02)",borderRadius:10,marginBottom:8,border:"1px solid rgba(255,255,255,0.03)"}}>
@@ -27979,22 +28058,28 @@ function ImportView(){
 /* === FONTES RSS DE MERCADO FINANCEIRO ===
    Lista de feeds RSS por fonte e categoria. O fetcher passa por proxy CORS pra contornar bloqueio. */
 var NEWS_FONTES=[
-  
-  {fonte:"InfoMoney",cor:"#FF7A00",ic:"💰",cat:"mercado",url:"https://www.infomoney.com.br/mercados/feed/"},
-  {fonte:"InfoMoney",cor:"#FF7A00",ic:"💰",cat:"rendaFixa",url:"https://www.infomoney.com.br/onde-investir/renda-fixa/feed/"},
-  {fonte:"InfoMoney",cor:"#FF7A00",ic:"💰",cat:"fii",url:"https://www.infomoney.com.br/onde-investir/fundos-imobiliarios/feed/"},
-  {fonte:"InfoMoney",cor:"#FF7A00",ic:"💰",cat:"internacional",url:"https://www.infomoney.com.br/mercados/internacional/feed/"},
-  
-  {fonte:"Valor Econômico",cor:"#003366",ic:"📊",cat:"mercado",url:"https://valor.globo.com/financas/rss/"},
-  {fonte:"Valor Econômico",cor:"#003366",ic:"📊",cat:"internacional",url:"https://valor.globo.com/mundo/rss/"},
-  
+  /* v529 — lista refeita e testada: os feeds antigos (Valor /rss, InfoMoney /mercados, /renda-fixa, /fii,
+     /internacional, Suno /fiis e /renda-fixa) retornam erro ou vêm vazios. Estes responderam com itens. */
+  {fonte:"InfoMoney",cor:"#FF7A00",ic:"💰",cat:"mercado",url:"https://www.infomoney.com.br/feed/"},
   {fonte:"Money Times",cor:"#0AAB60",ic:"💵",cat:"mercado",url:"https://www.moneytimes.com.br/feed/"},
-  {fonte:"Money Times",cor:"#0AAB60",ic:"💵",cat:"fii",url:"https://www.moneytimes.com.br/tag/fundos-imobiliarios/feed/"},
-  {fonte:"Money Times",cor:"#0AAB60",ic:"💵",cat:"rendaFixa",url:"https://www.moneytimes.com.br/tag/renda-fixa/feed/"},
-  
   {fonte:"Suno Notícias",cor:"#FF6600",ic:"📈",cat:"mercado",url:"https://www.suno.com.br/noticias/feed/"},
-  {fonte:"Suno Notícias",cor:"#FF6600",ic:"📈",cat:"fii",url:"https://www.suno.com.br/noticias/fiis/feed/"},
-  {fonte:"Suno Notícias",cor:"#FF6600",ic:"📈",cat:"rendaFixa",url:"https://www.suno.com.br/noticias/renda-fixa/feed/"}
+  {fonte:"Seu Dinheiro",cor:"#00A86B",ic:"💼",cat:"mercado",url:"https://www.seudinheiro.com/feed/"},
+  {fonte:"Folha Mercado",cor:"#1F6FB2",ic:"📰",cat:"mercado",url:"https://feeds.folha.uol.com.br/mercado/rss091.xml"},
+  {fonte:"Investing.com",cor:"#F5A623",ic:"📉",cat:"mercado",url:"https://br.investing.com/rss/market_overview.rss"},
+
+  {fonte:"InfoMoney",cor:"#FF7A00",ic:"💰",cat:"rendaFixa",url:"https://www.infomoney.com.br/tudo-sobre/renda-fixa/feed/"},
+  {fonte:"Seu Dinheiro",cor:"#00A86B",ic:"💼",cat:"rendaFixa",url:"https://www.seudinheiro.com/renda-fixa/feed/"},
+  {fonte:"Money Times",cor:"#0AAB60",ic:"💵",cat:"rendaFixa",url:"https://www.moneytimes.com.br/tag/renda-fixa/feed/"},
+  {fonte:"Money Times",cor:"#0AAB60",ic:"💵",cat:"rendaFixa",url:"https://www.moneytimes.com.br/tag/tesouro-direto/feed/"},
+
+  {fonte:"InfoMoney",cor:"#FF7A00",ic:"💰",cat:"fii",url:"https://www.infomoney.com.br/tudo-sobre/fundos-imobiliarios/feed/"},
+  {fonte:"Money Times",cor:"#0AAB60",ic:"💵",cat:"fii",url:"https://www.moneytimes.com.br/tag/fundos-imobiliarios/feed/"},
+  {fonte:"Money Times",cor:"#0AAB60",ic:"💵",cat:"fii",url:"https://www.moneytimes.com.br/tag/fiis/feed/"},
+
+  {fonte:"Folha Mundo",cor:"#1F6FB2",ic:"📰",cat:"internacional",url:"https://feeds.folha.uol.com.br/mundo/rss091.xml"},
+  {fonte:"G1 Mundo",cor:"#C4170C",ic:"🌐",cat:"internacional",url:"https://g1.globo.com/rss/g1/mundo/"},
+  {fonte:"Money Times",cor:"#0AAB60",ic:"💵",cat:"internacional",url:"https://www.moneytimes.com.br/tag/wall-street/feed/"},
+  {fonte:"BBC Brasil",cor:"#BB1919",ic:"🌍",cat:"internacional",url:"https://feeds.bbci.co.uk/portuguese/rss.xml"}
 ];
 
 var NEWS_CATS=[
@@ -28004,46 +28089,70 @@ var NEWS_CATS=[
   {id:"internacional",l:"🌎 Internacional",desc:"EUA, Europa, China"}
 ];
 
-/* Fetch RSS via proxy CORS. Tenta múltiplos proxies pra resiliência.
+/* Fetch RSS. v529: os proxies CORS gratuitos antigos (allorigins, corsproxy.io, codetabs) saíram do ar
+   (corsproxy.io agora responde 403 pra uso anônimo). Agora usa o conversor rss2json (devolve JSON com
+   CORS liberado) e, se falhar, o leitor r.jina.ai (devolve o XML cru). Cada tentativa tem timeout de 12s.
    Retorna Promise<Array<{titulo, link, pub, resumo}>>. */
+var fetchComTimeout=function(url,ms,opts){
+  var ctrl=typeof AbortController!=="undefined"?new AbortController():null;
+  var to=setTimeout(function(){if(ctrl)ctrl.abort()},ms||12000);
+  return fetch(url,Object.assign({},opts||{},ctrl?{signal:ctrl.signal}:{})).then(function(r){clearTimeout(to);return r},function(e){clearTimeout(to);throw e});
+};
+var limpaHtmlNews=function(s){return String(s||"").replace(/<[^>]+>/g," ").replace(/&nbsp;/gi," ").replace(/&amp;/gi,"&").replace(/&#0?38;/g,"&").replace(/&#8217;|&rsquo;/g,"’").replace(/&[a-z#0-9]+;/gi," ").replace(/\s+/g," ").trim()};
 var fetchRSSProxy=function(url){
-  var proxies=[
-    "https://api.allorigins.win/raw?url="+encodeURIComponent(url),
-    "https://corsproxy.io/?"+encodeURIComponent(url),
-    "https://api.codetabs.com/v1/proxy?quest="+encodeURIComponent(url)
-  ];
-  var tryNext=function(idx){
-    if(idx>=proxies.length)return Promise.reject(new Error("Todos proxies falharam"));
-    return fetch(proxies[idx],{cache:"no-cache"})
-      .then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.text()})
-      .catch(function(){return tryNext(idx+1)});
-  };
-  return tryNext(0).then(function(xmlText){
-    
-    var items=[];
-    try{
-      var parser=new DOMParser();
-      var xml=parser.parseFromString(xmlText,"text/xml");
-      var rssItems=xml.querySelectorAll("item");
-      rssItems.forEach(function(it){
-        var titulo=(it.querySelector("title")||{}).textContent||"";
-        var link=(it.querySelector("link")||{}).textContent||"";
-        var pub=(it.querySelector("pubDate")||{}).textContent||"";
-        var desc=(it.querySelector("description")||{}).textContent||"";
-        
-        var resumo=String(desc).replace(/<[^>]+>/g,"").replace(/&[a-z]+;/gi," ").trim().slice(0,200);
-        if(titulo){
-          items.push({
-            titulo:String(titulo).replace(/<[^>]+>/g,"").trim(),
-            link:String(link).trim(),
-            pub:pub?new Date(pub):null,
-            resumo:resumo
-          });
-        }
+  var viaRss2Json=function(){
+    return fetchComTimeout("https://api.rss2json.com/v1/api.json?api_key=&rss_url="+encodeURIComponent(url),12000)
+      .then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()})
+      .then(function(j){
+        if(!j||j.status!=="ok"||!Array.isArray(j.items)||j.items.length===0)throw new Error((j&&j.message)||"feed vazio");
+        return j.items.map(function(it){
+          var pub=null;
+          if(it.pubDate){var dt=new Date(String(it.pubDate).replace(" ","T")+"Z");if(!isNaN(dt.getTime()))pub=dt}
+          return{titulo:limpaHtmlNews(it.title),link:String(it.link||"").trim(),pub:pub,resumo:limpaHtmlNews(it.description||it.content).slice(0,200)};
+        }).filter(function(x){return x.titulo});
       });
-    }catch(e){console.warn("RSS parse erro:",e)}
-    return items;
-  });
+  };
+  var viaJina=function(){
+    return fetchComTimeout("https://r.jina.ai/"+url,15000)
+      .then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.text()})
+      .then(function(tx){
+        var i=tx.indexOf("Markdown Content:");if(i>=0)tx=tx.slice(i+17).trim();
+        var xml=new DOMParser().parseFromString(tx,"text/xml");
+        var out=[];
+        xml.querySelectorAll("item").forEach(function(it){
+          var titulo=(it.querySelector("title")||{}).textContent||"";
+          var link=(it.querySelector("link")||{}).textContent||"";
+          var pub=(it.querySelector("pubDate")||{}).textContent||"";
+          var desc=(it.querySelector("description")||{}).textContent||"";
+          if(titulo)out.push({titulo:limpaHtmlNews(titulo),link:String(link).trim(),pub:pub?new Date(pub):null,resumo:limpaHtmlNews(desc).slice(0,200)});
+        });
+        if(!out.length)throw new Error("sem itens");
+        return out;
+      });
+  };
+  return viaRss2Json().catch(function(){return viaJina()});
+};
+
+/* brapi.dev: o plano sem token só aceita 1 requisição por vez (RATE_LIMITED se vier em paralelo) —
+   então todas as chamadas passam por esta fila, com 1 nova tentativa. */
+var brapiFila=Promise.resolve();
+var brapiGet=function(url){
+  var exec=function(tent){
+    return fetchComTimeout(url,12000).then(function(r){return r.json()}).then(function(j){
+      if(j&&j.code==="RATE_LIMITED"&&tent<2)return new Promise(function(res){setTimeout(res,1200)}).then(function(){return exec(tent+1)});
+      return j;
+    });
+  };
+  var p=brapiFila.then(function(){return exec(0)});
+  brapiFila=p.catch(function(){}).then(function(){return new Promise(function(res){setTimeout(res,350)})});
+  return p;
+};
+/* Cotação de um ETF/ação via lista pública da brapi (funciona sem token): {preco, varDia(%)} */
+var brapiCotacaoLista=function(ticker){
+  return brapiGet("https://brapi.dev/api/quote/list?search="+ticker+"&limit=3").then(function(j){
+    var s=(j&&j.stocks||[]).find(function(x){return x.stock===ticker});
+    return s?{preco:s.close,varDia:s.change}:null;
+  }).catch(function(){return null});
 };
 
 var tempoRelNews=function(d){
@@ -28149,7 +28258,16 @@ function NewsView({data,dispatch}){
       });
       var totalCount=Object.keys(results).reduce(function(s,k){return s+results[k].length},0);
       if(totalCount===0){
-        sNewsErr("Não foi possível carregar notícias. Tente novamente em alguns minutos.");
+        /* Nada respondeu: mostra a última cópia salva (de qualquer idade) em vez de uma tela vazia. */
+        var mostrouAntigas=false;
+        try{
+          var velho=JSON.parse(localStorage.getItem("courinvest_news_cache")||"null");
+          if(velho&&velho.data){
+            Object.keys(velho.data).forEach(function(cat){velho.data[cat].forEach(function(it){if(it.pubISO)it.pub=new Date(it.pubISO)})});
+            sNewsLive(velho.data);sNewsUpAt(new Date(velho.ts));mostrouAntigas=true;
+          }
+        }catch(e){}
+        sNewsErr(mostrouAntigas?"Sem conexão com as fontes agora — mostrando as últimas notícias salvas. Tente atualizar em instantes.":"Não foi possível carregar notícias. Tente novamente em alguns minutos.");
       }else{
         sNewsLive(results);
         sNewsUpAt(new Date());
@@ -28181,30 +28299,25 @@ function NewsView({data,dispatch}){
 
   useEffect(function(){
     var fetchMkt=function(){
+      /* v529: hgbrasil (key=demo) saiu do ar. Agora: câmbio e bitcoin via AwesomeAPI (sem chave) e
+         Ibovespa / S&P 500 / IFIX / Small Caps via ETFs (BOVA11, IVVB11, XFIX11, SMAL11) pela lista
+         pública da brapi — o ETF acompanha a variação do índice (os pontos do índice exigem token). */
       sMktLoad(true);
-      fetch("https://api.hgbrasil.com/finance?format=json&key=demo")
-        .then(function(r){return r.json()})
-        .then(function(d){
-          if(d.results){
-            var st=d.results.stocks||{};var cur=d.results.currencies||{};
-            var gv=function(o,k){return o&&o[k]?fPt(o[k]):"—"};
-            var gc=function(o){return o?"R$ "+Number(o.buy).toFixed(2):"—"};
-            var gvr=function(o){return o?o.variation||0:0};
-            sMktData([
-              {n:"IBOVESPA",v:gv(st.IBOVESPA,"points"),vr:gvr(st.IBOVESPA),ic:"📊"},
-              {n:"NASDAQ",v:gv(st.NASDAQ,"points"),vr:gvr(st.NASDAQ),ic:"💻"},
-              {n:"DOWJONES",v:gv(st.DOWJONES,"points"),vr:gvr(st.DOWJONES),ic:"🇺🇸"},
-              {n:"USD/BRL",v:gc(cur.USD),vr:gvr(cur.USD),ic:"💵"},
-              {n:"EUR/BRL",v:gc(cur.EUR),vr:gvr(cur.EUR),ic:"💶"},
-              {n:"Bitcoin",v:cur.BTC?"R$ "+fPt(Number(cur.BTC.buy)):"—",vr:gvr(cur.BTC),ic:"₿"},
-              {n:"IFIX",v:gv(st.IFIX,"points"),vr:gvr(st.IFIX),ic:"🏠"},
-              {n:"CAC 40",v:gv(st.CAC,"points"),vr:gvr(st.CAC),ic:"🇫🇷"},
-            ]);
-            sLastUp(new Date().toLocaleTimeString("pt-BR"));
-          }
-          sMktLoad(false);
-        })
-        .catch(function(){sMktLoad(false)});
+      var fRs=function(v){return "R$ "+Number(v).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})};
+      var pAwesome=fetchComTimeout("https://economia.awesomeapi.com.br/json/last/USD-BRL,EUR-BRL,BTC-BRL",12000).then(function(r){return r.json()}).catch(function(){return null});
+      var etfs=[["IBOVESPA","BOVA11","📊"],["S&P 500","IVVB11","🇺🇸"],["IFIX","XFIX11","🏠"],["SMALL CAPS","SMAL11","🔎"]];
+      var pEtfs=etfs.reduce(function(chain,e){return chain.then(function(acc){return brapiCotacaoLista(e[1]).then(function(c){acc.push(c);return acc})})},Promise.resolve([]));
+      Promise.all([pAwesome,pEtfs]).then(function(res){
+        var aw=res[0]||{},cot=res[1]||[];
+        var cards=[];
+        var addAw=function(nome,key,ic,fmtV){var o=aw[key];if(o&&o.bid)cards.push({n:nome,v:fmtV(Number(o.bid)),vr:Math.round(Number(o.pctChange)*100)/100,ic:ic})};
+        addAw("USD/BRL","USDBRL","💵",function(v){return "R$ "+v.toFixed(2)});
+        addAw("EUR/BRL","EURBRL","💶",function(v){return "R$ "+v.toFixed(2)});
+        addAw("Bitcoin","BTCBRL","₿",function(v){return "R$ "+fPt(v)});
+        etfs.forEach(function(e,i){var c=cot[i];if(c)cards.push({n:e[0]+" ("+e[1]+")",v:fRs(c.preco),vr:Math.round(Number(c.varDia)*100)/100,ic:e[2]})});
+        if(cards.length){sMktData(cards);sLastUp(new Date().toLocaleTimeString("pt-BR"));}
+        sMktLoad(false);
+      }).catch(function(){sMktLoad(false)});
     };
     fetchMkt();
     var iv=setInterval(fetchMkt,120000);
@@ -28216,7 +28329,7 @@ function NewsView({data,dispatch}){
 
   /* === BUSCAR DADOS MACRO EXTRAS (Selic, IPCA, S&P 500, etc) ===
      Chama várias APIs em paralelo. Os dados ficam em macroData pro template usar. */
-  var carregarMacro=function(){
+  var carregarMacro=function(tokOv){
     sMacroLoad(true);
     var resultados={};
 
@@ -28225,32 +28338,38 @@ function NewsView({data,dispatch}){
       return fetch(url).then(function(r){return r.json()}).then(parser).catch(function(){return null});
     };
 
-    /* 1. Ibovespa fechamento + variação mês — brapi.dev (^BVSP é ação de teste, free) */
-    var pIbov=safeFetch("https://brapi.dev/api/quote/^BVSP?range=1mo&interval=1d",function(d){
+    /* v529: brapi passou a exigir token pros índices (^BVSP/^GSPC) e pro câmbio. Se o usuário cadastrou
+       um token gratuito (config.brapiToken, campo no fim da aba Mercado) usa os índices de verdade;
+       senão usa ETFs (BOVA11/IVVB11) só pra variação do dia. Dólar vem da AwesomeAPI (sem chave). */
+    var brapiTk=(typeof tokOv==="string")?tokOv:((data&&data.config&&data.config.brapiToken)||"");
+    var parseIdx=function(d){
       if(!d||!d.results||!d.results[0])return null;
       var r=d.results[0];
       var hist=r.historicalDataPrice||[];
-      
       var varMes=null;
-      if(hist.length>=2){
-        var prim=hist[0].close;var ult=hist[hist.length-1].close;
-        if(prim>0)varMes=((ult/prim-1)*100);
-      }
+      if(hist.length>=2){var prim=hist[0].close;var ult=hist[hist.length-1].close;if(prim>0)varMes=((ult/prim-1)*100)}
       return {pontos:r.regularMarketPrice,varDia:r.regularMarketChangePercent,varMes:varMes,max:r.regularMarketDayHigh,min:r.regularMarketDayLow,volume:r.regularMarketVolume};
-    });
+    };
+    var idxViaEtf=function(ticker){return brapiCotacaoLista(ticker).then(function(c){return c?{pontos:null,varDia:c.varDia,varMes:null,proxy:ticker,preco:c.preco}:null})};
+    var pIbov=brapiTk
+      ?brapiGet("https://brapi.dev/api/quote/%5EBVSP?range=1mo&interval=1d&token="+encodeURIComponent(brapiTk)).then(parseIdx).catch(function(){return null}).then(function(r){return r||idxViaEtf("BOVA11")})
+      :idxViaEtf("BOVA11");
 
-    
-    var pDolar=safeFetch("https://brapi.dev/api/v2/currency?currency=USD-BRL",function(d){
-      if(!d||!d.currency||!d.currency[0])return null;
-      var c=d.currency[0];
-      return {bid:parseFloat(c.bidPrice),pct:parseFloat(c.percentageChange),max:parseFloat(c.high),min:parseFloat(c.low)};
-    });
+    var pDolar=fetchComTimeout("https://economia.awesomeapi.com.br/json/last/USD-BRL",12000).then(function(r){return r.json()}).then(function(d){
+      var c=d&&d.USDBRL;if(!c)return null;
+      return {bid:parseFloat(c.bid),pct:parseFloat(c.pctChange),max:parseFloat(c.high),min:parseFloat(c.low)};
+    }).catch(function(){return null});
 
     /* Selic: série 432 = META Selic (definida pelo Copom). A 4189 usada antes é a Selic EFETIVA
        acumulada no mês anualizada — não é a meta e dava ~0,10 p.p. diferente (ex: 14,15 com meta
        14,25). A 432 é diária (repete o valor todo dia), então pega ~400 dias e anda pra trás até
        achar o valor anterior diferente (a meta antes da última mudança do Copom). */
-    var pSelic=safeFetch("https://api.bcb.gov.br/dados/serie/bcdata.sgs.432/dados/ultimos/400?formato=json",function(d){
+    /* v529: o BCB passou a aceitar no máx. 20 valores em /ultimos/N (o código pedia 400 → erro 400 e Selic "--").
+       Agora consulta por intervalo de datas (últimos ~14 meses). A série 432 também traz dias futuros
+       (meta vigente repetida), então corta em hoje. */
+    var _fdBCB=function(dt){return String(dt.getDate()).padStart(2,"0")+"/"+String(dt.getMonth()+1).padStart(2,"0")+"/"+dt.getFullYear()};
+    var _hojeBCB=new Date(),_iniBCB=new Date(_hojeBCB.getTime()-430*864e5);
+    var pSelic=safeFetch("https://api.bcb.gov.br/dados/serie/bcdata.sgs.432/dados?formato=json&dataInicial="+_fdBCB(_iniBCB)+"&dataFinal="+_fdBCB(_hojeBCB),function(d){
       if(!d||d.length<1)return null;
       var validos=d.filter(function(x){return x.valor&&parseFloat(x.valor.replace(",","."))<50});
       if(validos.length<1)return null;
@@ -28296,14 +28415,9 @@ function NewsView({data,dispatch}){
     });
 
     
-    var pSP500=safeFetch("https://brapi.dev/api/quote/^GSPC?range=1mo&interval=1d",function(d){
-      if(!d||!d.results||!d.results[0])return null;
-      var r=d.results[0];
-      var hist=r.historicalDataPrice||[];
-      var varMes=null;
-      if(hist.length>=2){var prim=hist[0].close;var ult=hist[hist.length-1].close;if(prim>0)varMes=((ult/prim-1)*100)}
-      return {pontos:r.regularMarketPrice,varDia:r.regularMarketChangePercent,varMes:varMes};
-    });
+    var pSP500=brapiTk
+      ?brapiGet("https://brapi.dev/api/quote/%5EGSPC?range=1mo&interval=1d&token="+encodeURIComponent(brapiTk)).then(parseIdx).catch(function(){return null}).then(function(r){return r||idxViaEtf("IVVB11")})
+      :idxViaEtf("IVVB11");
 
     Promise.all([pIbov,pDolar,pSelic,pIpca,pFocus,pFocusIpca,pSP500,pFed]).then(function(arr){
       var selicData=arr[2];
@@ -28375,7 +28489,7 @@ function NewsView({data,dispatch}){
 
       /* === PARÁGRAFO 1 — Renda variável + Câmbio + Exterior === */
       var p1="";
-      if(macroData.ibov){
+      if(macroData.ibov&&macroData.ibov.varMes!=null){
         var ibov=macroData.ibov;
         var dir=ibov.varMes>=0?"alta acumulada de":"queda acumulada de";
         var sinal=ibov.varMes>=0?"+":"";
@@ -28621,9 +28735,9 @@ function NewsView({data,dispatch}){
           )}
           {temDados && (
             <div style={{display:"grid",gridTemplateColumns:_isMob?"1fr 1fr":"repeat(3,1fr)",gap:10,marginBottom:16}}>
-              <MktCard label="IBOVESPA" valor={fmtPts(ibovPts)} pct={ibovDia} sub={"Variação mês: "+fmtPct(ibovMes)} sub2={ibovPts?"Fechamento: "+fmtPts(ibovPts)+" pts":null}/>
+              <MktCard label="IBOVESPA" valor={ibovPts!=null?fmtPts(ibovPts):(macroData.ibov&&macroData.ibov.proxy?"R$ "+Number(macroData.ibov.preco).toFixed(2)+" · "+macroData.ibov.proxy:"--")} pct={ibovDia} sub={ibovMes!=null?"Variação mês: "+fmtPct(ibovMes):(macroData.ibov&&macroData.ibov.proxy?"Variação do dia via ETF "+macroData.ibov.proxy:"indisponível")} sub2={ibovPts?"Fechamento: "+fmtPts(ibovPts)+" pts":null}/>
               <MktCard label="DÓLAR (USD/BRL)" valor={dolarVal?"R$ "+dolarVal.toFixed(4):"--"} pct={dolarPct} sub={dolarVal?"Compra: R$ "+dolarVal.toFixed(4):null}/>
-              <MktCard label="S&P 500" valor={fmtPts(sp500Pts)} pct={sp500Dia} sub={"Mês: "+fmtPct(sp500Mes)}/>
+              <MktCard label="S&P 500" valor={sp500Pts!=null?fmtPts(sp500Pts):(macroData.sp500&&macroData.sp500.proxy?"R$ "+Number(macroData.sp500.preco).toFixed(2)+" · "+macroData.sp500.proxy:"--")} pct={sp500Dia} sub={sp500Mes!=null?"Mês: "+fmtPct(sp500Mes):(macroData.sp500&&macroData.sp500.proxy?"Variação do dia via ETF "+macroData.sp500.proxy:"indisponível")}/>
               <MktCard label="SELIC (a.a.)" valor={selicVal!=null?(selicVal+"%"):"--"} sub={focusSelicVal?"Focus: "+focusSelicVal.toFixed(2)+"% fim do ano":"aguardando Focus..."}/>
               <MktCard label="IPCA (12m)" valor={ipcaVal!=null?(ipcaVal.toFixed(2)+"%"):"--"} sub={focusIpcaVal?"Focus: "+focusIpcaVal.toFixed(2)+"% para o ano":"aguardando Focus..."}/>
               <MktCard label="CDI (estimado)" valor={selicVal!=null?((selicVal-0.1).toFixed(2)+"%"):"--"} sub={selicVal?"Selic - 0,10pp":null}/>
@@ -28631,6 +28745,16 @@ function NewsView({data,dispatch}){
           )}
 
           {}
+          <Cd style={{padding:"12px 16px",marginBottom:16}} hov={false}>
+            <div style={{fontSize:11,fontWeight:700,color:T.t1,marginBottom:4}}>🔑 Pontos do Ibovespa e S&P 500 (opcional)</div>
+            <div style={{fontSize:10,color:T.t3,lineHeight:1.5,marginBottom:8}}>Sem token, o Hub mostra só a variação do dia pelos ETFs BOVA11 e IVVB11. Com um token gratuito da brapi (brapi.dev → criar conta → copiar o token), passa a mostrar os pontos e a variação do mês dos índices.</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+              <input id="brapi-token-inp" type="password" defaultValue={(data&&data.config&&data.config.brapiToken)||""} placeholder="token da brapi" style={{flex:1,minWidth:180,padding:"6px 10px",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.03)",color:T.t1,fontSize:11}}/>
+              <button onClick={function(){var v=(document.getElementById("brapi-token-inp")||{}).value||"";dispatch({t:"CONFIG_SET",p:{key:"brapiToken",value:v.trim()}});carregarMacro(v.trim())}} style={{padding:"6px 12px",borderRadius:8,fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid rgba(212,163,40,0.3)",background:T.goldD,color:T.gold}}>Salvar e atualizar</button>
+              {data&&data.config&&data.config.brapiToken&&<span style={{fontSize:10,color:T.green}}>✔ token salvo</span>}
+            </div>
+          </Cd>
+
           <Cd style={{padding:"16px 18px",marginBottom:16}} hov={false}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
               <div style={{fontSize:12,fontWeight:700,color:T.gold}}>Heatmap Setorial</div>
@@ -37359,30 +37483,101 @@ function gerarRelatorioGFModeloHtml(c,opts){
    "o que preciso ligar pro cliente essa semana pra decidir reinvestir". */
 var RF_TYPES_VENC=["cdb","lci","lca","lc","cri","cra","tesouro","deb","debi","coe"];
 
+/* v530 — Datas de vencimento "à prova de formato". O import do Gorila lê a planilha com raw:true, então uma
+   célula de data do Excel chega como NÚMERO SERIAL (ex.: 46310) — que antes era gravado como texto "46310"
+   e descartado pela aba Vencimentos (new Date("46310") = inválida) — deixando a aba vazia. */
+function normVencData(v){
+  if(v==null||v==="")return "";
+  var pad=function(n){return String(n).padStart(2,"0")};
+  var okAno=function(y){return y>=2000&&y<=2100};
+  var fromDate=function(dt){return(!dt||isNaN(dt.getTime())||!okAno(dt.getFullYear()))?"":dt.getFullYear()+"-"+pad(dt.getMonth()+1)+"-"+pad(dt.getDate())};
+  if(v instanceof Date)return fromDate(v);
+  var s=String(v).trim();if(!s)return "";
+  if(/^\d+(\.\d+)?$/.test(s)){
+    var n=parseFloat(s);
+    if(n>20000&&n<80000){var d0=new Date(Math.round((n-25569)*864e5));return okAno(d0.getUTCFullYear())?d0.getUTCFullYear()+"-"+pad(d0.getUTCMonth()+1)+"-"+pad(d0.getUTCDate()):""}
+    return "";
+  }
+  var m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m)return okAno(+m[1])?m[1]+"-"+m[2]+"-"+m[3]:"";
+  m=s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4}|\d{2})(?!\d)/);
+  if(m){var y=m[3].length===2?2000+(+m[3]):+m[3],mo=+m[2],dd=+m[1];if(mo<1||mo>12||dd<1||dd>31||!okAno(y))return "";return y+"-"+pad(mo)+"-"+pad(dd)}
+  m=s.match(/^(\d{1,2})[\/-](\d{4})$/);
+  if(m){var mo2=+m[1];if(mo2<1||mo2>12||!okAno(+m[2]))return "";return m[2]+"-"+pad(mo2)+"-"+pad(new Date(+m[2],mo2,0).getDate())}
+  return fromDate(new Date(s));
+}
+/* Quando a planilha não traz a coluna de vencimento, tenta achar a data no NOME do ativo
+   ("CDB BANCO X 15/03/2028", "LCA ... 03/2027") ou, pro Tesouro, pelo ano do título
+   (Selic 2029 → 01/03/2029; IPCA+ 2035 → 15/05/2035; Prefixado 2027 → 01/01/2027).
+   Resultado é ESTIMADO e aparece marcado como "data pelo nome". */
+function inferVencNome(a){
+  var txt=String((a&&a.nm)||"")+" "+String((a&&a.tk)||"");
+  var m=txt.match(/\b(\d{1,2}[\/.-]\d{1,2}[\/.-](?:\d{4}|\d{2}))\b/);
+  if(m){var i1=normVencData(m[1]);if(i1)return i1}
+  m=txt.match(/\b(0?[1-9]|1[0-2])\/(20\d{2})\b/);
+  if(m){var i2=normVencData(m[1]+"/"+m[2]);if(i2)return i2}
+  var low=txt.toLowerCase();
+  if(/tesouro|ntn|lft|ltn/.test(low)&&!/renda\+|educa\+|reserva\+/.test(low)){
+    var ym=low.match(/\b(20[2-6]\d)\b/);
+    if(ym){
+      var y=+ym[1];
+      if(/selic|lft/.test(low))return y+"-03-01";
+      if(/ipca|ntn-?b/.test(low)){var mp={2026:"08-15",2027:"05-15",2028:"08-15",2029:"05-15",2030:"08-15",2032:"08-15",2033:"05-15",2035:"05-15",2040:"08-15",2045:"05-15",2050:"08-15",2055:"05-15",2060:"08-15"};return mp[y]?y+"-"+mp[y]:""}
+      if(/prefix|ltn|ntn-?f/.test(low))return y+"-01-01";
+    }
+  }
+  return "";
+}
+function chaveVencAtivo(a){return String((a&&(a.tk||a.nm))||"")+"|"+String((a&&a.inst)||"")}
+/* Ordem: data digitada pelo usuário (c.vencManual, sobrevive a novos imports) → coluna da planilha → nome do ativo */
+function resolveVencAtivo(c,a){
+  var man=c&&c.vencManual&&c.vencManual[chaveVencAtivo(a)];
+  if(man){var im=normVencData(man);if(im)return{iso:im,origem:"manual"}}
+  var col=normVencData(a&&a.venc);if(col)return{iso:col,origem:"planilha"};
+  var inf=inferVencNome(a);if(inf)return{iso:inf,origem:"nome"};
+  return null;
+}
+
 function coletarVencimentosRF(clientes,taxasBCB){
   var hoje=new Date();hoje.setHours(0,0,0,0);
   var lista=[];
+  var diag={clientes:(clientes||[]).length,comImport:0,rfTotal:0,rfComData:0,rfPlanilha:0,rfNome:0,rfManual:0,rfSemData:0,liquidados:0,nativos:0,nativosSemData:0};
+  var semData=[];
   (clientes||[]).forEach(function(c){
-    /* Fonte 1: ativos importados do Gorila — campo "venc" (string de data, pode vir vazia) */
-    (c._ativosImport||[]).forEach(function(a){
-      if(RF_TYPES_VENC.indexOf(a.tp)<0||!a.venc)return;
-      var dt=new Date(a.venc);
-      if(isNaN(dt.getTime()))return;
-      var dias=Math.ceil((dt-hoje)/86400000);
+    var ai=c._ativosImport||[];
+    if(ai.length>0)diag.comImport++;
+    /* Fonte 1: ativos importados do Gorila */
+    ai.forEach(function(a){
+      if(RF_TYPES_VENC.indexOf(a.tp)<0)return;
+      if(a._liquidado||!(a.posR>0)){diag.liquidados++;return}
+      diag.rfTotal++;
+      var rv=resolveVencAtivo(c,a);
       var tInfo=RF_TIPOS_LISTA.find(function(t){return t.k===a.tp});
-      lista.push({id:"g_"+c.id+"_"+(a.tk||a.nm)+"_"+a.venc,clienteId:c.id,cliente:c.nome,ativo:a.tk||a.nm||"Ativo RF",tipo:a.tp,tipoLabel:tInfo?tInfo.l:a.tp,ic:tInfo?tInfo.ic:"📄",cor:tInfo?tInfo.cor:T.t3,isento:tInfo?tInfo.isento:false,inst:a.inst||"—",valor:a.posR||0,vencDate:dt,dias:dias,fonte:"gorila",idxLabel:null});
+      if(!rv){
+        diag.rfSemData++;
+        semData.push({chave:chaveVencAtivo(a),clienteId:c.id,cliente:c.nome,ativo:a.tk||a.nm||"Ativo RF",tipoLabel:tInfo?tInfo.l:a.tp,ic:tInfo?tInfo.ic:"📄",inst:a.inst||"—",valor:a.posR||0});
+        return;
+      }
+      diag.rfComData++;
+      if(rv.origem==="planilha")diag.rfPlanilha++;else if(rv.origem==="nome")diag.rfNome++;else diag.rfManual++;
+      var dt=new Date(rv.iso+"T12:00:00");
+      var dias=Math.ceil((dt-hoje)/86400000);
+      lista.push({id:"g_"+c.id+"_"+chaveVencAtivo(a)+"_"+rv.iso,clienteId:c.id,cliente:c.nome,ativo:a.tk||a.nm||"Ativo RF",tipo:a.tp,tipoLabel:tInfo?tInfo.l:a.tp,ic:tInfo?tInfo.ic:"📄",cor:tInfo?tInfo.cor:T.t3,isento:tInfo?tInfo.isento:false,inst:a.inst||"—",valor:a.posR||0,vencDate:dt,dias:dias,fonte:"gorila",origemData:rv.origem,chave:chaveVencAtivo(a),idxLabel:null});
     });
-    /* Fonte 2: Módulo de Renda Fixa nativo — campo "dataVenc" (sempre YYYY-MM-DD quando preenchido) */
+    /* Fonte 2: Módulo de Renda Fixa nativo (ficha do cliente) — campo "dataVenc" */
     (c.rendaFixa||[]).forEach(function(a){
-      if(!a.dataVenc)return;
-      var dt=new Date(a.dataVenc+"T12:00:00");
-      if(isNaN(dt.getTime()))return;
+      diag.nativos++;
+      var iso=normVencData(a.dataVenc);
+      if(!iso){diag.nativosSemData++;return}
+      var dt=new Date(iso+"T12:00:00");
       var dias=Math.ceil((dt-hoje)/86400000);
       var tInfo=RF_TIPOS_LISTA.find(function(t){return t.k===a.tp});
-      lista.push({id:"n_"+a.id,clienteId:c.id,cliente:c.nome,ativo:a.nm||a.tk||"Ativo RF",tipo:a.tp,tipoLabel:tInfo?tInfo.l:a.tp,ic:tInfo?tInfo.ic:"📄",cor:tInfo?tInfo.cor:T.t3,isento:tInfo?tInfo.isento:false,inst:a.inst||"—",valor:rfCalcSaldo(a,taxasBCB),vencDate:dt,dias:dias,fonte:"nativo",idxLabel:rfLabelIdx(a)});
+      lista.push({id:"n_"+a.id,clienteId:c.id,cliente:c.nome,ativo:a.nm||a.tk||"Ativo RF",tipo:a.tp,tipoLabel:tInfo?tInfo.l:a.tp,ic:tInfo?tInfo.ic:"📄",cor:tInfo?tInfo.cor:T.t3,isento:tInfo?tInfo.isento:false,inst:a.inst||"—",valor:rfCalcSaldo(a,taxasBCB),vencDate:dt,dias:dias,fonte:"nativo",origemData:"manual",idxLabel:rfLabelIdx(a)});
     });
   });
   lista.sort(function(a,b){return a.dias-b.dias});
+  semData.sort(function(a,b){return b.valor-a.valor});
+  lista.semData=semData;lista.diag=diag;
   return lista;
 }
 
@@ -37767,8 +37962,30 @@ function VencimentosView({data:d,dispatch:dp,taxasBCB,taxaBCBStatus,onGoClient})
   var [periodo,sPeriodo]=useState("90");
   var [tipoF,sTipoF]=useState("todos");
   var [busca,sBusca]=useState("");
+  var [ordem,sOrdem]=useState("venc");
 
   var todos=React.useMemo(function(){return coletarVencimentosRF(d.cl,taxasBCB);},[d.cl,taxasBCB]);
+  var semData=todos.semData||[];
+  var diag=todos.diag||{};
+  var [verSemData,sVerSemData]=useState(false);
+  var [ajustouPeriodo,sAjustouPeriodo]=useState(false);
+  /* Se a janela padrão (90 dias) está vazia mas existem vencimentos mais adiante, abre direto em "todos"
+     — antes a aba parecia vazia mesmo com dados lidos. */
+  useEffect(function(){
+    if(ajustouPeriodo)return;
+    if(todos.length>0){
+      var dentro=todos.filter(function(v){return v.dias<=90}).length;
+      if(dentro===0)sPeriodo("todos");
+      sAjustouPeriodo(true);
+    }
+  },[todos.length]);
+  var salvarVencManual=function(item,iso){
+    var c=(d.cl||[]).find(function(x){return x.id===item.clienteId});
+    if(!c)return;
+    var mapa=Object.assign({},c.vencManual||{});
+    if(iso)mapa[item.chave]=iso;else delete mapa[item.chave];
+    dp({t:"UC",p:{id:c.id,vencManual:mapa}});
+  };
 
   var vencidos=todos.filter(function(v){return v.dias<0});
   var venc30=todos.filter(function(v){return v.dias>=0&&v.dias<=30});
@@ -37789,6 +38006,17 @@ function VencimentosView({data:d,dispatch:dp,taxasBCB,taxaBCBStatus,onGoClient})
     var bq=busca.toLowerCase();
     filtrados=filtrados.filter(function(v){return(v.cliente+v.ativo+v.inst).toLowerCase().indexOf(bq)>=0});
   }
+
+  /* Ordenação: por vencimento (padrão), por cliente (A→Z, dentro do cliente pelo vencimento), por valor ou por ativo */
+  var cmpNome=function(a,b){return String(a).localeCompare(String(b),"pt-BR",{sensitivity:"base"})};
+  filtrados=filtrados.slice().sort(function(a,b){
+    if(ordem==="cliente")return cmpNome(a.cliente,b.cliente)||(a.dias-b.dias);
+    if(ordem==="cliente_z")return cmpNome(b.cliente,a.cliente)||(a.dias-b.dias);
+    if(ordem==="valor")return(b.valor-a.valor)||(a.dias-b.dias);
+    if(ordem==="ativo")return cmpNome(a.ativo,b.ativo)||(a.dias-b.dias);
+    if(ordem==="venc_desc")return b.dias-a.dias;
+    return a.dias-b.dias;
+  });
 
   var irParaCliente=function(clienteId){
     var c=(d.cl||[]).find(function(x){return x.id===clienteId});
@@ -37822,6 +38050,34 @@ function VencimentosView({data:d,dispatch:dp,taxasBCB,taxaBCBStatus,onGoClient})
         <KCard label="Total monitorado" valor={fm(valorTotal)} sub={todos.length+" ativo"+(todos.length!==1?"s":"")+" ao todo"} cor={T.gold} ic="💰" compact onClick={function(){sPeriodo("todos")}}/>
       </div>
 
+      <Cd style={{padding:"12px 16px",marginBottom:14}} hov={false}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <div style={{fontSize:11,color:T.t2,lineHeight:1.6}}>
+            <b style={{color:T.gold}}>📋 O que foi lido dos seus clientes:</b>{" "}
+            {diag.clientes||0} clientes · {diag.comImport||0} com carteira importada do Gorila · {diag.rfTotal||0} ativos de renda fixa em carteira
+            {" "}→ <b style={{color:T.green}}>{diag.rfComData||0} com vencimento</b>
+            {(diag.rfNome||0)>0&&<span style={{color:T.t3}}> ({diag.rfPlanilha||0} da planilha, {diag.rfNome} estimados pelo nome{(diag.rfManual||0)>0?", "+diag.rfManual+" digitados":""})</span>}
+            {(diag.rfSemData||0)>0&&<span> · <b style={{color:"#E0A85C"}}>{diag.rfSemData} sem data</b></span>}
+            {(diag.nativos||0)>0&&<span style={{color:T.t3}}> · {diag.nativos} lançados à mão na ficha ({(diag.nativos-(diag.nativosSemData||0))} com data)</span>}
+          </div>
+          {semData.length>0&&<button onClick={function(){sVerSemData(!verSemData)}} style={{padding:"6px 12px",borderRadius:8,fontSize:10,fontWeight:700,cursor:"pointer",border:"1px solid rgba(224,168,92,0.4)",background:"rgba(224,168,92,0.1)",color:"#E0A85C"}}>{verSemData?"Ocultar":"Informar datas faltantes ("+semData.length+")"}</button>}
+        </div>
+        {verSemData&&semData.length>0&&<div style={{marginTop:12,borderTop:"1px solid rgba(255,255,255,0.05)",paddingTop:10}}>
+          <div style={{fontSize:10,color:T.t3,marginBottom:8,lineHeight:1.5}}>A planilha do Gorila desses ativos não trouxe a data de vencimento (e o nome também não permite deduzir). Informe a data e ela fica salva no cliente — continua valendo nos próximos imports.</div>
+          {semData.slice(0,60).map(function(s){return (
+            <div key={s.clienteId+s.chave} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 0",borderTop:"1px solid rgba(255,255,255,0.03)"}}>
+              <span style={{fontSize:15}}>{s.ic}</span>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:11,fontWeight:700,color:T.t1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.ativo}</div>
+                <div style={{fontSize:9,color:T.t3}}>{s.cliente} · {s.tipoLabel} · {s.inst} · {fm(s.valor)}</div>
+              </div>
+              <input type="date" defaultValue="" onChange={function(e){if(e.target.value)salvarVencManual(s,e.target.value)}} style={{padding:"4px 6px",background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:6,color:T.t2,fontSize:11}}/>
+            </div>
+          )})}
+          {semData.length>60&&<div style={{fontSize:10,color:T.t3,marginTop:6}}>Mostrando os 60 maiores por valor ({semData.length} no total).</div>}
+        </div>}
+      </Cd>
+
       <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
         <input value={busca} onChange={function(e){sBusca(e.target.value)}} placeholder="🔍 Buscar cliente, ativo ou instituição..." style={Object.assign({},inpS,{flex:1,minWidth:160,fontSize:12,padding:"9px 14px"})}/>
         <select value={periodo} onChange={function(e){sPeriodo(e.target.value)}} style={selStyle}>
@@ -37831,6 +38087,14 @@ function VencimentosView({data:d,dispatch:dp,taxasBCB,taxaBCBStatus,onGoClient})
           <option value="90" style={{background:"#0F1B2E"}}>Até 90 dias</option>
           <option value="180" style={{background:"#0F1B2E"}}>Até 180 dias</option>
           <option value="todos" style={{background:"#0F1B2E"}}>Todos (sem limite)</option>
+        </select>
+        <select value={ordem} onChange={function(e){sOrdem(e.target.value)}} style={selStyle} title="Ordenar lista">
+          <option value="venc" style={{background:"#0F1B2E"}}>Ordenar: vencimento (mais próximo)</option>
+          <option value="venc_desc" style={{background:"#0F1B2E"}}>Ordenar: vencimento (mais distante)</option>
+          <option value="cliente" style={{background:"#0F1B2E"}}>Ordenar: cliente (A → Z)</option>
+          <option value="cliente_z" style={{background:"#0F1B2E"}}>Ordenar: cliente (Z → A)</option>
+          <option value="valor" style={{background:"#0F1B2E"}}>Ordenar: maior valor</option>
+          <option value="ativo" style={{background:"#0F1B2E"}}>Ordenar: ativo (A → Z)</option>
         </select>
         <select value={tipoF} onChange={function(e){sTipoF(e.target.value)}} style={selStyle}>
           <option value="todos" style={{background:"#0F1B2E"}}>Todos os tipos</option>
@@ -37843,7 +38107,13 @@ function VencimentosView({data:d,dispatch:dp,taxasBCB,taxaBCBStatus,onGoClient})
         <Cd style={{padding:40,textAlign:"center"}} hov={false}>
           <div style={{fontSize:34,marginBottom:10}}>{todos.length===0?"🏦":"👌"}</div>
           <div style={{fontSize:14,fontWeight:700,color:T.t2,marginBottom:6}}>{todos.length===0?"Nenhum vencimento cadastrado ainda":"Nenhum vencimento nesse filtro"}</div>
-          <div style={{fontSize:12,color:T.t3}}>{todos.length===0?"Vencimentos aparecem aqui a partir do import do Gorila (CDB/LCI/Tesouro com data de vencimento) ou do Módulo de Renda Fixa dentro da ficha do cliente.":"Ajuste o período, o tipo de ativo ou a busca acima."}</div>
+          <div style={{fontSize:12,color:T.t3,lineHeight:1.6}}>{todos.length===0
+            ?((diag.comImport||0)===0
+              ?"Nenhum cliente tem carteira importada do Gorila ainda. Importe a carteira na ficha do cliente (📥 Importar Gorila) ou lance a renda fixa no Módulo de Renda Fixa da ficha."
+              :((diag.rfTotal||0)===0
+                ?"Há carteiras importadas, mas nenhum ativo de renda fixa (CDB, LCI, LCA, CRI/CRA, debênture, Tesouro, COE) com posição aberta."
+                :"Há "+diag.rfTotal+" ativos de renda fixa em carteira, mas nenhum com data de vencimento. Use \"Informar datas faltantes\" acima."))
+            :"Ajuste o período, o tipo de ativo ou a busca acima. Existem "+todos.length+" vencimentos no total — escolha \"Todos (sem limite)\" no período."}</div>
         </Cd>
       ):(
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -37862,6 +38132,7 @@ function VencimentosView({data:d,dispatch:dp,taxasBCB,taxaBCBStatus,onGoClient})
                   <div style={{fontSize:10,color:T.t3,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                     {v.cliente} · {v.tipoLabel}{v.idxLabel?" · "+v.idxLabel:""} · {v.inst}
                     {v.isento&&<span style={{color:T.green,fontWeight:700}}> · Isento IR</span>}
+                    {v.origemData==="nome"&&<span style={{color:"#E0A85C",fontWeight:700}} title="A planilha não trouxe a data; ela foi deduzida pelo nome/ano do título"> · data pelo nome</span>}
                   </div>
                 </div>
                 <div style={{textAlign:"right",flexShrink:0}}>
@@ -39282,7 +39553,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '527';
+  var SW_VERSION = '530';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
