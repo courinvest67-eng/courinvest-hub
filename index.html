@@ -5565,6 +5565,7 @@ var REB_CLASSES=[
   {id:"rv",l:"Renda Variável",ic:"📈",cor:"#34D399"},
   {id:"ext",l:"Exterior",ic:"🌎",cor:"#38BDF8"},
   {id:"cx",l:"Caixa / Liquidez",ic:"💵",cor:"#A78BFA"},
+  {id:"prev",l:"Previdência Privada",ic:"🛡️",cor:"#F472B6"},
   {id:"alt",l:"Alternativos",ic:"🧩",cor:"#FBBF24"}
 ];
 var REB_IDX=[
@@ -5576,7 +5577,7 @@ var REB_IDX=[
 var REB_TP_CLASSE={cdb:"rf",lci:"rf",lca:"rf",lc:"rf",cri:"rf",cra:"rf",tesouro:"rf",deb:"rf",debi:"rf",fundo_rf:"rf",fundo_mm:"rf",fundo_camb:"rf",fundo_infra:"rf",coe:"rf",poupanca:"rf",
   acao:"rv",fii:"rv",fiagro:"rv",fip:"rv",etf_br:"rv",bdr:"rv",fundo_acoes:"rv",
   stock_us:"ext",etf_int:"ext",etf_eu:"ext",reit:"ext",bond_intl:"ext",fundo_mm_intl:"ext",
-  caixa:"cx",cripto:"alt",prev:"alt",ouro:"alt"};
+  caixa:"cx",cripto:"alt",prev:"prev",ouro:"alt"};
 /* Tipos dentro de Renda Variável e Exterior (alvo em % da classe) */
 var REB_SUB={
   rv:[{id:"acoes",l:"Ações",cor:"#34D399",dica:"Ações e BDRs"},{id:"fii",l:"Fundos Imobiliários (FIIs)",cor:"#38BDF8",dica:"FIIs de tijolo e papel"},{id:"fiagro",l:"Fiagros",cor:"#FBBF24",dica:"Fiagros listados (ex.: RZAG11)"},{id:"infra",l:"FI-Infra",cor:"#A78BFA",dica:"FI-Infra listados na B3 (ex.: KDIF11)"},{id:"etf",l:"ETFs (BR)",cor:"#F472B6",dica:"ETFs listados na B3"},{id:"fundos",l:"Fundos de ações",cor:"#FB923C",dica:"Fundos de ações e FIPs abertos"},{id:"outros",l:"Outros RV",cor:"#94A3B8",dica:"Demais ativos de renda variável"}],
@@ -5589,6 +5590,8 @@ function rebClasseAtivo(a){
   if(rebEhEtfBr(a))return"rv";
   /* FI-Infra com ticker de bolsa (ex.: KDIF11) é renda variável; cotas de fundo (debêntures incentivadas) seguem em renda fixa */
   if(a&&a.tp==="fundo_infra"&&/^[A-Z]{4}1[1-3]$/.test(String(a.tk||"").trim().toUpperCase()))return"rv";
+  /* fundo de previdência (PGBL/VGBL) cadastrado como fundo comum */
+  if(a&&/^fundo_/.test(String(a.tp||""))&&/\b(PGBL|VGBL)\b|PREVID|\bPREV\b|BRASILPREV/i.test(String(a.nm||"")))return"prev";
   return REB_TP_CLASSE[a.tp]||"rv";
 }
 var REB_TK_FIAGRO="RZAG11 RZTR11 KNCA11 CRAA11 SNAG11 VGIA11 XPCA11 FGAA11 BTAL11 GCRA11 OIAG11 AAGR11 RURA11 VCRA11 DAMA11 NCRA11 ARRI11".split(" ");
@@ -5624,13 +5627,13 @@ function rebAlvoAtivo(pol,a){
   if(a.keyAlt&&typeof pol.ativos[a.keyAlt]==="number")return pol.ativos[a.keyAlt];
   return null;
 }
-/* Destinos possíveis para um ativo-alvo ainda sem posição: "rv:fii", "ext:stocks", "rf:pos", "cx", "alt" */
+/* Destinos possíveis para um ativo-alvo ainda sem posição: "rv:fii", "ext:stocks", "rf:pos", "cx", "prev", "alt" */
 function rebGrupoOpcoes(){
   var o=[];
   REB_SUB.rv.forEach(function(x){o.push({v:"rv:"+x.id,l:"RV › "+x.l})});
   REB_SUB.ext.forEach(function(x){o.push({v:"ext:"+x.id,l:"Exterior › "+x.l})});
   REB_IDX.forEach(function(x){o.push({v:"rf:"+x.id,l:"RF › "+x.c})});
-  o.push({v:"cx",l:"Caixa"});o.push({v:"alt",l:"Alternativos"});
+  o.push({v:"cx",l:"Caixa"});o.push({v:"prev",l:"Previdência Privada"});o.push({v:"alt",l:"Alternativos"});
   return o;
 }
 var REB_MODELOS=[
@@ -5980,7 +5983,7 @@ function rebPlano(c,cart,pol,opts){
   moves.filter(function(m){return m.delta>0}).forEach(function(m){
     var dica=m.nivel==="idx"?(REB_IDX.filter(function(x){return x.id===m.id})[0]||{}).dica:
              m.nivel==="sub"?(rebSubInfo(m.classe,m.id)||{}).dica:
-             m.nivel==="classe"?({rf:"Renda fixa conforme os indexadores-alvo",rv:"Ações, FIIs, ETFs BR e fundos de ações",ext:"ETFs/BDRs/fundos no exterior",cx:"Tesouro Selic, fundo DI ou conta remunerada",alt:"Cripto, ouro, previdência"})[m.id]:
+             m.nivel==="classe"?({rf:"Renda fixa conforme os indexadores-alvo",rv:"Ações, FIIs, ETFs BR e fundos de ações",ext:"ETFs/BDRs/fundos no exterior",cx:"Tesouro Selic, fundo DI ou conta remunerada",prev:"PGBL/VGBL e fundos de previdência",alt:"Cripto, ouro e outros alternativos"})[m.id]:
              (m.novo?"Posição nova (alvo definido, ainda sem posição)":"Reforçar a posição");
     var lab=m.label;
     if(m.resto){lab+=" — demais ativos";dica="Distribuir entre os ativos do grupo sem peso-alvo definido"}
@@ -41727,7 +41730,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '541';
+  var SW_VERSION = '542';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
