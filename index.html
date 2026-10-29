@@ -6100,7 +6100,7 @@ function rebJurosAtivo(a,def){
 function rebJuros(cart,sh){
   sh=sh||{};var nom=+sh.nom||0,real=(sh.real==null?nom:+sh.real)||0,us=+sh.us||0;
   var rows=[],tot={imp:0,dv01:0,valorSens:0,valorDur:0,durPond:0,rfValor:0};
-  var grp={pos:{l:"Pós-fixado / caixa",valor:0,imp:0,dv01:0,durV:0},pre:{l:"Prefixado",valor:0,imp:0,dv01:0,durV:0},real:{l:"Inflação (IPCA+)",valor:0,imp:0,dv01:0,durV:0},us:{l:"Bonds e caixa no exterior",valor:0,imp:0,dv01:0,durV:0}};
+  var grp={pos:{l:"Pós-fixado / caixa",valor:0,imp:0,dv01:0,durV:0},pre:{l:"Prefixado",valor:0,imp:0,dv01:0,durV:0},real:{l:"Inflação (IPCA+)",valor:0,imp:0,dv01:0,durV:0},us:{l:"Bonds e caixa no exterior",valor:0,imp:0,dv01:0,durV:0},fx:{l:"Dólar nos ativos do exterior",valor:0,imp:0,dv01:0,durV:0}};
   var carry=0,cob={estimado:0,modelado:0,naoModelado:0};
   cart.ativos.forEach(function(a){
     if(!(a.valor>0))return;
@@ -6117,10 +6117,16 @@ function rebJuros(cart,sh){
     tot.imp+=imp;tot.dv01+=dv;if(j.tipo!=="pos"&&j.mod>0.3)tot.valorSens+=a.valor;
   });
   rows.sort(function(x,y){return y.dv01-x.dv01});
+  /* Efeito cambial: juros futuros sobem → dólar tende a subir (e vice-versa); ativos do exterior valem mais/menos em reais */
+  var vExt=0;cart.ativos.forEach(function(a){if(a.valor>0&&a.classe==="ext")vExt+=a.valor});
+  var fxBeta=+sh.fxBeta||0,fxPct=fxBeta*nom/100,fxImp=vExt*fxPct/100;
+  tot.impJuros=tot.imp;
+  if(fxBeta>0&&vExt>0){grp.fx.valor=vExt;grp.fx.imp=fxImp;tot.imp+=fxImp}else{fxImp=0;fxPct=0}
+  tot.fxImp=fxImp;tot.fxPct=fxPct;tot.vExt=vExt;
   tot.durMediaRF=cart.rfTotal>0?tot.durPond/cart.rfTotal:0;      /* duration média da renda fixa toda (pós = 0) */
   tot.durMediaSens=tot.valorDur>0?tot.durPond/tot.valorDur:0;     /* só da parte sensível (pré, IPCA+ e fundos) */
   tot.impPct=cart.pat>0?tot.imp/cart.pat*100:0;
-  return{rows:rows,grp:grp,tot:tot,carry12:carry,cob:cob,nom:nom,real:real,us:us};
+  return{rows:rows,grp:grp,tot:tot,carry12:carry,cob:cob,nom:nom,real:real,us:us,fxBeta:fxBeta};
 }
 function rebBRL0(v){return "R$ "+Math.round(+v||0).toLocaleString("pt-BR")}
 function rebPct1(v){return (+v||0).toFixed(1).replace(".",",")+"%"}
@@ -6190,20 +6196,22 @@ function RebJurosPanel({cart}){
   var _c=useState(false);var usOn=_c[0],setUsOn=_c[1];
   var _d=useState(14);var yPre=_d[0],setYPre=_d[1];
   var _e=useState(7.5);var yReal=_e[0],setYReal=_e[1];
+  var _f=useState(true);var fxOn=_f[0],setFxOn=_f[1];
+  var _g=useState(2);var fxBeta=_g[0],setFxBeta=_g[1];
   var BRL=function(v){return rebBRL0(v)};
   var sg=function(v){return (v>=0?"+":"−")+rebBRL0(Math.abs(v))};
   var cor=function(v){return v>0.5?T.green:v<-0.5?T.red:T.t2};
   var f1=function(v){return String(Math.round(v*10)/10).replace(".",",")};
   var f2=function(v){return String(Math.round(v*100)/100).replace(".",",")};
-  var mk=function(bps){return rebJuros(cart,{nom:bps,real:bps*kReal,us:usOn?bps:0,yPre:yPre,yReal:yReal})};
+  var mk=function(bps){return rebJuros(cart,{nom:bps,real:bps*kReal,us:usOn?bps:0,yPre:yPre,yReal:yReal,fxBeta:fxOn?fxBeta:0})};
   var alta=mk(mag),queda=mk(-mag),base=mk(0);
-  var cen=[-300,-200,-100,-50,50,100,200,300].map(function(b){var r=mk(b);return{b:b,imp:r.tot.imp,pct:r.tot.impPct,carry:r.carry12,saldo:r.tot.imp+r.carry12}});
+  var cen=[-300,-200,-100,-50,50,100,200,300].map(function(b){var r=mk(b);return{b:b,imp:r.tot.imp,pct:r.tot.impPct,carry:r.carry12,saldo:r.tot.imp+r.carry12,fx:r.tot.fxImp,semFx:r.tot.impJuros}});
   var mxC=1;cen.forEach(function(x){mxC=Math.max(mxC,Math.abs(x.imp),Math.abs(x.saldo))});
   var th={padding:"7px 10px",textAlign:"left",fontSize:10,color:T.t3,fontWeight:700,letterSpacing:0.4,textTransform:"uppercase"};
   var pctSens=cart.pat>0?base.tot.valorSens/cart.pat*100:0;
   var chip=function(on,l,fn,k){return <button key={k||l} onClick={fn} style={{padding:"6px 12px",borderRadius:10,fontSize:11,fontWeight:700,cursor:"pointer",border:on?"1px solid "+T.gold:"1px solid "+T.bdrL,background:on?"rgba(212,163,40,0.10)":"transparent",color:on?T.gold:T.t2}}>{l}</button>};
   var card=function(titulo,r,ic,sinal){
-    var gg=["pre","real","us"].map(function(k){return r.grp[k]}).filter(function(g){return g.valor>0});
+    var gg=["pre","real","us","fx"].map(function(k){return r.grp[k]}).filter(function(g){return g.valor>0});
     var carryTxt=sinal>0?"rendem "+f2(mag/100)+" p.p. a mais":"rendem "+f2(mag/100)+" p.p. a menos";
     return <Cd hov={false} style={{padding:18,flex:"1 1 320px",minWidth:280,borderTop:"3px solid "+(r.tot.imp>=0?T.green:T.red)}}>
       <div style={{fontSize:13,fontWeight:800,color:T.t1}}>{ic} {titulo}</div>
@@ -6212,6 +6220,7 @@ function RebJurosPanel({cart}){
       <div style={{fontSize:12,color:cor(r.tot.imp),fontWeight:700}}>{(r.tot.impPct>=0?"+":"−")+f2(Math.abs(r.tot.impPct))+"% do patrimônio"}</div>
       <div style={{marginTop:12,paddingTop:10,borderTop:"1px solid "+T.bdrL}}>
         {gg.map(function(g){return <div key={g.l} style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"2px 0"}}><span style={{color:T.t2}}>{g.l}</span><b style={{color:cor(g.imp),fontFamily:"'JetBrains Mono'"}}>{sg(g.imp)}</b></div>})}
+        {r.fxBeta>0&&r.tot.vExt>0&&<div style={{fontSize:10,color:T.t3,lineHeight:1.5,padding:"2px 0"}}>Dólar {sinal>0?"sobe":"cai"} ≈ {f2(Math.abs(r.tot.fxPct))}% neste cenário (premissa: {f2(r.fxBeta)}% a cada 100 bps) · só os juros: {sg(r.tot.impJuros)}</div>}
         <div style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"6px 0 2px",marginTop:4,borderTop:"1px dashed "+T.bdrL}}><span style={{color:T.t2}}>Carrego em 12 meses dos pós-fixados ({BRL(r.grp.pos.valor)})</span><b style={{color:cor(r.carry12),fontFamily:"'JetBrains Mono'"}}>{sg(r.carry12)}</b></div>
         <div style={{fontSize:10,color:T.t3,lineHeight:1.5}}>Se o choque durar 12 meses, os pós-fixados {carryTxt} (bruto de IR).</div>
         <div style={{display:"flex",justifyContent:"space-between",fontSize:12.5,padding:"8px 0 0",marginTop:6,borderTop:"1px solid "+T.bdrL}}><b style={{color:T.t1}}>Saldo estimado em 12 meses</b><b style={{color:cor(r.tot.imp+r.carry12),fontFamily:"'JetBrains Mono'"}}>{sg(r.tot.imp+r.carry12)}</b></div>
@@ -6238,6 +6247,11 @@ function RebJurosPanel({cart}){
         <label style={{fontSize:11,color:T.t2,display:"inline-flex",alignItems:"center",gap:6,cursor:"pointer"}}><input type="checkbox" checked={usOn} onChange={function(e){setUsOn(e.target.checked)}}/> juros dos EUA também se movem (bonds/ETFs no exterior)</label>
         <span style={{fontSize:11,color:T.t3}}>Taxa de referência quando o título não informa: pré <RebNumInput value={yPre} suffix="%" width={50} onCommit={function(v){setYPre(v==null||v<=0?14:v)}}/> · real <RebNumInput value={yReal} suffix="%" width={50} onCommit={function(v){setYReal(v==null||v<=0?7.5:v)}}/></span>
       </div>
+      {base.tot.vExt>0&&<div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center",marginTop:12,paddingTop:10,borderTop:"1px solid "+T.bdrL}}>
+        <label style={{fontSize:11,color:T.t2,display:"inline-flex",alignItems:"center",gap:6,cursor:"pointer"}}><input type="checkbox" checked={fxOn} onChange={function(e){setFxOn(e.target.checked)}}/> 💵 considerar o dólar como proteção ({BRL(base.tot.vExt)} no exterior)</label>
+        {fxOn&&<span style={{fontSize:11,color:T.t2,display:"inline-flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>Dólar varia <RebNumInput value={fxBeta} suffix="%" width={50} onCommit={function(v){setFxBeta(v==null||v<0?2:Math.min(20,v))}}/> a cada 100 bps de juros futuros {[1,2,3,5].map(function(b){return chip(fxBeta===b,b+"%",function(){setFxBeta(b)},"fx"+b)})}</span>}
+        <span style={{fontSize:10.5,color:T.t3,lineHeight:1.5}}>Em geral, juros futuros em alta andam com dólar em alta (e o contrário), então o exterior ameniza a perda — a relação é uma premissa sua, não uma garantia.</span>
+      </div>}
     </Cd>
 
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,marginBottom:14}}>
@@ -6245,6 +6259,7 @@ function RebJurosPanel({cart}){
       <KCard compact label="Duration da parte sensível" valor={f1(base.tot.durMediaSens)+" anos"} cor={T.cyan} sub="pré, IPCA+ e fundos de prazo"/>
       <KCard compact label="Risco por 1 bp" valor={BRL(base.tot.dv01)} cor={T.orange} sub="perda (ou ganho) a cada 0,01 p.p."/>
       <KCard compact label="Patrimônio sensível" valor={f1(pctSens)+"%"} cor={T.purple} sub={BRL(base.tot.valorSens)}/>
+      {fxOn&&fxBeta>0&&base.tot.vExt>0&&<KCard compact label={"Proteção do dólar (juros +"+mag+" bps)"} valor={alta.tot.impJuros<0?f1(Math.min(100,alta.tot.fxImp/Math.abs(alta.tot.impJuros)*100))+"%":"—"} cor={T.green} sub={alta.tot.impJuros<0?"da perda de juros é compensada: "+sg(alta.tot.fxImp)+" de "+sg(alta.tot.impJuros):"juros em alta não geram perda"}/>}
     </div>
 
     <div style={{display:"flex",flexWrap:"wrap",gap:14,marginBottom:14}}>
@@ -6256,13 +6271,14 @@ function RebJurosPanel({cart}){
       <div style={{fontSize:13,fontWeight:800,color:T.t1,marginBottom:2}}>Cenários de choque paralelo</div>
       <div style={{fontSize:11,color:T.t3,marginBottom:8}}>Verde = ganho, vermelho = perda · "saldo 12m" soma o efeito imediato com o carrego dos pós-fixados</div>
       <div style={{overflowX:"auto"}}>
-      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5,minWidth:560}}>
-        <thead><tr><th style={th}>Cenário</th><th style={th}>Efeito imediato</th><th style={{...th,textAlign:"right"}}>R$</th><th style={{...th,textAlign:"right"}}>% patrim.</th><th style={{...th,textAlign:"right"}}>Carrego pós 12m</th><th style={{...th,textAlign:"right"}}>Saldo 12m</th></tr></thead>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11.5,minWidth:620}}>
+        <thead><tr><th style={th}>Cenário</th><th style={th}>Efeito imediato</th><th style={{...th,textAlign:"right"}}>R$</th><th style={{...th,textAlign:"right"}}>% patrim.</th>{fxOn&&base.tot.vExt>0&&fxBeta>0&&<th style={{...th,textAlign:"right"}}>dos quais dólar</th>}<th style={{...th,textAlign:"right"}}>Carrego pós 12m</th><th style={{...th,textAlign:"right"}}>Saldo 12m</th></tr></thead>
         <tbody>{cen.map(function(x){return <tr key={x.b} style={{borderTop:"1px solid "+T.bdrL}}>
           <td style={{padding:"7px 10px",fontWeight:700,color:T.t1,whiteSpace:"nowrap"}}>{x.b>0?"Juros +":"Juros −"}{Math.abs(x.b)} bps</td>
           <td style={{padding:"7px 10px",width:"28%"}}><div style={{position:"relative",height:10,background:"rgba(255,255,255,0.05)",borderRadius:5}}><div style={{position:"absolute",left:"50%",top:-2,bottom:-2,width:1,background:"rgba(255,255,255,0.35)"}}/><div style={{position:"absolute",top:1,bottom:1,borderRadius:4,background:x.imp>=0?T.green:T.red,left:x.imp>=0?"50%":(50-Math.abs(x.imp)/mxC*50)+"%",width:(Math.abs(x.imp)/mxC*50)+"%"}}/></div></td>
           <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:cor(x.imp),fontWeight:700}}>{sg(x.imp)}</td>
           <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:cor(x.imp)}}>{(x.pct>=0?"+":"−")+f2(Math.abs(x.pct))+"%"}</td>
+          {fxOn&&base.tot.vExt>0&&fxBeta>0&&<td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:cor(x.fx)}}>{sg(x.fx)}</td>}
           <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:cor(x.carry)}}>{sg(x.carry)}</td>
           <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:cor(x.saldo),fontWeight:700}}>{sg(x.saldo)}</td>
         </tr>})}</tbody>
@@ -6276,7 +6292,7 @@ function RebJurosPanel({cart}){
         <tbody>{gr.map(function(x){return <tr key={x.k} style={{borderTop:"1px solid "+T.bdrL}}>
           <td style={{padding:"7px 10px",color:T.t1,fontWeight:700}}>{x.g.l}</td>
           <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t2}}>{BRL(x.g.valor)}</td>
-          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t2}}>{x.g.valor>0?f1(x.g.durV/x.g.valor)+" a":"—"}</td>
+          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t2}}>{x.k==="fx"?"—":(x.g.valor>0?f1(x.g.durV/x.g.valor)+" a":"—")}</td>
           <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:x.k==="pos"?T.t3:cor(x.a.imp)}}>{x.k==="pos"?"≈ R$ 0":sg(x.a.imp)}</td>
           <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:x.k==="pos"?T.t3:cor(x.q.imp)}}>{x.k==="pos"?"≈ R$ 0":sg(x.q.imp)}</td>
         </tr>})}</tbody>
@@ -6300,7 +6316,7 @@ function RebJurosPanel({cart}){
     </Cd>
 
     <div style={{fontSize:10.5,color:T.t3,lineHeight:1.65,padding:"4px 6px 10px"}}>
-      <b style={{color:T.t2}}>Premissas.</b> Deslocamento paralelo da curva, calculado por duration modificada e convexidade a partir da taxa e do vencimento de cada título (Tesouro com cupom considera os juros semestrais; crédito estruturado tem a duration reduzida em 20%). Fundos de renda fixa sem vencimento usam duration típica da categoria. Não considera marcação por risco de crédito/spread, imposto, nem o efeito indireto dos juros sobre ações e FIIs (renda variável fora do cálculo). COE fica de fora ({BRL(base.cob.naoModelado)} em RF sem modelo). Estimativa para apoio à conversa com o cliente — não é previsão de juros nem recomendação.
+      <b style={{color:T.t2}}>Premissas.</b> Deslocamento paralelo da curva, calculado por duration modificada e convexidade a partir da taxa e do vencimento de cada título (Tesouro com cupom considera os juros semestrais; crédito estruturado tem a duration reduzida em 20%). Fundos de renda fixa sem vencimento usam duration típica da categoria. Não considera marcação por risco de crédito/spread, imposto, nem o efeito indireto dos juros sobre ações e FIIs (renda variável fora do cálculo). COE fica de fora ({BRL(base.cob.naoModelado)} em RF sem modelo). Proteção cambial (opcional): a cada 100 bps de alta nos juros futuros, o dólar varia pela porcentagem informada na mesma direção, e a posição no exterior (já em reais) ganha ou perde nessa proporção; é uma tendência histórica, não uma regra — em crises de crédito local o efeito pode ser maior, e em outros momentos inexistente. Estimativa para apoio à conversa com o cliente — não é previsão de juros nem recomendação.
     </div>
   </div>;
 }
@@ -41730,7 +41746,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '542';
+  var SW_VERSION = '543';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
