@@ -2878,6 +2878,8 @@ function rd(st,ac){
             else if(falt.length>0)_rcUp[k]=b.concat(falt);
           }
         });
+        /* v537: a política de rebalanceamento (alvos, tolerâncias, histórico) nunca zera numa reimportação */
+        if(_rcOld.rebal&&!_rcNovo.rebal)_rcUp.rebal=_rcOld.rebal;
         _rcNovo=Object.assign({},_rcNovo,_rcUp);
       }
     }
@@ -41283,7 +41285,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '536';
+  var SW_VERSION = '537';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
