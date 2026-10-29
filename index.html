@@ -5667,6 +5667,12 @@ function rebLiquidez(a,dias){
   /* título prestes a vencer deixa de precisar de venda: tratado à parte (venc ≤ 90d) */
   return{s:s,n:s>=0.7?"alta":s>=0.4?"média":"baixa"};
 }
+/* Patrimônio cadastrado do cliente (mesma regra do dashboard: patGorila > pat > soma das posições importadas) */
+function rebPatCadastrado(c){
+  var p=+(c&&(c.patGorila||c.pat))||0;
+  if(!(p>0)&&c&&c._ativosImport&&c._ativosImport.length>0)p=c._ativosImport.reduce(function(s,at){return s+(+at.posR||(+at.qtd*+at.pa)||0)},0);
+  return p>0?p:0;
+}
 /* Foto da carteira: pesos por classe, indexador e ativo. */
 function rebCarteira(c){
   var ai=(c&&c._ativosImport)||[];
@@ -5769,12 +5775,53 @@ function rebMaxDesvio(rows){
   ["classes","idx","sub","ativos"].forEach(function(k){(rows[k]||[]).forEach(function(r){var d=Math.abs(r.desvio);if(r.status==="fora")qtdFora++;else if(r.status==="atencao")qtdAt++;if(d>m)m=d})});
   return{max:m,fora:qtdFora,atencao:qtdAt};
 }
+/* Sugere em quais ativos JÁ EXISTENTES do grupo aplicar uma compra (m = movimento de compra de classe/indexador/tipo).
+   Prioriza os de menor peso no grupo (equaliza por "água"), só com liquidez razoável (exclui CDB/CRI/COE etc. de prazo fixo)
+   e ignora quem já tem peso-alvo próprio (esses têm movimento próprio). */
+function rebSugerirAtivos(cart,pol,m,alvoDe,legado){
+  var out={itens:[],nota:""};
+  var noGrupo=cart.ativos.filter(function(a){
+    if(!(a.valor>0)||a.novo)return false;
+    if(m.gid)return rebGid(a,pol)===m.gid;
+    if(m.nivel==="idx")return a.idx===m.id;
+    if(m.nivel==="sub")return a.classe===m.classe&&a.sub===m.id;
+    return a.classe===m.id;
+  });
+  if(!noGrupo.length){out.nota="Nenhum ativo seu neste grupo — escolha um novo ativo.";return out}
+  var gTot=noGrupo.reduce(function(s,a){return s+a.valor},0);
+  var cands=noGrupo.filter(function(a){return alvoDe[a.key]==null&&a.liqS>=0.4&&!/provision/i.test(a.nm||"")});
+  if(!cands.length){out.nota="Os ativos deste grupo são títulos de prazo fixo (sem aporte adicional) — aplique em um novo título ou fundo.";return out}
+  cands.sort(function(x,y){return x.valor-y.valor});
+  var B=m.delta,minT=Math.min(Math.max(pol.minMov||0,500),B);
+  var fill=function(k){
+    var set=cands.slice(0,k),n=set.length,soma=0,i;
+    for(i=0;i<n;i++){
+      soma+=set[i].valor;
+      var lvl=(B+soma)/(i+1);
+      if(i===n-1||lvl<=set[i+1].valor){
+        return set.slice(0,i+1).map(function(a){return{a:a,v:lvl-a.valor}});
+      }
+    }
+    return[];
+  };
+  var k=cands.length,res=fill(k);
+  while(k>1&&res.some(function(r){return r.v<minT})){k--;res=fill(k)}
+  if(!res.length){res=[{a:cands[0],v:B}]}
+  var soma2=res.reduce(function(s,r){return s+r.v},0);
+  res.forEach(function(r){r.v=r.v*B/soma2});
+  res.sort(function(x,y){return y.v-x.v});
+  out.itens=res.map(function(r){
+    return{key:r.a.key,nm:r.a.nm,inst:r.a.inst,tp:r.a.tp,valor:r.v,atualPct:gTot>0?r.a.valor/gTot*100:0,aposPct:(gTot+B)>0?(r.a.valor+r.v)/(gTot+B)*100:0,atual:r.a.valor};
+  });
+  out.nota="Distribuição igualando o peso dos ativos do grupo (defina pesos-alvo por ativo na aba Política para personalizar).";
+  return out;
+}
 /* Plano: o que vender/comprar. opts={aporte:R$ (+ aporta, − resgata), modo:"completo"|"so_aporte"} */
 function rebPlano(c,cart,pol,opts){
   opts=opts||{};
   var aporte=+opts.aporte||0,modo=opts.modo==="so_aporte"?"so_aporte":"completo";
   var PAT=cart.pat||0,PATn=Math.max(0,PAT+aporte);
-  var plano={aporte:aporte,modo:modo,patNovo:PATn,nivel:null,moves:[],vendas:[],compras:[],sobra:0,totalVender:0,totalComprar:0,irEstimado:0,avisos:[],depoisClasse:{},depoisIdx:{},depoisSub:{rv:{},ext:{}},depoisAtivo:{},vencProx:{}};
+  var plano={aporte:aporte,modo:modo,patNovo:PATn,nivel:null,moves:[],vendas:[],compras:[],sobra:0,totalVender:0,totalComprar:0,irEstimado:0,avisos:[],depoisClasse:{},depoisIdx:{},depoisSub:{rv:{},ext:{}},depoisAtivo:{},vencProx:{},abaixo:[]};
   if(!(PAT>0))return plano;
   var te=rebTemAlvo(pol);
   var moves=[];
@@ -5925,8 +5972,19 @@ function rebPlano(c,cart,pol,opts){
              (m.novo?"Posição nova (alvo definido, ainda sem posição)":"Reforçar a posição");
     var lab=m.label;
     if(m.resto){lab+=" — demais ativos";dica="Distribuir entre os ativos do grupo sem peso-alvo definido"}
-    plano.compras.push({label:lab,nivel:m.nivel,valor:m.delta,inst:m.inst||"",dica:dica||""});
+    var lista=m.nivel==="ativo"?[]:rebSugerirAtivos(cart,pol,m,alvoDe,legado);
+    plano.compras.push({label:lab,nivel:m.nivel,valor:m.delta,inst:m.inst||"",dica:dica||"",lista:lista.itens,listaNota:lista.nota,ativoKey:m.nivel==="ativo"?m.id:null});
   });
+  /* Ativos com peso-alvo definido que estão abaixo dele (com ou sem compra no plano) */
+  var gcur2={};cart.ativos.forEach(function(a){var g=rebGid(a,pol);gcur2[g]=(gcur2[g]||0)+a.valor});
+  var compraAtv={};moves.forEach(function(m){if(m.nivel==="ativo"&&m.delta>0)compraAtv[m.id]=(compraAtv[m.id]||0)+m.delta});
+  cart.ativos.forEach(function(a){
+    var al=alvoDe[a.key];if(al==null)return;
+    var gid=rebGid(a,pol),bs=pol.ativoBase==="pat"?cart.pat:(gcur2[gid]||0);
+    var atual=bs>0?a.valor/bs*100:0,falta=al/100*bs-a.valor;
+    if((al-atual>(pol.tolAtivo||0)&&falta>=1)||compraAtv[a.key]>0)plano.abaixo.push({key:a.key,nm:a.nm,inst:a.inst,tp:a.tp,novo:!!a.novo,valor:a.valor,atualPct:atual,alvoPct:al,falta:Math.max(0,falta),compra:compraAtv[a.key]||0,grupo:pol.ativoBase==="pat"?"patrimônio":rebGidLabel(gid),gid:gid});
+  });
+  plano.abaixo.sort(function(x,y){return y.falta-x.falta});
   /* Vencimentos próximos (≤ 90 dias) por bucket: financiam compras sem venda */
   cart.ativos.forEach(function(a){
     if(a.dias!=null&&a.dias>=0&&a.dias<=90&&a.classe==="rf"){
@@ -6252,8 +6310,11 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
 
   /* ---------- visão geral (todos os clientes com carteira) ---------- */
   var linhas=React.useMemo(function(){
-    return (d.cl||[]).filter(function(c){return (c.status||"ativo")==="ativo"&&c._ativosImport&&c._ativosImport.length>0}).map(function(c){
-      var cart=rebCarteira(c);if(!(cart.pat>0))return null;
+    return (d.cl||[]).filter(function(c){return c.status!=="encerrado"&&c.status!=="inativo"}).map(function(c){
+      var cart=rebCarteira(c);
+      /* inclui TODO cliente com patrimônio: com posições importadas → análise completa; só com patrimônio cadastrado → entra "sem carteira detalhada" */
+      var patDecl=rebPatCadastrado(c),semCart=!(cart.pat>0);
+      if(semCart&&!(patDecl>0))return null;
       var pol=rebPolitica(c),te=rebTemAlvo(pol);
       var rows=rebDesvios(cart,pol),dv=rebMaxDesvio(rows);
       var temPol=(te.classes+te.idx+te.sub+te.ativos)>0;
@@ -6264,7 +6325,7 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
         if(!ult)vencida=true;
         else{var dt=new Date(ult+"T12:00:00");dt.setMonth(dt.getMonth()+pol.freqMeses);vencida=dt<hoje}
       }
-      return{c:c,cart:cart,pol:pol,te:te,rows:rows,dv:dv,temPol:temPol,plano:plano,ult:ult,vencida:vencida};
+      return{c:c,cart:cart,pol:pol,te:te,rows:rows,dv:dv,temPol:temPol,plano:plano,ult:ult,vencida:vencida,semCart:semCart,patExib:semCart?patDecl:cart.pat};
     }).filter(Boolean);
   },[d.cl]);
   var kpi=React.useMemo(function(){
@@ -6272,7 +6333,7 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
     var fora=com.filter(function(l){return l.dv.fora>0});
     return{total:linhas.length,com:com.length,sem:linhas.length-com.length,fora:fora.length,
       mov:fora.reduce(function(s,l){return s+(l.plano?l.plano.totalVender:0)},0),
-      aum:linhas.reduce(function(s,l){return s+l.cart.pat},0),
+      aum:linhas.reduce(function(s,l){return s+l.patExib},0),semCart:linhas.filter(function(l){return l.semCart}).length,
       venc:com.filter(function(l){return l.vencida}).length};
   },[linhas]);
 
@@ -6281,6 +6342,7 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
     if(filtro==="fora")return l.temPol&&l.dv.fora>0;
     if(filtro==="ok")return l.temPol&&l.dv.fora===0;
     if(filtro==="sem")return !l.temPol;
+    if(filtro==="semcart")return l.semCart;
     if(filtro==="venc")return l.temPol&&l.vencida;
     return true;
   }).sort(function(a,b){
@@ -6318,6 +6380,7 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
 
     /* --- Diagnóstico --- */
     var diag=function(){
+      if(L.semCart)return <Cd hov={false} style={{padding:24,textAlign:"center",color:T.t3,fontSize:12,lineHeight:1.6}}><div style={{fontSize:28}}>📥</div>Sem carteira detalhada importada — importe as posições (Gorila ou Relatório Consolidado) para ver o diagnóstico. A política definida fica salva.</Cd>;
       var secao=function(titulo,sub,lista,vazio,mostrarSemAlvo){
         var mx=10;lista.forEach(function(r){mx=Math.max(mx,r.atual,r.alvo+r.tol)});mx=mx*1.08;
         return <Cd hov={false} style={{padding:18,marginBottom:14}}>
@@ -6551,7 +6614,8 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
       var t="⚖️ Rebalanceamento — "+c.nome+" ("+new Date().toLocaleDateString("pt-BR")+")\n";
       t+="Patrimônio: "+BRL(cart.pat)+(aporte?(" · "+(aporte>0?"aporte":"resgate")+" de "+BRL(Math.abs(aporte))):"")+"\n\n";
       if(plano.vendas.length){t+="VENDER / RESGATAR:\n";plano.vendas.forEach(function(v){t+="• "+v.nm+" ("+v.inst+") — "+BRL(v.valor)+(v.parcial?" (parcial)":"")+"\n"})}
-      if(plano.compras.length){t+="\nAPLICAR:\n";plano.compras.forEach(function(v){t+="• "+v.label+" — "+BRL(v.valor)+(v.dica?" ("+v.dica+")":"")+"\n"})}
+      if(plano.compras.length){t+="\nAPLICAR:\n";plano.compras.forEach(function(v){t+="• "+v.label+" — "+BRL(v.valor)+(v.dica?" ("+v.dica+")":"")+"\n";(v.lista||[]).forEach(function(it){t+="    ◦ "+it.nm+(it.inst&&it.inst!=="—"?" ("+it.inst+")":"")+" — "+BRL(it.valor)+"\n"})})}
+      if(plano.abaixo&&plano.abaixo.length){t+="\nATIVOS ABAIXO DO PESO-ALVO:\n";plano.abaixo.forEach(function(r){t+="• "+r.nm+" — hoje "+rebPct1(r.atualPct)+" · alvo "+rebPct1(r.alvoPct)+" · falta "+BRL(r.falta)+"\n"})}
       if(!plano.vendas.length&&!plano.compras.length)t+="Carteira dentro da política — nada a fazer.\n";
       if(plano.irEstimado>0)t+="\nIR estimado nas vendas: ~"+BRL(plano.irEstimado)+" (estimativa).\n";
       return t;
@@ -6566,7 +6630,7 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
       try{
         var rowsX=[];
         plano.vendas.forEach(function(v){rowsX.push({Ação:"Vender/Resgatar",Item:v.nm,Custodiante:v.inst,Valor:Math.round(v.valor*100)/100,"Parcial?":v.parcial?"sim":"não",Liquidez:v.liq,"IR estimado":Math.round(v.ir*100)/100,Motivo:v.motivo})});
-        plano.compras.forEach(function(v){rowsX.push({Ação:"Aplicar",Item:v.label,Custodiante:v.inst||"",Valor:Math.round(v.valor*100)/100,"Parcial?":"",Liquidez:"","IR estimado":"",Motivo:v.dica})});
+        plano.compras.forEach(function(v){rowsX.push({Ação:"Aplicar",Item:v.label,Custodiante:v.inst||"",Valor:Math.round(v.valor*100)/100,"Parcial?":"",Liquidez:"","IR estimado":"",Motivo:v.dica});(v.lista||[]).forEach(function(it){rowsX.push({Ação:"  ↳ Aplicar no ativo",Item:it.nm,Custodiante:it.inst||"",Valor:Math.round(it.valor*100)/100,"Parcial?":"",Liquidez:"","IR estimado":"",Motivo:"hoje "+rebPct1(it.atualPct)+" → "+rebPct1(it.aposPct)+" do grupo"})})});
         if(!rowsX.length){flash("Nada a exportar — carteira dentro da política");return}
         var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rowsX),"Rebalanceamento");
         XLSX.writeFile(wb,"rebalanceamento_"+c.nome.replace(/[^\w]+/g,"_")+"_"+new Date().toISOString().split("T")[0]+".xlsx");
@@ -6582,6 +6646,7 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
       setNotaReg("");flash("✅ Rebalanceamento registrado no histórico (e nas interações do cliente)");
     };
     var plan=function(){
+      if(L.semCart)return <Cd hov={false} style={{padding:24,textAlign:"center",color:T.t3,fontSize:12,lineHeight:1.6}}><div style={{fontSize:28}}>📥</div>Sem carteira detalhada importada — importe as posições (Gorila ou Relatório Consolidado) para ver o plano. A política definida fica salva.</Cd>;
       var te=L.te;
       var semAlvo=(te.classes+te.idx+te.sub+te.ativos)===0;
       var nivelTxt=(te.ativos>0&&pol.ativoBase==="pat")?"por ativo (% do patrimônio)":[te.classes>0?"classe":null,te.idx>0?"indexador":null,te.sub>0?"tipo":null,te.ativos>0?"ativo":null].filter(Boolean).join(" + ");
@@ -6620,6 +6685,19 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
             <KCard compact label="IR estimado" valor={BRL(plano.irEstimado)} cor={T.orange} sub="estimativa nas vendas"/>
           </div>
           {plano.avisos.length>0&&<div style={{fontSize:11,color:T.t2,lineHeight:1.6,padding:"10px 12px",borderRadius:10,border:"1px solid rgba(224,168,92,0.35)",background:"rgba(224,168,92,0.07)",marginBottom:14}}>{plano.avisos.map(function(a,i){return <div key={i}>• {a}</div>})}</div>}
+          {plano.abaixo&&plano.abaixo.length>0&&<Cd hov={false} style={{padding:16,marginBottom:14}}>
+            <div style={{fontSize:13,fontWeight:800,color:T.cyan,marginBottom:2}}>🎯 Ativos abaixo do peso-alvo</div>
+            <div style={{fontSize:10.5,color:T.t3,marginBottom:8}}>Ativos da carteira com peso-alvo definido que estão abaixo dele — candidatos a receber aporte.</div>
+            <div style={{overflowX:"auto"}}><table style={{width:"100%",minWidth:520,borderCollapse:"collapse",fontSize:11.5}}>
+              <thead><tr><th style={{textAlign:"left",padding:"4px 8px",fontSize:10,color:T.t3}}>Ativo</th><th style={{textAlign:"right",padding:"4px 8px",fontSize:10,color:T.t3}}>Hoje</th><th style={{textAlign:"right",padding:"4px 8px",fontSize:10,color:T.t3}}>Alvo</th><th style={{textAlign:"right",padding:"4px 8px",fontSize:10,color:T.t3}}>Falta (R$)</th><th style={{textAlign:"right",padding:"4px 8px",fontSize:10,color:T.t3}}>Compra no plano</th></tr></thead>
+              <tbody>{plano.abaixo.map(function(r){return <tr key={r.key} style={{borderTop:"1px solid "+T.bdrL}}>
+                <td style={{padding:"6px 8px",color:T.t1}}>{r.nm}{r.inst&&r.inst!=="—"?<span style={{color:T.t3}}> · {r.inst}</span>:null}{r.novo?<span style={{color:T.cyan,fontSize:10}}> · nova posição</span>:null}<div style={{fontSize:10,color:T.t3}}>% do {r.grupo}</div></td>
+                <td style={{padding:"6px 8px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t2}}>{rebPct1(r.atualPct)}</td>
+                <td style={{padding:"6px 8px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.gold}}>{rebPct1(r.alvoPct)}</td>
+                <td style={{padding:"6px 8px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.orange}}>{BRL(r.falta)}</td>
+                <td style={{padding:"6px 8px",textAlign:"right",fontFamily:"'JetBrains Mono'",color:r.compra>0?T.green:T.t3}}>{r.compra>0?BRL(r.compra):"—"}</td></tr>})}</tbody>
+            </table></div>
+          </Cd>}
           {plano.moves.length===0?<Cd hov={false} style={{padding:24,textAlign:"center"}}><div style={{fontSize:30}}>✅</div><div style={{fontSize:13,fontWeight:700,color:T.green,marginTop:6}}>Carteira dentro da política</div><div style={{fontSize:11,color:T.t3,marginTop:4}}>Nenhum movimento necessário agora.</div></Cd>:<div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(340px,1fr))",gap:14,marginBottom:14}}>
               <Cd hov={false} style={{padding:16}}>
@@ -6642,6 +6720,14 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
                     <div key={i} style={{padding:"8px 0",borderTop:i?"1px solid "+T.bdrL:"none"}}>
                       <div style={{display:"flex",justifyContent:"space-between",gap:8}}><span style={{fontSize:12,fontWeight:700,color:T.t1}}>{v.label}</span><span style={{fontSize:12,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'",whiteSpace:"nowrap"}}>{BRL(v.valor)}</span></div>
                       {v.dica&&<div style={{fontSize:10,color:T.t3,marginTop:2}}>{v.dica}</div>}
+                      {v.lista&&v.lista.length>0&&<div style={{marginTop:6,padding:"6px 10px",borderRadius:8,background:"rgba(52,211,153,0.06)",border:"1px solid rgba(52,211,153,0.18)"}}>
+                        <div style={{fontSize:9.5,fontWeight:800,letterSpacing:0.5,color:T.green,marginBottom:3}}>COMPRAR NOS ATIVOS QUE VOCÊ JÁ TEM</div>
+                        {v.lista.slice(0,6).map(function(it){return <div key={it.key} style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:11,padding:"2px 0"}}>
+                          <span style={{color:T.t1,minWidth:0,wordBreak:"break-word"}}>{it.nm}{it.inst&&it.inst!=="—"?<span style={{color:T.t3}}> · {it.inst}</span>:null}<span style={{color:T.t3,fontSize:10}}> · hoje {rebPct1(it.atualPct)} → {rebPct1(it.aposPct)} do grupo</span></span>
+                          <b style={{color:T.green,fontFamily:"'JetBrains Mono'",whiteSpace:"nowrap"}}>{BRL(it.valor)}</b></div>})}
+                        {v.lista.length>6&&<div style={{fontSize:10,color:T.t3}}>+ {v.lista.length-6} outro(s) ativo(s) — {BRL(v.lista.slice(6).reduce(function(t,x){return t+x.valor},0))}</div>}
+                      </div>}
+                      {v.listaNota&&(!v.lista||v.lista.length===0)&&v.nivel!=="ativo"&&<div style={{fontSize:10,color:T.orange,marginTop:3}}>{v.listaNota}</div>}
                     </div>)})}
                 </div>}
                 {plano.vencProxTotal>0&&<div style={{fontSize:10.5,color:T.cyan,marginTop:10,lineHeight:1.5}}>⏰ {BRL(plano.vencProxTotal)} de renda fixa vencem nos próximos 90 dias — dá para usar esse dinheiro nas compras sem vender nada.</div>}
@@ -6695,10 +6781,11 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
       <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
           <Bt v="secondary" onClick={function(){setSelId(null);setAba("diag")}} style={{fontSize:12,padding:"8px 14px"}}>← Voltar</Bt>
-          <div><div style={{fontSize:18,fontWeight:800,color:T.t1}}>{c.nome}</div><div style={{fontSize:11,color:T.t3}}>Patrimônio {BRL(cart.pat)} · {cart.ativos.length} ativos · última revisão {L.ult?fD(L.ult):"nunca"}{L.vencida?" · ⚠ revisão atrasada":""}</div></div>
+          <div><div style={{fontSize:18,fontWeight:800,color:T.t1}}>{c.nome}</div><div style={{fontSize:11,color:T.t3}}>Patrimônio {BRL(L.patExib)} · {L.semCart?"sem carteira detalhada":cart.ativos.length+" ativos"} · última revisão {L.ult?fD(L.ult):"nunca"}{L.vencida?" · ⚠ revisão atrasada":""}</div></div>
         </div>
         <Bt v="ghost" onClick={function(){onGoClient&&onGoClient(c)}} style={{fontSize:11}}>Abrir ficha do cliente →</Bt>
       </div>
+      {L.semCart&&<div style={{padding:"11px 14px",borderRadius:10,background:"rgba(251,146,60,0.10)",border:"1px solid rgba(251,146,60,0.35)",color:T.orange,fontSize:12,lineHeight:1.6,marginBottom:12}}>⚠ Este cliente tem {BRL(L.patExib)} de patrimônio cadastrado, mas ainda sem posições importadas. Você já pode definir a política (alvos) na aba Política; o diagnóstico e o plano aparecem assim que a carteira for importada (Gorila ou Relatório Consolidado) — a política fica salva.</div>}
       {msg&&<div style={{padding:"9px 14px",borderRadius:10,background:"rgba(212,163,40,0.10)",border:"1px solid rgba(212,163,40,0.3)",color:T.gold,fontSize:12,fontWeight:600,marginBottom:12}}>{msg}</div>}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
         {tabBtn("diag","📊 Diagnóstico")}{tabBtn("politica","🎯 Política (alvos)")}{tabBtn("plano","⚖️ Plano de rebalanceamento")}{tabBtn("juros","📉 Juros")}{tabBtn("hist","🕘 Histórico ("+pol.hist.length+")")}
@@ -6716,16 +6803,16 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
       <div style={{fontSize:12,color:T.t3,marginTop:4,lineHeight:1.6}}>Defina o peso-alvo por classe, indexador (pós × pré × IPCA) e ativo. O Hub acompanha o desvio de cada carteira e sugere o que vender e onde aplicar — incluindo o caminho "só com aporte".</div>
     </div>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,marginBottom:16}}>
-      <KCard compact label="Carteiras monitoradas" valor={String(kpi.com)} cor={T.gold} sub={kpi.sem+" ainda sem política"}/>
+      <KCard compact label="Carteiras monitoradas" valor={String(kpi.com)} cor={T.gold} sub={kpi.sem+" ainda sem política"+(kpi.semCart>0?" · "+kpi.semCart+" sem carteira detalhada":"")}/>
       <KCard compact label="Fora da faixa" valor={String(kpi.fora)} cor={kpi.fora>0?T.red:T.green} sub={kpi.fora>0?"pedem ação":"tudo em ordem"}/>
       <KCard compact label="A movimentar" valor={BRL(kpi.mov)} cor={T.orange} sub="vendas das carteiras fora"/>
       <KCard compact label="Revisões atrasadas" valor={String(kpi.venc)} cor={kpi.venc>0?T.orange:T.green} sub="sem rebalancear no prazo"/>
     </div>
     <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center",marginBottom:14}}>
       <input value={busca} onChange={function(e){setBusca(e.target.value)}} placeholder="Buscar cliente…" style={{...inpS,flex:1,minWidth:180,borderRadius:14}}/>
-      {chipF("todos","Todos",linhas.length)}{chipF("fora","Fora da faixa",kpi.fora)}{chipF("ok","Dentro da política",kpi.com-kpi.fora)}{chipF("venc","Revisão atrasada",kpi.venc)}{chipF("sem","Sem política",kpi.sem)}
+      {chipF("todos","Todos",linhas.length)}{chipF("fora","Fora da faixa",kpi.fora)}{chipF("ok","Dentro da política",kpi.com-kpi.fora)}{chipF("venc","Revisão atrasada",kpi.venc)}{chipF("sem","Sem política",kpi.sem)}{kpi.semCart>0&&chipF("semcart","Sem carteira detalhada",kpi.semCart)}
     </div>
-    {lista.length===0?<Cd hov={false} style={{padding:30,textAlign:"center",color:T.t3,fontSize:13}}>{linhas.length===0?"Nenhum cliente com carteira importada ainda. Importe a carteira (Gorila ou Relatório Consolidado) para usar o rebalanceamento.":"Nenhum cliente neste filtro."}</Cd>:
+    {lista.length===0?<Cd hov={false} style={{padding:30,textAlign:"center",color:T.t3,fontSize:13}}>{linhas.length===0?"Nenhum cliente com patrimônio cadastrado ainda. Cadastre o patrimônio ou importe a carteira (Gorila ou Relatório Consolidado) para usar o rebalanceamento.":"Nenhum cliente neste filtro."}</Cd>:
     <div style={{display:"flex",flexDirection:"column",gap:10}}>
       {lista.map(function(l){
         var st=!l.temPol?null:(l.dv.fora>0?REB_ST.fora:(l.dv.atencao>0?REB_ST.atencao:REB_ST.ok));
@@ -6733,13 +6820,14 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
           <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:14,justifyContent:"space-between"}}>
             <div style={{minWidth:190,flex:"1 1 190px"}}>
               <div style={{fontSize:14,fontWeight:800,color:T.t1}}>{l.c.nome}</div>
-              <div style={{fontSize:11,color:T.t3}}>{BRL(l.cart.pat)} · {l.cart.ativos.length} ativos{l.ult?" · revisado em "+fD(l.ult):""}{l.vencida?" · ⚠ atrasada":""}</div>
+              <div style={{fontSize:11,color:T.t3}}>{BRL(l.patExib)} · {l.semCart?"sem carteira detalhada":l.cart.ativos.length+" ativos"}{l.ult?" · revisado em "+fD(l.ult):""}{l.vencida?" · ⚠ atrasada":""}</div>
             </div>
             <div style={{flex:"2 1 260px",minWidth:220}}>
+              {l.semCart?<div style={{fontSize:11,color:T.orange,lineHeight:1.5}}>⚠ Patrimônio cadastrado, mas sem posições importadas — importe a carteira (Gorila ou Relatório Consolidado) para o Hub calcular desvios e o plano.</div>:<div>
               <div style={{display:"flex",height:12,borderRadius:6,overflow:"hidden",background:"rgba(255,255,255,0.04)"}}>
                 {REB_CLASSES.map(function(x){var v=l.cart.classe[x.id]||0;if(!(v>0))return null;return <div key={x.id} title={x.l+" "+rebPct1(v/l.cart.pat*100)} style={{width:(v/l.cart.pat*100)+"%",background:x.cor,opacity:0.85}}/>})}
               </div>
-              <div style={{fontSize:10,color:T.t3,marginTop:4}}>{REB_CLASSES.map(function(x){var v=l.cart.classe[x.id]||0;return v>0?x.l.split(" ")[0]+" "+Math.round(v/l.cart.pat*100)+"%":null}).filter(Boolean).join(" · ")}</div>
+              <div style={{fontSize:10,color:T.t3,marginTop:4}}>{REB_CLASSES.map(function(x){var v=l.cart.classe[x.id]||0;return v>0?(x.id==="rf"?"Renda Fixa":x.id==="rv"?"Renda Variável":x.l.split(" ")[0])+" "+Math.round(v/l.cart.pat*100)+"%":null}).filter(Boolean).join(" · ")}</div></div>}
             </div>
             <div style={{textAlign:"right",minWidth:150}}>
               {l.temPol?<div>
@@ -41285,7 +41373,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '537';
+  var SW_VERSION = '538';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
