@@ -5674,8 +5674,19 @@ function rebPatCadastrado(c){
   return p>0?p:0;
 }
 /* Foto da carteira: pesos por classe, indexador e ativo. */
-function rebCarteira(c){
-  var ai=(c&&c._ativosImport)||[];
+function rebTemConjuge(c){return !!(c&&c.conjuge&&c.conjuge._ativosImport&&c.conjuge._ativosImport.length>0)}
+/* Ativos de um escopo: "titular", "conjuge" ou "casal" (os dois juntos; os do cônjuge levam _dono:"C" e chave própria) */
+function rebAtivosEscopo(c,esc){
+  var t=(c&&c._ativosImport)||[],cj=(c&&c.conjuge&&c.conjuge._ativosImport)||[];
+  var nomeC=String((c&&c.conjuge&&c.conjuge.nome)||"Cônjuge").split(" ")[0];
+  var marca=function(a){return Object.assign({},a,{_dono:"C",_donoNome:nomeC})};
+  if(esc==="conjuge")return cj.map(marca);
+  if(esc==="casal")return t.concat(cj.map(marca));
+  return t;
+}
+function rebCarteira(c,esc){
+  esc=esc||(rebTemConjuge(c)?"casal":"titular");
+  var ai=rebAtivosEscopo(c,esc);
   var out={pat:0,ativos:[],classe:{},idx:{},sub:{rv:{},ext:{}},rfTotal:0,nIgnorados:0,idxEstimado:0};
   REB_CLASSES.forEach(function(x){out.classe[x.id]=0});
   REB_IDX.forEach(function(x){out.idx[x.id]=0});
@@ -5694,7 +5705,8 @@ function rebCarteira(c){
     var dias=null;if(rv&&rv.iso){dias=Math.ceil((new Date(rv.iso+"T12:00:00")-hoje)/86400000)}
     var pm=(+a.qtd>0&&+a.pm>0)?(+a.qtd)*(+a.pm):0;
     var liq=rebLiquidez(a,dias);
-    var it={key:chaveVencAtivo(a),keyAlt:(String(a.tk||"").trim()?String(a.tk).trim().toUpperCase()+"|":chaveVencAtivo(a)),nm:a.nm||a.tk||"Ativo",tk:a.tk,tp:a.tp,inst:a.inst||"—",classe:cl,idx:ix?ix.id:null,idxEst:ix?ix.est:false,sub:sb,valor:v,
+    var sufC=a._dono==="C"?"#C":"";
+    var it={key:chaveVencAtivo(a)+sufC,keyAlt:(String(a.tk||"").trim()?String(a.tk).trim().toUpperCase()+"|":chaveVencAtivo(a))+sufC,nm:(a.nm||a.tk||"Ativo")+(esc==="casal"&&a._dono==="C"?" ("+a._donoNome+")":""),dono:a._dono||"T",tk:a.tk,tp:a.tp,inst:a.inst||"—",classe:cl,idx:ix?ix.id:null,idxEst:ix?ix.est:false,sub:sb,valor:v,
       pm:pm,ganho:pm>0?v-pm:null,dias:dias,vencIso:rv?rv.iso:null,liq:liq.n,liqS:liq.s,semRent:!!a._semRentabilidade,gSub:a._gSubCl};
     out.ativos.push(it);
     out.pat+=v;out.classe[cl]+=v;
@@ -6309,11 +6321,14 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
   var hoje=new Date();hoje.setHours(0,0,0,0);
 
   /* ---------- visão geral (todos os clientes com carteira) ---------- */
+  var _esc=useState({});var escMap=_esc[0],setEscMap=_esc[1];
+  var escDe=function(c){return escMap[c.id]||(rebTemConjuge(c)?"casal":"titular")};
   var linhas=React.useMemo(function(){
     return (d.cl||[]).filter(function(c){return c.status!=="encerrado"&&c.status!=="inativo"}).map(function(c){
-      var cart=rebCarteira(c);
+      var esc=escMap[c.id]||(rebTemConjuge(c)?"casal":"titular");
+      var cart=rebCarteira(c,esc);
       /* inclui TODO cliente com patrimônio: com posições importadas → análise completa; só com patrimônio cadastrado → entra "sem carteira detalhada" */
-      var patDecl=rebPatCadastrado(c),semCart=!(cart.pat>0);
+      var patDecl=rebPatCadastrado(c)+((c.conjuge&&+c.conjuge.patGorila>0&&esc==="casal"&&!rebTemConjuge(c))?+c.conjuge.patGorila:0),semCart=!(cart.pat>0);
       if(semCart&&!(patDecl>0))return null;
       var pol=rebPolitica(c),te=rebTemAlvo(pol);
       var rows=rebDesvios(cart,pol),dv=rebMaxDesvio(rows);
@@ -6325,9 +6340,9 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
         if(!ult)vencida=true;
         else{var dt=new Date(ult+"T12:00:00");dt.setMonth(dt.getMonth()+pol.freqMeses);vencida=dt<hoje}
       }
-      return{c:c,cart:cart,pol:pol,te:te,rows:rows,dv:dv,temPol:temPol,plano:plano,ult:ult,vencida:vencida,semCart:semCart,patExib:semCart?patDecl:cart.pat};
+      return{c:c,cart:cart,pol:pol,te:te,rows:rows,dv:dv,temPol:temPol,plano:plano,ult:ult,vencida:vencida,semCart:semCart,patExib:semCart?patDecl:cart.pat,esc:esc,temConj:rebTemConjuge(c)};
     }).filter(Boolean);
-  },[d.cl]);
+  },[d.cl,escMap]);
   var kpi=React.useMemo(function(){
     var com=linhas.filter(function(l){return l.temPol});
     var fora=com.filter(function(l){return l.dv.fora>0});
@@ -6781,10 +6796,15 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
       <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
           <Bt v="secondary" onClick={function(){setSelId(null);setAba("diag")}} style={{fontSize:12,padding:"8px 14px"}}>← Voltar</Bt>
-          <div><div style={{fontSize:18,fontWeight:800,color:T.t1}}>{c.nome}</div><div style={{fontSize:11,color:T.t3}}>Patrimônio {BRL(L.patExib)} · {L.semCart?"sem carteira detalhada":cart.ativos.length+" ativos"} · última revisão {L.ult?fD(L.ult):"nunca"}{L.vencida?" · ⚠ revisão atrasada":""}</div></div>
+          <div><div style={{fontSize:18,fontWeight:800,color:T.t1}}>{c.nome}</div><div style={{fontSize:11,color:T.t3}}>Patrimônio {BRL(L.patExib)} · {L.semCart?"sem carteira detalhada":cart.ativos.length+" ativos"}{L.temConj?(L.esc==="casal"?" · 👫 casal":""):""} · última revisão {L.ult?fD(L.ult):"nunca"}{L.vencida?" · ⚠ revisão atrasada":""}</div></div>
         </div>
         <Bt v="ghost" onClick={function(){onGoClient&&onGoClient(c)}} style={{fontSize:11}}>Abrir ficha do cliente →</Bt>
       </div>
+      {L.temConj&&<div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:12}}>
+        <span style={{fontSize:11,color:T.t3,fontWeight:700}}>CARTEIRA:</span>
+        {[["casal","👫 Casal (juntos)"],["titular",String(c.nome||"Titular").split(" ")[0]],["conjuge",String((c.conjuge||{}).nome||"Cônjuge").split(" ")[0]]].map(function(o){var on=L.esc===o[0];return <button key={o[0]} onClick={function(){var m=Object.assign({},escMap);m[c.id]=o[0];setEscMap(m)}} style={{padding:"6px 14px",borderRadius:12,fontSize:11,fontWeight:700,cursor:"pointer",border:on?"1px solid "+T.gold:"1px solid "+T.bdrL,background:on?"rgba(212,163,40,0.10)":"transparent",color:on?T.gold:T.t2}}>{o[1]}</button>})}
+        <span style={{fontSize:10,color:T.t3}}>A política (alvos) é uma só para o casal; o plano e o diagnóstico seguem a carteira escolhida.</span>
+      </div>}
       {L.semCart&&<div style={{padding:"11px 14px",borderRadius:10,background:"rgba(251,146,60,0.10)",border:"1px solid rgba(251,146,60,0.35)",color:T.orange,fontSize:12,lineHeight:1.6,marginBottom:12}}>⚠ Este cliente tem {BRL(L.patExib)} de patrimônio cadastrado, mas ainda sem posições importadas. Você já pode definir a política (alvos) na aba Política; o diagnóstico e o plano aparecem assim que a carteira for importada (Gorila ou Relatório Consolidado) — a política fica salva.</div>}
       {msg&&<div style={{padding:"9px 14px",borderRadius:10,background:"rgba(212,163,40,0.10)",border:"1px solid rgba(212,163,40,0.3)",color:T.gold,fontSize:12,fontWeight:600,marginBottom:12}}>{msg}</div>}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
@@ -6820,7 +6840,7 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
           <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:14,justifyContent:"space-between"}}>
             <div style={{minWidth:190,flex:"1 1 190px"}}>
               <div style={{fontSize:14,fontWeight:800,color:T.t1}}>{l.c.nome}</div>
-              <div style={{fontSize:11,color:T.t3}}>{BRL(l.patExib)} · {l.semCart?"sem carteira detalhada":l.cart.ativos.length+" ativos"}{l.ult?" · revisado em "+fD(l.ult):""}{l.vencida?" · ⚠ atrasada":""}</div>
+              <div style={{fontSize:11,color:T.t3}}>{BRL(l.patExib)} · {l.semCart?"sem carteira detalhada":l.cart.ativos.length+" ativos"}{l.temConj?(l.esc==="casal"?" · 👫 casal":l.esc==="conjuge"?" · só "+String((l.c.conjuge||{}).nome||"cônjuge").split(" ")[0]:" · só titular"):""}{l.ult?" · revisado em "+fD(l.ult):""}{l.vencida?" · ⚠ atrasada":""}</div>
             </div>
             <div style={{flex:"2 1 260px",minWidth:220}}>
               {l.semCart?<div style={{fontSize:11,color:T.orange,lineHeight:1.5}}>⚠ Patrimônio cadastrado, mas sem posições importadas — importe a carteira (Gorila ou Relatório Consolidado) para o Hub calcular desvios e o plano.</div>:<div>
@@ -41720,7 +41740,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '539';
+  var SW_VERSION = '540';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
