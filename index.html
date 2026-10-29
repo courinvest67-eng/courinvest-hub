@@ -6542,19 +6542,6 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:8,paddingTop:8,borderTop:"1px solid "+T.bdrL}}><span style={{fontSize:11,color:T.t3}}>Tolerância (± pontos)</span><RebNumInput value={pol.tolSub} suffix="pp" onCommit={function(v){salvar(c,{tolSub:v==null?5:v})}}/></div>
               <div style={{marginTop:8}}><Bt v="ghost" onClick={function(){fixarAtuais("sub")}} style={{fontSize:11,padding:"4px 0"}}>📌 Fixar pesos atuais</Bt></div>
             </Cd>})}
-          <Cd hov={false} style={{padding:16}}>
-            <div style={{fontSize:13,fontWeight:800,color:T.t1,marginBottom:8}}>Regras do rebalanceamento</div>
-            <div style={{fontSize:11,color:T.t3,marginBottom:4}}>Rebalancear até…</div>
-            <div style={{display:"flex",gap:6,marginBottom:10}}>
-              {[["alvo","o peso-alvo"],["banda","a borda da faixa"]].map(function(o){var on=pol.ate===o[0];return <button key={o[0]} onClick={function(){salvar(c,{ate:o[0]})}} style={{padding:"5px 10px",borderRadius:10,fontSize:10.5,fontWeight:700,cursor:"pointer",border:on?"1px solid "+T.gold:"1px solid "+T.bdrL,background:on?"rgba(212,163,40,0.10)":"transparent",color:on?T.gold:T.t3}}>{o[1]}</button>})}
-            </div>
-            <div style={{fontSize:10,color:T.t3,lineHeight:1.5,marginBottom:10}}>"Borda da faixa" gira menos a carteira (e paga menos imposto): só leva o item para dentro da tolerância.</div>
-            {[["Movimento mínimo (R$)","minMov",pol.minMov,"R$"],["Tolerância por ativo (± pp)","tolAtivo",pol.tolAtivo,"pp"],["Revisar a cada (meses)","freqMeses",pol.freqMeses,"m"]].map(function(r){return(
-              <div key={r[1]} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"6px 0",borderTop:"1px solid "+T.bdrL}}>
-                <span style={{fontSize:11,color:T.t2}}>{r[0]}</span>
-                <RebNumInput value={r[2]} suffix={r[3]} onCommit={function(v){var o={};o[r[1]]=v==null?r[2]:v;salvar(c,o)}} width={80}/>
-              </div>)})}
-          </Cd>
         </div>
 
         <Cd hov={false} style={{padding:16}}>
@@ -41740,7 +41727,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '540';
+  var SW_VERSION = '541';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
