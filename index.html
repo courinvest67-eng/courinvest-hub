@@ -6259,8 +6259,186 @@ function RebMov({label,antes,depois,alvo,tol,max,dv}){
 }
 var REB_ST={ok:{c:"#34D399",l:"Dentro da faixa"},atencao:{c:"#FBBF24",l:"Perto do limite"},fora:{c:"#F87171",l:"Fora da faixa"}};
 
+/* ===== v546 — Risco das instituições financeiras (IF.data do Banco Central) =====
+   Busca no navegador (Olinda/IFDATA, relatório 1 "Resumo", conglomerados prudenciais) o índice de Basileia, imobilização, lucro e patrimônio líquido
+   do último trimestre divulgado e do anterior; calcula uma nota de saúde (ok/atenção/crítico) e guarda o resultado em config.riscoIF (sincroniza). */
+var RIF_BASE="https://olinda.bcb.gov.br/olinda/servico/IFDATA/versao/v1/odata/";
+var RIF_DIAS=7;
+var rifMem={cad:null,mets:null,am:null};
+var RIF_COLS=[["basileia",/basileia/],["imob",/imobiliza/],["capprinc",/capital principal/],["lucro",/lucro liquido/],["pl",/patrimonio liquido/],["ativo",/^ativo total/],["capt",/^captac/]];
+var RIF_ALIAS={"itau unibanco":/itau/,"bradesco":/bradesco/,"santander":/santander/,"banco do brasil":/banco do brasil/,"caixa economica federal":/caixa economica/,
+  "nubank":/\bnu (pagamentos|financeira|holding|invest)|nubank/,"banco inter":/\binter\b/,"c6 bank":/\bc6\b/,"btg pactual":/btg/,"safra":/safra/,"banco pan":/\bpan\b/,
+  "picpay":/picpay/,"banco xp":/\bxp\b/,"banco bv":/\bbv\b|votorantim/,"daycoval":/daycoval/,"banco original":/original/,"banco bmg":/\bbmg\b/,"sofisa direto":/sofisa/,
+  "genial":/genial/,"pine":/\bpine\b/,"abc brasil":/\babc\b/,"agibank":/agibank|\bagi\b/,"neon":/\bneon\b/,"modalmais":/modal/,"brb":/\bbrb\b|banco de brasilia/,"banrisul":/banrisul|rio grande do sul/,
+  "sicoob":/sicoob|bancoob/,"sicredi":/sicredi/,"banco do nordeste":/nordeste/,"banco master":/\bmaster\b/};
+function rifNorm(s){return gcNormNome(s).replace(/[^a-z0-9 ]/g," ").replace(/\s+/g," ").trim()}
+function rifFetch(url,ms){return new Promise(function(res){var fim=false,tm=setTimeout(function(){if(!fim){fim=true;res(null)}},ms||30000);
+  fetch(url,{cache:"no-store"}).then(function(r){return r.ok?r.json():null}).then(function(j){if(!fim){fim=true;clearTimeout(tm);res(j)}}).catch(function(){if(!fim){fim=true;clearTimeout(tm);res(null)}})})}
+function rifTrimestres(n){
+  var h=new Date(),yy=h.getFullYear(),mm=Math.floor((h.getMonth())/3)*3,out=[];
+  if(mm===0){yy--;mm=12}
+  for(var i=0;i<n;i++){out.push(yy*100+mm);mm-=3;if(mm<=0){mm+=12;yy--}}
+  return out;
+}
+function rifTriAnterior(am){var y=Math.floor(am/100),m=am%100-3;if(m<=0){m+=12;y--}return y*100+m}
+function rifAmLabel(am){return am?String(am%100).padStart(2,"0")+"/"+Math.floor(am/100):"—"}
+function rifBuscaLista(url){
+  var tops=[100000,20000];
+  var tenta=function(i){if(i>=tops.length)return Promise.resolve(null);
+    return rifFetch(url+"&$top="+tops[i]).then(function(j){return j&&j.value?j.value:tenta(i+1)})};
+  return tenta(0);
+}
+function rifUrlValores(am){return RIF_BASE+"IfDataValores(AnoMes=@AnoMes,TipoInstituicao=@TipoInstituicao,Relatorio=@Relatorio)?@AnoMes="+am+"&@TipoInstituicao=1&@Relatorio='1'&$format=json"}
+function rifUrlCad(am){return RIF_BASE+"IfDataCadastro(AnoMes=@AnoMes)?@AnoMes="+am+"&$format=json"}
+function rifMetricas(rows){
+  var out={};
+  (rows||[]).forEach(function(r){
+    var n=rifNorm(r.NomeColuna||r.DescricaoColuna||""),cod=String(r.CodInst),v=+r.Saldo;
+    if(!n||!isFinite(v))return;
+    for(var i=0;i<RIF_COLS.length;i++){if(RIF_COLS[i][1].test(n)){var o=out[cod]||(out[cod]={});if(o[RIF_COLS[i][0]]==null)o[RIF_COLS[i][0]]=v;break}}
+  });
+  /* alguns retornos vêm em fração (0,145) em vez de % (14,5) */
+  Object.keys(out).forEach(function(k){var o=out[k];if(o.basileia!=null&&o.basileia>0&&o.basileia<2){["basileia","imob","capprinc"].forEach(function(f){if(o[f]!=null)o[f]=o[f]*100})}});
+  return out;
+}
+function rifFmt(v){return String(Math.round(v*10)/10).replace(".",",")}
+function rifAvaliar(m,p){
+  if(!m||m.basileia==null)return{status:"sem",motivos:["Sem índice de Basileia divulgado para esta instituição"],tend:null};
+  var mot=[],st="ok",up=function(s){if(s==="critico")st="critico";else if(s==="atencao"&&st==="ok")st="atencao"};
+  var b=m.basileia;
+  if(b<10.5){up("critico");mot.push("Basileia de "+rifFmt(b)+"% abaixo do mínimo com colchão de conservação (10,5%)")}
+  else if(b<12){up("atencao");mot.push("Basileia de "+rifFmt(b)+"% próxima do mínimo regulatório (10,5%)")}
+  if(m.imob!=null){if(m.imob>50){up("critico");mot.push("Imobilização de "+rifFmt(m.imob)+"% acima do limite de 50%")}else if(m.imob>40){up("atencao");mot.push("Imobilização de "+rifFmt(m.imob)+"% (limite 50%)")}}
+  if(m.pl!=null&&m.pl<=0){up("critico");mot.push("Patrimônio líquido negativo ou zerado")}
+  if(m.lucro!=null&&m.lucro<0){up("atencao");mot.push("Prejuízo no acumulado do ano")}
+  var tend=null;
+  if(p&&p.basileia!=null){tend=b-p.basileia;if(tend<=-2){up("atencao");mot.push("Basileia caiu "+rifFmt(Math.abs(tend))+" p.p. no trimestre")}}
+  if(p&&p.pl>0&&m.pl!=null&&m.pl<p.pl*0.85){up("atencao");mot.push("Patrimônio líquido caiu mais de 15% no trimestre")}
+  if(!mot.length)mot.push("Capital e imobilização dentro dos parâmetros");
+  return{status:st,motivos:mot,tend:tend};
+}
+function rifAcharCod(label,key,cad,mets){
+  var rx=RIF_ALIAS[key];
+  var toks=rifNorm(label).split(" ").filter(function(t){return t.length>=3&&t!=="banco"&&t!=="bank"});
+  var alvo=rifNorm(label);
+  var cands=cad.filter(function(c){
+    if(!mets[c.cod]||mets[c.cod].basileia==null)return false;
+    var n=rifNorm(c.nome);
+    return rx?rx.test(n):(toks.length>0&&toks.every(function(t){return n.indexOf(t)>=0}));
+  });
+  if(!cands.length)return null;
+  cands.sort(function(a,b){
+    var na=rifNorm(a.nome),nb=rifNorm(b.nome);
+    var sa=(na===alvo?0:na.indexOf(alvo)===0?1:2),sb=(nb===alvo?0:nb.indexOf(alvo)===0?1:2);
+    return sa-sb||na.length-nb.length;
+  });
+  return cands[0];
+}
+/* insts: [{key,label}], mapa: {key:CodInst} (vínculos manuais). Devolve Promise do snapshot (ou null se o BC não respondeu) */
+function rifAtualizar(insts,mapa){
+  var tris=rifTrimestres(4);
+  var acha=function(i){if(i>=tris.length)return Promise.resolve(null);
+    return rifBuscaLista(rifUrlValores(tris[i])).then(function(rows){return(rows&&rows.length>50)?{am:tris[i],rows:rows}:acha(i+1)})};
+  return acha(0).then(function(a){
+    if(!a)return null;
+    var prevAm=rifTriAnterior(a.am);
+    return Promise.all([rifBuscaLista(rifUrlCad(a.am)),rifBuscaLista(rifUrlValores(prevAm))]).then(function(r){
+      var cad=[],vistos={};
+      (r[0]||[]).forEach(function(x){var cod=String(x.CodInst);if(x.CodInst==null||vistos[cod])return;vistos[cod]=1;cad.push({cod:cod,nome:String(x.NomeInstituicao||x.Nome||"")})});
+      var mets=rifMetricas(a.rows),prev=rifMetricas(r[1]||[]);
+      rifMem={cad:cad,mets:mets,am:a.am};
+      var snap={fetchedAt:Date.now(),anoMes:a.am,prevAnoMes:r[1]&&r[1].length>50?prevAm:null,inst:{},cadOk:cad.length>0};
+      (insts||[]).forEach(function(it){
+        var cod=(mapa||{})[it.key],nomeBc="",manual=!!cod;
+        if(cod){var f=cad.filter(function(c){return c.cod===String(cod)})[0];nomeBc=f?f.nome:"Código "+cod}
+        else{var h=rifAcharCod(it.label,it.key,cad,mets);if(h){cod=h.cod;nomeBc=h.nome}}
+        var m=cod?mets[cod]:null,p=cod?prev[cod]:null;
+        var av=cod?rifAvaliar(m,p):{status:"sem",motivos:["Instituição não encontrada na base do Banco Central — vincule manualmente"],tend:null};
+        snap.inst[it.key]={label:it.label,cod:cod||null,nomeBc:nomeBc,manual:manual,m:m||null,p:p||null,status:av.status,motivos:av.motivos,tend:av.tend};
+      });
+      return snap;
+    });
+  });
+}
+function rifBuscaManual(txt){
+  if(!rifMem.cad||!rifMem.mets)return[];
+  var q=rifNorm(txt);if(q.length<3)return[];
+  return rifMem.cad.filter(function(c){return rifMem.mets[c.cod]&&rifMem.mets[c.cod].basileia!=null&&rifNorm(c.nome).indexOf(q)>=0}).slice(0,8);
+}
+var RIF_ST={ok:{c:"#34D399",l:"Saudável"},atencao:{c:"#FBBF24",l:"Atenção"},critico:{c:"#F87171",l:"Crítico"},sem:{c:"#94A3B8",l:"Sem dado"}};
+
+/* ===== v546 — Visão "Risco das instituições" (todas as carteiras) ===== */
+function RebRiscoView({snap,expo,st,onAtualizar,onVincular,onDesvincular}){
+  var _q=useState({});var qMap=_q[0],setQMap=_q[1];
+  var _o=useState(null);var aberto=_o[0],setAberto=_o[1];
+  var BRL=function(v){return rebBRL0(v)};
+  var f1=rifFmt;
+  var th={padding:"7px 10px",textAlign:"left",fontSize:10,color:T.t3,fontWeight:700,letterSpacing:0.4,textTransform:"uppercase"};
+  var linhas=expo.map(function(e){var r=snap&&snap.inst?snap.inst[e.key]:null;return Object.assign({},e,{r:r,status:r?r.status:"sem"})});
+  var ord={critico:0,atencao:1,sem:2,ok:3};
+  linhas.sort(function(a,b){return ord[a.status]-ord[b.status]||b.total-a.total});
+  var nCrit=linhas.filter(function(l){return l.status==="critico"}).length,nAt=linhas.filter(function(l){return l.status==="atencao"}).length;
+  var expRisco=linhas.filter(function(l){return l.status==="critico"||l.status==="atencao"}).reduce(function(s,l){return s+l.total},0);
+  var quando=snap&&snap.fetchedAt?new Date(snap.fetchedAt).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):null;
+  return <div>
+    <Cd hov={false} style={{padding:18,marginBottom:14}}>
+      <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:10}}>
+        <div style={{minWidth:220,flex:"1 1 260px"}}>
+          <div style={{fontSize:14,fontWeight:800,color:T.t1,marginBottom:4}}>🏦 Risco das instituições financeiras dos clientes</div>
+          <div style={{fontSize:11.5,color:T.t2,lineHeight:1.6}}>Indicadores oficiais do Banco Central (IF.data) de cada banco emissor dos CDBs, LCIs, LCAs e LCs das carteiras: índice de Basileia, imobilização, lucro e patrimônio. Atualiza sozinho ao abrir esta tela, no máximo uma vez por semana.</div>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <Bt v="secondary" onClick={onAtualizar} style={{fontSize:12,padding:"8px 14px",opacity:st.loading?0.6:1}}>{st.loading?"⏳ Buscando no Banco Central…":"🔄 Atualizar agora"}</Bt>
+          <div style={{fontSize:10.5,color:T.t3,marginTop:6}}>{snap?"Dados do BC de "+rifAmLabel(snap.anoMes)+(snap.prevAnoMes?" (comparado a "+rifAmLabel(snap.prevAnoMes)+")":"")+" · consultado em "+quando:"Ainda não consultado"}</div>
+        </div>
+      </div>
+      {st.erro&&<div style={{padding:"9px 12px",borderRadius:10,background:"rgba(248,113,113,0.10)",border:"1px solid rgba(248,113,113,0.35)",color:T.red,fontSize:11.5,lineHeight:1.6,marginBottom:10}}>⚠ {st.erro}</div>}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10}}>
+        <KCard compact label="Instituições monitoradas" valor={String(linhas.length)} cor={T.gold} sub={"emissores nas carteiras"}/>
+        <KCard compact label="Em estado crítico" valor={String(nCrit)} cor={nCrit>0?T.red:T.green} sub={nCrit>0?"avaliar saída ou redução":"nenhuma"}/>
+        <KCard compact label="Em atenção" valor={String(nAt)} cor={nAt>0?T.orange:T.green} sub="acompanhar de perto"/>
+        <KCard compact label="Exposição dos clientes em alerta" valor={BRL(expRisco)} cor={expRisco>0?T.orange:T.green} sub="atenção + crítico"/>
+      </div>
+    </Cd>
+    {linhas.length===0?<Cd hov={false} style={{padding:24,textAlign:"center",color:T.t3,fontSize:12,lineHeight:1.6}}><div style={{fontSize:28}}>🏦</div>Nenhum CDB, LCI, LCA ou LC nas carteiras importadas — não há instituições bancárias para monitorar.</Cd>:
+    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+      {linhas.map(function(l){var s=RIF_ST[l.status],r=l.r,m=r&&r.m,ab=aberto===l.key;
+        var res=qMap[l.key]!==undefined?rifBuscaManual(qMap[l.key]):[];
+        return <Cd key={l.key} hov={false} style={{padding:"14px 16px",borderLeft:"3px solid "+s.c}}>
+          <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",alignItems:"center",gap:10}}>
+            <div style={{minWidth:200,flex:"1 1 220px"}}>
+              <div style={{fontSize:14,fontWeight:800,color:T.t1}}>{l.label} <span style={{fontSize:11,fontWeight:700,color:s.c,padding:"2px 9px",borderRadius:20,background:s.c+"1f",border:"1px solid "+s.c+"40",marginLeft:4}}>{s.l}</span></div>
+              <div style={{fontSize:10.5,color:T.t3,marginTop:3}}>{r&&r.nomeBc?"BC: "+r.nomeBc+(r.manual?" (vinculado por você)":""):"não localizada na base do BC"}</div>
+            </div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:18,fontSize:11.5,fontFamily:"'JetBrains Mono'"}}>
+              <div><div style={{fontSize:9.5,color:T.t3,fontFamily:"inherit"}}>BASILEIA</div><span style={{color:T.t1,fontWeight:700}}>{m&&m.basileia!=null?f1(m.basileia)+"%":"—"}</span>{r&&r.tend!=null&&<span style={{color:r.tend<-0.05?T.red:r.tend>0.05?T.green:T.t3,marginLeft:5,fontSize:10.5}}>{r.tend<-0.05?"▼":r.tend>0.05?"▲":"▬"} {f1(Math.abs(r.tend))} p.p.</span>}</div>
+              <div><div style={{fontSize:9.5,color:T.t3,fontFamily:"inherit"}}>IMOBILIZAÇÃO</div><span style={{color:T.t1,fontWeight:700}}>{m&&m.imob!=null?f1(m.imob)+"%":"—"}</span></div>
+              <div><div style={{fontSize:9.5,color:T.t3,fontFamily:"inherit"}}>LUCRO ANO</div><span style={{color:m&&m.lucro!=null?(m.lucro<0?T.red:T.green):T.t3,fontWeight:700}}>{m&&m.lucro!=null?(m.lucro<0?"Prejuízo":"Lucro"):"—"}</span></div>
+              <div><div style={{fontSize:9.5,color:T.t3,fontFamily:"inherit"}}>EXPOSTO</div><span style={{color:T.gold,fontWeight:700}}>{BRL(l.total)}</span></div>
+            </div>
+          </div>
+          <div style={{fontSize:11,color:T.t2,marginTop:8,lineHeight:1.6}}>{r?r.motivos.join(" · "):"Sem consulta ao Banco Central ainda — toque em Atualizar agora."}</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:12,marginTop:8,fontSize:11}}>
+            <span onClick={function(){setAberto(ab?null:l.key)}} style={{color:T.gold,cursor:"pointer",fontWeight:700}}>{ab?"▾":"▸"} {l.clientes.length} cliente(s) expostos</span>
+            <span onClick={function(){setQMap(Object.assign({},qMap,{[l.key]:qMap[l.key]===undefined?"":undefined}))}} style={{color:T.t3,cursor:"pointer",fontWeight:600}}>🔗 {r&&r.manual?"Trocar vínculo":"Vincular manualmente"}</span>
+            {r&&r.manual&&<span onClick={function(){onDesvincular(l.key)}} style={{color:T.t3,cursor:"pointer",fontWeight:600}}>✖ Voltar ao automático</span>}
+          </div>
+          {ab&&<div style={{marginTop:8,fontSize:11,color:T.t2,lineHeight:1.8}}>{l.clientes.map(function(c){return <div key={c.id} style={{display:"flex",justifyContent:"space-between",gap:10,borderTop:"1px solid "+T.bdrL,padding:"3px 0"}}><span>{c.nome}</span><span style={{fontFamily:"'JetBrains Mono'",color:T.gold}}>{BRL(c.valor)}</span></div>})}</div>}
+          {qMap[l.key]!==undefined&&<div style={{marginTop:8}}>
+            <input value={qMap[l.key]} onChange={function(e){setQMap(Object.assign({},qMap,{[l.key]:e.target.value}))}} placeholder="Digite parte do nome da instituição no Banco Central…" style={{...inpS,width:"100%",boxSizing:"border-box",fontSize:12}}/>
+            {!rifMem.cad&&<div style={{fontSize:10.5,color:T.t3,marginTop:4}}>Atualize os dados primeiro para habilitar a busca.</div>}
+            {res.map(function(c){return <div key={c.cod} onClick={function(){onVincular(l.key,c.cod);setQMap(Object.assign({},qMap,{[l.key]:undefined}))}} style={{fontSize:11.5,color:T.t1,padding:"6px 8px",borderRadius:8,cursor:"pointer",marginTop:4,border:"1px solid "+T.bdrL}}>{c.nome}</div>})}
+          </div>}
+        </Cd>})}
+    </div>}
+    <div style={{fontSize:10.5,color:T.t3,lineHeight:1.65,padding:"10px 6px"}}>
+      <b style={{color:T.t2}}>Como a nota é calculada.</b> Crítico: Basileia abaixo de 10,5%, imobilização acima de 50% ou patrimônio líquido não positivo. Atenção: Basileia entre 10,5% e 12%, imobilização acima de 40%, prejuízo no ano, queda de 2 p.p. ou mais na Basileia ou de mais de 15% no patrimônio em um trimestre. São critérios práticos do Hub sobre dados contábeis divulgados com cerca de dois a três meses de atraso — não são rating, não capturam notícias recentes nem substituem a análise do crédito. A instituição é localizada pelo nome do emissor; se vier errada, vincule manualmente. Fonte: Banco Central do Brasil, IF.data.
+    </div>
+  </div>;
+}
+
 /* ===== v545 — Painel de cobertura do FGC ===== */
-function RebFgcPanel({fgc}){
+function RebFgcPanel({fgc,riscoDe}){
   var BRL=function(v){return rebBRL0(v)};
   var th={padding:"7px 10px",textAlign:"left",fontSize:10,color:T.t3,fontWeight:700,letterSpacing:0.4,textTransform:"uppercase"};
   var cor={ok:T.green,atencao:T.orange,fora:T.red};
@@ -6283,7 +6461,7 @@ function RebFgcPanel({fgc}){
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
         {fgc.inst.map(function(g){var c=cor[g.status];return <div key={g.dono+g.key} style={{borderLeft:"3px solid "+c,paddingLeft:12}}>
           <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",alignItems:"baseline",gap:8,marginBottom:5}}>
-            <span style={{fontSize:13,fontWeight:800,color:T.t1}}>{g.label}{multi&&<span style={{color:T.t3,fontWeight:600}}> · {g.donoNome}</span>}{g.est&&<span title="O nome do título não informa o emissor; foi usada a corretora/instituição do extrato" style={{color:T.orange,fontWeight:600,fontSize:10.5}}> · emissor estimado</span>}</span>
+            <span style={{fontSize:13,fontWeight:800,color:T.t1}}>{g.label}{multi&&<span style={{color:T.t3,fontWeight:600}}> · {g.donoNome}</span>}{g.est&&<span title="O nome do título não informa o emissor; foi usada a corretora/instituição do extrato" style={{color:T.orange,fontWeight:600,fontSize:10.5}}> · emissor estimado</span>}{(function(){var r=riscoDe&&riscoDe(g.key);if(!r)return null;var s=RIF_ST[r.status];return <span title={r.motivos.join(" · ")} style={{marginLeft:8,fontSize:10.5,fontWeight:700,color:s.c,padding:"1px 8px",borderRadius:20,background:s.c+"1f",border:"1px solid "+s.c+"40"}}>🏦 {s.l}{r.m&&r.m.basileia!=null?" · Basileia "+rifFmt(r.m.basileia)+"%":""}</span>})()}</span>
             <span style={{fontSize:12,fontFamily:"'JetBrains Mono'",fontWeight:700,color:c}}>{BRL(g.total)} <span style={{color:T.t3,fontWeight:500}}>de R$ 250.000</span></span>
           </div>
           <div style={{position:"relative",height:10,background:"rgba(255,255,255,0.05)",borderRadius:5,overflow:"hidden"}}>
@@ -6477,6 +6655,31 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
       return{c:c,cart:cart,pol:pol,te:te,rows:rows,dv:dv,temPol:temPol,plano:plano,ult:ult,vencida:vencida,semCart:semCart,patExib:semCart?patDecl:cart.pat,esc:esc,temConj:rebTemConjuge(c),fgc:rebFgc(c,cart)};
     }).filter(Boolean);
   },[d.cl,escMap]);
+  /* v546: risco das instituições (IF.data/BC) — snapshot em config.riscoIF, atualizado sozinho no máx. 1x por semana */
+  var rif=(d.config&&d.config.riscoIF)||{},snapRif=rif.snap||null,mapRif=rif.map||{};
+  var _rs=useState({loading:false,erro:""});var rifSt=_rs[0],setRifSt=_rs[1];
+  var _vs=useState("clientes");var visao=_vs[0],setVisao=_vs[1];
+  var rifBusy=useRef(false),rifTent=useRef(false);
+  var instsAtuais=React.useMemo(function(){var m={};linhas.forEach(function(l){l.fgc.inst.forEach(function(g){if(g.key!=="?"&&!m[g.key])m[g.key]={key:g.key,label:g.label}})});return Object.keys(m).map(function(k){return m[k]})},[linhas]);
+  var expoRif=React.useMemo(function(){var m={};linhas.forEach(function(l){l.fgc.inst.forEach(function(g){if(g.key==="?")return;var e=m[g.key]||(m[g.key]={key:g.key,label:g.label,total:0,cl:{}});e.total+=g.total;var c=e.cl[l.c.id]||(e.cl[l.c.id]={id:l.c.id,nome:l.c.nome,valor:0});c.valor+=g.total})});
+    return Object.keys(m).map(function(k){var e=m[k];return{key:e.key,label:e.label,total:e.total,clientes:Object.keys(e.cl).map(function(i){return e.cl[i]}).sort(function(a,b){return b.valor-a.valor})}})},[linhas]);
+  var riscoDe=function(key){return snapRif&&snapRif.inst&&snapRif.inst[key]||null};
+  var atualizarRisco=function(mapa){
+    if(rifBusy.current)return;rifBusy.current=true;setRifSt({loading:true,erro:""});
+    var mp=mapa||mapRif;
+    rifAtualizar(instsAtuais,mp).then(function(sn){
+      rifBusy.current=false;
+      if(!sn){setRifSt({loading:false,erro:"Não foi possível acessar a base IF.data do Banco Central agora (sem resposta ou fora do ar). O Hub tenta de novo na próxima vez que você abrir esta tela."});return}
+      dp({t:"CONFIG_SET",p:{key:"riscoIF",value:{snap:sn,map:mp}}});setRifSt({loading:false,erro:""});
+    }).catch(function(){rifBusy.current=false;setRifSt({loading:false,erro:"Erro ao consultar o Banco Central."})});
+  };
+  useEffect(function(){
+    if(!instsAtuais.length||rifTent.current)return;
+    var velho=!snapRif||!snapRif.fetchedAt||(Date.now()-snapRif.fetchedAt)>RIF_DIAS*864e5;
+    var falta=snapRif&&instsAtuais.some(function(i){return !(snapRif.inst&&snapRif.inst[i.key])});
+    if(velho||falta){rifTent.current=true;atualizarRisco()}
+  },[instsAtuais.length,snapRif&&snapRif.fetchedAt]);
+  var riscoLinha=function(l){return l.fgc.inst.filter(function(g){var r=riscoDe(g.key);return r&&(r.status==="critico"||r.status==="atencao")})};
   var kpi=React.useMemo(function(){
     var com=linhas.filter(function(l){return l.temPol});
     var fora=com.filter(function(l){return l.dv.fora>0});
@@ -6493,6 +6696,7 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
     if(filtro==="sem")return !l.temPol;
     if(filtro==="semcart")return l.semCart;
     if(filtro==="fgc")return l.fgc.acima>0;
+    if(filtro==="risco")return riscoLinha(l).length>0;
     if(filtro==="venc")return l.temPol&&l.vencida;
     return true;
   }).sort(function(a,b){
@@ -6929,11 +7133,12 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
       </div>}
       {L.semCart&&<div style={{padding:"11px 14px",borderRadius:10,background:"rgba(251,146,60,0.10)",border:"1px solid rgba(251,146,60,0.35)",color:T.orange,fontSize:12,lineHeight:1.6,marginBottom:12}}>⚠ Este cliente tem {BRL(L.patExib)} de patrimônio cadastrado, mas ainda sem posições importadas. Você já pode definir a política (alvos) na aba Política; o diagnóstico e o plano aparecem assim que a carteira for importada (Gorila ou Relatório Consolidado) — a política fica salva.</div>}
       {L.fgc&&L.fgc.acima>0&&aba!=="fgc"&&<div onClick={function(){setAba("fgc")}} style={{padding:"11px 14px",borderRadius:10,background:"rgba(248,113,113,0.10)",border:"1px solid rgba(248,113,113,0.4)",color:T.red,fontSize:12,lineHeight:1.6,marginBottom:12,cursor:"pointer"}}>🛡️ <b>Limite do FGC ultrapassado:</b> {L.fgc.inst.filter(function(g){return g.status==="fora"}).map(function(g){return g.label+(L.fgc.casal?" ("+g.donoNome+")":"")+" "+rebBRL0(g.total)}).join(" · ")} — {rebBRL0(L.fgc.excessoTotal)} sem cobertura (limite R$ 250 mil por CPF e instituição). Toque para ver os detalhes.</div>}
+      {riscoLinha(L).length>0&&aba!=="fgc"&&<div onClick={function(){setAba("fgc")}} style={{padding:"11px 14px",borderRadius:10,background:"rgba(251,146,60,0.10)",border:"1px solid rgba(251,146,60,0.4)",color:T.orange,fontSize:12,lineHeight:1.6,marginBottom:12,cursor:"pointer"}}>🏦 <b>Instituição com risco no Banco Central:</b> {riscoLinha(L).map(function(g){var r=riscoDe(g.key);return g.label+" ("+RIF_ST[r.status].l.toLowerCase()+") — "+r.motivos.join("; ")+" · "+rebBRL0(g.total)+" do cliente"}).join(" | ")}. Toque para ver.</div>}
       {msg&&<div style={{padding:"9px 14px",borderRadius:10,background:"rgba(212,163,40,0.10)",border:"1px solid rgba(212,163,40,0.3)",color:T.gold,fontSize:12,fontWeight:600,marginBottom:12}}>{msg}</div>}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
         {tabBtn("diag","📊 Diagnóstico")}{tabBtn("politica","🎯 Política (alvos)")}{tabBtn("plano","⚖️ Plano de rebalanceamento")}{tabBtn("juros","📉 Juros")}{tabBtn("fgc",L.fgc&&L.fgc.acima>0?"🛡️ FGC ⚠":"🛡️ FGC")}{tabBtn("hist","🕘 Histórico ("+pol.hist.length+")")}
       </div>
-      {aba==="juros"&&<RebJurosPanel cart={cart}/>}{aba==="fgc"&&<RebFgcPanel fgc={L.fgc}/>}{aba==="diag"&&diag()}{aba==="politica"&&politica()}{aba==="plano"&&plan()}{aba==="hist"&&historico()}
+      {aba==="juros"&&<RebJurosPanel cart={cart}/>}{aba==="fgc"&&<RebFgcPanel fgc={L.fgc} riscoDe={riscoDe}/>}{aba==="diag"&&diag()}{aba==="politica"&&politica()}{aba==="plano"&&plan()}{aba==="hist"&&historico()}
     </div>;
   };
 
@@ -6945,15 +7150,20 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
       <h2 style={{margin:0,fontSize:20,fontWeight:800,color:T.t1}}>⚖️ Rebalanceamento de carteira</h2>
       <div style={{fontSize:12,color:T.t3,marginTop:4,lineHeight:1.6}}>Defina o peso-alvo por classe, indexador (pós × pré × IPCA) e ativo. O Hub acompanha o desvio de cada carteira e sugere o que vender e onde aplicar — incluindo o caminho "só com aporte".</div>
     </div>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,marginBottom:16}}>
+    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
+      {[["clientes","👥 Clientes"],["inst","🏦 Risco das instituições"+(function(){var n=expoRif.filter(function(e){var r=riscoDe(e.key);return r&&(r.status==="critico"||r.status==="atencao")}).length;return n>0?" ⚠ "+n:""})()]].map(function(o){var on=visao===o[0];return <button key={o[0]} onClick={function(){setVisao(o[0])}} style={{padding:"9px 16px",borderRadius:12,border:on?"1px solid "+T.gold:"1px solid "+T.bdrL,background:on?"rgba(212,163,40,0.10)":"transparent",color:on?T.gold:T.t2,fontSize:12,fontWeight:700,cursor:"pointer"}}>{o[1]}</button>})}
+    </div>
+    {visao==="inst"&&<RebRiscoView snap={snapRif} expo={expoRif} st={rifSt} onAtualizar={function(){atualizarRisco()}} onVincular={function(k,cod){var mp=Object.assign({},mapRif);mp[k]=cod;atualizarRisco(mp)}} onDesvincular={function(k){var mp=Object.assign({},mapRif);delete mp[k];atualizarRisco(mp)}}/>}
+    {visao==="clientes"&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,marginBottom:16}}>
       <KCard compact label="Carteiras monitoradas" valor={String(kpi.com)} cor={T.gold} sub={kpi.sem+" ainda sem política"+(kpi.semCart>0?" · "+kpi.semCart+" sem carteira detalhada":"")}/>
       <KCard compact label="Fora da faixa" valor={String(kpi.fora)} cor={kpi.fora>0?T.red:T.green} sub={kpi.fora>0?"pedem ação":"tudo em ordem"}/>
       <KCard compact label="A movimentar" valor={BRL(kpi.mov)} cor={T.orange} sub="vendas das carteiras fora"/>
       <KCard compact label="Revisões atrasadas" valor={String(kpi.venc)} cor={kpi.venc>0?T.orange:T.green} sub="sem rebalancear no prazo"/>
-    </div>
+    </div>}
+    {visao==="clientes"&&<React.Fragment>
     <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center",marginBottom:14}}>
       <input value={busca} onChange={function(e){setBusca(e.target.value)}} placeholder="Buscar cliente…" style={{...inpS,flex:1,minWidth:180,borderRadius:14}}/>
-      {chipF("todos","Todos",linhas.length)}{chipF("fora","Fora da faixa",kpi.fora)}{chipF("ok","Dentro da política",kpi.com-kpi.fora)}{chipF("venc","Revisão atrasada",kpi.venc)}{chipF("sem","Sem política",kpi.sem)}{kpi.semCart>0&&chipF("semcart","Sem carteira detalhada",kpi.semCart)}{kpi.fgc>0&&chipF("fgc","🛡️ Acima do limite do FGC",kpi.fgc)}
+      {chipF("todos","Todos",linhas.length)}{chipF("fora","Fora da faixa",kpi.fora)}{chipF("ok","Dentro da política",kpi.com-kpi.fora)}{chipF("venc","Revisão atrasada",kpi.venc)}{chipF("sem","Sem política",kpi.sem)}{kpi.semCart>0&&chipF("semcart","Sem carteira detalhada",kpi.semCart)}{kpi.fgc>0&&chipF("fgc","🛡️ Acima do limite do FGC",kpi.fgc)}{linhas.filter(function(l){return riscoLinha(l).length>0}).length>0&&chipF("risco","🏦 Instituição em alerta",linhas.filter(function(l){return riscoLinha(l).length>0}).length)}
     </div>
     {lista.length===0?<Cd hov={false} style={{padding:30,textAlign:"center",color:T.t3,fontSize:13}}>{linhas.length===0?"Nenhum cliente com patrimônio cadastrado ainda. Cadastre o patrimônio ou importe a carteira (Gorila ou Relatório Consolidado) para usar o rebalanceamento.":"Nenhum cliente neste filtro."}</Cd>:
     <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -6978,11 +7188,13 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
                 <div style={{fontSize:10.5,color:T.t3,marginTop:4}}>desvio máx. {String(Math.round(l.dv.max*10)/10).replace(".",",")} pp{l.plano&&l.plano.totalVender>0&&l.dv.fora>0?" · mover "+BRL(l.plano.totalVender):""}</div>
               </div>:<span style={{fontSize:11,fontWeight:700,color:T.t3,padding:"3px 10px",borderRadius:20,border:"1px dashed "+T.bdrL}}>Definir política →</span>}
               {l.fgc.acima>0&&<div style={{fontSize:10.5,fontWeight:700,color:T.red,marginTop:4}}>🛡️ FGC: {l.fgc.acima} instituição(ões) acima de R$ 250 mil</div>}
+              {riscoLinha(l).length>0&&<div style={{fontSize:10.5,fontWeight:700,color:riscoLinha(l).some(function(g){return riscoDe(g.key).status==="critico"})?T.red:T.orange,marginTop:4}}>🏦 {riscoLinha(l).map(function(g){return g.label+" ("+RIF_ST[riscoDe(g.key).status].l.toLowerCase()+")"}).join(", ")}</div>}
             </div>
           </div>
         </Cd>;
       })}
     </div>}
+    </React.Fragment>}
   </div>;
 }
 
@@ -41864,7 +42076,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '545';
+  var SW_VERSION = '546';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
