@@ -5085,6 +5085,22 @@ function Dash({data:d,onSel:os,goTo}){
               return <PizzaReceita itens={recCli} total={totRec} isMob={isMob}/>;
             })()}
 
+            {/* v544: aviso de receita contada em dois cadastros do mesmo cliente (mesmo nome, ex.: Alan/Allan) */}
+            {(function(){
+              var chaveNm=function(n){var t=gcNormNome(n).replace(/(.)\1+/g,"$1").split(" ").filter(Boolean);return t.length<2?t.join(" "):t[0]+" "+t[t.length-1]};
+              var mp={};
+              var add=function(c,sv,v){if(!(v>0))return;var k=chaveNm(c.nome);if(!k)return;(mp[k]=mp[k]||{}) ;(mp[k][c.id]=mp[k][c.id]||{c:c,gp:0,gf:0});mp[k][c.id][sv]+=v};
+              clPat.forEach(function(c){add(c,"gp",feeBaseDoCliente(c).fee)});
+              clFin.forEach(function(c){add(c,"gf",feeGFBRL(c))});
+              var itens=Object.keys(mp).map(function(k){return Object.keys(mp[k]).map(function(i){return mp[k][i]})}).filter(function(g){return g.length>1});
+              if(itens.length===0)return null;
+              return <Cd style={{padding:"12px 16px",marginBottom:14,border:"1px solid rgba(239,100,97,0.4)"}} hov={false}>
+                <div style={{fontSize:12,fontWeight:800,color:T.red,marginBottom:6}}>⚠ Receita possivelmente contada em dobro</div>
+                <div style={{fontSize:11,color:T.t2,lineHeight:1.6,marginBottom:6}}>Há mais de um cadastro com o mesmo nome gerando receita. Se for a mesma pessoa, use <b>Clientes → Limpar duplicados</b> para manter só uma ficha.</div>
+                {itens.map(function(g){return <div key={g[0].c.id} style={{fontSize:11,color:T.t1,padding:"3px 0"}}><b>{g[0].c.nome}</b> — {g.map(function(x){return (x.gp>0?"GP "+fm(x.gp):"")+(x.gp>0&&x.gf>0?" + ":"")+(x.gf>0?"GF "+fm(x.gf):"")+" ("+x.c.nome+")"}).join("  ·  ")}</div>})}
+              </Cd>;
+            })()}
+
             {}
             <div style={{display:"grid",gridTemplateColumns:isMob?"1fr":"1fr 1fr",gap:12,marginBottom:14}}>
               {}
@@ -24259,7 +24275,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       {tab==="familiar" && c.grupoFamiliarId && (function(){
         var mbs=[c].concat(d.cl.filter(function(x){return x.id!==c.id&&x.grupoFamiliarId===c.grupoFamiliarId;}));
         var pt=mbs.reduce(function(s,m){return s+(m.patGorila||m.pat||0);},0);
-        var rt=mbs.reduce(function(s,m){return s+feeBaseDoCliente(m).fee+feeMensalBRL(m);},0);
+        var rt=mbs.reduce(function(s,m){return s+receitaTotalBRL(m);},0);
         return <div style={{paddingBottom:20}}>
           <div style={{fontSize:15,fontWeight:800,color:T.gold,marginBottom:4}}>{c.grupoFamiliarNome}</div>
           <div style={{fontSize:10,color:T.t3,marginBottom:14}}>{mbs.length} membros</div>
@@ -24275,7 +24291,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           </div>
           {mbs.map(function(m){
             var mp=m.patGorila||m.pat||0;
-            var mr=feeBaseDoCliente(m).fee+feeMensalBRL(m);
+            var mr=receitaTotalBRL(m);
             var pct=pt>0?Math.round(mp/pt*100):0;
             var curr=m.id===c.id;
             return <Cd key={m.id} style={{marginBottom:10,padding:14,cursor:curr?"default":"pointer"}} hov={!curr} onClick={function(){if(!curr)os(m);}}>
@@ -41746,7 +41762,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '543';
+  var SW_VERSION = '544';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
