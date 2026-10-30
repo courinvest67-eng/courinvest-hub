@@ -5848,6 +5848,60 @@ function rebSugerirAtivos(cart,pol,m,alvoDe,legado){
   return out;
 }
 /* Plano: o que vender/comprar. opts={aporte:R$ (+ aporta, − resgata), modo:"completo"|"so_aporte"} */
+/* ===== v545 — Cobertura do FGC por instituição (renda fixa bancária) =====
+   FGC: R$ 250 mil por CPF e por conglomerado financeiro (emissor, não a corretora), teto global de R$ 1 mi por CPF a cada 4 anos.
+   Cobre CDB, RDB, LCI, LCA, LC, LIG e poupança. NÃO cobre debêntures, CRI/CRA, fundos, COE, Tesouro, ações. Cada CPF (titular/cônjuge) tem seu limite. */
+var REB_FGC_LIM=250000,REB_FGC_GLOBAL=1000000;
+var REB_FGC_TP={cdb:1,lci:1,lca:1,lc:1,poupanca:1};
+var REB_FGC_CONGL=[
+  [/ita[uú]|itaucard|unibanco/,"Itaú Unibanco"],[/bradesco|\bnext\b|bradescard|banco next/,"Bradesco"],[/santander/,"Santander"],
+  [/banco do brasil|^bb\b|\bbb\b/,"Banco do Brasil"],[/caixa econ|^caixa\b|\bcef\b/,"Caixa Econômica Federal"],
+  [/nubank|^nu\b|\bnu financeira|\bnu invest|nu pagamentos/,"Nubank"],[/\binter\b|banco inter/,"Banco Inter"],[/\bc6\b/,"C6 Bank"],
+  [/btg/,"BTG Pactual"],[/safra/,"Safra"],[/\bpan\b/,"Banco Pan"],[/picpay/,"PicPay"],[/\bxp\b/,"Banco XP"],[/\bbv\b|votorantim/,"Banco BV"],
+  [/daycoval/,"Daycoval"],[/original/,"Banco Original"],[/\bbmg\b/,"Banco BMG"],[/sofisa/,"Sofisa Direto"],[/genial/,"Genial"],[/\bpine\b/,"Pine"],
+  [/\babc\b/,"ABC Brasil"],[/mercantil/,"Mercantil do Brasil"],[/agibank/,"Agibank"],[/\bneon\b/,"Neon"],[/modal/,"Modalmais"],[/\bbrb\b/,"BRB"],
+  [/banrisul/,"Banrisul"],[/sicoob|bancoob/,"Sicoob"],[/sicredi/,"Sicredi"],[/\bbnb\b|banco do nordeste/,"Banco do Nordeste"],[/\bmaster\b/,"Banco Master"]
+];
+function rebFgcEmissor(a){
+  var nm=String(a.nm||a.tk||"").replace(/\s+/g," ").trim();
+  var pr=null;try{pr=parseProdutoRF({nm:nm,tk:a.tk,_gSubCl:a.gSub})}catch(e){}
+  var em=pr&&pr.emissor?String(pr.emissor):"",est=false;
+  if(!em){em=String(a.inst||"");est=true}
+  var n=gcNormNome(em).replace(/\bs\.?\/?a\.?\b|\bltda\b/g," ").replace(/\s+/g," ").trim();
+  if(!n||n==="—")return{key:"?",label:"Emissor não identificado",est:true};
+  for(var i=0;i<REB_FGC_CONGL.length;i++){if(REB_FGC_CONGL[i][0].test(n))return{key:gcNormNome(REB_FGC_CONGL[i][1]),label:REB_FGC_CONGL[i][1],est:est}}
+  var k=n.replace(/\b(banco|financeira|investimentos?|de|do|da|dos|das|sa)\b/g," ").replace(/\s+/g," ").trim()||n;
+  return{key:k,label:em.replace(/^\s*banco\s+/i,"Banco ").replace(/\s+/g," ").trim(),est:est};
+}
+function rebFgcCoberto(a){
+  if(!(a.valor>0)||a.novo)return false;
+  if(/^(cri|cra|deb|debi|coe|tesouro|fundo_)/.test(String(a.tp||"")))return false;
+  if(REB_FGC_TP[a.tp])return true;
+  var m=String(a.nm||"").trim().match(/^(CDB|RDB|LCI|LCA|LC|LIG)\b/i);
+  return !!m&&a.classe==="rf";
+}
+function rebFgc(c,cart){
+  var nomeT=String((c&&c.nome)||"Titular").split(" ")[0],nomeC=String((c&&c.conjuge&&c.conjuge.nome)||"Cônjuge").split(" ")[0];
+  var grupos={},cobertoDono={T:0,C:0},rfFora=0;
+  cart.ativos.forEach(function(a){
+    if(!rebFgcCoberto(a)){if(a.classe==="rf"&&a.valor>0)rfFora+=a.valor;return}
+    var dono=a.dono==="C"?"C":"T",e=rebFgcEmissor(a),k=dono+"|"+e.key;
+    var g=grupos[k]||(grupos[k]={dono:dono,donoNome:dono==="C"?nomeC:nomeT,key:e.key,label:e.label,total:0,itens:[],est:false});
+    g.total+=a.valor;g.est=g.est||e.est;cobertoDono[dono]+=a.valor;
+    g.itens.push({nm:a.dono==="C"?String(a.nm||"").replace(/\s*\([^)]*\)\s*$/,""):a.nm,inst:a.inst,valor:a.valor,tp:a.tp,dias:a.dias});
+  });
+  var inst=Object.keys(grupos).map(function(k){
+    var g=grupos[k];g.pct=g.total/REB_FGC_LIM*100;g.excesso=Math.max(0,g.total-REB_FGC_LIM);g.folga=Math.max(0,REB_FGC_LIM-g.total);
+    g.status=g.total>REB_FGC_LIM?"fora":g.total>=REB_FGC_LIM*0.8?"atencao":"ok";
+    g.itens.sort(function(x,y){return y.valor-x.valor});
+    return g;
+  }).sort(function(x,y){return y.total-x.total});
+  var casal=!!(c&&c.conjuge&&cobertoDono.C>0)&&cobertoDono.T>0;
+  var donos=["T","C"].filter(function(d){return cobertoDono[d]>0}).map(function(d){return{dono:d,nome:d==="C"?nomeC:nomeT,coberto:cobertoDono[d],acimaGlobal:cobertoDono[d]>REB_FGC_GLOBAL}});
+  return{inst:inst,acima:inst.filter(function(g){return g.status==="fora"}).length,perto:inst.filter(function(g){return g.status==="atencao"}).length,
+    excessoTotal:inst.reduce(function(s,g){return s+g.excesso},0),cobertoTotal:cobertoDono.T+cobertoDono.C,rfFora:rfFora,donos:donos,casal:casal,
+    globalAcima:donos.filter(function(d){return d.acimaGlobal}).length};
+}
 function rebPlano(c,cart,pol,opts){
   opts=opts||{};
   var aporte=+opts.aporte||0,modo=opts.modo==="so_aporte"?"so_aporte":"completo";
@@ -6205,6 +6259,51 @@ function RebMov({label,antes,depois,alvo,tol,max,dv}){
 }
 var REB_ST={ok:{c:"#34D399",l:"Dentro da faixa"},atencao:{c:"#FBBF24",l:"Perto do limite"},fora:{c:"#F87171",l:"Fora da faixa"}};
 
+/* ===== v545 — Painel de cobertura do FGC ===== */
+function RebFgcPanel({fgc}){
+  var BRL=function(v){return rebBRL0(v)};
+  var th={padding:"7px 10px",textAlign:"left",fontSize:10,color:T.t3,fontWeight:700,letterSpacing:0.4,textTransform:"uppercase"};
+  var cor={ok:T.green,atencao:T.orange,fora:T.red};
+  var tx={ok:"Dentro do limite",atencao:"Perto do limite",fora:"Acima do limite"};
+  var multi=fgc.casal;
+  return <div>
+    <Cd hov={false} style={{padding:18,marginBottom:14}}>
+      <div style={{fontSize:14,fontWeight:800,color:T.t1,marginBottom:4}}>🛡️ Cobertura do FGC por instituição (renda fixa bancária)</div>
+      <div style={{fontSize:11.5,color:T.t2,lineHeight:1.6,marginBottom:12}}>O FGC garante até <b>R$ 250 mil por CPF e por instituição</b> (conglomerado financeiro do emissor — não importa em qual corretora o título está) e até R$ 1 milhão por CPF no total, a cada 4 anos. Vale para CDB, RDB, LCI, LCA, LC, LIG e poupança.</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10}}>
+        <KCard compact label="Instituições acima do limite" valor={String(fgc.acima)} cor={fgc.acima>0?T.red:T.green} sub={fgc.acima>0?"excedente "+BRL(fgc.excessoTotal)+" sem cobertura":"nenhuma ultrapassa R$ 250 mil"}/>
+        <KCard compact label="Perto do limite (≥ 80%)" valor={String(fgc.perto)} cor={fgc.perto>0?T.orange:T.green} sub="atenção em novos aportes"/>
+        <KCard compact label="Renda fixa coberta pelo FGC" valor={BRL(fgc.cobertoTotal)} cor={T.gold} sub={fgc.globalAcima>0?"passa de R$ 1 mi por CPF":"CDB, LCI, LCA, LC, poupança"}/>
+        <KCard compact label="Renda fixa sem FGC" valor={BRL(fgc.rfFora)} cor={T.t2} sub="Tesouro, debêntures, CRI/CRA, fundos, COE"/>
+      </div>
+    </Cd>
+    {fgc.inst.length===0?<Cd hov={false} style={{padding:24,textAlign:"center",color:T.t3,fontSize:12,lineHeight:1.6}}><div style={{fontSize:28}}>🛡️</div>Nenhum CDB, LCI, LCA ou LC na carteira — não há exposição ao FGC para acompanhar.</Cd>:
+    <Cd hov={false} style={{padding:18,marginBottom:14}}>
+      <div style={{fontSize:14,fontWeight:800,color:T.t1,marginBottom:10}}>Exposição por instituição{multi?" e por CPF":""}</div>
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+        {fgc.inst.map(function(g){var c=cor[g.status];return <div key={g.dono+g.key} style={{borderLeft:"3px solid "+c,paddingLeft:12}}>
+          <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",alignItems:"baseline",gap:8,marginBottom:5}}>
+            <span style={{fontSize:13,fontWeight:800,color:T.t1}}>{g.label}{multi&&<span style={{color:T.t3,fontWeight:600}}> · {g.donoNome}</span>}{g.est&&<span title="O nome do título não informa o emissor; foi usada a corretora/instituição do extrato" style={{color:T.orange,fontWeight:600,fontSize:10.5}}> · emissor estimado</span>}</span>
+            <span style={{fontSize:12,fontFamily:"'JetBrains Mono'",fontWeight:700,color:c}}>{BRL(g.total)} <span style={{color:T.t3,fontWeight:500}}>de R$ 250.000</span></span>
+          </div>
+          <div style={{position:"relative",height:10,background:"rgba(255,255,255,0.05)",borderRadius:5,overflow:"hidden"}}>
+            <div style={{position:"absolute",left:0,top:0,bottom:0,width:Math.min(100,g.pct)+"%",background:c,opacity:0.85}}/>
+          </div>
+          <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",gap:8,marginTop:5,fontSize:11}}>
+            <span style={{color:c,fontWeight:700}}>{tx[g.status]} · {Math.round(g.pct)}% do limite</span>
+            <span style={{color:T.t2}}>{g.status==="fora"?"Excedente sem cobertura: "+BRL(g.excesso)+" — redistribuir para outra instituição":"Folga até o limite: "+BRL(g.folga)}</span>
+          </div>
+          <div style={{fontSize:10.5,color:T.t3,marginTop:5,lineHeight:1.6}}>{g.itens.slice(0,5).map(function(i){return i.nm+(i.inst&&i.inst!=="—"?" · "+i.inst:"")+" — "+BRL(i.valor)}).join("  |  ")}{g.itens.length>5?"  |  +"+(g.itens.length-5)+" título(s)":""}</div>
+        </div>})}
+      </div>
+    </Cd>}
+    {fgc.globalAcima>0&&<div style={{padding:"11px 14px",borderRadius:10,background:"rgba(248,113,113,0.10)",border:"1px solid rgba(248,113,113,0.35)",color:T.red,fontSize:12,lineHeight:1.6,marginBottom:14}}>⚠ {fgc.donos.filter(function(d){return d.acimaGlobal}).map(function(d){return d.nome+" ("+BRL(d.coberto)+")"}).join(" e ")} ultrapassa o teto global de R$ 1 milhão por CPF que o FGC cobre em um período de 4 anos, mesmo com cada instituição abaixo de R$ 250 mil.</div>}
+    <div style={{fontSize:10.5,color:T.t3,lineHeight:1.65,padding:"4px 6px 10px"}}>
+      <b style={{color:T.t2}}>Premissas.</b> O Hub soma, por CPF, os títulos do mesmo emissor identificado pelo nome do título (ex.: "CDB … PicPay"); marcas de um mesmo conglomerado são unidas nos casos mais comuns (Itaú, Bradesco/Next, Nubank, BTG etc.), mas instituições com nomes diferentes dentro do mesmo conglomerado podem não ser unidas — confirme no site do FGC. O valor considerado é a posição atual (principal + rendimento). Titular e cônjuge têm limites separados; contas conjuntas dividem o limite entre os titulares e não são tratadas aqui. Debêntures, CRI/CRA, fundos, COE e Tesouro não têm FGC e ficam de fora. Apoio à conversa com o cliente — não é recomendação.
+    </div>
+  </div>;
+}
+
 /* ===== Painel de sensibilidade a juros ===== */
 function RebJurosPanel({cart}){
   var _a=useState(100);var mag=_a[0],setMag=_a[1];
@@ -6375,7 +6474,7 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
         if(!ult)vencida=true;
         else{var dt=new Date(ult+"T12:00:00");dt.setMonth(dt.getMonth()+pol.freqMeses);vencida=dt<hoje}
       }
-      return{c:c,cart:cart,pol:pol,te:te,rows:rows,dv:dv,temPol:temPol,plano:plano,ult:ult,vencida:vencida,semCart:semCart,patExib:semCart?patDecl:cart.pat,esc:esc,temConj:rebTemConjuge(c)};
+      return{c:c,cart:cart,pol:pol,te:te,rows:rows,dv:dv,temPol:temPol,plano:plano,ult:ult,vencida:vencida,semCart:semCart,patExib:semCart?patDecl:cart.pat,esc:esc,temConj:rebTemConjuge(c),fgc:rebFgc(c,cart)};
     }).filter(Boolean);
   },[d.cl,escMap]);
   var kpi=React.useMemo(function(){
@@ -6384,7 +6483,7 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
     return{total:linhas.length,com:com.length,sem:linhas.length-com.length,fora:fora.length,
       mov:fora.reduce(function(s,l){return s+(l.plano?l.plano.totalVender:0)},0),
       aum:linhas.reduce(function(s,l){return s+l.patExib},0),semCart:linhas.filter(function(l){return l.semCart}).length,
-      venc:com.filter(function(l){return l.vencida}).length};
+      venc:com.filter(function(l){return l.vencida}).length,fgc:linhas.filter(function(l){return l.fgc.acima>0}).length};
   },[linhas]);
 
   var lista=linhas.filter(function(l){
@@ -6393,6 +6492,7 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
     if(filtro==="ok")return l.temPol&&l.dv.fora===0;
     if(filtro==="sem")return !l.temPol;
     if(filtro==="semcart")return l.semCart;
+    if(filtro==="fgc")return l.fgc.acima>0;
     if(filtro==="venc")return l.temPol&&l.vencida;
     return true;
   }).sort(function(a,b){
@@ -6828,11 +6928,12 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
         <span style={{fontSize:10,color:T.t3}}>A política (alvos) é uma só para o casal; o plano e o diagnóstico seguem a carteira escolhida.</span>
       </div>}
       {L.semCart&&<div style={{padding:"11px 14px",borderRadius:10,background:"rgba(251,146,60,0.10)",border:"1px solid rgba(251,146,60,0.35)",color:T.orange,fontSize:12,lineHeight:1.6,marginBottom:12}}>⚠ Este cliente tem {BRL(L.patExib)} de patrimônio cadastrado, mas ainda sem posições importadas. Você já pode definir a política (alvos) na aba Política; o diagnóstico e o plano aparecem assim que a carteira for importada (Gorila ou Relatório Consolidado) — a política fica salva.</div>}
+      {L.fgc&&L.fgc.acima>0&&aba!=="fgc"&&<div onClick={function(){setAba("fgc")}} style={{padding:"11px 14px",borderRadius:10,background:"rgba(248,113,113,0.10)",border:"1px solid rgba(248,113,113,0.4)",color:T.red,fontSize:12,lineHeight:1.6,marginBottom:12,cursor:"pointer"}}>🛡️ <b>Limite do FGC ultrapassado:</b> {L.fgc.inst.filter(function(g){return g.status==="fora"}).map(function(g){return g.label+(L.fgc.casal?" ("+g.donoNome+")":"")+" "+rebBRL0(g.total)}).join(" · ")} — {rebBRL0(L.fgc.excessoTotal)} sem cobertura (limite R$ 250 mil por CPF e instituição). Toque para ver os detalhes.</div>}
       {msg&&<div style={{padding:"9px 14px",borderRadius:10,background:"rgba(212,163,40,0.10)",border:"1px solid rgba(212,163,40,0.3)",color:T.gold,fontSize:12,fontWeight:600,marginBottom:12}}>{msg}</div>}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
-        {tabBtn("diag","📊 Diagnóstico")}{tabBtn("politica","🎯 Política (alvos)")}{tabBtn("plano","⚖️ Plano de rebalanceamento")}{tabBtn("juros","📉 Juros")}{tabBtn("hist","🕘 Histórico ("+pol.hist.length+")")}
+        {tabBtn("diag","📊 Diagnóstico")}{tabBtn("politica","🎯 Política (alvos)")}{tabBtn("plano","⚖️ Plano de rebalanceamento")}{tabBtn("juros","📉 Juros")}{tabBtn("fgc",L.fgc&&L.fgc.acima>0?"🛡️ FGC ⚠":"🛡️ FGC")}{tabBtn("hist","🕘 Histórico ("+pol.hist.length+")")}
       </div>
-      {aba==="juros"&&<RebJurosPanel cart={cart}/>}{aba==="diag"&&diag()}{aba==="politica"&&politica()}{aba==="plano"&&plan()}{aba==="hist"&&historico()}
+      {aba==="juros"&&<RebJurosPanel cart={cart}/>}{aba==="fgc"&&<RebFgcPanel fgc={L.fgc}/>}{aba==="diag"&&diag()}{aba==="politica"&&politica()}{aba==="plano"&&plan()}{aba==="hist"&&historico()}
     </div>;
   };
 
@@ -6852,7 +6953,7 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
     </div>
     <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center",marginBottom:14}}>
       <input value={busca} onChange={function(e){setBusca(e.target.value)}} placeholder="Buscar cliente…" style={{...inpS,flex:1,minWidth:180,borderRadius:14}}/>
-      {chipF("todos","Todos",linhas.length)}{chipF("fora","Fora da faixa",kpi.fora)}{chipF("ok","Dentro da política",kpi.com-kpi.fora)}{chipF("venc","Revisão atrasada",kpi.venc)}{chipF("sem","Sem política",kpi.sem)}{kpi.semCart>0&&chipF("semcart","Sem carteira detalhada",kpi.semCart)}
+      {chipF("todos","Todos",linhas.length)}{chipF("fora","Fora da faixa",kpi.fora)}{chipF("ok","Dentro da política",kpi.com-kpi.fora)}{chipF("venc","Revisão atrasada",kpi.venc)}{chipF("sem","Sem política",kpi.sem)}{kpi.semCart>0&&chipF("semcart","Sem carteira detalhada",kpi.semCart)}{kpi.fgc>0&&chipF("fgc","🛡️ Acima do limite do FGC",kpi.fgc)}
     </div>
     {lista.length===0?<Cd hov={false} style={{padding:30,textAlign:"center",color:T.t3,fontSize:13}}>{linhas.length===0?"Nenhum cliente com patrimônio cadastrado ainda. Cadastre o patrimônio ou importe a carteira (Gorila ou Relatório Consolidado) para usar o rebalanceamento.":"Nenhum cliente neste filtro."}</Cd>:
     <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -6876,6 +6977,7 @@ function RebalanceamentoView({data:d,dispatch:dp,onGoClient}){
                 <span style={{fontSize:11,fontWeight:800,color:st.c,padding:"3px 10px",borderRadius:20,background:st.c+"1f",border:"1px solid "+st.c+"40"}}>{l.dv.fora>0?l.dv.fora+" fora da faixa":(l.dv.atencao>0?"quase no limite":"dentro da política")}</span>
                 <div style={{fontSize:10.5,color:T.t3,marginTop:4}}>desvio máx. {String(Math.round(l.dv.max*10)/10).replace(".",",")} pp{l.plano&&l.plano.totalVender>0&&l.dv.fora>0?" · mover "+BRL(l.plano.totalVender):""}</div>
               </div>:<span style={{fontSize:11,fontWeight:700,color:T.t3,padding:"3px 10px",borderRadius:20,border:"1px dashed "+T.bdrL}}>Definir política →</span>}
+              {l.fgc.acima>0&&<div style={{fontSize:10.5,fontWeight:700,color:T.red,marginTop:4}}>🛡️ FGC: {l.fgc.acima} instituição(ões) acima de R$ 250 mil</div>}
             </div>
           </div>
         </Cd>;
@@ -41762,7 +41864,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '544';
+  var SW_VERSION = '545';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
