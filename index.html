@@ -118,6 +118,7 @@ table{border-spacing:0}
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-messaging-compat.js"></script>
 <script>
   /* Firebase bootstrap — defensive, tolera falha de carregamento */
   (function(){
@@ -321,13 +322,14 @@ const feeMensalBRL=function(c){
    (ex.: 0.01) no container com o conteúdo é capturada pelo html2canvas no render, gerando
    um PDF "lavado"/quase invisível — por isso é o WRAPPER que fica de tamanho zero, não o
    conteúdo que fica com opacidade baixa. */
-const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent,nomeArquivoDownload){
+const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent,nomeArquivoDownload,ctl){
   var wrapper=null;
+  ctl=ctl||{ping:Date.now(),abort:false,motivo:""};
   try{
     if(typeof window.html2canvas==="undefined"||!window.jspdf||typeof window.jspdf.jsPDF==="undefined"){
-      console.warn("[PDF] html2canvas/jsPDF não carregaram.");return null;
+      console.warn("[PDF] html2canvas/jsPDF não carregaram.");ctl.motivo="as bibliotecas de PDF não carregaram (bloqueador de scripts ou internet)";return null;
     }
-    if(!window._fbStorage){console.warn("[PDF] Firebase Storage indisponível (verifique se o Storage está habilitado no projeto Firebase).");return null;}
+    if(!window._fbStorage){console.warn("[PDF] Firebase Storage indisponível (verifique se o Storage está habilitado no projeto Firebase).");ctl.motivo="Firebase Storage indisponível";return null;}
     /* HISTÓRICO (v389→v394): usávamos o html2pdf.js, que captura o relatório inteiro numa
        tacada só como UM canvas gigante (chegava a ~50 mil pixels de altura em scale:2, pra um
        relatório de várias páginas). Testamos 4 hipóteses pro erro "InvalidStateError:
@@ -375,6 +377,7 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent,nomeAr
     var pageEls=Array.prototype.filter.call(container.children,function(el){return el.tagName==="DIV";});
     if(pageEls.length===0){
       console.warn("[PDF] Nenhuma página encontrada no HTML do relatório.");
+      ctl.motivo="o relatório não tem páginas para gerar";
       try{document.body.removeChild(wrapper)}catch(_e){}
       return null;
     }
@@ -439,7 +442,12 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent,nomeAr
       }
     };
     try{
+      /* v548: escala adaptativa — celular ou relatório longo usam 1.2 (mais leve/rápido) em vez de 1.5 */
+      var _escalaPdf=(window.innerWidth<768||pageEls.length>14)?1.2:1.5;
+      ctl.total=pageEls.length;ctl.ping=Date.now();
       for(var pi=0;pi<pageEls.length;pi++){
+        if(ctl.abort){ctl.motivo=ctl.motivo||"cancelado";break;}
+        ctl.pagina=pi+1;ctl.ping=Date.now();
         var canvas=null;
         try{
           /* scale 1.5 (era 2) — reduz em ~44% o total de pixels que o html2canvas precisa
@@ -457,9 +465,10 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent,nomeAr
              das letras em vez do gradiente sutil (reportado com print: capa da proposta e o valor
              "R$ 5.360,00" saindo visualmente quebrados no PDF do e-mail, apesar de saírem perfeitos
              no "Imprimir/Salvar PDF" do navegador e na tela). */
-          canvas=await window.html2canvas(pageEls[pi],{scale:1.5,useCORS:true,backgroundColor:"#ffffff",onclone:function(_clonedDoc,clonedEl){_forcarTemaClaroParaCaptura(_clonedDoc);_prepararGradienteTextoParaCaptura(clonedEl);_prepararImagensQuebradasParaCaptura(clonedEl);}});
+          canvas=await window.html2canvas(pageEls[pi],{scale:_escalaPdf,useCORS:true,backgroundColor:"#ffffff",onclone:function(_clonedDoc,clonedEl){_forcarTemaClaroParaCaptura(_clonedDoc);_prepararGradienteTextoParaCaptura(clonedEl);_prepararImagensQuebradasParaCaptura(clonedEl);}});
         }catch(_pageErr){
           console.warn("[PDF] Página "+pi+" falhou ao renderizar, pulando:",_pageErr);
+          ctl.paginasFalhas=(ctl.paginasFalhas||0)+1;ctl.ultimoErroPagina=String((_pageErr&&_pageErr.message)||_pageErr);
           continue;
         }
         if(!canvas||canvas.width===0||canvas.height===0){
@@ -804,7 +813,10 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent,nomeAr
       CanvasRenderingContext2D.prototype.createPattern=_origCreatePattern;
     }
     try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
-    if(pagesOk===0){console.warn("[PDF] Nenhuma página renderizou com sucesso.");return null;}
+    if(ctl.abort){console.warn("[PDF] Geração cancelada pelo vigia de tempo.");return null;}
+    if(pagesOk===0){console.warn("[PDF] Nenhuma página renderizou com sucesso.");ctl.motivo="nenhuma página renderizou"+(ctl.ultimoErroPagina?" ("+ctl.ultimoErroPagina+")":"");return null;}
+    if(pagesOk<pageEls.length)console.warn("[PDF] Atenção: "+(pageEls.length-pagesOk)+" página(s) não renderizaram e ficaram de fora do PDF.");
+    ctl.ping=Date.now();ctl.etapa="upload";
 
     /* Modo "download local": quando chamado sem pathStorage (ver baixarPdfCourinvest, usado pelo
        botão "Baixar PDF" do Relatório Anual de IR), não sobe pro Storage — só salva o PDF direto
@@ -814,12 +826,18 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent,nomeAr
       return true;
     }
     var blob=doc.output("blob");
+    window._pdfUltimoBlob=blob;
     var ref=window._fbStorage.ref().child(pathStorage);
-    await ref.put(blob,{contentType:"application/pdf"});
+    var _metaPut={contentType:"application/pdf"};
+    /* v549: ao SUBSTITUIR um PDF já enviado por e-mail, reaproveita o token do link antigo pra que o botão
+       do e-mail continue funcionando (ver substituirPdfEnviado). */
+    if(window._pdfTokenForcado)_metaPut.customMetadata={firebaseStorageDownloadTokens:window._pdfTokenForcado};
+    await ref.put(blob,_metaPut);
     var url=await ref.getDownloadURL();
     return url;
   }catch(e){
     console.warn("[PDF] Falha ao gerar/subir PDF:",e);
+    ctl.motivo="erro ao gerar/enviar o PDF: "+String((e&&e.message)||e).slice(0,160);
     try{if(wrapper&&wrapper.parentNode)document.body.removeChild(wrapper)}catch(_e){}
     return null;
   }
@@ -827,26 +845,26 @@ const _gerarPdfLinkCourinvestInner=async function(pathStorage,htmlContent,nomeAr
 const gerarPdfLinkCourinvest=function(pathStorage,htmlContent){
   return new Promise(function(resolve){
     var settled=false;
-    var finish=function(v){if(settled)return;settled=true;resolve(v);};
-    /* 130s (era 75s, e antes disso 45s) — desde a v395 a geração roda página por página (uma
-       chamada ao html2canvas por página do relatório, sequencial), o que é mais lento no total
-       que a captura única de antes, mas muito mais confiável. Carteiras casal/família com muitos
-       ativos podem gerar 15-20+ páginas, e o tamanho médio das carteiras só tende a crescer com o
-       tempo. Timeout curto demais fazia o e-mail sair sem o link do PDF mesmo quando a geração
-       estava OK, só lenta — já bumped uma vez (45s→75s) por causa exatamente desse mesmo sintoma,
-       e voltou a acontecer (relato de vários clientes seguidos com o botão de PDF sumindo, print
-       do console confirmando "[PDF] Timeout de 75s atingido"). Além de alongar o prazo aqui,
-       reduzido o scale do html2canvas (ver mais abaixo) pra também diminuir o tempo real de
-       geração, não só empurrar o teto pra frente de novo. */
-    var timeoutId=setTimeout(function(){
-      console.warn("[PDF] Timeout de 130s atingido — seguindo sem o link do PDF.");
-      finish(null);
-    },130000);
-    _gerarPdfLinkCourinvestInner(pathStorage,htmlContent).then(function(url){
-      clearTimeout(timeoutId);
+    var ctl={ping:Date.now(),abort:false,motivo:""};
+    var t0=Date.now();
+    var finish=function(v){if(settled)return;settled=true;clearInterval(vigia);window._pdfUltimoMotivo=v?"":(ctl.motivo||"falha desconhecida");resolve(v);};
+    /* v548: em vez de um teto fixo de 130s (que cortava relatórios longos ou geração no celular mesmo com tudo
+       andando), o vigia só desiste se NENHUMA página avançar por 90s (travou) ou se passar de 8 minutos no total.
+       Ao desistir, manda cancelar a geração em andamento — antes ela seguia em segundo plano, disputando
+       processador com a próxima tentativa. */
+    var vigia=setInterval(function(){
+      var parado=Date.now()-ctl.ping,total=Date.now()-t0;
+      if(parado>90000||total>480000){
+        ctl.abort=true;
+        ctl.motivo=(parado>90000?"travou por "+Math.round(parado/1000)+"s":"passou de 8 minutos")+(ctl.pagina?" na página "+ctl.pagina+" de "+(ctl.total||"?"):"")+(ctl.etapa==="upload"?" durante o envio ao Storage":"");
+        console.warn("[PDF] Vigia: "+ctl.motivo+" — seguindo sem o link do PDF completo.");
+        finish(null);
+      }
+    },3000);
+    _gerarPdfLinkCourinvestInner(pathStorage,htmlContent,undefined,ctl).then(function(url){
       finish(url);
-    }).catch(function(){
-      clearTimeout(timeoutId);
+    }).catch(function(e){
+      ctl.motivo=ctl.motivo||String((e&&e.message)||e);
       finish(null);
     });
   });
@@ -3255,7 +3273,7 @@ function Dash({data:d,onSel:os,goTo}){
          pro resumo curto (o card com os KPIs) como PDF — nunca bloqueia o envio do e-mail. */
       var pathStorage="relatorios/"+c.id+"/"+mesRefArquivo+"_"+(isPlan?"gf":"gp")+".pdf";
       var tipoRelatorioCompleto=isPlan?"planejamento":"mensal";
-      var _pdfModo="nenhum";
+      var _pdfModo="nenhum",_motivoPdf="";
       buscarIndicadoresMercadoVivos().then(function(vivos){
         /* Refaz o card "Panorama do Mês" com Selic/IPCA de HOJE (não o retrato salvo no overview) */
         if(vivos&&!isPlan){
@@ -3270,6 +3288,8 @@ function Dash({data:d,onSel:os,goTo}){
         }
         return gerarRelatorioHtmlHeadless(c,d,tipoRelatorioCompleto);
       }).then(function(htmlCompleto){
+        var _headlessOk=!!htmlCompleto;
+        if(!_headlessOk)console.warn("[E-mail] Não consegui montar o relatório completo de "+c.nome+" em segundo plano (tempo esgotado ou erro) — o PDF vai sair só com o resumo.");
         var htmlParaPdf=htmlCompleto||reportHtml.replace("%%PDF_BUTTON%%","");
         var _htmlResumoPdf=reportHtml.replace("%%PDF_BUTTON%%","");
         /* v502: o botão de PDF sumia em silêncio quando a geração falhava/estourava o tempo. Agora:
@@ -3278,12 +3298,14 @@ function Dash({data:d,onSel:os,goTo}){
            _pdfModo ("completo"|"resumo"|"nenhum") e é mostrado ao Igor no painel de envio. */
         var _t0=Date.now();
         return gerarPdfLinkCourinvest(pathStorage,htmlParaPdf).then(function(url){
-          if(url){_pdfModo="completo";return url;}
-          console.warn("[E-mail] PDF completo de "+c.nome+" falhou após "+Math.round((Date.now()-_t0)/1000)+"s.");
+          if(url){_pdfModo=_headlessOk?"completo":"resumo";if(!_headlessOk)_motivoPdf="não consegui montar o relatório completo em segundo plano (90s)";return url;}
+          _motivoPdf=window._pdfUltimoMotivo||"";
+          console.warn("[E-mail] PDF completo de "+c.nome+" falhou após "+Math.round((Date.now()-_t0)/1000)+"s — motivo: "+_motivoPdf);
           var rapido=(Date.now()-_t0)<60000;
           var p2=rapido?gerarPdfLinkCourinvest(pathStorage,htmlParaPdf):Promise.resolve(null);
           return p2.then(function(url2){
-            if(url2){_pdfModo="completo";return url2;}
+            if(url2){_pdfModo=_headlessOk?"completo":"resumo";return url2;}
+            if(window._pdfUltimoMotivo)_motivoPdf=window._pdfUltimoMotivo;
             return gerarPdfLinkCourinvest(pathStorage.replace(/\.pdf$/,"_resumo.pdf"),_htmlResumoPdf).then(function(url3){
               _pdfModo=url3?"resumo":"nenhum";
               return url3;
@@ -3311,7 +3333,7 @@ function Dash({data:d,onSel:os,goTo}){
 
         return window.emailjs.send(cfg.serviceId,cfg.templateId,templateParams);
       })
-        .then(function(){resolve(_pdfModo);})
+        .then(function(){window._pdfMotivos=window._pdfMotivos||{};window._pdfMotivos[c.id]=(_pdfModo==="completo")?"":_motivoPdf;resolve(_pdfModo);})
         .catch(function(e){reject(new Error("EmailJS: "+(e&&e.text||e&&e.message||JSON.stringify(e))));});
     });
   };
@@ -3397,6 +3419,62 @@ function Dash({data:d,onSel:os,goTo}){
         window._fbDB.collection("workspaces").doc("main").update({cl:clientes});
       }).catch(function(e){console.warn("Persistir aprovado:",e)});
     }catch(e){console.warn("Persistir aprovado:",e);}
+  };
+  /* v549: troca, no Storage, o PDF que o e-mail JÁ ENVIADO aponta (resumo/card) pelo relatório COMPLETO,
+     sem reenviar o e-mail. O link do e-mail é um download URL com token; ao sobrescrever o arquivo o Firebase
+     pode gerar token novo (link antigo morre) — por isso reaproveita o token antigo via customMetadata e
+     CONFERE no fim se a URL ficou idêntica; se não ficou, avisa que é preciso reenviar. */
+  const[trocaPdf,sTrocaPdf]=useState({});
+  var substituirPdfEnviado=function(cl){
+    var set=function(v){sTrocaPdf(function(p){var n=Object.assign({},p);n[cl.id]=v;return n;});};
+    if(!window._fbStorage){set({st:"erro",msg:"Firebase Storage indisponível"});return;}
+    var sv=Array.isArray(cl.sv)?cl.sv:(cl.sv?[cl.sv]:[]);
+    var isPlan=sv.includes("planejamento")&&!sv.includes("patrimonio");
+    var base="relatorios/"+cl.id+"/"+mesRefKey+"_"+(isPlan?"gf":"gp");
+    var paths=[base+".pdf",base+"_resumo.pdf"];
+    var refs=paths.map(function(pp){return window._fbStorage.ref().child(pp);});
+    var tokDe=function(u){var m=u&&/[?&]token=([^&]+)/.exec(u);return m?m[1]:null;};
+    set({st:"gerando",msg:"Gerando o relatório completo… (pode levar alguns minutos, não feche o app)"});
+    Promise.all(refs.map(function(r){return r.getDownloadURL().then(function(u){return u;},function(){return null;});})).then(function(antes){
+      return gerarRelatorioHtmlHeadless(cl,d,isPlan?"planejamento":"mensal").then(function(html){
+        if(!html)throw new Error("não consegui montar o relatório completo em segundo plano — tente de novo (de preferência no computador)");
+        window._pdfTokenForcado=tokDe(antes[0])||null;
+        return gerarPdfLinkCourinvest(paths[0],html).then(function(url0){
+          window._pdfTokenForcado=null;
+          if(!url0)throw new Error(window._pdfUltimoMotivo||"falha ao gerar o PDF");
+          var blob=window._pdfUltimoBlob;
+          var fim=antes[1]&&blob
+            ?refs[1].put(blob,{contentType:"application/pdf",customMetadata:tokDe(antes[1])?{firebaseStorageDownloadTokens:tokDe(antes[1])}:undefined}).then(function(){return refs[1].getDownloadURL();})
+            :Promise.resolve(null);
+          return fim.then(function(url1){return {antes:antes,depois:[url0,url1]};});
+        });
+      });
+    }).then(function(r){
+      /* confere cada caminho que já existia: URL idêntica = e-mail antigo continua valendo; se mudou, tenta
+         religar o token antigo via updateMetadata; se ainda assim mudou, avisa. */
+      var checar=function(i){
+        var a=r.antes[i],b=r.depois[i];
+        if(!a)return Promise.resolve(i===0?"novo":"nao-existia");
+        if(a===b)return Promise.resolve("igual");
+        var t=tokDe(a);
+        if(!t)return Promise.resolve("mudou");
+        return refs[i].updateMetadata({customMetadata:{firebaseStorageDownloadTokens:t}}).then(function(){return refs[i].getDownloadURL();}).then(function(u){return u===a?"igual":"mudou";}).catch(function(){return "mudou";});
+      };
+      return Promise.all([checar(0),checar(1)]);
+    }).then(function(res){
+      var existiu=res.indexOf("igual")>=0||res.indexOf("mudou")>=0;
+      var mudou=res.indexOf("mudou")>=0;
+      if(!existiu)set({st:"aviso",msg:"O e-mail antigo não tinha link de PDF no Storage — gerei o completo, mas é preciso reenviar o e-mail."});
+      else if(mudou)set({st:"aviso",msg:"PDF completo gerado, mas o Firebase trocou o endereço do arquivo — o botão do e-mail antigo pode não abrir mais. Reenvie o e-mail."});
+      else{
+        set({st:"ok",msg:"✅ Pronto! O botão do e-mail já enviado agora abre o relatório completo. Clique nele pra conferir."});
+        sEmailStatus(function(p){var n=Object.assign({},p);n[cl.id]="ok";return n;});
+      }
+    }).catch(function(e){
+      window._pdfTokenForcado=null;
+      console.warn("[Trocar PDF]",e);
+      set({st:"erro",msg:"Não deu certo: "+String((e&&e.message)||e).slice(0,160)});
+    });
   };
   /* enviarRelatorioParaCliente: extrai a lógica de UM envio individual (registro no Firebase,
      abertura do PDF e disparo por e-mail/WhatsApp) pra poder ser reaproveitada tanto no envio
@@ -3808,8 +3886,10 @@ function Dash({data:d,onSel:os,goTo}){
                           <div style={{fontSize:10,color:T.green,fontWeight:700}}>✅ enviado</div>
                           <div style={{display:"flex",gap:8,marginTop:2,justifyContent:"flex-end"}}>
                             <span onClick={function(){if(window.confirm("Desmarcar \""+c.nome+"\" como enviado?\n\nO relatório continua tendo sido enviado antes — isso só limpa o status pra você poder revisar/reenviar."))desmarcarEnviado(c);}} title="Desmarcar como enviado" style={{fontSize:9,color:T.t3,cursor:"pointer",textDecoration:"underline"}}>desmarcar</span>
+                            <span onClick={function(){if(trocaPdf[c.id]&&trocaPdf[c.id].st==="gerando")return;if(window.confirm("Trocar o PDF do e-mail JÁ ENVIADO de \""+c.nome+"\" pelo relatório COMPLETO?\n\nNão reenvia o e-mail: o botão do e-mail antigo passa a abrir o relatório completo. Pode levar alguns minutos."))substituirPdfEnviado(c);}} title="Gera o relatório completo e sobrescreve o PDF que o e-mail antigo já aponta (sem reenviar)" style={{fontSize:9,color:T.gold,cursor:"pointer",textDecoration:"underline"}}>{trocaPdf[c.id]&&trocaPdf[c.id].st==="gerando"?"⏳ trocando…":"🔁 trocar PDF"}</span>
                             <span onClick={function(){sRelEnviando(c.id);enviarRelatorioParaCliente(c,function(){sRelEnviando(null);});}} title="Enviar novamente para este cliente" style={{fontSize:9,color:T.cyan,cursor:"pointer",textDecoration:"underline"}}>reenviar</span>
                           </div>
+                          {trocaPdf[c.id]&&<div style={{fontSize:9,lineHeight:1.35,marginTop:3,textAlign:"right",maxWidth:240,marginLeft:"auto",color:trocaPdf[c.id].st==="ok"?T.green:trocaPdf[c.id].st==="gerando"?T.cyan:trocaPdf[c.id].st==="aviso"?T.gold:T.red}}>{trocaPdf[c.id].msg}</div>}
                         </div>
                       )}
                       {!enviado&&aprovado&&!enviando&&<div style={{fontSize:10,color:T.gold,fontWeight:700}}>✓ aprovado</div>}
@@ -3817,8 +3897,8 @@ function Dash({data:d,onSel:os,goTo}){
                     </div>
                     {/* Status do e-mail */}
                     {emailStatus[c.id]&&(
-                      <div style={{fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:5,background:(emailStatus[c.id]==="ok-resumo"||emailStatus[c.id]==="ok-sempdf")?"rgba(232,163,23,0.18)":emailStatus[c.id]==="ok"?"rgba(45,212,160,0.15)":emailStatus[c.id]==="enviando"?"rgba(56,189,248,0.15)":"rgba(239,100,97,0.15)",color:(emailStatus[c.id]==="ok-resumo"||emailStatus[c.id]==="ok-sempdf")?T.gold:emailStatus[c.id]==="ok"?T.green:emailStatus[c.id]==="enviando"?T.cyan:T.red,whiteSpace:"nowrap"}}>
-                        {emailStatus[c.id]==="ok-resumo"?"📧⚠ só resumo em PDF":emailStatus[c.id]==="ok-sempdf"?"📧⚠ enviado SEM botão de PDF":emailStatus[c.id]==="ok"?"📧✅":emailStatus[c.id]==="enviando"?"📧⏳":"📧❌"}
+                      <div style={{fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:5,background:(emailStatus[c.id]==="ok-resumo"||emailStatus[c.id]==="ok-sempdf")?"rgba(232,163,23,0.18)":emailStatus[c.id]==="ok"?"rgba(45,212,160,0.15)":emailStatus[c.id]==="enviando"?"rgba(56,189,248,0.15)":"rgba(239,100,97,0.15)",color:(emailStatus[c.id]==="ok-resumo"||emailStatus[c.id]==="ok-sempdf")?T.gold:emailStatus[c.id]==="ok"?T.green:emailStatus[c.id]==="enviando"?T.cyan:T.red,whiteSpace:"nowrap"}} title={(emailStatus[c.id]==="ok-resumo"||emailStatus[c.id]==="ok-sempdf")&&window._pdfMotivos&&window._pdfMotivos[c.id]?"Motivo: "+window._pdfMotivos[c.id]:undefined}>
+                        {emailStatus[c.id]==="ok-resumo"?"📧⚠ só resumo em PDF"+(window._pdfMotivos&&window._pdfMotivos[c.id]?" · "+window._pdfMotivos[c.id].slice(0,60):""):emailStatus[c.id]==="ok-sempdf"?"📧⚠ enviado SEM botão de PDF":emailStatus[c.id]==="ok"?"📧✅":emailStatus[c.id]==="enviando"?"📧⏳":"📧❌"}
                       </div>
                     )}
                     {/* PDF com tipo correto baseado no serviço */}
@@ -41610,12 +41690,55 @@ function App({authUser}){
     }
   };
 
+  /* v547: PUSH DE VERDADE no celular (Firebase Cloud Messaging) — chega mesmo com o app fechado.
+     O aparelho se registra em push_tokens; uma rotina no Firebase (pasta courinvest-push) envia os alertas do sino todo dia às 8h. */
+  const[fcmEst,sFcmEst]=useState({status:"?",msg:""});
+  const[vapidTxt,sVapidTxt]=useState("");
+  var fcmVapid=(d.config&&d.config.fcmVapidKey)||"";
+  const registrarPushFCM=function(silencioso){
+    var falha=function(m){if(!silencioso)sFcmEst({status:"erro",msg:m});return null};
+    var ua=navigator.userAgent||"";
+    var ios=/iPhone|iPad|iPod/.test(ua),standalone=(window.navigator.standalone===true)||(window.matchMedia&&window.matchMedia("(display-mode: standalone)").matches);
+    if(ios&&!standalone)return falha("No iPhone o push só funciona com o app instalado: toque em Compartilhar › Adicionar à Tela de Início e abra o Hub por esse ícone.");
+    if(typeof Notification==="undefined"||!("serviceWorker" in navigator)||!window.firebase||!firebase.messaging||!firebase.messaging.isSupported())return falha("Este navegador não suporta push. Use o Chrome (Android/computador) ou instale o app na Tela de Início (iPhone).");
+    if(Notification.permission!=="granted")return falha("Permita as notificações deste site primeiro.");
+    if(!fcmVapid)return falha("Falta a chave Web Push (VAPID) do Firebase — cole-a no campo abaixo.");
+    if(!window._fbDB)return falha("Sem conexão com o Firebase.");
+    return navigator.serviceWorker.register("firebase-messaging-sw.js",{scope:"firebase-cloud-messaging-push-scope"}).then(function(reg){
+      return firebase.messaging().getToken({vapidKey:fcmVapid,serviceWorkerRegistration:reg});
+    }).then(function(token){
+      if(!token)throw new Error("o Firebase não devolveu o código do aparelho");
+      var u=(window._fbAuth&&window._fbAuth.currentUser)||{};
+      return window._fbDB.collection("push_tokens").doc(token).set({token:token,email:u.email||"",plataforma:ios?"iOS":/Android/.test(ua)?"Android":"Computador",ua:ua.slice(0,160),atualizadoEm:Date.now()},{merge:true}).then(function(){
+        try{localStorage.setItem("courinvest_fcm_v1",JSON.stringify({token:token,t:Date.now()}))}catch(e){}
+        sFcmEst({status:"ok",msg:""});return token;
+      });
+    }).catch(function(e){
+      var m=String((e&&e.message)||e);
+      if(/permission|insufficient/i.test(m))m="O Firestore bloqueou a gravação em push_tokens — adicione a regra do README (passo 5). Detalhe: "+m;
+      else if(/404|not found|firebase-messaging-sw/i.test(m))m="Não achei o arquivo firebase-messaging-sw.js ao lado do index.html — suba-o no GitHub (passo 4 do README). Detalhe: "+m;
+      return falha(m);
+    });
+  };
+  const enviarTestePush=function(){
+    var u=(window._fbAuth&&window._fbAuth.currentUser)||{};
+    window._fbDB.collection("push_fila").add({titulo:"🔔 Teste do Courinvest Hub",corpo:"Se esta mensagem chegou, o push no celular está funcionando.",criadoEm:Date.now(),por:u.email||""})
+      .then(function(){sFcmEst({status:"ok",msg:"Teste enviado — deve chegar em alguns segundos."})})
+      .catch(function(e){sFcmEst({status:"erro",msg:"Não consegui pedir o teste: "+((e&&e.message)||e)})});
+  };
+  React.useEffect(function(){
+    if(pushPerm!=="granted"||!fcmVapid)return;
+    var rec=null;try{rec=JSON.parse(localStorage.getItem("courinvest_fcm_v1")||"null")}catch(e){}
+    if(rec&&rec.t&&(Date.now()-rec.t)<7*864e5){sFcmEst({status:"ok",msg:""});return}
+    registrarPushFCM(true);
+  },[pushPerm,fcmVapid]);
+
   const pedirPermissaoPush=function(){
     if(typeof Notification==="undefined")return;
     Notification.requestPermission().then(function(p){
       sPushPerm(p);
       sShowPushModal(false);
-      if(p==="granted"){
+      if(p==="granted"){registrarPushFCM(false);
         _showPushNotif("🔔 Courinvest Hub","Notificações ativadas! Você receberá alertas de vencimentos e reajustes.","setup");
       }
     });
@@ -41624,6 +41747,7 @@ function App({authUser}){
   /* Dispara push para alertas urgentes não lidos (roda 1x por dia ao abrir o app) */
   React.useEffect(function(){
     if(pushPerm!=="granted")return;
+    if(fcmEst.status==="ok")return; /* v547: com o push de verdade ativo, o servidor já avisa — evita aviso duplicado ao abrir o app */
     var urgentes=notsReais.filter(function(n){
       return !n.lido&&["rent_negativa","concentracao","vencimento_rf","reajuste_ipca"].indexOf(n.tipo)>=0;
     });
@@ -41636,7 +41760,7 @@ function App({authUser}){
         _showPushNotif("⚡ "+(n.cliNome||"Alerta"),n.msg,"courinvest-"+(n.id||i));
       },i*1500);
     });
-  },[notsReais,pushPerm]);
+  },[notsReais,pushPerm,fcmEst.status]);
   const go=function(p){sPg(p);sSel(null);sShowMenu(false)};
   const titles={dashboard:"Dashboard",clients:sel?sel.nome:"Clientes",rebal:"Rebalanceamento de Carteira",vencimentos:"Vencimentos de Renda Fixa",simuladores:"Simuladores — Carro e Imóvel",financeiro:"Financeiro da Empresa",comercial:"Comercial",metas:"Painel de Metas",agenda:"Agenda",news:"Notícias & Mercado",import:"Importar",irAnual:"Relatório Anual de IR"};
 
@@ -41840,6 +41964,18 @@ function App({authUser}){
                           {pushPerm==="denied" && <span style={{fontSize:9,color:T.t3}}>Push bloqueado</span>}
                           <button onClick={function(){sShowN(false)}} style={{background:"transparent",border:"none",color:T.t3,cursor:"pointer",fontSize:14,padding:0,lineHeight:1}}>✕</button>
                         </div>
+                      </div>
+                      <div style={{padding:"8px 14px 10px",borderBottom:"1px solid "+T.w3,fontSize:10.5,color:T.t2,lineHeight:1.6}}>
+                        <span style={{fontWeight:700,color:T.t1}}>📲 Push no celular</span>{" "}
+                        {pushPerm!=="granted"?<span style={{color:T.t3}}>— ative o push acima primeiro.</span>:
+                         !fcmVapid?<span>— falta a chave Web Push do Firebase (Firebase › Configurações › Cloud Messaging › Certificados Web Push):
+                           <div style={{display:"flex",gap:6,marginTop:5}}>
+                             <input value={vapidTxt} onChange={function(e){sVapidTxt(e.target.value)}} placeholder="Cole a chave aqui" style={{flex:1,minWidth:0,padding:"5px 8px",borderRadius:8,border:"1px solid "+T.bdrL,background:T.card,color:T.t1,fontSize:10.5}}/>
+                             <button onClick={function(){if(vapidTxt.trim().length>40)dp({t:"CONFIG_SET",p:{key:"fcmVapidKey",value:vapidTxt.trim()}})}} style={{padding:"5px 10px",borderRadius:8,border:"1px solid rgba(212,163,40,0.3)",background:"rgba(212,163,40,0.12)",color:T.gold,fontSize:10.5,fontWeight:700,cursor:"pointer"}}>Salvar</button>
+                           </div></span>:
+                         fcmEst.status==="ok"?<span style={{color:"#2DD4A0",fontWeight:600}}>✅ ativo neste aparelho — chega mesmo com o app fechado. <span onClick={enviarTestePush} style={{color:T.gold,cursor:"pointer",textDecoration:"underline",fontWeight:700}}>Enviar teste</span></span>:
+                         <span><button onClick={function(){registrarPushFCM(false)}} style={{padding:"3px 9px",borderRadius:8,border:"1px solid rgba(212,163,40,0.3)",background:"rgba(212,163,40,0.12)",color:T.gold,fontSize:10.5,fontWeight:700,cursor:"pointer"}}>Ativar neste aparelho</button></span>}
+                        {fcmEst.msg&&<div style={{marginTop:4,color:fcmEst.status==="erro"?T.red:T.t2}}>{fcmEst.msg}</div>}
                       </div>
                       {notsReais.map(function(n){
                         var clicavel=n.cliId&&d.cl.find(function(c){return c.id===n.cliId});
@@ -42076,7 +42212,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '546';
+  var SW_VERSION = '549';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
