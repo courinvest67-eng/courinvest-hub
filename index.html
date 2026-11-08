@@ -3388,7 +3388,8 @@ function Dash({data:d,onSel:os,goTo}){
   const[retMsgGeradas,sRetMsgGeradas]=useState({});
   const[retGerando,sRetGerando]=useState({});
   const[retCfgModal,sRetCfgModal]=useState(false);
-  const[subTab,sSubTab]=useState("patrimonio"); 
+  const[subTab,sSubTab]=useState("patrimonio");
+  const[dashDetalhes,sDashDetalhes]=useState(false); 
   const[showAum,sShowAum]=useState(false);
   const[showCarteiras,sShowCarteiras]=useState(false); 
   const[showCaixa,sShowCaixa]=useState(false);
@@ -3898,6 +3899,26 @@ function Dash({data:d,onSel:os,goTo}){
   const captacaoLiquida=captadoBruto-perdidoBruto;
   const temDadosCaptacao=clCaptados12m.length>0||clEncerrados12m.length>0;
 
+  var diasDesdeTs=function(ts){if(!ts)return 9999;return Math.floor((Date.now()-ts)/86400000);};
+  var carteirasAtrasadas=clAtivos.filter(function(c){
+    var temCart=(c.sv&&c.sv.indexOf("patrimonio")>=0)||(c._ativosImport&&c._ativosImport.length>0);
+    if(!temCart)return false;
+    if(c.sv&&c.sv.indexOf("patrimonio")<0&&!(c._ativosImport&&c._ativosImport.length))return false;
+    return diasDesdeTs(c._ativosTs)>8;
+  });
+  var relPendentesLista=clRelatorio.filter(function(c){return !(relEnviados[c.id+"-"+mesRefKey]||isEnviadoPersistido(c));});
+  var caixaParadoLista=clAtivos.filter(function(c){
+    var cx=caixaByCliente[c.nome];
+    return !!(cx&&cx.total>=10000&&cx.pct>=5);
+  });
+  var contatosAtrasados=clAtivos.filter(function(c){
+    var its=(d.it||[]).filter(function(i){return i&&(i.cid===c.id||i.cliId===c.id);});
+    if(!its.length)return true;
+    its.sort(function(a,b){return new Date(b.data||b.dt||0)-new Date(a.data||a.dt||0);});
+    var dias=Math.floor((Date.now()-new Date(its[0].data||its[0].dt))/86400000);
+    return isNaN(dias)||dias>60;
+  });
+
   const tTG=tG.reduce((a,t)=>a+t.vl,0);
 
   return (
@@ -4129,6 +4150,35 @@ function Dash({data:d,onSel:os,goTo}){
 
       {dt==="geral" && (
         <div>
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:15,fontWeight:800,color:T.t1,marginBottom:4}}>Fila de ações</div>
+            <div style={{fontSize:12,color:T.t3,marginBottom:10}}>O que precisa de uma decisão agora. Indicadores, gráficos e rankings ficam recolhidos.</div>
+            <div style={{display:"grid",gridTemplateColumns:isMob?"1fr":"1fr 1fr",gap:10}}>
+              {[
+                {ic:"📥",titulo:"Carteiras desatualizadas",qtd:carteirasAtrasadas.length,detalhe:carteirasAtrasadas.length?carteirasAtrasadas.slice(0,3).map(function(c){return c.nome;}).join(" · "):"Nenhuma carteira de patrimônio parada há mais de 8 dias",acao:"Abrir clientes",fn:function(){if(goTo)goTo("clients");}},
+                {ic:"📬",titulo:"Relatórios pendentes",qtd:relPendentesLista.length,detalhe:relPendentesLista.length?(relPendentesLista.length+" de "+mesRefNome+" sem envio"):"Relatórios de "+mesRefNome+" enviados",acao:"Revisar e enviar",fn:function(){sRelModal(true);}},
+                {ic:"💵",titulo:"Caixa parado",qtd:caixaParadoLista.length,detalhe:caixaParadoLista.length?caixaParadoLista.slice(0,3).map(function(c){var cx=caixaByCliente[c.nome];return c.nome+" "+fm(cx.total);}).join(" · "):"Nenhum cliente com caixa acima de 5% e de R$ 10 mil",acao:"Ver caixa",fn:function(){sDashDetalhes(true);sSubTab("patrimonio");sShowCaixa(true);}},
+                {ic:"📞",titulo:"Contatos atrasados",qtd:contatosAtrasados.length,detalhe:contatosAtrasados.length?contatosAtrasados.slice(0,3).map(function(c){return c.nome;}).join(" · "):"Nenhum contato parado há mais de 60 dias",acao:"Abrir agenda",fn:function(){if(goTo)goTo("agenda");}}
+              ].map(function(item){return (
+                <Cd key={item.titulo} style={{padding:"14px 16px"}} hov={false}>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"flex-start"}}>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontSize:12,fontWeight:800,color:T.t1}}>{item.ic} {item.titulo}</div>
+                      <div style={{fontSize:22,fontWeight:800,color:item.qtd?T.gold:T.green,fontFamily:"'JetBrains Mono'",margin:"4px 0 2px"}}>{item.qtd}</div>
+                      <div style={{fontSize:11,color:T.t3,lineHeight:1.4}}>{item.detalhe}</div>
+                    </div>
+                    <button onClick={item.fn} style={{padding:"8px 10px",borderRadius:8,border:"1px solid "+T.bdr,background:T.w3,color:T.t1,fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>{item.acao}</button>
+                  </div>
+                </Cd>
+              );})}
+            </div>
+            <div style={{marginTop:12,display:"flex",justifyContent:"flex-end"}}>
+              <button onClick={function(){sDashDetalhes(!dashDetalhes)}} style={{padding:"8px 14px",borderRadius:10,border:"1px solid "+T.bdr,background:dashDetalhes?T.goldD:"transparent",color:dashDetalhes?T.gold:T.t2,fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                {dashDetalhes?"Ocultar indicadores e rankings":"Ver indicadores, gráficos e rankings"}
+              </button>
+            </div>
+          </div>
+          {dashDetalhes && (<>
           {/* === SUB-ABAS: GESTÃO DE PATRIMÔNIO | GESTÃO FINANCEIRA === */}
           <div style={{display:"flex",gap:6,marginBottom:14,padding:"4px",background:T.w3,borderRadius:12,border:"1px solid "+T.bdrL,width:"fit-content"}}>
             {[
@@ -5010,6 +5060,7 @@ function Dash({data:d,onSel:os,goTo}){
               </div>
             );
           })()}
+          </>)}
           </>)}
         </div>
       )}
@@ -12133,7 +12184,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       var idxEXT=1;
       html+='<div style="page-break-before:always"></div>';
       html+='<div style="text-align:center;margin:40px 0 30px"><div class="cover-badge" style="background:rgba(167,139,250,0.1);color:#A78BFA;border-color:rgba(167,139,250,0.3)">PARTE 2</div><h2 style="font-size:32px;font-weight:800;color:#A78BFA;letter-spacing:-1px;margin-top:12px">Investimentos no Exterior</h2><div style="font-size:11px;color:#8B94A7;margin-top:4px">Lei 14.754/2023 · Tributação Exclusiva 15%</div></div>';
-      html+='<div class="box box-imp"><strong>📌 IMPORTANTE:</strong> Conforme a <strong>Lei 14.754/2023</strong>, os rendimentos de aplicações financeiras no exterior (dividendos + ganhos de capital) são tributados à <strong>alíquota fixa de 15%</strong>. O imposto pago no exterior (geralmente 30% sobre dividendos nos EUA) pode ser deduzido <strong>até o limite do imposto devido no Brasil</strong>.</div>';
+      html+='<div class="box box-imp"><strong>📌 IMPORTANTE:</strong> Conforme a <strong>Lei 14.754/2023, art. 2º e art. 3º</strong>, os rendimentos de <strong>aplicações financeiras no exterior</strong> são tributados à <strong>alíquota de 15%</strong> no ajuste anual. O imposto pago no exterior só é dedutível se houver tratado, acordo ou reciprocidade, e dentro dos limites do <strong>art. 4º</strong> — não é automático. <strong>Conferir:</strong> não estender esse regime a bem ou renda no exterior que não seja aplicação financeira, e não usar uma alíquota única de retenção no país de origem.</div>';
       tiposEXT.forEach(function(tp){
         var info=byTipo[tp].info;
         var ativos=byTipo[tp].ativos;
@@ -26300,7 +26351,16 @@ function calcRecorrentesEngine(entradas,canonCliente,visaoRec,d){
 }
 
 function FinanceiroView({data:d,dispatch:dp}){
-  const[fTab,sFTab]=useState("importar");
+  const[fTab,sFTab]=useState("resumo");
+  const[concMes,sConcMes]=useState(typeof cvUltMesFechadoYM==="function"?cvUltMesFechadoYM():"");
+  const[irAvulsosFin,sIrAvulsosFin]=useState([]);
+  React.useEffect(function(){
+    if(window._cvPreview){sIrAvulsosFin(window._cvPreviewAvulsos||[]);return;}
+    if(!window._fbDB)return;
+    window._fbDB.collection("ir_avulsos").limit(200).get().then(function(snap){
+      sIrAvulsosFin(snap.docs.map(function(doc){return {id:doc.id,tipo:"avulso",...doc.data()};}));
+    }).catch(function(e){console.error("[Financeiro] ir_avulsos:",e);});
+  },[]);
   /* === RESPONSIVE: detecção reativa de mobile === usado em vários pontos do layout abaixo
      (grids, tamanhos de fonte, gráfico de barras) — faltava declarar nesse componente, causando
      "ReferenceError: isMob is not defined" e travando a tela inteira com o Error Boundary. */
@@ -26623,10 +26683,135 @@ function FinanceiroView({data:d,dispatch:dp}){
 
   var fmtMonth=function(m){var p=m.split("-");return(["","Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"][+p[1]]||p[1])+"/"+p[0].slice(2)};
 
+  var painelConciliacao=function(compacto){
+    var nomeKey=function(s){return String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();};
+    var mes=concMes||cvUltMesFechadoYM();
+    var hoje=new Date();
+    var mesAtual=hoje.getFullYear()+"-"+String(hoje.getMonth()+1).padStart(2,"0");
+    var mesPassado=mes<mesAtual||(mes===mesAtual&&hoje.getDate()>10);
+    var doMes=entradas.filter(function(e){return e.data&&e.data.substring(0,7)===mes;});
+    var ehIR=function(e){return /\bir\b|imposto de renda|relat[oó]rio de ir|avulso/i.test((e.servico||"")+" "+(e.cliente||""));};
+    var ehComissao=function(e){return /comiss/i.test((e.servico||"")+" "+(e.cliente||""));};
+    var fees=doMes.filter(function(e){return !ehIR(e)&&!ehComissao(e);});
+    var irs=doMes.filter(function(e){return ehIR(e);});
+    var coms=doMes.filter(function(e){return ehComissao(e)&&!ehIR(e);});
+    var usados={};
+    var clientesAtivos=(d.cl||[]).filter(function(c){return c.status!=="encerrado"&&c.status!=="inativo";});
+    var linhas=clientesAtivos.map(function(c){
+      var previsto=receitaTotalBRL(c);
+      if(!(previsto>0))return null;
+      var chave=nomeKey(c.nome);
+      var matches=fees.filter(function(e){
+        if(usados[e.id])return false;
+        var nk=nomeKey(canonCliente(e.cliente));
+        return nk===chave||(chave.length>5&&(nk.indexOf(chave)>=0||chave.indexOf(nk)>=0));
+      });
+      matches.forEach(function(e){usados[e.id]=true;});
+      var recebido=matches.reduce(function(s,e){return s+(+e.valor||0);},0);
+      var tol=Math.max(1,previsto*0.01);
+      var status="atrasado";
+      if(recebido>previsto+tol)status="divergente";
+      else if(recebido>0&&recebido<previsto-tol)status="parcial";
+      else if(Math.abs(recebido-previsto)<=tol&&recebido>0)status="pago";
+      else if(!mesPassado)status="em_aberto";
+      return {nome:c.nome,previsto:previsto,recebido:recebido,status:status,tipo:"Fee mensal"};
+    }).filter(Boolean);
+    var avulsoLinhas=[];
+    (irAvulsosFin||[]).forEach(function(av){
+      (av.faturamento||[]).forEach(function(fat){
+        var quando=(fat.geradoEm||"").substring(0,7);
+        if(quando&&quando!==mes)return;
+        var previsto=+fat.valor||+av.valorRelatorio||0;
+        var chave=nomeKey(av.nome);
+        var match=irs.find(function(e){return !usados["ir"+e.id]&&nomeKey(e.cliente).indexOf(chave.split(" ")[0])>=0&&(previsto<=0||Math.abs((+e.valor||0)-previsto)<=Math.max(1,previsto*0.02));});
+        if(match)usados["ir"+match.id]=true;
+        var recebido=match?(+match.valor||0):0;
+        var status=recebido<=0?(mesPassado?"atrasado":"em_aberto"):(Math.abs(recebido-previsto)<=Math.max(1,previsto*0.02)?"pago":"divergente");
+        avulsoLinhas.push({nome:av.nome||"Avulso de IR",previsto:previsto,recebido:recebido,status:status,tipo:"Avulso de IR",nota:"Não entra de novo no fee."});
+      });
+    });
+    irs.forEach(function(e){
+      if(usados["ir"+e.id])return;
+      avulsoLinhas.push({nome:e.cliente||"IR sem cadastro",previsto:0,recebido:+e.valor||0,status:"divergente",tipo:"Avulso de IR",nota:"Lançamento de IR sem avulso correspondente. Não somar no fee."});
+    });
+    var parc=(d.parceiros&&d.parceiros.parceiros)||[];
+    var inds=(d.parceiros&&d.parceiros.indicacoes)||[];
+    var comEsperado=0;
+    parc.forEach(function(p){
+      if((p.direcao||"pagamos")!=="recebemos")return;
+      inds.forEach(function(i){
+        if(i.parceiroId!==p.id||i.status!=="convertido"||i.recorrenteAtiva===false)return;
+        if(p.tipoComissao==="recorrente"||p.tipoComissao==="hibrido")comEsperado+=(+i.valorTaxaMensal||0)*((+p.percentual||0)/100);
+      });
+    });
+    var comRecebido=coms.reduce(function(s,e){return s+(+e.valor||0);},0);
+    var comStatus="em_aberto";
+    if(comEsperado>0||comRecebido>0){
+      var tolC=Math.max(1,comEsperado*0.02);
+      if(comRecebido>comEsperado+tolC)comStatus="divergente";
+      else if(comRecebido>0&&comRecebido<comEsperado-tolC)comStatus="parcial";
+      else if(comEsperado>0&&Math.abs(comRecebido-comEsperado)<=tolC)comStatus="pago";
+      else if(mesPassado&&comRecebido<=0)comStatus="atrasado";
+    }
+    var rotulo={pago:"Pago",parcial:"Parcial",atrasado:"Atrasado",divergente:"Divergente",em_aberto:"Em aberto"};
+    var corSt=function(s){return s==="pago"?T.green:s==="parcial"?T.gold:s==="divergente"?T.red:s==="atrasado"?T.red:T.t3;};
+    var mrr=linhas.reduce(function(s,l){return s+l.previsto;},0);
+    var caixaFee=linhas.reduce(function(s,l){return s+l.recebido;},0);
+    var aConferir=linhas.filter(function(l){return l.status!=="pago";}).length+avulsoLinhas.filter(function(l){return l.status!=="pago";}).length+(comStatus!=="pago"&&(comEsperado>0||comRecebido>0)?1:0);
+    var mesesOpts=[];
+    entradas.forEach(function(e){if(e.data){var m=e.data.substring(0,7);if(mesesOpts.indexOf(m)<0)mesesOpts.push(m);}});
+    if(mes&&mesesOpts.indexOf(mes)<0)mesesOpts.push(mes);
+    mesesOpts.sort().reverse();
+    var mostrar=compacto?linhas.slice(0,8):linhas;
+    return (
+      <Cd style={{padding:16,marginBottom:14}} hov={false}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"flex-start",marginBottom:10}}>
+          <div>
+            <div style={{fontSize:14,fontWeight:800,color:T.t1}}>Fee previsto × recebido</div>
+            <div style={{fontSize:12,color:T.t3,lineHeight:1.45,maxWidth:640}}>O MRR contratado é o que o cadastro manda cobrar. Ele não é caixa. O recebido sai só dos lançamentos importados daquele mês. Avulso de IR e comissão de parceiro aparecem à parte, para não entrarem duas vezes no fee.</div>
+          </div>
+          <select value={mes} onChange={function(e){sConcMes(e.target.value)}} style={{padding:"8px 10px",fontSize:12}}>
+            {mesesOpts.map(function(m){return <option key={m} value={m}>{fmtMonth(m)}</option>;})}
+          </select>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:isMob?"1fr 1fr":"repeat(4,1fr)",gap:8,marginBottom:12}}>
+          <div style={{padding:"10px 12px",background:T.w3,borderRadius:10}}><div style={{fontSize:9,color:T.t3,fontWeight:700}}>MRR CONTRATADO</div><div style={{fontSize:16,fontWeight:800,color:T.gold}}>{fm(mrr)}</div><div style={{fontSize:9,color:T.t3}}>não é caixa</div></div>
+          <div style={{padding:"10px 12px",background:T.w3,borderRadius:10}}><div style={{fontSize:9,color:T.t3,fontWeight:700}}>RECEBIDO DE FEE</div><div style={{fontSize:16,fontWeight:800,color:T.green}}>{fm(caixaFee)}</div><div style={{fontSize:9,color:T.t3}}>lançamentos do mês</div></div>
+          <div style={{padding:"10px 12px",background:T.w3,borderRadius:10}}><div style={{fontSize:9,color:T.t3,fontWeight:700}}>A CONFERIR</div><div style={{fontSize:16,fontWeight:800,color:aConferir?T.red:T.green}}>{aConferir}</div><div style={{fontSize:9,color:T.t3}}>pago, parcial, atrasado ou divergente</div></div>
+          <div style={{padding:"10px 12px",background:T.w3,borderRadius:10}}><div style={{fontSize:9,color:T.t3,fontWeight:700}}>FORA DO FEE</div><div style={{fontSize:16,fontWeight:800,color:T.cyan}}>{fm(avulsoLinhas.reduce(function(s,l){return s+l.recebido;},0)+comRecebido)}</div><div style={{fontSize:9,color:T.t3}}>IR e comissão, sem somar de novo</div></div>
+        </div>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+            <thead><tr style={{color:T.t3,fontSize:10,textAlign:"left"}}><th style={{padding:"6px 4px"}}>Cliente</th><th>Tipo</th><th style={{textAlign:"right"}}>Previsto</th><th style={{textAlign:"right"}}>Recebido</th><th>Situação</th></tr></thead>
+            <tbody>
+              {mostrar.map(function(l,i){return (
+                <tr key={l.nome+i} style={{borderTop:"1px solid "+T.bdrL}}>
+                  <td style={{padding:"7px 4px",fontWeight:700}}>{l.nome}</td>
+                  <td style={{color:T.t3}}>{l.tipo}</td>
+                  <td style={{textAlign:"right",fontFamily:"'JetBrains Mono'"}}>{fm(l.previsto)}</td>
+                  <td style={{textAlign:"right",fontFamily:"'JetBrains Mono'"}}>{fm(l.recebido)}</td>
+                  <td style={{fontWeight:800,color:corSt(l.status)}}>{rotulo[l.status]||l.status}</td>
+                </tr>
+              );})}
+              {!mostrar.length&&<tr><td colSpan={5} style={{padding:10,color:T.t3}}>Nenhum fee contratado no cadastro para conciliar.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        {compacto&&linhas.length>8&&<button onClick={function(){sFTab("conciliar")}} style={{marginTop:8,background:"none",border:"none",color:T.gold,fontWeight:700,cursor:"pointer",fontSize:12}}>Ver os {linhas.length} clientes na conciliação</button>}
+        {(!compacto||avulsoLinhas.length||comEsperado>0||comRecebido>0)&&<div style={{marginTop:12}}>
+          <div style={{fontSize:12,fontWeight:800,marginBottom:6}}>Fora do fee — não lançar de novo</div>
+          {avulsoLinhas.map(function(l,i){return <div key={i} style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:11,padding:"4px 0",borderTop:"1px solid "+T.bdrL}}><span>{l.nome} · {l.tipo}</span><span style={{color:corSt(l.status),fontWeight:700}}>{rotulo[l.status]} · previsto {fm(l.previsto)} · recebido {fm(l.recebido)}</span></div>;})}
+          {(comEsperado>0||comRecebido>0)&&<div style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:11,padding:"4px 0",borderTop:"1px solid "+T.bdrL}}><span>Comissões a receber de parceiros</span><span style={{color:corSt(comStatus),fontWeight:700}}>{rotulo[comStatus]} · previsto {fm(comEsperado)} · recebido {fm(comRecebido)}</span></div>}
+          {!avulsoLinhas.length&&comEsperado<=0&&comRecebido<=0&&<div style={{fontSize:11,color:T.t3}}>Nenhum avulso de IR nem comissão neste mês.</div>}
+        </div>}
+      </Cd>
+    );
+  };
+
   return (
     <div>
       <div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap"}}>
-        {[{id:"importar",l:"📥 Importar"},{id:"resumo",l:"📊 Resumo"},{id:"entradas",l:"💰 Entradas"},{id:"despesas",l:"💸 Despesas"},{id:"dre",l:"📋 DRE"},{id:"clientes",l:"👥 Por Cliente"},{id:"recorrentes",l:"🔄 Recorrentes"},{id:"cartao",l:"💳 Cartão"}].map(function(t){return (
+        {[{id:"resumo",l:"📊 Resumo"},{id:"conciliar",l:"⚖️ Conciliação"},{id:"importar",l:"📥 Importar"},{id:"entradas",l:"💰 Entradas"},{id:"despesas",l:"💸 Despesas"},{id:"dre",l:"📋 DRE"},{id:"clientes",l:"👥 Por Cliente"},{id:"recorrentes",l:"🔄 Recorrentes"},{id:"cartao",l:"💳 Cartão"}].map(function(t){return (
           <button key={t.id} onClick={function(){sFTab(t.id)}} style={{padding:"8px 16px",borderRadius:12,fontSize:11,fontWeight:600,cursor:"pointer",border:fTab===t.id?"1.5px solid "+T.gold:"1px solid var(--wa04)",background:fTab===t.id?T.goldD:"transparent",color:fTab===t.id?T.gold:T.t3}}>{t.l}</button>
         )})}
       </div>
@@ -26730,7 +26915,8 @@ function FinanceiroView({data:d,dispatch:dp}){
       {/* RESUMO */}
       {fTab==="resumo" && (
         <div>
-          {entradas.length===0 ? <Cd style={{padding:30,textAlign:"center"}} hov={false}><div style={{fontSize:28,marginBottom:10}}>📊</div><div style={{fontSize:14,color:T.t3}}>Importe sua planilha primeiro na aba "📥 Importar"</div></Cd> : (
+          {painelConciliacao(true)}
+          {entradas.length===0 ? <Cd style={{padding:30,textAlign:"center"}} hov={false}><div style={{fontSize:28,marginBottom:10}}>📊</div><div style={{fontSize:14,color:T.t3}}>O restante do resumo usa a planilha importada. Comece por 📥 Importar quando quiser ver o caixa lançado.</div></Cd> : (
             <div>
               {}
               {anos.length>0 && (
@@ -27175,6 +27361,10 @@ function FinanceiroView({data:d,dispatch:dp}){
       )}
 
       {}
+      {fTab==="conciliar" && (
+        <div>{painelConciliacao(false)}</div>
+      )}
+
       {fTab==="entradas" && (
         <Cd style={{padding:18}} hov={false}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
@@ -32543,6 +32733,15 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
      Agora .cover e cada .pagelight são irmãos diretos do <body>, cada um vira uma "página" real
      pro motor de PDF, igual ao relatório mensal e à proposta. */
   var html='<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório Anual de IR '+anoDec+' — '+pessoa.nome+'</title>'+css+'</head><body>';
+  if(dados.templateFiscal==="553"||dados.rascunho===true||dados.rascunho===false){
+    if(dados.rascunho!==false){
+      html+='<div class="pagelight" style="padding:18px 22px 0"><div class="box box-warn"><b>RASCUNHO — não é a versão final.</b> Modelo fiscal v553. '
+        +(dados.apuracaoIncompleta?'A apuração do exterior está incompleta (juros, perdas ou limite do crédito ainda não fechados). ':'')
+        +'Revise os itens marcados como <b>conferir</b> e o dossiê de documentos antes de tratar este arquivo como relatório entregue ao cliente. O Hub não envia a declaração à Receita.</div></div>';
+    } else {
+      html+='<div class="pagelight" style="padding:18px 22px 0"><div class="box box-tip"><b>Versão revisada · modelo fiscal v553.</b> A validação de um contador continua necessária. O Hub não envia a declaração à Receita.</div></div>';
+    }
+  }
 
   /* ===== CAPA ===== */
   html+='<div class="cover"><div class="cover-inner">';
@@ -32811,7 +33010,7 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
       html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">💰 Dividendos de Ações</h3>';
       html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Isentos e Não Tributáveis</b> → Novo → Código <b>09 – Lucros e dividendos recebidos</b>.</div></div>';
       html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text">Informe o <b>CNPJ da empresa pagadora</b> e o valor total recebido no ano (some todos os pagamentos da mesma empresa).</div></div>';
-      html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu R$ 850,00 de dividendos da empresa XPTO S.A. (CNPJ 12.345.678/0001-90) ao longo de 2025 → lança R$ 850,00 no Código 09, com o CNPJ da XPTO. Totalmente isento, não gera imposto.</div>';
+      html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu R$ 850,00 de dividendos da empresa XPTO S.A. (CNPJ 12.345.678/0001-90) ao longo de '+anoBase+' → lança R$ 850,00 no Código 09, com o CNPJ da XPTO. Totalmente isento, não gera imposto. <b>Conferir:</b> o código da ficha e o exemplo numérico são ilustrativos — confirme no Programa IRPF '+anoDec+'.</div>';
 
       html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🎁 Bonificação em Ações</h3>';
       html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Isentos e Não Tributáveis</b> → Código <b>18 – Incorporação de reservas ao capital/Bonificações em ações</b> → CNPJ da empresa → valor de mercado das ações bonificadas (divulgado pela própria empresa no Fato Relevante/Aviso aos Acionistas da bonificação — a corretora às vezes traz esse valor no informe de rendimentos, mas nem sempre).</div></div>';
@@ -32824,14 +33023,14 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
       html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🪙 Frações de Ações (Leilão)</h3>';
       html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Uma posição não pode ter fração de ação/cota. Quando uma bonificação, desdobramento ou outro evento societário gera uma fração (ex.: 0,36 ação), a corretora retira essa fração da posição e vende em leilão — o valor em dinheiro é creditado na sua conta.</div></div>';
       html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text">Ficha <b>Rendimentos Isentos e Não Tributáveis</b> → Código <b>99 – Outros</b> → CNPJ da empresa → valor recebido no leilão. Discriminação sugerida: "Sobras de frações de ações bonificadas pela empresa [Nome], CNPJ [número]".</div></div>';
-      html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você tinha 1.000 ações e uma bonificação de 10% geraria 100,4 ações — a B3 credita as 100 ações inteiras e retira a fração de 0,4, vendendo-a em leilão por R$ 4,52 → lança R$ 4,52 no Código 99, com o CNPJ da empresa. Não afeta o preço médio da posição nem exige apuração de ganho de capital.</div>';
+      html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você tinha 1.000 ações e uma bonificação de 10% geraria 100,4 ações — a B3 credita as 100 ações inteiras e retira a fração de 0,4, vendendo-a em leilão por R$ 4,52 → lança R$ 4,52 no Código 99, com o CNPJ da empresa. Não afeta o preço médio da posição nem exige apuração de ganho de capital. <b>Conferir:</b> o código 99 para fração em leilão é prática de mercado usada neste modelo; confirme no Programa IRPF '+anoDec+' antes de replicar.</div>';
       if(movimentacao&&movimentacao.porEmpresaFracao&&movimentacao.porEmpresaFracao.length){
         html+='<div class="box box-warn"><b>⚠ Identificamos '+movimentacao.porEmpresaFracao.length+' leilão(ões) de fração neste ano</b> — veja o valor recebido de cada empresa na tabela "Frações de Ações (Leilão) por Empresa", na seção de Rendimentos do Ano. Diferente da bonificação, aqui a B3 já informa o valor certinho — não precisa buscar nada com a empresa.</div>';
       }
 
       html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🏦 Juros sobre Capital Próprio (JCP)</h3>';
       html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Sujeitos à Tributação Exclusiva/Definitiva</b> → Código <b>10 – Juros sobre Capital Próprio</b> → CNPJ da empresa → valor <b>bruto</b> recebido no ano (o Informe de Rendimentos já traz esse total separado dos dividendos).</div></div>';
-      html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu R$ 500,00 brutos de JCP, com R$ 75,00 já retidos na fonte pela empresa (15%) → lança R$ 500,00 (valor bruto) no Código 10. O imposto retido é informativo — já foi pago pela empresa, não gera DARF nem cobrança adicional.</div>';
+      html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu R$ 500,00 brutos de JCP, com R$ 75,00 já retidos na fonte pela empresa (15% neste exemplo) → lança R$ 500,00 (valor bruto) no Código 10. O imposto retido é informativo — já foi pago pela empresa, não gera DARF nem cobrança adicional. <b>Conferir:</b> alíquota e valor bruto saem do informe, não deste exemplo.</div>';
       html+='<div class="box box-warn"><b>⚠ JCP "em trânsito" (creditado mas ainda não pago):</b> se a empresa <b>creditou</b> o JCP contabilmente até 31/12/'+anoBase+' mas só efetuou o <b>pagamento</b> em '+(anoBase+1)+', esse valor não entra na Tributação Exclusiva deste ano (só quando for pago) — mas precisa aparecer como <b>Bens e Direitos, Grupo 99, Código 07</b> ("Outros bens e direitos"), com o saldo credor em 31/12/'+anoBase+' e zerado no ano anterior. Confira no informe de rendimentos da corretora se há uma linha de "JCP a receber" ou "JCP declarado e não pago".</div>';
     }
 
@@ -32839,8 +33038,9 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
       html+='<h3 style="font-size:14px;font-weight:800;color:#8a6d1f;margin:18px 0 6px">🏢 Proventos de FII, Fiagro e FI-Infra</h3>';
       html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Ficha <b>Rendimentos Isentos e Não Tributáveis</b> → Código <b>99 – Outros</b> → CNPJ do fundo (administrador) → valor total recebido no ano <b>daquele fundo especificamente</b> (um lançamento por fundo, não um total único).</div></div>';
       html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text">No campo <b>Discriminação</b>, escreva de forma simples, sem precisar citar lei: "Valor de proventos recebidos do FII [TICKER]", "Valor de proventos recebidos do Fiagro [TICKER]" ou "Valor de proventos recebidos do FI-Infra [TICKER]", conforme o tipo do fundo.</div></div>';
-      html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu R$ 1.200,00 de HGLG11 (FII), R$ 300,00 de BBGO11 (Fiagro) e R$ 450,00 de BDIF11 (FI-Infra) em 2025 → três lançamentos separados no Código 99, cada um com o CNPJ do respectivo fundo.</div>';
-      html+='<div class="box box-warn"><b>⚠ Requisito da isenção:</b> desde jan/2024, a isenção de FII/Fiagro/FI-Infra vale só se o fundo tiver cotas negociadas em bolsa/balcão organizado (efetivamente negociadas, não só admitidas), no mínimo <b>500 cotistas</b> e nenhum cotista com 10% ou mais das cotas recebendo mais de 10% do rendimento distribuído. Praticamente todos os fundos listados na B3 já atendem isso, mas vale conferir no informe de rendimentos se algum fundo pequeno da carteira está fora da regra.</div>';
+      html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu R$ 1.200,00 de HGLG11 (FII), R$ 300,00 de BBGO11 (Fiagro) e R$ 450,00 de BDIF11 (FI-Infra) em '+anoBase+' → três lançamentos separados no Código 99, cada um com o CNPJ do respectivo fundo. Números só de exemplo.</div>';
+      html+='<div class="box box-warn"><b>⚠ Requisito da isenção — FII e Fiagro (Lei 14.754/2023, art. 41):</b> a isenção da pessoa física vale quando o fundo tem, no mínimo, <b>100 cotistas</b>. Não é concedida ao conjunto de cotistas pessoas físicas ligadas que tenham <b>30% ou mais das cotas</b> ou direito a mais de <b>30% dos rendimentos</b> (art. 3º da Lei 11.033/2004, com a redação do art. 41). <b>Conferir:</b> as demais condições desse artigo que o art. 41 não reescreveu (inclusive cotas negociadas em bolsa ou balcão) continuam a ser checadas no informe de cada fundo.</div>';
+      html+='<div class="box box-warn"><b>⚠ Conferir — FI-Infra:</b> a regra de 100 cotistas do art. 41 vale para <b>FII e Fiagro</b>. Não use essa condição para FI-Infra. A isenção do FI-Infra tem base própria — confira o informe de cada fundo antes de lançar o provento como isento.</div>';
     }
     html+='</div></div>';
   }
@@ -32848,7 +33048,7 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
   /* ===== PARTE 2 — EXTERIOR ===== */
   if(tiposExt.length||saldoContaExterior){
     html+='<div class="pagelight"><div style="text-align:center;margin:20px 0 24px"><div class="cover-badge" style="background:rgba(167,139,250,0.12);color:#7C3AED;border-color:rgba(124,58,237,0.3)">PARTE 2</div><h2 style="font-size:28px;font-weight:900;color:#7C3AED;letter-spacing:-.8px;margin-top:10px">Investimentos no <i style="font-style:italic">Exterior</i></h2><div style="font-size:11px;color:#7a8399;margin-top:4px">Lei 14.754/2023 · Tributação Exclusiva 15%</div></div>';
-    html+='<div class="box box-imp"><b>📌 IMPORTANTE:</b> Pela Lei 14.754/2023, dividendos + ganhos de capital no exterior são tributados a <b>15%</b>. O imposto pago no exterior pode ser deduzido até o limite do imposto devido no Brasil.</div>';
+    html+='<div class="box box-imp"><b>📌 IMPORTANTE:</b> Pela Lei 14.754/2023, art. 2º e art. 3º, os <b>rendimentos de aplicações financeiras no exterior</b> (entre eles dividendos, juros e ganhos na alienação dessas aplicações) são tributados a <b>15%</b> no ajuste anual. Isso <b>não</b> se estende automaticamente a todo bem ou renda no exterior: o ganho na alienação de bem que não seja aplicação financeira segue outra regra (art. 2º, § 2º). <b>Conferir</b> o enquadramento de cada ativo.</div>';
 
     if(saldoContaExterior){
       html+='<div class="section"><div class="section-eyebrow"><span class="section-eyebrow-line"></span><span class="section-eyebrow-text">PARTE 2 · ITEM 2.1</span></div><h2 class="section-title" style="color:#7C3AED">Saldo em Conta — <i>Corretora Exterior</i></h2>';
@@ -32893,11 +33093,11 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
     html+='<div class="step"><div class="step-num">PASSO 1</div><div class="step-text">Abra a ficha <b>Bens e Direitos</b> e selecione o ativo (a mesma ação ou ETF já cadastrado no item anterior) — <b>não</b> crie um lançamento novo. Role a tela para baixo até a seção <b>"Aplicação Financeira"</b>, que fica dentro do próprio cadastro do bem.</div></div>';
     html+='<div class="step"><div class="step-num">PASSO 2</div><div class="step-text">No campo <b>"Lucro ou Prejuízo"</b>, informe o total de dividendos recebidos daquele ativo no ano (em reais) — é a coluna <b>"Dividendos"</b> da tabela acima. No campo <b>"Imposto pago no Exterior"</b>, informe o total retido na fonte lá fora — é a coluna <b>"Imp. Exterior"</b> da mesma tabela.</div></div>';
     html+='<div class="step"><div class="step-num">PASSO 3</div><div class="step-text">Repita para <b>cada ativo</b> que pagou dividendo no ano (uma ação/ETF de cada vez) — não dá pra lançar um total único. Ativos que não pagaram dividendo (Lucro ou Prejuízo = R$ 0,00) não precisam preencher essa seção.</div></div>';
-    html+='<div class="box box-tip"><b>💡 Conversão cambial:</b> o dividendo é convertido pela <b>cotação PTAX de venda</b> do dia do pagamento; o imposto retido lá fora é convertido pela <b>cotação PTAX de compra</b> do dia do pagamento. Normalmente a corretora (ex.: Vest, Avenue, Interactive Brokers) já entrega esses dois valores convertidos em reais no informe de rendimentos anual — é só copiar, sem precisar converter na mão.</div>';
+    html+='<div class="box box-tip"><b>💡 Conversão cambial:</b> o imposto pago no exterior é convertido pela <b>cotação de fechamento de compra</b> divulgada pelo Banco Central para o dia do pagamento desse imposto (Lei 14.754/2023, art. 4º, § 2º). <b>Conferir:</b> a conversão do rendimento (dividendo, juro ou ganho) pela PTAX de venda do dia do pagamento não foi revalidada nesta versão — use o valor em reais do informe da corretora ou a regra da Receita para o exercício '+anoDec+'.</div>';
     html+='<div class="step"><div class="step-num">PASSO 4</div><div class="step-text">O Programa IRPF soma sozinho tudo o que foi lançado na seção "Aplicação Financeira" de cada ativo (dividendos + ganhos de capital + juros do ano) e monta o <b>"Demonstrativo de Apuração — Lei nº 14.754/2023"</b>, aplicando <b>15%</b> sobre o total e gerando um <b>único DARF (código 0211)</b> — pagável à vista ou parcelado em até 8x, com vencimento junto ao ajuste anual.</div></div>';
-    html+='<div class="step"><div class="step-num">IMPOSTO PAGO LÁ FORA</div><div class="step-text">O imposto retido no exterior (ex.: withholding tax dos EUA) que você lançou no Passo 2 é <b>abatido automaticamente do imposto devido no Brasil, até o limite de 15%</b> — sem precisar de acordo de reciprocidade específico pra esse regime. Se a retenção lá fora já foi de 15% ou mais sobre aquele valor, não sobra imposto a pagar aqui.</div></div>';
+    html+='<div class="step"><div class="step-num">IMPOSTO PAGO LÁ FORA</div><div class="step-text">O imposto pago no país de origem <b>só pode ser deduzido</b> do IRPF se houver acordo, tratado ou convenção para evitar a dupla tributação com esse país, <b>ou</b> reciprocidade de tratamento em relação aos rendimentos produzidos no Brasil (Lei 14.754/2023, art. 4º, incisos I e II). A dedução não passa da diferença entre o IRPF com e sem aquele rendimento (§ 1º), não inclui imposto reembolsável no exterior (§ 3º) e o que não for usado neste ano-calendário não vai para outro ano (§ 4º). Não é um abatimento automático até 15%.</div></div>';
     html+='<div class="box box-warn"><b>⚠ Onde NÃO declarar:</b> dividendo do exterior <b>não</b> vai em "Rendimentos Isentos e Não Tributáveis" (não é isento) e <b>não</b> passa mais por carnê-leão mensal nem por um GCAP separado — isso valia antes de 2024. Também <b>não</b> é a ficha "Rendimentos Recebidos de Pessoa Jurídica no Exterior" (essa é só pra sócio/titular de empresa offshore própria, não pra quem só tem ações/ETFs numa corretora internacional). Desde a Lei 14.754/2023, o lugar correto é a seção "Aplicação Financeira" de cada ativo em Bens e Direitos, descrita acima.</div>';
-    html+='<div class="box box-tip"><b>💡 Exemplo:</b> Você recebeu US$ 200,00 em dividendos de uma ação americana (≈ R$ 1.100,00 no câmbio do dia do recebimento), com US$ 30,00 retidos na fonte pelos EUA (15%, ≈ R$ 165,00). Na ficha dessa ação em Bens e Direitos → Aplicação Financeira: Lucro ou Prejuízo = R$ 1.100,00; Imposto pago no Exterior = R$ 165,00. No demonstrativo da Lei 14.754/2023: imposto devido no Brasil = R$ 1.100,00 × 15% = R$ 165,00; como já foram retidos R$ 165,00 no exterior, o crédito cobre integralmente o imposto devido — <b>nada a pagar adicionalmente aqui</b> sobre esse valor.</div>';
+    html+='<div class="box box-tip"><b>💡 Exemplo numérico, não é regra:</b> US$ 200,00 de dividendo (≈ R$ 1.100,00 no informe) e US$ 30,00 retidos lá fora (≈ R$ 165,00). Na ficha do ativo → Aplicação Financeira: Lucro ou Prejuízo = R$ 1.100,00; Imposto pago no Exterior = R$ 165,00. O programa calcula 15% sobre o rendimento. <b>Conferir:</b> esse crédito só entra se o art. 4º estiver cumprido. O exemplo não autoriza abater sem tratado, acordo ou reciprocidade.</div>';
     html+='</div>';
     i2++;
 
@@ -32915,6 +33115,8 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
       html+='<div class="tax-row"><span>Dividendos / Ganhos de Capital / Imposto Pago no Exterior</span><span>preencher do informe</span></div>';
     }
     html+='</div>';
+    html+='<div class="box box-warn"><b>⚠ Conferir — crédito do art. 4º:</b> a dedução do imposto pago no exterior depende de tratado, acordo ou reciprocidade e dos limites legais (não pode exceder o IRPF atribuível àquele rendimento, não inclui imposto reembolsável e não passa para outro ano). O Hub não valida isso sozinho.</div>';
+    if(resumoTributarioExterior&&resumoTributarioExterior.apuracaoIncompleta)html+='<div class="box box-warn"><b>⚠ Conferir — várias corretoras:</b> esta base soma só ganhos de capital e dividendos e subtrai o imposto informado. Juros e perdas compensáveis ficam de fora. Não use este quadro como versão final.</div>';
     if(!resumoTributarioExterior||resumoTributarioExterior.baseCalculo===null)html+='<div class="box box-warn"><b>⚠ ATENÇÃO:</b> Resumo tributário oficial não encontrado no informe anexado — preencha manualmente com base no documento da corretora.</div>';
     if(resumoTributarioExterior && resumoTributarioExterior.baseCalculo!==null){
       var irGross15=0.15*(resumoTributarioExterior.baseCalculo||0);
@@ -32922,7 +33124,7 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
         html+='<div class="box box-warn"><b>⚠ Crédito não aproveitado integralmente:</b> o imposto pago no exterior ('+irFmtR(resumoTributarioExterior.impostoPagoExterior)+') foi maior que os 15% devidos no Brasil sobre esse rendimento ('+irFmtR(irGross15)+'), então não há imposto a pagar aqui — mas o excedente <b>não gera restituição nem pode ser aproveitado em anos seguintes</b>. O crédito de imposto pago no exterior vale só até o limite do imposto devido no mesmo ano-calendário.</div>';
       }
     }
-    html+='<div class="box box-imp"><b>📌 CBE OBRIGATÓRIA:</b> Se o total no exterior em 31/12/'+anoBase+' ultrapassou <b>US$ 1.000.000</b>, é obrigatório declarar a CBE no Banco Central até 5 de abril de '+anoDec+'. Acesse: bcb.gov.br/cbe</div>';
+    html+='<div class="box box-imp"><b>📌 CBE — conferir o limite e o prazo do ano:</b> o modelo ainda cita a obrigação quando o total no exterior em 31/12/'+anoBase+' ultrapassa <b>US$ 1.000.000</b>, com entrega até 5 de abril de '+anoDec+' (bcb.gov.br/cbe). <b>Conferir</b> a regra vigente do Banco Central para este ano-calendário — limite e data não foram revalidados nesta versão e mudam por ato do BC.</div>';
     html+='</div></div>';
   }
 
@@ -32946,6 +33148,67 @@ function montarRelatorioIRAnualHTML(pessoa,anoBase,dados){
 
   html+='</body></html>';
   return html;
+}
+
+/* v553 — itens de regra tributária que NÃO foram alterados porque não houve confirmação em fonte oficial nesta versão.
+   O painel da aba e o CHANGELOG listam o mesmo conjunto. */
+var IR_CONFERIR_ITENS=[
+  {id:"fracoes99",onde:"Frações em leilão",texto:"Código 99 em Rendimentos Isentos é prática de mercado deste modelo. Confirme no Programa IRPF do exercício."},
+  {id:"jcp15",onde:"Exemplo de JCP",texto:"Os 15% do exemplo numérico são ilustrativos. Use o bruto e o retido do informe."},
+  {id:"cbe",onde:"CBE",texto:"Limite de US$ 1.000.000 e prazo de 5 de abril não foram revalidados. Confira o ato vigente do Banco Central."},
+  {id:"ptax",onde:"Câmbio do rendimento",texto:"O art. 4º, § 2º, confirma a cotação de compra do dia do pagamento do imposto. A PTAX de venda do rendimento fica para conferir no informe ou na orientação da Receita."},
+  {id:"fichas",onde:"Códigos de ficha",texto:"Grupos e códigos de Bens e Direitos, Isentos e Tributação Exclusiva não foram revalidados ficha a ficha contra o manual do exercício."},
+  {id:"fii-extra",onde:"FII e Fiagro",texto:"O art. 41 fixa 100 cotistas e o limite de 30% para pessoas físicas ligadas. As outras condições da Lei 11.033/2004 que o artigo não reescreveu continuam a conferir."},
+  {id:"fi-infra",onde:"FI-Infra",texto:"Não aplicar a regra de cotistas do art. 41 ao FI-Infra. A isenção tem base própria — conferir o informe de cada fundo."},
+  {id:"escopo15",onde:"15% no exterior",texto:"Os 15% valem para aplicações financeiras (art. 2º e art. 3º). Não estender a todo bem ou renda no exterior (art. 2º, § 2º)."},
+  {id:"credito",onde:"Crédito do art. 4º",texto:"Além de tratado, acordo ou reciprocidade, há limite por rendimento, exclusão do imposto reembolsável e vedação de aproveitar em outro ano. O Hub não calcula isso rendimento a rendimento."},
+  {id:"multi",onde:"Várias corretoras",texto:"A soma automática usa só ganhos de capital e dividendos. Juros, perdas e o limite do crédito ficam de fora — a versão permanece rascunho."},
+  {id:"prazo",onde:"Prazo oficial",texto:"A data de entrega da declaração muda todo ano. O campo do dossiê nasce vazio de propósito. Não confundir com o prazo interno."},
+  {id:"withholding",onde:"Retenção no país de origem",texto:"Não há alíquota única (o texto antigo citava 30% nos EUA). Use o informe da corretora."}
+];
+var IR_STATUS_DOC=[{id:"solicitado",l:"Solicitado"},{id:"recebido",l:"Recebido"},{id:"extraido",l:"Extraído"},{id:"conferido",l:"Conferido"},{id:"sem_movimento",l:"Sem movimento"}];
+var IR_ETAPAS=[{id:"aguardando_informe",l:"Aguardando informe"},{id:"revisao",l:"Revisão"},{id:"pronto",l:"Pronto"},{id:"enviado",l:"Enviado"}];
+function irDossieMem(){if(!window._cvDossieMem)window._cvDossieMem={};return window._cvDossieMem;}
+function irDossieLerTodos(cb){
+  if(window._cvPreview){cb(Object.keys(irDossieMem()).map(function(k){return irDossieMem()[k];}));return;}
+  if(!window._fbDB){cb([]);return;}
+  window._fbDB.collection("ir_dossies").limit(300).get().then(function(snap){
+    cb(snap.docs.map(function(doc){return Object.assign({id:doc.id},doc.data());}));
+  }).catch(function(e){console.error("[RelatórioIR] dossiê:",e);cb([]);});
+}
+function irDossieSalvar(doc){
+  if(!doc||!doc.id)return Promise.resolve();
+  var gravado=Object.assign({},doc,{atualizadoEm:new Date().toISOString()});
+  if(window._cvPreview){irDossieMem()[gravado.id]=gravado;return Promise.resolve(gravado);}
+  if(!window._fbDB)return Promise.resolve(gravado);
+  return window._fbDB.collection("ir_dossies").doc(gravado.id).set(gravado).then(function(){return gravado;});
+}
+function irSugerirDocsCarteira(cliente){
+  var ativos=(cliente&&cliente._ativosImport)||[];
+  var insts={};
+  var temB3=false;
+  var extTp={stock_us:1,etf_int:1,etf_eu:1,reit:1,bond_intl:1,fundo_mm_intl:1};
+  ativos.forEach(function(a){
+    if(!a)return;
+    var inst=String(a.inst||"").trim()||"Instituição não informada";
+    var k=inst.toLowerCase();
+    var exterior=!!extTp[a.tp]||/avenue|vest|interactive|schwab|\bibkr\b|c6 global|inter global|xp internacional/i.test(inst+" "+(a.nm||""));
+    if(!insts[k])insts[k]={instituicao:inst,exterior:false,brasil:false};
+    if(exterior)insts[k].exterior=true;else insts[k].brasil=true;
+    if(!exterior&&/^(acao|fii|fiagro|etf_br|bdr|tesouro|fundo_infra)$/.test(a.tp||""))temB3=true;
+  });
+  var itens=[];var n=1;
+  Object.keys(insts).sort().forEach(function(k){
+    var g=insts[k];
+    if(g.brasil)itens.push({id:"inf"+n,instituicao:g.instituicao,tipo:"informe",rotulo:"Informe de rendimentos — "+g.instituicao,origem:"carteira",status:"solicitado",nota:""});
+    if(g.exterior)itens.push({id:"ext"+n,instituicao:g.instituicao,tipo:"exterior",rotulo:"Documento exterior — "+g.instituicao,origem:"carteira",status:"solicitado",nota:""});
+    n++;
+  });
+  if(temB3){
+    itens.push({id:"b3pos",instituicao:"B3",tipo:"b3",rotulo:"Posição B3",origem:"carteira",status:"solicitado",nota:""});
+    itens.push({id:"b3mov",instituicao:"B3",tipo:"b3",rotulo:"Movimentação B3",origem:"carteira",status:"solicitado",nota:""});
+  }
+  return itens;
 }
 
 /* ---------- Componente da aba "Relatório Anual de IR" ---------- */
@@ -32990,6 +33253,12 @@ var AbaRelatorioIR=function({data}){
      do relatório recém-gerado quanto pra reenviar qualquer relatório já salvo na lista abaixo. */
   var [emailDestino,sEmailDestino]=React.useState("");
   var [enviandoEmailId,sEnviandoEmailId]=React.useState(null);
+  var [dossieAtual,sDossieAtual]=React.useState(null);
+  var [dossiesAno,sDossiesAno]=React.useState([]);
+  var [dossieInst,sDossieInst]=React.useState("");
+  var [dossieTipo,sDossieTipo]=React.useState("informe");
+  var [apuracaoLiberada,sApuracaoLiberada]=React.useState(false);
+  var [conferirAberto,sConferirAberto]=React.useState(true);
   React.useEffect(function(){if(pessoaSel)sEmailDestino(pessoaSel.email||"")},[pessoaSel]);
 
   var toast=function(m){sToastMsg(m);setTimeout(function(){sToastMsg(null)},3800)};
@@ -33005,6 +33274,14 @@ var AbaRelatorioIR=function({data}){
   };
 
   React.useEffect(function(){
+    if(window._cvPreview){
+      sAvulsos(window._cvPreviewAvulsos||[]);
+      sRelatorios(window._cvPreviewRelatorios||[]);
+      sLoadingAvulsos(false);sLoadingRelatorios(false);
+      irDossieLerTodos(function(lista){sDossiesAno(lista);});
+      return;
+    }
+    irDossieLerTodos(function(lista){sDossiesAno(lista);});
     if(!window._fbDB){sLoadingAvulsos(false);sLoadingRelatorios(false);return}
     window._fbDB.collection("ir_avulsos").orderBy("criadoEm","desc").limit(200).get().then(function(snap){
       sAvulsos(snap.docs.map(function(doc){return {id:doc.id,tipo:"avulso",...doc.data()}}));
@@ -33070,6 +33347,7 @@ var AbaRelatorioIR=function({data}){
     var resumosInformesBR=[];
     var movimentacao=null;
     var ativosExterior=[],saldoContaExterior=null,resumoTributarioExterior=null;
+    var apuracaoExteriorIncompleta=false;
 
     try{
       if(arqPosicaoB3){
@@ -33186,15 +33464,21 @@ var AbaRelatorioIR=function({data}){
           var extBaseCalculo=extGanhosCapital+extDividendos;
           var extImpostoDevido=Math.max(0,Math.round((0.15*extBaseCalculo-extImpostoPagoExterior)*100)/100);
           resumoTributarioExterior={ganhosCapital:extGanhosCapital,dividendos:extDividendos,baseCalculo:extBaseCalculo,impostoPagoExterior:extImpostoPagoExterior,impostoDevido:extImpostoDevido};
-          itensRevisaoManual.push({arquivo:exteriorComArquivo.map(function(x){return x.arquivo.name}).join(", "),motivo:"Resumo Tributário — Lei 14.754/2023 recalculado pelo Hub somando Ganhos de Capital, Dividendos e Imposto Pago no Exterior de todas as "+exteriorComArquivo.length+" corretoras do exterior anexadas, com os 15% e o crédito de imposto aplicados sobre o TOTAL combinado (não corretora por corretora). Confira antes de declarar."});
+          apuracaoExteriorIncompleta=true;
+          resumoTributarioExterior.apuracaoIncompleta=true;
+          itensRevisaoManual.push({arquivo:exteriorComArquivo.map(function(x){return x.arquivo.name}).join(", "),motivo:"CONFERIR — Resumo da Lei 14.754/2023 montado pelo Hub só com Ganhos de Capital + Dividendos, menos o Imposto Pago no Exterior, somados entre as "+exteriorComArquivo.length+" corretoras. Juros, perdas compensáveis e o limite do crédito por rendimento (art. 4º, § 1º) não entram nessa conta. A versão fica como rascunho até a apuração ser fechada."});
         } else if(extResumoIncompleto){
+          apuracaoExteriorIncompleta=true;
           itensRevisaoManual.push({arquivo:exteriorComArquivo.map(function(x){return x.arquivo.name}).join(", "),motivo:"Não foi possível montar um Resumo Tributário único e confiável somando todas as corretoras do exterior (pelo menos uma não trouxe um resumo tributário completo) — confira os ativos e valores de cada corretora nas seções acima e preencha o Resumo Tributário — Lei 14.754/2023 manualmente com o total combinado."});
         }
       }
 
       sProgresso("Montando relatório...");
       var pessoaFmt={id:pessoaSel.id,nome:pessoaSel.nome,cpf:pessoaSel.cpf,tipo:pessoaSel.tipo};
-      var dadosRel={ativosBR:ativosBR,ativosExterior:ativosExterior,resumosInformesBR:resumosInformesBR,movimentacao:movimentacao,saldoContaExterior:saldoContaExterior,resumoTributarioExterior:resumoTributarioExterior,fontesUsadas:fontesUsadas,itensRevisaoManual:itensRevisaoManual};
+      var _itensDossie=(dossieAtual&&dossieAtual.pessoaId===pessoaSel.id&&String(dossieAtual.anoBase)===String(anoBase))?(dossieAtual.itens||[]):[];
+      var _dossieOk=_itensDossie.length>0&&_itensDossie.every(function(it){return it.status==="conferido"||it.status==="sem_movimento";});
+      var _rascunho=apuracaoExteriorIncompleta||itensRevisaoManual.length>0||!_dossieOk;
+      var dadosRel={ativosBR:ativosBR,ativosExterior:ativosExterior,resumosInformesBR:resumosInformesBR,movimentacao:movimentacao,saldoContaExterior:saldoContaExterior,resumoTributarioExterior:resumoTributarioExterior,fontesUsadas:fontesUsadas,itensRevisaoManual:itensRevisaoManual,rascunho:_rascunho,apuracaoIncompleta:apuracaoExteriorIncompleta,templateFiscal:"553",dossieCompleto:_dossieOk};
       var html=montarRelatorioIRAnualHTML(pessoaFmt,anoBase,dadosRel);
 
       var w=window.open("","_blank");
@@ -33203,14 +33487,28 @@ var AbaRelatorioIR=function({data}){
 
       sUltimoRelatorioGerado({pessoaFmt:pessoaFmt,anoBase:anoBase,dadosRel:dadosRel});
 
-      if(window._fbDB){
-        var docId=pessoaSel.id+"_"+anoBase;
-        window._fbDB.collection("ir_relatorios").doc(docId).set({
-          pessoaId:pessoaSel.id,pessoaNome:pessoaSel.nome,pessoaTipo:pessoaSel.tipo,pessoaCpf:pessoaSel.cpf||"",
-          anoBase:anoBase,geradoEm:new Date().toISOString(),geradoPor:"courinvest.67@gmail.com",
-          ativosBR:ativosBR,ativosExterior:ativosExterior,resumosInformesBR:resumosInformesBR,movimentacao:movimentacao,
-          saldoContaExterior:saldoContaExterior,resumoTributarioExterior:resumoTributarioExterior,
-          fontesUsadas:fontesUsadas,itensRevisaoManual:itensRevisaoManual
+      var docId=pessoaSel.id+"_"+anoBase;
+      var payloadRel={
+        pessoaId:pessoaSel.id,pessoaNome:pessoaSel.nome,pessoaTipo:pessoaSel.tipo,pessoaCpf:pessoaSel.cpf||"",
+        anoBase:anoBase,geradoEm:new Date().toISOString(),geradoPor:"courinvest.67@gmail.com",
+        ativosBR:ativosBR,ativosExterior:ativosExterior,resumosInformesBR:resumosInformesBR,movimentacao:movimentacao,
+        saldoContaExterior:saldoContaExterior,resumoTributarioExterior:resumoTributarioExterior,
+        fontesUsadas:fontesUsadas,itensRevisaoManual:itensRevisaoManual,
+        rascunho:_rascunho,apuracaoIncompleta:apuracaoExteriorIncompleta,templateFiscal:"553",revisado:false,dossieCompleto:_dossieOk
+      };
+      if(window._cvPreview){
+        sRelatorios(function(p){return [Object.assign({id:docId,versao:1},payloadRel)].concat(p.filter(function(x){return x.id!==docId;}));});
+      } else if(window._fbDB){
+        var relRef=window._fbDB.collection("ir_relatorios").doc(docId);
+        relRef.get().then(function(snap){
+          var prev=snap.exists?snap.data():null;
+          var versao=(prev&&prev.versao?prev.versao:0)+1;
+          payloadRel.versao=versao;
+          var ops=[relRef.set(payloadRel)];
+          if(prev){
+            ops.push(window._fbDB.collection("ir_relatorios_versoes").doc(docId+"_v"+(prev.versao||1)+"_"+Date.now()).set(Object.assign({},prev,{arquivadoEm:new Date().toISOString(),docOrigem:docId})));
+          }
+          return Promise.all(ops);
         }).then(function(){
           window._fbDB.collection("ir_relatorios").orderBy("geradoEm","desc").limit(100).get().then(function(snap){
             sRelatorios(snap.docs.map(function(doc){return {id:doc.id,...doc.data()}}));
@@ -33268,6 +33566,14 @@ var AbaRelatorioIR=function({data}){
     var email=(emailDestino||"").trim();
     if(!email){toast("⚠️ Informe o e-mail do destinatário");return}
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){toast("⚠️ E-mail inválido");return}
+    if(dadosRel&&dadosRel.rascunho!==false&&!dadosRel.revisado){
+      toast("⚠️ Este relatório está em rascunho. Marque como revisado antes de enviar — rascunho não é versão final.");
+      return;
+    }
+    if(dadosRel&&dadosRel.apuracaoIncompleta&&!dadosRel.apuracaoLiberada){
+      toast("⚠️ Apuração do exterior incompleta (juros, perdas ou limite do crédito). Libere só depois de conferir fora do Hub.");
+      return;
+    }
     if(typeof montarEmailRelatorioHtml!=="function"||typeof gerarPdfLinkCourinvest!=="function"){toast("⚠️ Envio por e-mail não disponível nesta versão");return}
     sEnviandoEmailId(idLoading);
     try{
@@ -33348,6 +33654,84 @@ var AbaRelatorioIR=function({data}){
     }).catch(function(e){console.error(e);toast("❌ Erro ao remover")});
   };
 
+  React.useEffect(function(){
+    if(!window._cvPreview||pessoaSel)return;
+    var c=(clientes&&clientes[0]);
+    if(!c)return;
+    sPessoaSel({id:c.id,tipo:"cliente",nome:c.nome,cpf:c.cpf||"",email:c.email||""});
+  },[clientes.length]);
+  React.useEffect(function(){
+    if(!pessoaSel){sDossieAtual(null);return;}
+    var id=pessoaSel.id+"_"+anoBase;
+    var achou=(dossiesAno||[]).find(function(x){return x.id===id;});
+    if(achou){sDossieAtual(achou);return;}
+    if(window._cvPreview&&irDossieMem()[id]){sDossieAtual(irDossieMem()[id]);return;}
+    sDossieAtual(null);
+  },[pessoaSel,anoBase,dossiesAno]);
+
+  var gravarDossie=function(next){
+    sDossieAtual(next);
+    sDossiesAno(function(p){
+      var rest=p.filter(function(x){return x.id!==next.id;});
+      return rest.concat([next]);
+    });
+    irDossieSalvar(next).catch(function(e){console.error(e);toast("❌ Não salvei o dossiê")});
+  };
+  var baseDossie=function(){
+    var id=pessoaSel.id+"_"+anoBase;
+    return dossieAtual&&dossieAtual.id===id?Object.assign({},dossieAtual):{
+      id:id,pessoaId:pessoaSel.id,pessoaTipo:pessoaSel.tipo,pessoaNome:pessoaSel.nome,anoBase:anoBase,
+      etapa:"aguardando_informe",prazoOficial:"",prazoInterno:"",proximaAcao:"",itens:[]
+    };
+  };
+  var sugerirDossie=function(){
+    if(!pessoaSel)return;
+    var cli=clientes.find(function(c){return c.id===pessoaSel.id;});
+    var sugeridos=irSugerirDocsCarteira(cli);
+    var atual=baseDossie();
+    var porRotulo={};
+    (atual.itens||[]).forEach(function(it){porRotulo[it.rotulo]=it;});
+    sugeridos.forEach(function(it){if(!porRotulo[it.rotulo])porRotulo[it.rotulo]=it;});
+    atual.itens=Object.keys(porRotulo).map(function(k){return porRotulo[k];});
+    if(!atual.etapa)atual.etapa="aguardando_informe";
+    gravarDossie(atual);
+    toast(sugeridos.length?"Checklist sugerido pela carteira. Contas encerradas e fontes de fora do Hub entram no campo ao lado.":"Nenhuma instituição na carteira importada. Inclua os documentos à mão.");
+  };
+  var setStatusDoc=function(itemId,status){
+    var atual=baseDossie();
+    atual.itens=(atual.itens||[]).map(function(it){return it.id===itemId?Object.assign({},it,{status:status}):it;});
+    gravarDossie(atual);
+  };
+  var addDocManual=function(){
+    var nome=(dossieInst||"").trim();
+    if(!nome){toast("Informe a instituição ou a fonte");return;}
+    var atual=baseDossie();
+    var tipo=dossieTipo||"informe";
+    var rotulo=(tipo==="exterior"?"Documento exterior — ":tipo==="outro"?"Outra fonte — ":"Informe de rendimentos — ")+nome;
+    atual.itens=(atual.itens||[]).concat([{id:"man"+Date.now(),instituicao:nome,tipo:tipo,rotulo:rotulo,origem:"manual",status:"solicitado",nota:"Incluído à mão (conta encerrada ou fonte fora do Hub)"}]);
+    sDossieInst("");
+    gravarDossie(atual);
+  };
+  var patchDossie=function(patch){
+    gravarDossie(Object.assign(baseDossie(),patch));
+  };
+  var marcarRelatorioRevisado=function(rel){
+    if(!rel)return;
+    if(rel.apuracaoIncompleta&&!apuracaoLiberada&&!rel.apuracaoLiberada){
+      toast("⚠️ A apuração do exterior está incompleta. Marque que ela foi conferida fora do Hub antes de liberar a versão.");
+      return;
+    }
+    var next=Object.assign({},rel,{revisado:true,rascunho:false,apuracaoLiberada:true,revisadoEm:new Date().toISOString(),templateFiscal:"553"});
+    sUltimoRelatorioGerado(function(u){return u?Object.assign({},u,{dadosRel:Object.assign({},u.dadosRel,next)}):u;});
+    sRelatorios(function(p){return p.map(function(x){return x.id===rel.id?Object.assign({},x,next):x;});});
+    if(window._cvPreview){toast("✅ Versão marcada como revisada");return;}
+    if(window._fbDB&&rel.id){
+      window._fbDB.collection("ir_relatorios").doc(rel.id).set({revisado:true,rascunho:false,apuracaoLiberada:!!(apuracaoLiberada||rel.apuracaoLiberada),revisadoEm:next.revisadoEm,templateFiscal:"553"},{merge:true})
+        .then(function(){toast("✅ Versão marcada como revisada");})
+        .catch(function(e){console.error(e);toast("❌ Não consegui gravar a revisão");});
+    } else toast("✅ Versão marcada como revisada neste navegador");
+  };
+
   var uploadZone=function({label,icon,accept,multiple,onFiles,arquivo,arquivos}){
     var inputRef=React.useRef(null);
     return (
@@ -33373,6 +33757,103 @@ var AbaRelatorioIR=function({data}){
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
       {toastMsg && <div style={{position:"fixed",top:20,right:20,zIndex:9999,background:T.bg2,border:"1px solid "+T.bdr,borderRadius:12,padding:"12px 18px",boxShadow:"0 12px 32px rgba(0,0,0,0.4)",color:T.t1,fontSize:13,fontWeight:600}}>{toastMsg}</div>}
+
+      <Cd style={{padding:16,marginBottom:4}} hov={false}>
+        <button onClick={function(){sConferirAberto(!conferirAberto)}} style={{display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%",background:"none",border:"none",cursor:"pointer",padding:0,color:T.t1}}>
+          <span style={{fontSize:14,fontWeight:800}}>Regras fiscais v553 — corrigidas e a conferir</span>
+          <span style={{fontSize:11,color:T.t3}}>{conferirAberto?"recolher":"abrir"}</span>
+        </button>
+        {conferirAberto&&<div style={{marginTop:12}}>
+          <div style={{fontSize:12,color:T.t2,lineHeight:1.55,marginBottom:8}}><b style={{color:T.t1}}>Corrigido (Lei 14.754/2023):</b> o crédito do imposto pago no exterior depende de tratado, acordo ou reciprocidade e dos limites do art. 4º — o texto antigo dizia que independia disso. A isenção de FII e Fiagro exige no mínimo <b>100 cotistas</b> (art. 41), não 500, e essa regra <b>não</b> vale para FI-Infra.</div>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {IR_CONFERIR_ITENS.map(function(it){return (
+              <div key={it.id} style={{fontSize:11,color:T.t2,lineHeight:1.45,padding:"6px 8px",background:"rgba(180,83,9,0.08)",borderRadius:8}}>
+                <b style={{color:"#B45309"}}>Conferir · {it.onde}.</b> {it.texto}
+              </div>
+            );})}
+          </div>
+        </div>}
+      </Cd>
+
+      <Cd style={{padding:16}} hov={false}>
+        <div style={{fontSize:14,fontWeight:800,color:T.t1,marginBottom:4}}>Dossiê do ano — documentos por cliente</div>
+        <div style={{fontSize:12,color:T.t3,marginBottom:12,lineHeight:1.5}}>Informes de rendimentos de cada instituição, documentos do exterior e a confirmação de que não houve posição. O prazo oficial da declaração fica separado do prazo interno do relatório.</div>
+        {(function(){
+          var etapasCont={sem_dossie:0,aguardando_informe:0,revisao:0,pronto:0,enviado:0};
+          var linhas=[];
+          (clientes||[]).forEach(function(c){
+            var doc=(dossiesAno||[]).find(function(x){return x.pessoaId===c.id&&String(x.anoBase)===String(anoBase);});
+            var etapa=doc?doc.etapa:"sem_dossie";
+            etapasCont[etapa]=(etapasCont[etapa]||0)+1;
+            linhas.push({id:c.id,tipo:"cliente",nome:c.nome,cpf:c.cpf||"",email:c.email||"",etapa:etapa,doc:doc});
+          });
+          (dossiesAno||[]).forEach(function(x){
+            if(String(x.anoBase)!==String(anoBase))return;
+            if(x.pessoaTipo==="cliente"&&(clientes||[]).some(function(c){return c.id===x.pessoaId;}))return;
+            etapasCont[x.etapa]=(etapasCont[x.etapa]||0)+1;
+            linhas.push({id:x.pessoaId,tipo:x.pessoaTipo||"avulso",nome:x.pessoaNome||"Pessoa",cpf:"",email:"",etapa:x.etapa,doc:x});
+          });
+          var chips=[{id:"sem_dossie",l:"Sem dossiê"},{id:"aguardando_informe",l:"Aguardando informe"},{id:"revisao",l:"Revisão"},{id:"pronto",l:"Pronto"},{id:"enviado",l:"Enviado"}];
+          return (
+            <div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+                {chips.map(function(ch){return <span key={ch.id} style={{fontSize:10,fontWeight:700,padding:"4px 8px",borderRadius:99,background:T.w3,color:T.t2}}>{ch.l}: {etapasCont[ch.id]||0}</span>;})}
+              </div>
+              <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:4}}>
+                {linhas.slice(0,12).map(function(ln){return (
+                  <button key={ln.tipo+ln.id} onClick={function(){sPessoaSel({id:ln.id,tipo:ln.tipo,nome:ln.nome,cpf:ln.cpf,email:ln.email});}} style={{flex:"0 0 auto",textAlign:"left",padding:"8px 10px",borderRadius:10,border:"1px solid "+(pessoaSel&&pessoaSel.id===ln.id?T.gold:T.bdrL),background:pessoaSel&&pessoaSel.id===ln.id?T.goldD:T.w3,cursor:"pointer",color:T.t1}}>
+                    <div style={{fontSize:11,fontWeight:800}}>{ln.nome}</div>
+                    <div style={{fontSize:10,color:T.t3}}>{(chips.find(function(c){return c.id===ln.etapa;})||{l:ln.etapa}).l}</div>
+                  </button>
+                );})}
+              </div>
+            </div>
+          );
+        })()}
+        {pessoaSel&&<div style={{marginTop:14,paddingTop:12,borderTop:"1px solid "+T.bdrL}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:8}}>
+            <div style={{fontSize:13,fontWeight:800}}>{pessoaSel.nome} · ano-calendário {anoBase}</div>
+            <Bt v="secondary" style={{fontSize:11}} onClick={sugerirDossie}>Sugerir pela carteira</Bt>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:8,marginBottom:10}}>
+            <label style={{fontSize:10,color:T.t3,fontWeight:700}}>Etapa
+              <select value={(dossieAtual&&dossieAtual.etapa)||"aguardando_informe"} onChange={function(e){patchDossie({etapa:e.target.value});}} style={{display:"block",width:"100%",marginTop:4,padding:"8px 10px"}}>
+                {IR_ETAPAS.map(function(et){return <option key={et.id} value={et.id}>{et.l}</option>;})}
+              </select>
+            </label>
+            <label style={{fontSize:10,color:T.t3,fontWeight:700}}>Prazo oficial da declaração
+              <input type="date" value={(dossieAtual&&dossieAtual.prazoOficial)||""} onChange={function(e){patchDossie({prazoOficial:e.target.value});}} style={{display:"block",width:"100%",marginTop:4,padding:"8px 10px"}}/>
+            </label>
+            <label style={{fontSize:10,color:T.t3,fontWeight:700}}>Prazo interno do relatório
+              <input type="date" value={(dossieAtual&&dossieAtual.prazoInterno)||""} onChange={function(e){patchDossie({prazoInterno:e.target.value});}} style={{display:"block",width:"100%",marginTop:4,padding:"8px 10px"}}/>
+            </label>
+          </div>
+          <div style={{fontSize:10,color:"#B45309",marginBottom:8}}>Conferir: o prazo oficial não vem preenchido — confirme na Receita Federal. Ele não é o prazo interno.</div>
+          <label style={{display:"block",fontSize:10,color:T.t3,fontWeight:700,marginBottom:10}}>Próxima ação
+            <input value={(dossieAtual&&dossieAtual.proximaAcao)||""} onChange={function(e){patchDossie({proximaAcao:e.target.value});}} placeholder="Ex.: cobrar informe do BTG" style={{display:"block",width:"100%",marginTop:4,padding:"8px 10px",borderRadius:10,border:"1px solid "+T.bdrL,background:T.w3,color:T.t1}}/>
+          </label>
+          {(dossieAtual&&dossieAtual.itens&&dossieAtual.itens.length)?dossieAtual.itens.map(function(it){return (
+            <div key={it.id} style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",padding:"8px 0",borderTop:"1px solid "+T.bdrL}}>
+              <div style={{flex:"1 1 180px",minWidth:0}}>
+                <div style={{fontSize:12,fontWeight:700,color:T.t1}}>{it.rotulo}</div>
+                <div style={{fontSize:10,color:T.t3}}>{it.origem==="manual"?"Incluído à mão":"Sugerido pela carteira"}{it.nota?" · "+it.nota:""}</div>
+              </div>
+              <select value={it.status} onChange={function(e){setStatusDoc(it.id,e.target.value);}} style={{padding:"6px 8px",fontSize:11}}>
+                {IR_STATUS_DOC.map(function(st){return <option key={st.id} value={st.id}>{st.l}</option>;})}
+              </select>
+            </div>
+          );}):<div style={{fontSize:12,color:T.t3,padding:"8px 0"}}>Nenhum documento neste ano. Use “Sugerir pela carteira” ou inclua uma instituição que já foi encerrada.</div>}
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
+            <input value={dossieInst} onChange={function(e){sDossieInst(e.target.value)}} placeholder="Instituição ou fonte fora do Hub" style={{flex:"1 1 180px",padding:"8px 10px",borderRadius:10,border:"1px solid "+T.bdrL,background:T.w3,color:T.t1,fontSize:12}}/>
+            <select value={dossieTipo} onChange={function(e){sDossieTipo(e.target.value)}} style={{padding:"8px 10px",fontSize:12}}>
+              <option value="informe">Informe de rendimentos</option>
+              <option value="exterior">Documento exterior</option>
+              <option value="outro">Outra fonte</option>
+            </select>
+            <Bt v="secondary" style={{fontSize:11}} onClick={addDocManual}>Incluir</Bt>
+          </div>
+        </div>}
+      </Cd>
 
       <Cd style={{padding:20}}>
         <div style={{fontSize:16,fontWeight:800,color:T.t1,marginBottom:4}}>📑 Relatório Anual de IR</div>
@@ -33523,6 +34004,13 @@ var AbaRelatorioIR=function({data}){
             onClick={function(){enviarRelatorioIRPorEmail(ultimoRelatorioGerado.pessoaFmt,ultimoRelatorioGerado.anoBase,ultimoRelatorioGerado.dadosRel,"__ultimo__")}}>
             {enviandoEmailId==="__ultimo__"?"⏳ Enviando...":"✉️ Enviar por E-mail"}
           </Bt>
+          {ultimoRelatorioGerado&&ultimoRelatorioGerado.dadosRel&&ultimoRelatorioGerado.dadosRel.rascunho!==false&&(
+            <div style={{flex:"1 1 100%",display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+              <span style={{fontSize:11,fontWeight:800,color:"#B45309"}}>Rascunho — o e-mail só sai depois da revisão.</span>
+              {ultimoRelatorioGerado.dadosRel.apuracaoIncompleta&&<label style={{fontSize:11,color:T.t2,display:"flex",gap:6,alignItems:"center"}}><input type="checkbox" checked={!!apuracaoLiberada} onChange={function(e){sApuracaoLiberada(e.target.checked)}}/>Apuração do exterior conferida fora do Hub</label>}
+              <Bt v="secondary" style={{fontSize:11}} onClick={function(){marcarRelatorioRevisado(Object.assign({id:pessoaSel?pessoaSel.id+"_"+anoBase:""},ultimoRelatorioGerado.dadosRel));}}>Marcar como revisado</Bt>
+            </div>
+          )}
         </div>
         {!(d.config&&d.config.emailjs&&d.config.emailjs.publicKey) && (
           <div style={{fontSize:10,color:T.orange,marginTop:6}}>⚠️ E-mail automático não configurado — acesse Configurações → E-mail (EmailJS) antes de enviar.</div>
@@ -33637,8 +34125,8 @@ var AbaRelatorioIR=function({data}){
                 <div key={rel.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:T.w3,borderRadius:10,border:"1px solid "+T.bdrL}}>
                   <Bg c={rel.pessoaTipo==="cliente"?"gold":"cyan"}>{rel.pessoaTipo==="cliente"?"Cliente":"Avulso"}</Bg>
                   <div style={{flex:1}}>
-                    <div style={{fontSize:13,fontWeight:700,color:T.t1}}>{rel.pessoaNome} — {rel.anoBase}</div>
-                    <div style={{fontSize:10,color:T.t3}}>Gerado em {rel.geradoEm?new Date(rel.geradoEm).toLocaleString("pt-BR"):"-"}{rel.itensRevisaoManual&&rel.itensRevisaoManual.length?" · ⚠️ "+rel.itensRevisaoManual.length+" item(ns) p/ revisão":""}</div>
+                    <div style={{fontSize:13,fontWeight:700,color:T.t1}}>{rel.pessoaNome} — {rel.anoBase} {rel.rascunho!==false&&rel.templateFiscal==="553"&&<span style={{color:"#B45309",fontSize:10}}> · rascunho v{rel.versao||1}</span>}{rel.revisado&&<span style={{color:T.green,fontSize:10}}> · revisado</span>}</div>
+                    <div style={{fontSize:10,color:T.t3}}>Gerado em {rel.geradoEm?new Date(rel.geradoEm).toLocaleString("pt-BR"):"-"}{rel.itensRevisaoManual&&rel.itensRevisaoManual.length?" · ⚠️ "+rel.itensRevisaoManual.length+" item(ns) p/ revisão":""}{rel.versao?" · versão "+rel.versao:""}</div>
                   </div>
                   <Bt v="secondary" style={{fontSize:11}} onClick={function(){reabrirRelatorio(rel)}}>Abrir</Bt>
                   <Bt v="secondary" style={{fontSize:11}} disabled={baixandoPdfId===rel.id} onClick={function(){baixarRelatorioPdf({id:rel.pessoaId,nome:rel.pessoaNome,cpf:rel.pessoaCpf,tipo:rel.pessoaTipo},rel.anoBase,rel,rel.id)}}>{baixandoPdfId===rel.id?"⏳ PDF...":"📄 PDF"}</Bt>
@@ -40883,6 +41371,59 @@ function VencimentosView({data:d,dispatch:dp,taxasBCB,taxaBCBStatus,onGoClient})
       sAjustouPeriodo(true);
     }
   },[todos.length]);
+  var isoLocal=function(dt){if(!(dt instanceof Date)||isNaN(dt.getTime()))return "";return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0");};
+  var opDe=function(v){
+    var c=(d.cl||[]).find(function(x){return x.id===v.clienteId});
+    return (c&&c.vencOperacional&&c.vencOperacional[v.chave])||null;
+  };
+  var salvarOp=function(v,patch){
+    var c=(d.cl||[]).find(function(x){return x.id===v.clienteId});
+    if(!c||!v.chave)return;
+    var mapa=Object.assign({},c.vencOperacional||{});
+    var prev=mapa[v.chave]||{status:"contatar",destino:"",vencIso:isoLocal(v.vencDate),ativo:v.ativo,tipo:v.tipo,tipoLabel:v.tipoLabel,ic:v.ic,inst:v.inst,valor:v.valor,emissor:v.emissor||""};
+    mapa[v.chave]=Object.assign({},prev,patch,{atualizadoEm:new Date().toISOString(),vencIso:prev.vencIso||isoLocal(v.vencDate),ativo:prev.ativo||v.ativo,valor:v.valor||prev.valor||0});
+    dp({t:"UC",p:{id:c.id,vencOperacional:mapa}});
+  };
+  useEffect(function(){
+    var por={};
+    todos.forEach(function(v){
+      if(v.dias>=0||!v.chave)return;
+      var c=(d.cl||[]).find(function(x){return x.id===v.clienteId});
+      if(!c)return;
+      if(c.vencOperacional&&c.vencOperacional[v.chave])return;
+      if(!por[c.id])por[c.id]={c:c,itens:[]};
+      por[c.id].itens.push(v);
+    });
+    Object.keys(por).forEach(function(id){
+      var c=por[id].c;
+      var mapa=Object.assign({},c.vencOperacional||{});
+      por[id].itens.forEach(function(v){
+        mapa[v.chave]={status:"contatar",destino:"",vencIso:isoLocal(v.vencDate),ativo:v.ativo,tipo:v.tipo,tipoLabel:v.tipoLabel,ic:v.ic,inst:v.inst,valor:v.valor,emissor:v.emissor||"",atualizadoEm:new Date().toISOString()};
+      });
+      dp({t:"UC",p:{id:c.id,vencOperacional:mapa}});
+    });
+  },[todos]);
+  var filaReinvestir=[];
+  var vistosFila={};
+  todos.forEach(function(v){
+    var op=opDe(v);
+    var st=op?op.status:(v.dias<0?"contatar":"");
+    if(v.dias<0&&st!=="reinvestido"){filaReinvestir.push(Object.assign({},v,{_st:st,_dest:op&&op.destino||""}));vistosFila[v.clienteId+"|"+v.chave]=true;}
+  });
+  (d.cl||[]).forEach(function(c){
+    var mapa=c.vencOperacional||{};
+    Object.keys(mapa).forEach(function(chave){
+      var op=mapa[chave];
+      if(!op||op.status==="reinvestido"||vistosFila[c.id+"|"+chave])return;
+      var iso=op.vencIso||"";
+      var dt=iso?new Date(iso+"T12:00:00"):new Date();
+      var hoje0=new Date();hoje0.setHours(0,0,0,0);
+      var dias=Math.ceil((dt-hoje0)/86400000);
+      filaReinvestir.push({id:"op_"+c.id+"_"+chave,clienteId:c.id,cliente:c.nome,ativo:op.ativo||chave,ativoRaw:op.ativo||"",tipo:op.tipo||"cdb",tipoLabel:op.tipoLabel||"Renda fixa",ic:op.ic||"📄",inst:op.inst||"—",valor:op.valor||0,vencDate:dt,dias:dias,fonte:"acompanhamento",origemData:"acompanhamento",chave:chave,saiuDaCarteira:true,emissor:op.emissor||"",taxaTxt:"",codigo:"",idxLabel:null,isento:false,ganhoPct:null,aplicado:0,_st:op.status||"contatar",_dest:op.destino||""});
+    });
+  });
+  filaReinvestir.sort(function(a,b){return a.dias-b.dias;});
+  var rotuloOp={contatar:"Contatar",destino:"Destino definido",liquidacao:"Aguardando liquidação",reinvestido:"Reinvestido"};
   var salvarVencManual=function(item,iso){
     var c=(d.cl||[]).find(function(x){return x.id===item.clienteId});
     if(!c)return;
@@ -40953,6 +41494,29 @@ function VencimentosView({data:d,dispatch:dp,taxasBCB,taxaBCBStatus,onGoClient})
         <KCard label="Vence em 90 dias" valor={String(venc90.length)} sub={fm(venc90.reduce(function(s,v){return s+v.valor},0))} cor={T.cyan} ic="📅" compact onClick={function(){sPeriodo("90")}}/>
         <KCard label="Total monitorado" valor={fm(valorTotal)} sub={todos.length+" ativo"+(todos.length!==1?"s":"")+" ao todo"} cor={T.gold} ic="💰" compact onClick={function(){sPeriodo("todos")}}/>
       </div>
+
+      <Cd style={{padding:"14px 16px",marginBottom:14,borderColor:filaReinvestir.length?"rgba(185,28,28,0.35)":T.bdr}} hov={false}>
+        <div style={{fontSize:13,fontWeight:800,color:T.t1,marginBottom:4}}>Fila até confirmar o reinvestimento · {filaReinvestir.length}</div>
+        <div style={{fontSize:12,color:T.t3,marginBottom:10,lineHeight:1.45}}>Um título vencido continua aqui até o crédito e o destino serem confirmados. Some da fila só quando a situação for “Reinvestido”. Se a posição já saiu da carteira importada, ela permanece nesta fila.</div>
+        {filaReinvestir.length===0?<div style={{fontSize:12,color:T.green}}>Nenhum vencimento aguardando confirmação.</div>:filaReinvestir.map(function(v){
+          var op=opDe(v)||{status:v._st||"contatar",destino:v._dest||""};
+          return (
+            <div key={"fila"+v.id} style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",padding:"8px 0",borderTop:"1px solid "+T.bdrL}}>
+              <div style={{flex:"1 1 220px",minWidth:0}}>
+                <div style={{fontSize:12,fontWeight:800,color:T.t1}}>{v.ativo}</div>
+                <div style={{fontSize:11,color:T.t3}}>{v.cliente} · {fm(v.valor)} · {v.vencDate.toLocaleDateString("pt-BR")}{v.saiuDaCarteira?" · saiu da carteira, falta confirmar":" · vencido há "+Math.abs(v.dias)+"d"}</div>
+              </div>
+              <input value={op.destino||""} placeholder="Destino do valor" onChange={function(e){salvarOp(v,{destino:e.target.value,status:op.status||"destino"});}} style={{padding:"6px 8px",borderRadius:8,border:"1px solid "+T.bdr,background:T.w3,color:T.t1,fontSize:11,minWidth:140}}/>
+              <select value={op.status||"contatar"} onChange={function(e){salvarOp(v,{status:e.target.value});}} style={{padding:"6px 8px",fontSize:11}}>
+                <option value="contatar">Contatar</option>
+                <option value="destino">Destino definido</option>
+                <option value="liquidacao">Aguardando liquidação</option>
+                <option value="reinvestido">Reinvestido</option>
+              </select>
+            </div>
+          );
+        })}
+      </Cd>
 
       <Cd style={{padding:"12px 16px",marginBottom:14}} hov={false}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
@@ -41056,6 +41620,13 @@ function VencimentosView({data:d,dispatch:dp,taxasBCB,taxaBCBStatus,onGoClient})
                     {v.taxaTxt&&<span>📈 {v.taxaTxt}</span>}
                     {v.codigo&&<span style={{fontFamily:"'JetBrains Mono'",color:T.t3}}>#{v.codigo}</span>}
                     {v.aplicado>0&&<span>💼 aplicado {fm(v.aplicado)}{v.ganhoPct!=null&&<b style={{color:v.ganhoPct>=0?T.green:T.red}}> ({v.ganhoPct>=0?"+":""}{v.ganhoPct.toFixed(1).replace(".",",")}%)</b>}</span>}
+                    {(function(){
+                      var op=opDe(v);
+                      if(!op&&v.dias>=0)return null;
+                      var st=op&&op.status||(v.dias<0?"contatar":"");
+                      if(!st)return null;
+                      return <span style={{fontWeight:700,color:st==="reinvestido"?T.green:"#B45309"}}>Situação: {rotuloOp[st]||st}{op&&op.destino?" · "+op.destino:""}</span>;
+                    })()}
                   </div>
                 </div>
                 <div style={{textAlign:"right",flexShrink:0}}>
@@ -41074,6 +41645,13 @@ function VencimentosView({data:d,dispatch:dp,taxasBCB,taxaBCBStatus,onGoClient})
 /* ════════════ FIM VENCIMENTOS DE RENDA FIXA ════════════ */
 
 function AppWithAuth(){
+  var cvPreview=/[?&]preview=553(?:&|$)/.test(typeof location!=="undefined"?location.search:"");
+  if(cvPreview){
+    window._cvPreview=true;
+    var abaPrev=(location.search.match(/[?&]aba=([a-zA-Z]+)/)||[])[1];
+    if(abaPrev)window._cvPreviewAba=abaPrev;
+    return <App authUser={{email:"preview@courinvest.local",displayName:"Pré-visualização"}} preview={true}/>;
+  }
   const[authUser,sAuthUser]=useState(null);
   const[authChecked,sAuthChecked]=useState(false);
   var fbError=window._fbLoadError||!window._fbAuth;
@@ -41453,7 +42031,88 @@ function ComercialView({data,dispatch}){
   );
 }
 
-function App({authUser}){
+function cvMontarPreview(){
+  var hoje=new Date();
+  var iso=function(dias){var dt=new Date(hoje.getFullYear(),hoje.getMonth(),hoje.getDate()+dias);return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0");};
+  var mes=cvUltMesFechadoYM();
+  var dia=function(n){return mes+"-"+String(n).padStart(2,"0");};
+  var ana={
+    id:"prev_ana",nome:"Ana Martins",status:"ativo",email:"ana.martins@example.com",cpf:"123.456.789-00",
+    sv:["patrimonio"],txGestao:0.5,pat:400000,patGorila:400000,
+    _ativosTs:Date.now()-20*86400000,
+    _ativosImport:[
+      {tk:"CDB BTG 110% CDI",nm:"CDB BTG 110% CDI",tp:"cdb",inst:"BTG Pactual",posR:80000,qtd:1,pa:80000,pm:75000,venc:iso(-12)},
+      {tk:"TESOURO SELIC 2029",nm:"Tesouro Selic 2029",tp:"tesouro",inst:"XP Investimentos",posR:150000,venc:iso(40)},
+      {tk:"HGLG11",nm:"CSHG Logística",tp:"fii",inst:"Rico",posR:45000,qtd:300,pa:150},
+      {tk:"AAPL",nm:"Apple Inc",tp:"stock_us",inst:"Avenue",posR:90000},
+      {tk:"CAIXA BTG",nm:"Saldo em conta",tp:"caixa",inst:"BTG Pactual",posR:35000}
+    ],
+    vencOperacional:{
+      "CDB BTG 110% CDI|BTG Pactual":{status:"contatar",destino:"",vencIso:iso(-12),ativo:"CDB BTG 110% CDI",tipo:"cdb",tipoLabel:"CDB",ic:"🏦",inst:"BTG Pactual",valor:80000,emissor:"BTG",atualizadoEm:new Date().toISOString()},
+      "LCA INTER 96%|Banco Inter":{status:"destino",destino:"Tesouro Selic",vencIso:iso(-40),ativo:"LCA Inter 96% CDI",tipo:"lca",tipoLabel:"LCA",ic:"🌾",inst:"Banco Inter",valor:50000,emissor:"Inter",atualizadoEm:new Date().toISOString()}
+    }
+  };
+  var bruno={id:"prev_bruno",nome:"Bruno Lima",status:"ativo",email:"bruno.lima@example.com",sv:["planejamento"],feeFixo:900,pat:0,_ativosTs:0,_ativosImport:[]};
+  var carla={
+    id:"prev_carla",nome:"Carla Nunes",status:"ativo",email:"carla.nunes@example.com",
+    sv:["patrimonio"],txGestao:0.4,pat:250000,patGorila:250000,_ativosTs:Date.now()-2*86400000,
+    _ativosImport:[
+      {tk:"LCI ITAU 97%",nm:"LCI Itaú 97% CDI",tp:"lci",inst:"Itaú",posR:120000,venc:iso(20)},
+      {tk:"PETR4",nm:"Petrobras",tp:"acao",inst:"Clear",posR:130000,qtd:2000,pa:65}
+    ],
+    particularidades:{relatorios:{}}
+  };
+  carla.particularidades.relatorios[mes]={publicado:true,aprovado:true,mes:mes,mesNome:mes};
+  var elena={
+    id:"prev_elena",nome:"Elena Prado",status:"ativo",email:"elena.prado@example.com",
+    sv:["patrimonio"],txGestao:0.5,pat:180000,patGorila:180000,_ativosTs:Date.now()-40*86400000,
+    _ativosImport:[
+      {tk:"CDB MASTER 120%",nm:"CDB Master 120% CDI",tp:"cdb",inst:"Genial",posR:70000,venc:iso(-25)},
+      {tk:"CAIXA GENIAL",nm:"Conta remunerada",tp:"caixa",inst:"Genial",posR:4000}
+    ],
+    vencOperacional:{
+      "CDB MASTER 120%|Genial":{status:"liquidacao",destino:"Aguardando crédito na Genial",vencIso:iso(-25),ativo:"CDB Master 120% CDI",tipo:"cdb",tipoLabel:"CDB",ic:"🏦",inst:"Genial",valor:70000,emissor:"Master",atualizadoEm:new Date().toISOString()}
+    }
+  };
+  window._cvPreviewAvulsos=[{id:"av_joao",tipo:"avulso",nome:"João Avulso",email:"joao.avulso@example.com",valorRelatorio:650,faturamento:[{id:"av_joao_2025",anoBase:2025,geradoEm:dia(8)+"T12:00:00.000Z",valor:650}]}];
+  window._cvPreviewRelatorios=[];
+  window._cvDossieMem={
+    "prev_ana_2025":{id:"prev_ana_2025",pessoaId:"prev_ana",pessoaTipo:"cliente",pessoaNome:"Ana Martins",anoBase:2025,etapa:"revisao",prazoOficial:"",prazoInterno:"2026-04-15",proximaAcao:"Cobrar informe do Rico",itens:[
+      {id:"inf1",instituicao:"BTG Pactual",tipo:"informe",rotulo:"Informe de rendimentos — BTG Pactual",origem:"carteira",status:"recebido",nota:""},
+      {id:"inf2",instituicao:"Rico",tipo:"informe",rotulo:"Informe de rendimentos — Rico",origem:"carteira",status:"solicitado",nota:""},
+      {id:"inf3",instituicao:"XP Investimentos",tipo:"informe",rotulo:"Informe de rendimentos — XP Investimentos",origem:"carteira",status:"extraido",nota:""},
+      {id:"ext1",instituicao:"Avenue",tipo:"exterior",rotulo:"Documento exterior — Avenue",origem:"carteira",status:"recebido",nota:""},
+      {id:"b3pos",instituicao:"B3",tipo:"b3",rotulo:"Posição B3",origem:"carteira",status:"conferido",nota:""},
+      {id:"b3mov",instituicao:"B3",tipo:"b3",rotulo:"Movimentação B3",origem:"carteira",status:"solicitado",nota:""},
+      {id:"man1",instituicao:"Modal",tipo:"informe",rotulo:"Informe de rendimentos — Modal",origem:"manual",status:"sem_movimento",nota:"Conta encerrada em março. Cliente confirmou que não houve posição."}
+    ]},
+    "prev_carla_2025":{id:"prev_carla_2025",pessoaId:"prev_carla",pessoaTipo:"cliente",pessoaNome:"Carla Nunes",anoBase:2025,etapa:"pronto",prazoOficial:"",prazoInterno:"2026-03-30",proximaAcao:"Gerar PDF",itens:[
+      {id:"c1",instituicao:"Itaú",tipo:"informe",rotulo:"Informe de rendimentos — Itaú",origem:"carteira",status:"conferido",nota:""},
+      {id:"c2",instituicao:"Clear",tipo:"informe",rotulo:"Informe de rendimentos — Clear",origem:"carteira",status:"conferido",nota:""}
+    ]}
+  };
+  return {
+    cl:[ana,bruno,carla,elena],
+    it:[
+      {id:"i1",cid:"prev_ana",data:"2026-07-01",txt:"Revisão de carteira"},
+      {id:"i2",cid:"prev_carla",data:iso(-5),txt:"Relatório de outubro"},
+      {id:"i3",cid:"prev_elena",data:"2026-08-20",txt:"Aporte"}
+    ],
+    lds:[],
+    fin:{entradas:[
+      {id:1,data:dia(5),servico:"Gestão de Patrimônio",meio:"PIX",cliente:"Ana Martins",valor:2000,nf:"OK"},
+      {id:2,data:dia(6),servico:"Gestão Financeira",meio:"PIX",cliente:"Bruno Lima",valor:400,nf:""},
+      {id:3,data:dia(7),servico:"Gestão de Patrimônio",meio:"PIX",cliente:"Elena Prado",valor:1800,nf:"OK"},
+      {id:4,data:dia(8),servico:"Relatório de IR",meio:"PIX",cliente:"João Avulso",valor:650,nf:""},
+      {id:5,data:dia(9),servico:"Comissão parceiro",meio:"PIX",cliente:"Contábil Alfa",valor:200,nf:""}
+    ],despesas:[
+      {id:11,data:dia(3),cat:"Software",meio:"Cartão",desc:"Ferramentas",valor:350}
+    ]},
+    parceiros:{parceiros:[{id:"p_alfa",nome:"Contábil Alfa",direcao:"recebemos",tipoComissao:"recorrente",percentual:20}],indicacoes:[{id:"ind1",parceiroId:"p_alfa",status:"convertido",recorrenteAtiva:true,valorTaxaMensal:1000,clienteNome:"Indicação Alfa"}]},
+    vistaLearning:[],ag:[],tpAg:TIPOS_AGENDA_DEFAULT.slice(),overviewMercado:{},config:{}
+  };
+}
+function App({authUser,preview}){
   /* === PWA: state pra botão Instalar App ===
      pwaInstallable: true quando o navegador suporta instalação (Chrome/Edge/Android).
      pwaInstalled: true após o usuário instalar — esconde o botão.
@@ -41502,6 +42161,7 @@ function App({authUser}){
 
   /* Lazy init: tenta carregar do localStorage (cache enquanto Firestore carrega) */
   const initState=(function(){
+    if(preview)return cvMontarPreview();
     try{
       var saved=localStorage.getItem("courinvest_data_v1");
       if(saved){
@@ -41708,6 +42368,7 @@ function App({authUser}){
   };
 
   useEffect(function(){
+    if(preview){sSyncState("synced");isInitialLoadRef.current=false;return}
     if(!window._fbDB){sSyncState("error");return}
     var mainRef=window._fbDB.collection("workspaces").doc("main");
     var ativosRef=window._fbDB.collection("workspaces").doc("main_ativos");
@@ -41791,6 +42452,7 @@ function App({authUser}){
   },[]);
   
   useEffect(function(){
+    if(preview)return;
     try{localStorage.setItem("courinvest_data_v1",JSON.stringify(d))}
     catch(e){console.warn("localStorage save failed:",e)}
     if(isInitialLoadRef.current||skipNextSaveRef.current){
@@ -41850,7 +42512,7 @@ function App({authUser}){
      Roda 1x ao montar, fica escutando até o componente desmontar.
      skipNextSaveRef evita loop: quando recebo update do listener, não salvo de volta. */
   useEffect(function(){
-    if(!window._fbDB)return;
+    if(preview||!window._fbDB)return;
     var docRef=window._fbDB.collection("workspaces").doc("main");
     var ativosRefSnap=window._fbDB.collection("workspaces").doc("main_ativos");
     var unsub=docRef.onSnapshot(function(snap){
@@ -41969,7 +42631,7 @@ function App({authUser}){
       presenceRef.delete().catch(function(){});
     };
   },[]);
-  const[pg,sPg]=useState("dashboard");
+  const[pg,sPg]=useState((preview&&window._cvPreviewAba)||"dashboard");
   const[clFi,sClFi]=useState("patrimonio");
   const[sel,sSel]=useState(null);
   const[col,sCol]=useState(false);
@@ -42393,6 +43055,7 @@ function App({authUser}){
         )}
 
         <div style={{flex:1,overflow:"auto",padding:isMobile?14:28,background:"radial-gradient(ellipse at 15% -5%,rgba(var(--gold-rgb),0.03),transparent 45%),radial-gradient(ellipse at 85% 100%,rgba(56,189,248,0.015),transparent 45%)"}} onClick={function(){sShowN(false)}}>
+          {preview&&<div style={{marginBottom:12,padding:"8px 12px",borderRadius:10,background:"rgba(180,83,9,0.1)",color:"#B45309",fontSize:12,fontWeight:700}}>Pré-visualização local com dados fictícios. Nada disso é gravado no Firebase.</div>}
           {pg==="dashboard" && <Dash data={d} onSel={function(c){sPg("clients");sSel(c)}} goTo={function(p){sPg(p)}}/>}
           {pg==="clients" && !sel && <CL data={d} onSel={function(c){sSel(c)}} dispatch={dp} fi={clFi} sFi={sClFi}/>}
           {pg==="rebal" && <RebalanceamentoView data={d} dispatch={dp} onGoClient={function(c){sPg("clients");sSel(c)}}/>}
@@ -42553,7 +43216,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '552';
+  var SW_VERSION = '553';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
