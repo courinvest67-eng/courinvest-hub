@@ -4150,9 +4150,26 @@ function Dash({data:d,onSel:os,goTo}){
 
       {dt==="geral" && (
         <div>
+          <div style={{display:"grid",gridTemplateColumns:isMob?"1fr":"1.5fr 1fr 1fr",gap:10,marginBottom:16}}>
+            <Cd style={{padding:isMob?"14px 16px":"18px 22px",cursor:"pointer"}} hov={true} glow onClick={function(){sDashDetalhes(true);sSubTab("patrimonio");sShowAum(!showAum);}}>
+              <div style={{fontSize:isMob?9:10,color:T.t3,fontWeight:700,letterSpacing:.6,textTransform:"uppercase"}}>Patrimônio total sob gestão</div>
+              <div style={{fontSize:isXS?22:isMob?26:32,fontWeight:800,letterSpacing:-.6,marginTop:4,whiteSpace:"nowrap"}}>{fmAuto(aum)}</div>
+              <div style={{fontSize:11,color:T.t3,marginTop:4}}>AUM de todos os clientes</div>
+            </Cd>
+            <Cd style={{padding:isMob?"14px 16px":"18px 20px"}} hov={false}>
+              <div style={{fontSize:isMob?9:10,color:T.t3,fontWeight:700,letterSpacing:.6,textTransform:"uppercase"}}>Clientes ativos</div>
+              <div style={{fontSize:isXS?22:isMob?26:32,fontWeight:800,letterSpacing:-.6,marginTop:4}}>{clAtivos.length}</div>
+              <div style={{fontSize:11,color:T.t3,marginTop:4}}>{cl.length} no cadastro</div>
+            </Cd>
+            <Cd style={{padding:isMob?"14px 16px":"18px 20px"}} hov={false}>
+              <div style={{fontSize:isMob?9:10,color:T.t3,fontWeight:700,letterSpacing:.6,textTransform:"uppercase"}}>Receita mensal (MRR)</div>
+              <div style={{fontSize:isXS?22:isMob?26:32,fontWeight:800,letterSpacing:-.6,color:T.cyan,marginTop:4,whiteSpace:"nowrap"}}>{fmAuto(mrr)}</div>
+              <div style={{fontSize:11,color:T.t3,marginTop:4}}>Fee de patrimônio + gestão financeira</div>
+            </Cd>
+          </div>
           <div style={{marginBottom:14}}>
             <div style={{fontSize:15,fontWeight:800,color:T.t1,marginBottom:4}}>Fila de ações</div>
-            <div style={{fontSize:12,color:T.t3,marginBottom:10}}>O que precisa de uma decisão agora. Indicadores, gráficos e rankings ficam recolhidos.</div>
+            <div style={{fontSize:12,color:T.t3,marginBottom:10}}>O que precisa de uma decisão agora. Gráficos e rankings continuam recolhidos.</div>
             <div style={{display:"grid",gridTemplateColumns:isMob?"1fr":"1fr 1fr",gap:10}}>
               {[
                 {ic:"📥",titulo:"Carteiras desatualizadas",qtd:carteirasAtrasadas.length,detalhe:carteirasAtrasadas.length?carteirasAtrasadas.slice(0,3).map(function(c){return c.nome;}).join(" · "):"Nenhuma carteira de patrimônio parada há mais de 8 dias",acao:"Abrir clientes",fn:function(){if(goTo)goTo("clients");}},
@@ -43216,7 +43233,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '553';
+  var SW_VERSION = '554';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
