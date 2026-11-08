@@ -7442,6 +7442,141 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
     return null;
   };
 
+  /* v550: helpers COMPARTILHADOS entre importGorilaCliente (individual) e processGorilaFile (lote) pra
+     montar o c._gorilaRent consolidado do cliente. Antes o lote só gravava as posições novas e mantinha
+     (via spread do existing) o _gorilaRent ANTIGO — rentabilidade/benchmarks/movimentações de outro
+     período ao lado das posições do arquivo novo. Agora os dois caminhos usam exatamente a mesma lógica. */
+  /* Excel: resumo (Resultado/Data inicial/final/aportes/retiradas/captação) + tabela "Rentabilidade da
+     carteira" + "Atribuição de performance". Retorna {gorilaRent} (null se o arquivo não trouxer nada). */
+  var gorilaRentDoAoa=function(aoa,pv){
+    var patBruto=0,resultadoPer=0,dataIni="",dataFim="",aportesPer=0,retiradasPer=0,captacaoPer=0;
+    var _excelDateToISO=function(v){
+      if(v instanceof Date)return v.toISOString().split("T")[0];
+      if(typeof v==="number"&&v>40000&&v<60000){
+        var _d=new Date(Math.round((v-25569)*86400*1000));
+        return _d.toISOString().split("T")[0];
+      }
+      return String(v||"").substring(0,10);
+    };
+    /* Mesma cadeia de rótulos clássicos (e mesma precedência) do import individual */
+    for(var i=0;i<Math.min(aoa.length,30);i++){
+      var label=String(aoa[i][0]||"").toLowerCase().trim();
+      var rawVal=aoa[i][1];
+      if(!label)continue;
+      if(label.indexOf("patrim")>=0 && patBruto===0)patBruto=typeof rawVal==="number"?rawVal:pv(rawVal);
+      else if(label.indexOf("resultado")>=0 && resultadoPer===0)resultadoPer=typeof rawVal==="number"?rawVal:pv(rawVal);
+      else if(label.indexOf("data inicial")>=0)dataIni=_excelDateToISO(rawVal);
+      else if(label.indexOf("data final")>=0)dataFim=_excelDateToISO(rawVal);
+      else if(label.indexOf("aporte")>=0||label.indexOf("aplica")>=0||label.indexOf("depos")>=0)aportesPer=typeof rawVal==="number"?rawVal:pv(rawVal);
+      else if(label.indexOf("resgate")>=0||label.indexOf("retirad")>=0||label.indexOf("saqu")>=0)retiradasPer=typeof rawVal==="number"?rawVal:pv(rawVal);
+      else if(label.indexOf("capta")>=0||label.indexOf("fluxo")>=0)captacaoPer=typeof rawVal==="number"?rawVal:pv(rawVal);
+    }
+    /* Se só veio "captação líquida" e não os dois separados, usa ela como líquido (positivo=aporte, negativo=retirada) */
+    if(captacaoPer!==0 && aportesPer===0 && retiradasPer===0){
+      if(captacaoPer>0)aportesPer=captacaoPer;
+      else retiradasPer=Math.abs(captacaoPer);
+    }
+    if(captacaoPer===0)captacaoPer=aportesPer-retiradasPer;
+
+    var gorilaRent=null;
+    var rentSectionRow=-1;
+    for(var i=0;i<Math.min(aoa.length,30);i++){
+      var c0=String(aoa[i][0]||"").toLowerCase();
+      if(c0.indexOf("rentabilidade da carteira")>=0){rentSectionRow=i;break}
+    }
+    if(rentSectionRow>=0){
+      /* Header row: [Periodo, Sharpe, Volatilidade, Rentabilidade, IBOV, CDI, IPCA] */
+      var rentPeriods=[];
+      for(var i=rentSectionRow+2;i<Math.min(rentSectionRow+10,aoa.length);i++){
+        var r=aoa[i];if(!r)continue;
+        var per=String(r[0]||"").trim();
+        if(!per||per.toLowerCase().indexOf("atribui")>=0||per.toLowerCase().indexOf("posição")>=0)break;
+        var sharpe=typeof r[1]==="number"?r[1]:pv(r[1]);
+        var vol=typeof r[2]==="number"?r[2]:pv(r[2]);
+        var rent=typeof r[3]==="number"?r[3]:pv(r[3]);
+        var ibov=typeof r[4]==="number"?r[4]:pv(r[4]);
+        var cdi=typeof r[5]==="number"?r[5]:pv(r[5]);
+        var ipca=typeof r[6]==="number"?r[6]:pv(r[6]);
+        rentPeriods.push({p:per,sharpe:sharpe,vol:vol,rent:rent,ibov:ibov,cdi:cdi,ipca:ipca});
+      }
+      if(rentPeriods.length>0){
+        gorilaRent={periods:rentPeriods,resultado:resultadoPer,dataIni:dataIni,dataFim:dataFim,aportes:aportesPer,retiradas:retiradasPer,captacao:captacaoPer,importedAt:Date.now()};
+      }
+    }
+    /* Fallback: se não achou tabela de rentabilidade mas tem movimentações, cria gorilaRent mínimo */
+    if(!gorilaRent && (aportesPer>0||retiradasPer>0||captacaoPer!==0) && dataIni && dataFim){
+      gorilaRent={periods:[],resultado:resultadoPer,dataIni:dataIni,dataFim:dataFim,aportes:aportesPer,retiradas:retiradasPer,captacao:captacaoPer,importedAt:Date.now()};
+    }
+
+    var atribuicao=[];
+    var atribRow=-1;
+    for(var i=0;i<Math.min(aoa.length,35);i++){
+      var c0=String(aoa[i][0]||"").toLowerCase();
+      if(c0.indexOf("atribuição de performance")>=0||c0.indexOf("atribuicao de performance")>=0){atribRow=i;break}
+    }
+    if(atribRow>=0){
+      for(var i=atribRow+2;i<Math.min(atribRow+15,aoa.length);i++){
+        var r=aoa[i];if(!r)continue;
+        var classe=String(r[0]||"").trim();
+        if(!classe||classe.toLowerCase()==="posição"||classe.toLowerCase()==="total")break;
+        var pct=typeof r[1]==="number"?r[1]:pv(r[1]);
+        if(classe&&classe.toLowerCase()!=="classe")atribuicao.push({classe:classe,pct:pct});
+      }
+    }
+    if(gorilaRent&&atribuicao.length>0)gorilaRent.atribuicao=atribuicao;
+    return {gorilaRent:gorilaRent};
+  };
+  /* PDF ("Relatório por período"): coluna "Período" da tabela "Resultado financeiro" (rent + CDI/IPCA/Ibov).
+     Retorna null se a tabela não for encontrada — quem chama decide o fallback (preserva o existente). */
+  var gorilaRentDoPdf=function(lines){
+    var gorilaRentPdf=null;
+    try{
+      var rfIdx=-1;
+      for(var k=0;k<lines.length-1;k++){
+        if(lines[k].toLowerCase()==="resultado financeiro"&&lines[k+1].match(/^R\$/)){rfIdx=k;break}
+      }
+      if(rfIdx<0)return null;
+      var lerLinhaPct=function(label){
+        for(var k=rfIdx;k<Math.min(rfIdx+40,lines.length);k++){
+          if(lines[k].toLowerCase()===label.toLowerCase()){
+            var vm=(lines[k+1]||"").match(/(-?[\d.,]+)%/);
+            if(vm)return parseFloat(vm[1].replace(/\./g,"").replace(",","."))/100;
+          }
+        }
+        return null;
+      };
+      var rentPer=lerLinhaPct("Rentabilidade");
+      var cdiPer=lerLinhaPct("CDI");
+      var ipcaPer=lerLinhaPct("IPCA");
+      var ibovPer=lerLinhaPct("Ibovespa");
+      if(rentPer===null)return null;
+      /* Data do período coberto: o cabeçalho "Período do Relatório" vem em branco
+         nesse tipo de PDF (mesma particularidade do nome do cliente), então achamos
+         o mês de referência pelo último mês preenchido (≠"-") na tabela
+         "Rentabilidade mensal e acumulada" (o bloco do ano mais recente vem primeiro). */
+      var dataIniPdf=null,dataFimPdf=null;
+      var anoIdx=-1;
+      for(var k=0;k<lines.length;k++){
+        if(/^\d{4}$/.test(lines[k])){anoIdx=k;break}
+      }
+      if(anoIdx>=0&&anoIdx+13<lines.length){
+        var anoRef=parseInt(lines[anoIdx],10);
+        var mesIdx=-1;
+        for(var m=11;m>=0;m--){
+          var val=lines[anoIdx+1+m];
+          if(val&&val!=="-"&&val.match(/%/)){mesIdx=m;break}
+        }
+        if(mesIdx>=0&&anoRef>2000){
+          dataIniPdf=anoRef+"-"+String(mesIdx+1).padStart(2,"0")+"-01";
+          var ultDia=new Date(anoRef,mesIdx+1,0).getDate();
+          dataFimPdf=anoRef+"-"+String(mesIdx+1).padStart(2,"0")+"-"+String(ultDia).padStart(2,"0");
+        }
+      }
+      gorilaRentPdf={periods:[{p:"Período",rent:rentPer,cdi:cdiPer,ibov:ibovPer,ipca:ipcaPer}],dataIni:dataIniPdf,dataFim:dataFimPdf,resultado:null,aportes:0,retiradas:0,captacao:0,importedAt:Date.now()};
+    }catch(err){console.warn("Parse benchmarks PDF Gorila:",err)}
+    return gorilaRentPdf;
+  };
+
   var importGorilaBulk=function(files){
     if(!files||files.length===0)return;
     var arr=Array.from(files).filter(function(f){return /\.(xlsx|xls|pdf|csv)$/i.test(f.name)});
@@ -7602,6 +7737,9 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
               _ativosImport:existing&&existing._ativosImport&&existing._ativosImport.length>ativos.length?existing._ativosImport:ativos,
               _ativosTs:Date.now(),
               _backupAntesImport:backup,
+              /* v550: mesma regra do import individual de PDF — benchmarks do período deste PDF; se a tabela
+                 "Resultado financeiro" não for encontrada, preserva o _gorilaRent existente. */
+              _gorilaRent:gorilaRentDoPdf(lines)||(existing&&existing._gorilaRent),
               /* === PRESERVAÇÃO EXPLÍCITA DE DADOS MANUAIS === sempre mantém, nunca sobrescreve na reimportação */
               proventos:(existing&&existing.proventos&&existing.proventos.length>0)?existing.proventos:(existing&&existing.proventos||[]),
               notasFiscais:(existing&&existing.notasFiscais)||[],
@@ -7807,6 +7945,9 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
           txGestao:txGestaoImport(existing,patReal,null),feeFixo:existing?existing.feeFixo:0,feeBase:existing?existing.feeBase:"",
           _ativosImport:ativos,
           _ativosTs:Date.now(),
+          /* v550: recalcula o _gorilaRent consolidado deste arquivo (igual ao import individual) — não
+             mantém a rentabilidade antiga ao lado das posições novas. null se o arquivo não trouxer. */
+          _gorilaRent:gorilaRentDoAoa(aoa,pv).gorilaRent,
           _backupAntesImport:backup,
           /* === PRESERVAÇÃO EXPLÍCITA DE DADOS MANUAIS === sempre mantém, nunca sobrescreve na reimportação */
           proventos:(existing&&existing.proventos&&existing.proventos.length>0)?existing.proventos:(existing&&existing.proventos||[]),
@@ -8437,53 +8578,7 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
                essa coluna e gravamos em c._gorilaRent, no mesmo formato que o import via
                Excel já usa, sobrescrevendo qualquer dado antigo (este PDF é a fonte mais
                recente no momento da importação). */
-            var gorilaRentPdf=null;
-            (function(){
-              try{
-                var rfIdx=-1;
-                for(var k=0;k<lines.length-1;k++){
-                  if(lines[k].toLowerCase()==="resultado financeiro"&&lines[k+1].match(/^R\$/)){rfIdx=k;break}
-                }
-                if(rfIdx<0)return;
-                var lerLinhaPct=function(label){
-                  for(var k=rfIdx;k<Math.min(rfIdx+40,lines.length);k++){
-                    if(lines[k].toLowerCase()===label.toLowerCase()){
-                      var vm=(lines[k+1]||"").match(/(-?[\d.,]+)%/);
-                      if(vm)return parseFloat(vm[1].replace(/\./g,"").replace(",","."))/100;
-                    }
-                  }
-                  return null;
-                };
-                var rentPer=lerLinhaPct("Rentabilidade");
-                var cdiPer=lerLinhaPct("CDI");
-                var ipcaPer=lerLinhaPct("IPCA");
-                var ibovPer=lerLinhaPct("Ibovespa");
-                if(rentPer===null)return;
-                /* Data do período coberto: o cabeçalho "Período do Relatório" vem em branco
-                   nesse tipo de PDF (mesma particularidade do nome do cliente), então achamos
-                   o mês de referência pelo último mês preenchido (≠"-") na tabela
-                   "Rentabilidade mensal e acumulada" (o bloco do ano mais recente vem primeiro). */
-                var dataIniPdf=null,dataFimPdf=null;
-                var anoIdx=-1;
-                for(var k=0;k<lines.length;k++){
-                  if(/^\d{4}$/.test(lines[k])){anoIdx=k;break}
-                }
-                if(anoIdx>=0&&anoIdx+13<lines.length){
-                  var anoRef=parseInt(lines[anoIdx],10);
-                  var mesIdx=-1;
-                  for(var m=11;m>=0;m--){
-                    var val=lines[anoIdx+1+m];
-                    if(val&&val!=="-"&&val.match(/%/)){mesIdx=m;break}
-                  }
-                  if(mesIdx>=0&&anoRef>2000){
-                    dataIniPdf=anoRef+"-"+String(mesIdx+1).padStart(2,"0")+"-01";
-                    var ultDia=new Date(anoRef,mesIdx+1,0).getDate();
-                    dataFimPdf=anoRef+"-"+String(mesIdx+1).padStart(2,"0")+"-"+String(ultDia).padStart(2,"0");
-                  }
-                }
-                gorilaRentPdf={periods:[{p:"Período",rent:rentPer,cdi:cdiPer,ibov:ibovPer,ipca:ipcaPer}],dataIni:dataIniPdf,dataFim:dataFimPdf,resultado:null,aportes:0,retiradas:0,captacao:0,importedAt:Date.now()};
-              }catch(err){console.warn("Parse benchmarks PDF Gorila:",err)}
-            })();
+            var gorilaRentPdf=gorilaRentDoPdf(lines); /* v550: helper compartilhado com o import em lote */
 
             var ativos=[];
             Object.entries(instData).forEach(function(e){
@@ -8679,64 +8774,9 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
             else if(v.indexOf("indiv")>=0)cfgTipoCli="individual";
           }
         }
-        /* Se só veio "captação líquida" e não os dois separados, usa ela como líquido (positivo=aporte, negativo=retirada) */
-        if(captacaoPer!==0 && aportesPer===0 && retiradasPer===0){
-          if(captacaoPer>0)aportesPer=captacaoPer;
-          else retiradasPer=Math.abs(captacaoPer);
-        }
-        
-        if(captacaoPer===0)captacaoPer=aportesPer-retiradasPer;
-
-        
-        var gorilaRent=null;
-        var rentSectionRow=-1;
-        for(var i=0;i<Math.min(aoa.length,30);i++){
-          var c0=String(aoa[i][0]||"").toLowerCase();
-          if(c0.indexOf("rentabilidade da carteira")>=0){rentSectionRow=i;break}
-        }
-        if(rentSectionRow>=0){
-          /* Header row: [Periodo, Sharpe, Volatilidade, Rentabilidade, IBOV, CDI, IPCA] */
-          var rentPeriods=[];
-          
-          for(var i=rentSectionRow+2;i<Math.min(rentSectionRow+10,aoa.length);i++){
-            var r=aoa[i];if(!r)continue;
-            var per=String(r[0]||"").trim();
-            if(!per||per.toLowerCase().indexOf("atribui")>=0||per.toLowerCase().indexOf("posição")>=0)break;
-            
-            var sharpe=typeof r[1]==="number"?r[1]:pv(r[1]);
-            var vol=typeof r[2]==="number"?r[2]:pv(r[2]);
-            var rent=typeof r[3]==="number"?r[3]:pv(r[3]);
-            var ibov=typeof r[4]==="number"?r[4]:pv(r[4]);
-            var cdi=typeof r[5]==="number"?r[5]:pv(r[5]);
-            var ipca=typeof r[6]==="number"?r[6]:pv(r[6]);
-            rentPeriods.push({p:per,sharpe:sharpe,vol:vol,rent:rent,ibov:ibov,cdi:cdi,ipca:ipca});
-          }
-          if(rentPeriods.length>0){
-            gorilaRent={periods:rentPeriods,resultado:resultadoPer,dataIni:dataIni,dataFim:dataFim,aportes:aportesPer,retiradas:retiradasPer,captacao:captacaoPer,importedAt:Date.now()};
-          }
-        }
-        /* Fallback: se não achou tabela de rentabilidade mas tem movimentações, cria gorilaRent mínimo */
-        if(!gorilaRent && (aportesPer>0||retiradasPer>0||captacaoPer!==0) && dataIni && dataFim){
-          gorilaRent={periods:[],resultado:resultadoPer,dataIni:dataIni,dataFim:dataFim,aportes:aportesPer,retiradas:retiradasPer,captacao:captacaoPer,importedAt:Date.now()};
-        }
-
-        
-        var atribuicao=[];
-        var atribRow=-1;
-        for(var i=0;i<Math.min(aoa.length,35);i++){
-          var c0=String(aoa[i][0]||"").toLowerCase();
-          if(c0.indexOf("atribuição de performance")>=0||c0.indexOf("atribuicao de performance")>=0){atribRow=i;break}
-        }
-        if(atribRow>=0){
-          for(var i=atribRow+2;i<Math.min(atribRow+15,aoa.length);i++){
-            var r=aoa[i];if(!r)continue;
-            var classe=String(r[0]||"").trim();
-            if(!classe||classe.toLowerCase()==="posição"||classe.toLowerCase()==="total")break;
-            var pct=typeof r[1]==="number"?r[1]:pv(r[1]);
-            if(classe&&classe.toLowerCase()!=="classe")atribuicao.push({classe:classe,pct:pct});
-          }
-        }
-        if(gorilaRent&&atribuicao.length>0)gorilaRent.atribuicao=atribuicao;
+        /* v550: _gorilaRent consolidado (resumo + "Rentabilidade da carteira" + atribuição) vem do helper
+           compartilhado gorilaRentDoAoa — o import em lote usa exatamente a mesma lógica. */
+        var gorilaRent=gorilaRentDoAoa(aoa,pv).gorilaRent;
 
         
         var headerRow=-1;
@@ -42212,7 +42252,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '549';
+  var SW_VERSION = '550';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
