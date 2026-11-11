@@ -270,6 +270,7 @@ document.addEventListener("DOMContentLoaded", function() {
   }, 4000);
 });
 </script>
+<script src="couri-core.js"></script>
 <script type="text/babel" data-presets="react">
 const {useState, useReducer, useEffect, useRef} = React;
 
@@ -1862,7 +1863,7 @@ const feeBaseDoCliente=function(c){
   return {patTotal:patTotal,exclReserva:exclReserva,exclHolding:exclHolding,exclPrev:exclPrev,exclRF:exclRF,exclCaixa:exclCaixa,exclCripto:exclCripto,exclInst:exclInst,valorFixo:valorFixo,base:base,fee:fee,taxa:taxa,regressiva:!!c.txRegressiva,modoFee:modoFee};
 };
 
-/* Receita TOTAL mensal do cliente em BRL — soma fee + % patrimônio (com particularidades) + milhas */
+/* Receita TOTAL mensal do cliente em BRL — fee de patrimônio e de gestão financeira. Milhas não entram (bônus, sem fee). */
 const receitaTotalBRL=function(c){
   if(!c)return 0;
   var total=0;
@@ -3799,14 +3800,13 @@ function Dash({data:d,onSel:os,goTo}){
   };
   const fmAuto=function(v){return isXS?fmCompact(v):fm(v)};
   const cl=d.cl;
-  const milhasEstimado=cl.filter(function(c){return c.sv.includes("milhas")}).length*8870;
   const aum=cl.reduce((a,c)=>{
     var p=c.patGorila||c.pat||0;
     if(p===0&&c._ativosImport&&c._ativosImport.length>0){
       p=c._ativosImport.reduce(function(s,at){return s+(at.posR||at.qtd*at.pa||0)},0);
     }
     return a+p;
-  },0)+milhasEstimado;
+  },0);
 
   
   var normI=function(n){if(!n)return"Sem instituição";if(n.match(/xp\b|xp investimentos/i))return"Rico";if(n.match(/rico/i))return"Rico";if(n.match(/sproutfi|passfolio|passfólio|PASSFOLIO/i))return"Vest";if(n.match(/j\.\s*safra/i))return"Safra";return n};
@@ -10423,7 +10423,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
      Quando headlessTipoRelatorio vem preenchido, essa instância do CD nasce direto na aba
      "relatorio" com autoRelatorio já setado — dispensa esperar o listener de evento
      (courinvest:abrirRelatorio) e evita qualquer corrida de timing no primeiro render. */
-  const[tab,sTab]=useState(function(){return headlessTipoRelatorio?"relatorio":"geral"});
+  const[tab,sTab]=useState(function(){if(headlessTipoRelatorio)return "relatorio";if(window._cvAbrirMilhas){window._cvAbrirMilhas=false;return "milhas";}return "geral";});
   /* === FIRE: único estado objeto para evitar problemas de inicialização === */
   const[fireParams,sFireParams]=useState({
     idadeAlvo:60,rendaMensal:15000,aporteMensal:5000,
@@ -10547,29 +10547,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
   const[alvoNivel,sAlvoNivel]=useState("macro"); 
 
   
-  const[milhasProgs,sMilhasProgs]=useState([
-    {id:1,prog:"LATAM Pass",saldo:145000,custo:0.018,ic:"🟣",cor:T.purple,venc:"2027-06"},
-    {id:2,prog:"Smiles (GOL)",saldo:82000,custo:0.022,ic:"🟠",cor:T.orange,venc:"2026-12"},
-    {id:3,prog:"TudoAzul",saldo:35000,custo:0.020,ic:"🔵",cor:T.cyan,venc:"2027-03"},
-    {id:4,prog:"Livelo",saldo:210000,custo:0.012,ic:"🟢",cor:T.green,venc:"2027-09"},
-    {id:5,prog:"ALL Accor",saldo:48000,custo:0.015,ic:"🔴",cor:T.red,venc:"2028-01"},
-    {id:6,prog:"Esfera (Bradesco)",saldo:65000,custo:0.014,ic:"🟡",cor:T.goldL,venc:"2027-05"},
-  ]);
-  const[milhasHist,sMilhasHist]=useState([
-    {id:1,data:"2026-04-10",prog:"LATAM Pass",tipo:"acumulo",qtd:12000,desc:"Bônus 80% cartão Itaucard",custo:216},
-    {id:2,data:"2026-04-08",prog:"Livelo",tipo:"acumulo",qtd:25000,desc:"Compra Livelo 10 pts/R$",custo:250},
-    {id:3,data:"2026-04-05",prog:"Smiles",tipo:"resgate",qtd:-15000,desc:"Passagem GRU→GIG ida/volta",custo:0},
-    {id:4,data:"2026-04-02",prog:"ALL Accor",tipo:"acumulo",qtd:8000,desc:"Estadia Pullman SP",custo:0},
-    {id:5,data:"2026-03-28",prog:"LATAM Pass",tipo:"transferencia",qtd:30000,desc:"Transferência Livelo → LATAM",custo:360},
-    {id:6,data:"2026-03-25",prog:"TudoAzul",tipo:"acumulo",qtd:10000,desc:"Bônus 100% cartão Porto",custo:180},
-    {id:7,data:"2026-03-20",prog:"Livelo",tipo:"resgate",qtd:-40000,desc:"Resgate passagem LATAM via Livelo",custo:0},
-    {id:8,data:"2026-03-15",prog:"LATAM Pass",tipo:"acumulo",qtd:8000,desc:"Voo GRU→MIA executiva",custo:0},
-  ]);
-  const[milhasTab,sMilhasTab]=useState("saldos");
-  const[showAddMilha,sShowAddMilha]=useState(false);
-  const totalMilhas=milhasProgs.reduce(function(a,p){return a+p.saldo},0);
-  const totalValor=milhasProgs.reduce(function(a,p){return a+p.saldo*p.custo},0);
-  const custoMedio=totalMilhas>0?(totalValor/totalMilhas):0;
+  /* v555: milhas saíram do estado local. A aba lê c.milhas. */
   const totalAporte=aportesData.reduce(function(a,ap){return a+ap.valor},0);
   const[ativos,sAtivos]=useState(c._ativosImport||[]);
   
@@ -17924,8 +17902,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           <div style={{display:"flex",gap:16,flexWrap:"wrap",minWidth:0}}>
             {isPat && <div style={{textAlign:"right",minWidth:0,flex:"1 1 auto"}}>
               <div style={{fontSize:9,color:T.t3,fontWeight:600}}>PATRIMÔNIO TOTAL</div>
-              <div style={{fontSize:(function(){var _v=patDisplay+(c.sv.includes("milhas")?totalValor:0);return _v>=10000000000?11:_v>=1000000000?12:_v>=100000000?13:_v>=10000000?14:_v>=1000000?15:_v>=100000?17:20;})(),fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'",lineHeight:1.2}}>{fmF(patDisplay+(c.sv.includes("milhas")?totalValor:0))}</div>
-              {c.sv.includes("milhas") && <div style={{fontSize:9,color:T.t3}}>Investimentos {fmF(tCV||c.pat||0)} + Milhas {fmF(totalValor)}</div>}
+              <div style={{fontSize:(function(){var _v=patDisplay;return _v>=10000000000?11:_v>=1000000000?12:_v>=100000000?13:_v>=10000000?14:_v>=1000000?15:_v>=100000?17:20;})(),fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'",lineHeight:1.2}}>{fmF(patDisplay)}</div>
+              {c.sv.includes("milhas") && milhasVisao(c).totalValor>0 && <div style={{fontSize:9,color:T.purple,marginTop:2}}>Milhas pelo custo médio {fmF(milhasVisao(c).totalValor)} — não entra neste patrimônio</div>}
             </div>}
             {/* v551: "Receita" saiu do cabeçalho (ficava duplicada com o card KPI "Receita da Consultoria" da Visão Geral,
                 que agora concentra fee em moeda estrangeira, base IPCA, forma de pagamento e o botão Editar fee). */}
@@ -25462,195 +25440,9 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
 
       {}
       {tab==="milhas" && c.sv.includes("milhas") && (
-        <div>
-          {}
-          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
-            {[{l:"TOTAL MILHAS",v:fPt(totalMilhas),c:T.purple},{l:"PROGRAMAS",v:String(milhasProgs.length),c:T.cyan},{l:"VALOR ESTIMADO",v:fmF(totalValor),c:T.gold},{l:"CUSTO MÉDIO/MILHA",v:"R$ "+(custoMedio*100).toFixed(1)+" ¢",c:T.green}].map(function(k,i){return (
-              <Cd key={i} style={{padding:"10px 14px",flex:1,minWidth:100}} hov={false} glow={i===0}>
-                <div style={{fontSize:7,color:T.t3,fontWeight:600,letterSpacing:1}}>{k.l}</div>
-                <div style={{fontSize:15,fontWeight:800,color:k.c,marginTop:2,fontFamily:"'JetBrains Mono'"}}>{k.v}</div>
-              </Cd>
-            )})}
-          </div>
-
-          {}
-          <div style={{display:"flex",gap:4,marginBottom:14,alignItems:"center",flexWrap:"wrap"}}>
-            {[{id:"saldos",l:"✈️ Saldos"},{id:"hist",l:"📋 Histórico"},{id:"valor",l:"💰 Valuation"}].map(function(t){return (
-              <button key={t.id} onClick={function(){sMilhasTab(t.id)}} style={{padding:"6px 14px",borderRadius:8,fontSize:11,fontWeight:600,cursor:"pointer",border:milhasTab===t.id?"1.5px solid "+T.purple:"1px solid var(--wa04)",background:milhasTab===t.id?T.purpleD:"transparent",color:milhasTab===t.id?T.purple:T.t3}}>{t.l}</button>
-            )})}
-            <div style={{marginLeft:"auto"}}><Bt v="secondary" onClick={function(){sShowAddMilha(true)}} style={{fontSize:10,padding:"6px 12px"}}>＋ Transação</Bt></div>
-          </div>
-
-          {}
-          {milhasTab==="saldos" && (
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(250px,1fr))",gap:10}}>
-              {milhasProgs.map(function(p){
-                var mesesVenc=Math.ceil((new Date(p.venc+"-01")-new Date())/(30*864e5));
-                return (
-                  <Cd key={p.id} style={{padding:18}} hov={false}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8}}>
-                        <span style={{fontSize:22}}>{p.ic}</span>
-                        <div>
-                          <div style={{fontSize:14,fontWeight:700}}>{p.prog}</div>
-                          <div style={{fontSize:10,color:T.t3}}>Vence: {p.venc} ({mesesVenc}m)</div>
-                        </div>
-                      </div>
-                      {mesesVenc<=6 && <Bg c="orange">Vence em {mesesVenc}m</Bg>}
-                    </div>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
-                      <div>
-                        <div style={{fontSize:9,color:T.t3,fontWeight:600}}>SALDO</div>
-                        <input type="number" value={p.saldo} onChange={function(e){sMilhasProgs(function(pr){return pr.map(function(x){return x.id===p.id?Object.assign({},x,{saldo:Math.max(0,+e.target.value)}):x})})}} style={{background:"transparent",border:"none",color:p.cor,fontSize:24,fontWeight:800,fontFamily:"'JetBrains Mono'",outline:"none",padding:0,width:130}}/>
-                      </div>
-                      <div style={{textAlign:"right"}}>
-                        <div style={{fontSize:9,color:T.t3}}>VALOR</div>
-                        <div style={{fontSize:14,fontWeight:700,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fmF(p.saldo*p.custo)}</div>
-                      </div>
-                    </div>
-                    {}
-                    <div style={{marginTop:10,height:4,background:"var(--wa03)",borderRadius:2,overflow:"hidden"}}>
-                      <div style={{height:"100%",width:Math.min(100,p.saldo/totalMilhas*100*milhasProgs.length)+"%",background:p.cor,borderRadius:2,opacity:.6}}/>
-                    </div>
-                    <div style={{display:"flex",justifyContent:"space-between",marginTop:4,fontSize:9,color:T.t3}}>
-                      <span>Custo: R$ {(p.custo*100).toFixed(1)}¢/milha</span>
-                      <span>{totalMilhas>0?(p.saldo/totalMilhas*100).toFixed(0):0}% do total</span>
-                    </div>
-                  </Cd>
-                );
-              })}
-            </div>
-          )}
-
-          {}
-          {milhasTab==="hist" && (
-            <Cd style={{padding:18}} hov={false}>
-              <h4 style={{margin:"0 0 14px",fontSize:13,fontWeight:700,color:T.purple}}>Histórico de Operações</h4>
-              {milhasHist.sort(function(a,b){return b.data.localeCompare(a.data)}).map(function(h,i){
-                var isAcum=h.tipo==="acumulo";var isTransf=h.tipo==="transferencia";
-                return (
-                  <div key={h.id} style={{display:"flex",gap:12,padding:"12px 0",borderBottom:i<milhasHist.length-1?"1px solid var(--wa03)":"none",alignItems:"center"}}>
-                    <div style={{width:36,height:36,borderRadius:10,background:isAcum?T.greenD:isTransf?T.cyanD:T.redD,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>
-                      {isAcum?"📥":isTransf?"🔄":"📤"}
-                    </div>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-                        <span style={{fontSize:13,fontWeight:600}}>{h.desc}</span>
-                        <Bg c={isAcum?"green":isTransf?"cyan":"red"}>{h.tipo}</Bg>
-                      </div>
-                      <div style={{fontSize:10,color:T.t3,marginTop:3}}>{h.prog} • {h.data.split("-").reverse().join("/")}</div>
-                    </div>
-                    <div style={{textAlign:"right",flexShrink:0}}>
-                      <div style={{fontSize:14,fontWeight:800,color:h.qtd>0?T.green:T.red,fontFamily:"'JetBrains Mono'"}}>{h.qtd>0?"+":""}{fPt(h.qtd)}</div>
-                      {h.custo>0 && <div style={{fontSize:10,color:T.t3}}>Custo: {fmF(h.custo)}</div>}
-                    </div>
-                  </div>
-                );
-              })}
-            </Cd>
-          )}
-
-          {}
-          {milhasTab==="valor" && (
-            <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
-              <Cd style={{padding:18,flex:1.5,minWidth:280}} hov={false}>
-                <h4 style={{margin:"0 0 14px",fontSize:13,fontWeight:700,color:T.gold}}>Valuation por Programa</h4>
-                <div style={{overflowX:"auto",borderRadius:12,border:"1px solid var(--wa04)"}}>
-                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:400}}>
-                    <thead><tr style={{background:"var(--wa02)"}}>
-                      {["Programa","Saldo","Custo/Milha","Valor Total","%"].map(function(h,i){return <th key={i} style={{padding:"10px 12px",textAlign:i>0?"right":"left",fontWeight:700,color:T.gold,fontSize:10,borderBottom:"1px solid rgba(var(--gold-rgb),0.1)"}}>{h}</th>})}
-                    </tr></thead>
-                    <tbody>
-                      {milhasProgs.sort(function(a,b){return b.saldo*b.custo-a.saldo*a.custo}).map(function(p,i){return (
-                        <tr key={p.id} style={{background:i%2===0?"transparent":"var(--wa015)"}}>
-                          <td style={{padding:"10px 12px",borderBottom:"1px solid var(--wa03)"}}><div style={{display:"flex",alignItems:"center",gap:6}}><span>{p.ic}</span><span style={{fontWeight:600}}>{p.prog}</span></div></td>
-                          <td style={{padding:"10px 12px",borderBottom:"1px solid var(--wa03)",textAlign:"right",fontFamily:"'JetBrains Mono'",color:p.cor,fontWeight:700}}>{fPt(p.saldo)}</td>
-                          <td style={{padding:"10px 12px",borderBottom:"1px solid var(--wa03)",textAlign:"right",fontFamily:"'JetBrains Mono'",color:T.t2}}>R$ {(p.custo*100).toFixed(1)}¢</td>
-                          <td style={{padding:"10px 12px",borderBottom:"1px solid var(--wa03)",textAlign:"right",fontFamily:"'JetBrains Mono'",fontWeight:700,color:T.gold}}>{fmF(p.saldo*p.custo)}</td>
-                          <td style={{padding:"10px 12px",borderBottom:"1px solid var(--wa03)",textAlign:"right",fontSize:11,color:T.t3}}>{totalValor>0?((p.saldo*p.custo)/totalValor*100).toFixed(0):0}%</td>
-                        </tr>
-                      )})}
-                    </tbody>
-                    <tfoot><tr style={{borderTop:"2px solid rgba(var(--gold-rgb),0.15)"}}>
-                      <td style={{padding:"12px",fontWeight:800,color:T.t2}}>TOTAL</td>
-                      <td style={{padding:"12px",textAlign:"right",fontWeight:800,color:T.purple,fontFamily:"'JetBrains Mono'"}}>{fPt(totalMilhas)}</td>
-                      <td style={{padding:"12px",textAlign:"right",color:T.t3,fontFamily:"'JetBrains Mono'"}}>R$ {(custoMedio*100).toFixed(1)}¢</td>
-                      <td style={{padding:"12px",textAlign:"right",fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'"}}>{fmF(totalValor)}</td>
-                      <td style={{padding:"12px",textAlign:"right",color:T.t3}}>100%</td>
-                    </tr></tfoot>
-                  </table>
-                </div>
-              </Cd>
-
-              <div style={{flex:1,minWidth:220,display:"flex",flexDirection:"column",gap:12}}>
-                <Cd style={{padding:18}} hov={false} glow>
-                  <h4 style={{margin:"0 0 14px",fontSize:13,fontWeight:700,color:T.gold}}>📊 Resumo</h4>
-                  {[
-                    {l:"Total de milhas",v:fPt(totalMilhas),c:T.purple},
-                    {l:"Valor patrimonial",v:fmF(totalValor),c:T.gold},
-                    {l:"Custo médio",v:"R$ "+(custoMedio*100).toFixed(1)+"¢/milha",c:T.green},
-                    {l:"Valor médio resgate",v:"R$ "+(custoMedio*100*1.8).toFixed(1)+"¢/milha",c:T.cyan},
-                    {l:"Upside potencial",v:"+"+(((custoMedio*1.8-custoMedio)/custoMedio)*100).toFixed(0)+"%",c:T.green},
-                  ].map(function(s,i){return (
-                    <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:i<4?"1px solid var(--wa03)":"none"}}>
-                      <span style={{fontSize:11,color:T.t3}}>{s.l}</span>
-                      <span style={{fontSize:12,fontWeight:700,color:s.c,fontFamily:"'JetBrains Mono'"}}>{s.v}</span>
-                    </div>
-                  )})}
-                </Cd>
-                <Cd style={{padding:18}} hov={false}>
-                  <h4 style={{margin:"0 0 10px",fontSize:13,fontWeight:700,color:T.gold}}>⏰ Alertas de Vencimento</h4>
-                  {milhasProgs.filter(function(p){return Math.ceil((new Date(p.venc+"-01")-new Date())/(30*864e5))<=12}).sort(function(a,b){return a.venc.localeCompare(b.venc)}).map(function(p){
-                    var m=Math.ceil((new Date(p.venc+"-01")-new Date())/(30*864e5));
-                    return (
-                      <div key={p.id} style={{padding:8,background:m<=6?T.redD:T.orangeD,borderRadius:8,marginBottom:4,fontSize:11,fontWeight:600,color:m<=6?T.red:T.orange,display:"flex",justifyContent:"space-between"}}>
-                        <span>{p.ic} {p.prog}</span>
-                        <span>{fPt(p.saldo)} pts • {m}m</span>
-                      </div>
-                    );
-                  })}
-                  {milhasProgs.filter(function(p){return Math.ceil((new Date(p.venc+"-01")-new Date())/(30*864e5))<=12}).length===0 && <div style={{fontSize:11,color:T.green}}>✅ Nenhuma milha vencendo nos próximos 12 meses</div>}
-                </Cd>
-              </div>
-            </div>
-          )}
-
-          {}
-          <Mo open={showAddMilha} onClose={function(){sShowAddMilha(false)}} title="✈️ Nova Transação de Milhas">
-            <div style={{display:"flex",flexDirection:"column",gap:12}}>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                <div><div style={{fontSize:10,fontWeight:700,color:T.t3,marginBottom:3}}>PROGRAMA</div>
-                  <select id="ml-prog" style={inpS}>{milhasProgs.map(function(p){return <option key={p.id} value={p.prog}>{p.prog}</option>})}</select></div>
-                <div><div style={{fontSize:10,fontWeight:700,color:T.t3,marginBottom:3}}>TIPO</div>
-                  <select id="ml-tipo" style={inpS}><option value="acumulo">Acúmulo</option><option value="resgate">Resgate</option><option value="transferencia">Transferência</option><option value="bonus">Bônus</option><option value="expiracao">Expiração</option></select></div>
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                <div><div style={{fontSize:10,fontWeight:700,color:T.t3,marginBottom:3}}>QUANTIDADE</div><input type="number" id="ml-qtd" placeholder="10000" style={{...inpS,fontFamily:"'JetBrains Mono'"}}/></div>
-                <div><div style={{fontSize:10,fontWeight:700,color:T.t3,marginBottom:3}}>CUSTO (R$)</div><input type="number" id="ml-custo" defaultValue="0" style={{...inpS,fontFamily:"'JetBrains Mono'"}}/></div>
-              </div>
-              <div><div style={{fontSize:10,fontWeight:700,color:T.t3,marginBottom:3}}>DESCRIÇÃO</div><input id="ml-desc" placeholder="Ex: Bônus 80% cartão Itaú" style={inpS}/></div>
-              <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-                <Bt v="secondary" onClick={function(){sShowAddMilha(false)}}>Cancelar</Bt>
-                <Bt onClick={function(){
-                  var prog=document.getElementById("ml-prog").value;
-                  var tipo=document.getElementById("ml-tipo").value;
-                  var qtd=+(document.getElementById("ml-qtd").value)||0;
-                  var custo=+(document.getElementById("ml-custo").value)||0;
-                  var desc=document.getElementById("ml-desc").value||tipo;
-                  if(qtd===0)return;
-                  var qtdFinal=tipo==="resgate"||tipo==="expiracao"?-Math.abs(qtd):Math.abs(qtd);
-                  sMilhasHist(function(p){return[{id:Date.now(),data:new Date().toISOString().split("T")[0],prog:prog,tipo:tipo,qtd:qtdFinal,desc:desc,custo:custo},...p]});
-                  
-                  sMilhasProgs(function(p){return p.map(function(x){return x.prog===prog?Object.assign({},x,{saldo:Math.max(0,x.saldo+qtdFinal)}):x})});
-                  sShowAddMilha(false);
-                }}>✈️ Salvar</Bt>
-              </div>
-            </div>
-          </Mo>
-        </div>
+        <FichaMilhas c={c} dp={dp}/>
       )}
 
-      {}
       <Mo open={showInt} onClose={()=>sShowInt(false)} title="Nova Interação">
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
           <input placeholder="Título" id="int-t" style={inpS}/>
@@ -38228,7 +38020,7 @@ function PropostasView({data,dispatch}){
   return null;
 }
 
-const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"rebal",l:"Rebalanceamento",i:"⚖️"},{id:"vencimentos",l:"Vencimentos",i:"⏰"},{id:"simuladores",l:"Simuladores",i:"🧮"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"parceiros",l:"Parceiros",i:"🤝"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"irAnual",l:"Relatório IR",i:"📑"}];
+const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes",i:"◎"},{id:"milhas",l:"Couri Mile$",i:"✈️"},{id:"rebal",l:"Rebalanceamento",i:"⚖️"},{id:"vencimentos",l:"Vencimentos",i:"⏰"},{id:"simuladores",l:"Simuladores",i:"🧮"},{id:"financeiro",l:"Financeiro",i:"$"},{id:"parceiros",l:"Parceiros",i:"🤝"},{id:"comercial",l:"Comercial",i:"💼"},{id:"metas",l:"Metas",i:"🎯"},{id:"agenda",l:"Agenda",i:"◫"},{id:"news",l:"Notícias",i:"◆"},{id:"irAnual",l:"Relatório IR",i:"📑"}];
 
 /* ============ AUTH + FIRESTORE SYNC ============ */
 
@@ -42048,14 +41840,455 @@ function ComercialView({data,dispatch}){
   );
 }
 
+/* v555 — Couri Mile$. Cálculo em couri-core.js (custo médio, transferência out/in/boomerang, saldo). */
+var MILES_CATALOGO=[
+  {id:"latam",prog:"LATAM Pass"},
+  {id:"smiles",prog:"Smiles"},
+  {id:"azul",prog:"TudoAzul"},
+  {id:"livelo",prog:"Livelo"},
+  {id:"esfera",prog:"Esfera"},
+  {id:"accor",prog:"ALL Accor"},
+  {id:"itau",prog:"Itaú / Iupp"}
+];
+var MILES_TIPOS=[
+  {id:"compra",l:"Compra"},
+  {id:"acumulo",l:"Acúmulo"},
+  {id:"transferencia",l:"Transferência"},
+  {id:"bonus",l:"Bônus"},
+  {id:"resgate",l:"Resgate"},
+  {id:"venda",l:"Venda"}
+];
+function milhasNorm(raw){
+  var m=raw&&typeof raw==="object"?raw:{};
+  return {
+    programas:Array.isArray(m.programas)?m.programas.slice():[],
+    lancamentos:Array.isArray(m.lancamentos)?m.lancamentos.slice():[],
+    ajustes:m.ajustes&&typeof m.ajustes==="object"?Object.assign({},m.ajustes):{},
+    atualizadoEm:m.atualizadoEm||null
+  };
+}
+function milhasCore(m){
+  if(typeof CouriCore==="undefined")return null;
+  var ids=m.programas.map(function(p){return p.id});
+  var state={
+    transactions:m.lancamentos.map(function(l){return CouriCore.migrateTransaction(Object.assign({},l));}),
+    balances:{},
+    balanceAdjustments:Object.assign({},m.ajustes||{})
+  };
+  CouriCore.applyLedgerWithAdjustments(state,ids);
+  return state;
+}
+function milhasVisao(c){
+  var m=milhasNorm(c&&c.milhas);
+  var vazio={m:m,state:null,linhas:[],totalMilhas:0,totalValor:0,resultado:0,compras:0,vendas:0,economia:0,custoMilheiro:0};
+  var state=milhasCore(m);
+  if(!state)return vazio;
+  var linhas=m.programas.map(function(p){
+    var acq=CouriCore.programAcquisition(state,p.id);
+    var saldo=Math.round(acq.currentBalance);
+    return {id:p.id,prog:p.prog,venc:p.venc||"",saldo:saldo,custoMilheiro:saldo>0?acq.avgCostPerK:0,valor:saldo>0?acq.totalSpent:0};
+  });
+  var totalMilhas=linhas.reduce(function(s,l){return s+Math.max(0,l.saldo)},0);
+  var totalValor=linhas.reduce(function(s,l){return s+(l.valor>0?l.valor:0)},0);
+  var compras=CouriCore.cashSpent(state.transactions);
+  var vendas=state.transactions.reduce(function(s,t){return t.type==="venda"?s+CouriCore.num(t.cost):s},0);
+  var economia=state.transactions.reduce(function(s,t){return t.type==="uso"?s+CouriCore.num(t.savedValue):s},0);
+  return {m:m,state:state,linhas:linhas,totalMilhas:totalMilhas,totalValor:CouriCore.round2(totalValor),resultado:CouriCore.round2(vendas+economia-compras),compras:CouriCore.round2(compras),vendas:CouriCore.round2(vendas),economia:CouriCore.round2(economia),custoMilheiro:totalMilhas>0?(totalValor/(totalMilhas/1000)):0};
+}
+function milhasCommit(c,dp,m){
+  var vis=milhasVisao({milhas:m});
+  var next={
+    programas:m.programas.map(function(p){
+      var l=null;vis.linhas.forEach(function(x){if(x.id===p.id)l=x});
+      return {id:p.id,prog:p.prog,saldo:l?Math.max(0,Math.round(l.saldo)):0,custo:l?CouriCore.round2(l.custoMilheiro):0,venc:p.venc||""};
+    }),
+    lancamentos:m.lancamentos,
+    ajustes:vis.state?Object.assign({},vis.state.balanceAdjustments):(m.ajustes||{}),
+    atualizadoEm:new Date().toISOString()
+  };
+  dp({t:"UC",p:{id:c.id,milhas:next}});
+}
+function milhasAddPrograma(m,catId,nomeLivre){
+  var cat=MILES_CATALOGO.filter(function(x){return x.id===catId})[0];
+  var id=cat?cat.id:("outro"+Date.now());
+  if(m.programas.some(function(p){return p.id===id}))return "Esse programa já está na ficha.";
+  var nome=cat?cat.prog:String(nomeLivre||"").trim();
+  if(!nome)return "Informe o nome do programa.";
+  m.programas.push({id:id,prog:nome.slice(0,80),saldo:0,custo:0,venc:""});
+  return "";
+}
+function milhasDias(iso){
+  if(!iso)return null;
+  var p=String(iso).slice(0,10).split("-");
+  if(p.length<3)return null;
+  var dt=new Date(+p[0],+p[1]-1,+p[2]);
+  if(isNaN(dt.getTime()))return null;
+  var h=new Date();h.setHours(0,0,0,0);
+  return Math.ceil((dt-h)/86400000);
+}
+function milhasRotuloTipo(l){
+  if(l.kind==="acumulo")return "Acúmulo";
+  if(l.kind==="bonus")return "Bônus";
+  if(l.type==="compra")return "Compra";
+  if(l.type==="venda")return "Venda";
+  if(l.type==="uso")return "Resgate";
+  if(l.type==="transferencia")return l.transferRole==="out"?"Transferência (saída)":l.transferRole==="boomerang"?"Transferência (bônus)":"Transferência (entrada)";
+  return l.type||"";
+}
+function milhasLancar(m,form){
+  if(typeof CouriCore==="undefined")return "Núcleo de cálculo indisponível.";
+  var hoje=new Date().toISOString().slice(0,10);
+  var data=/^\d{4}-\d{2}-\d{2}$/.test(form.data||"")?form.data:hoje;
+  var miles=Math.round(CouriCore.num(form.miles));
+  var state=milhasCore(m);
+  var id=Date.now();
+  var desc=String(form.desc||"").slice(0,500);
+  if(form.tipo==="ajuste"){
+    if(!form.program)return "Escolha o programa.";
+    var saldo=Math.round(CouriCore.num(form.miles));
+    if(saldo<0)return "O saldo não pode ser negativo.";
+    var ledger=CouriCore.replayLedger(state.transactions,m.programas.map(function(p){return p.id}));
+    m.ajustes[form.program]=saldo-CouriCore.num(ledger[form.program]);
+    return "";
+  }
+  if(form.tipo==="transferencia"){
+    if(!form.program||!form.destino||form.program===form.destino)return "Escolha a origem e o destino, programas diferentes.";
+    var bonus=CouriCore.parseBonus(form.bonus);
+    var out={id:id,date:data,program:form.program,type:"transferencia",transferRole:"out",miles:miles,cost:0,savedValue:0,description:desc||"Saída de transferência",transferTo:form.destino,transferGroup:id};
+    var chk=CouriCore.validateEntry(out,state.balances);
+    if(!chk.ok)return chk.errors[0];
+    var cpm=CouriCore.originCostPerMile(state,form.program);
+    var cost=CouriCore.round2(cpm*miles);
+    var inn={id:id+1,date:data,program:form.destino,type:"transferencia",transferRole:"in",miles:miles,cost:cost,savedValue:0,description:desc||"Entrada de transferência",transferFrom:form.program,transferGroup:id};
+    m.lancamentos.push(out,inn);
+    var extra=Math.round(miles*bonus/100);
+    if(extra>0)m.lancamentos.push({id:id+2,date:data,program:form.destino,type:"transferencia",transferRole:"boomerang",miles:extra,cost:0,savedValue:0,description:(desc?desc+" · ":"")+"Bônus "+bonus+"%",transferFrom:form.program,transferGroup:id,kind:"bonus"});
+    return "";
+  }
+  var tx={id:id,date:data,program:form.program,miles:miles,cost:0,savedValue:0,description:desc};
+  if(!tx.program)return "Escolha o programa.";
+  if(form.tipo==="compra"){tx.type="compra";tx.cost=CouriCore.round2(form.cost);}
+  else if(form.tipo==="acumulo"){tx.type="compra";tx.cost=0;tx.kind="acumulo";if(!tx.description)tx.description="Acúmulo";}
+  else if(form.tipo==="bonus"){tx.type="transferencia";tx.transferRole="boomerang";tx.kind="bonus";if(!tx.description)tx.description="Bônus";}
+  else if(form.tipo==="venda"){tx.type="venda";tx.cost=CouriCore.round2(form.cost);}
+  else if(form.tipo==="resgate"){tx.type="uso";tx.savedValue=CouriCore.round2(form.cost);if(!tx.description)tx.description="Resgate";}
+  else return "Tipo de lançamento inválido.";
+  var v=CouriCore.validateEntry(tx,state.balances);
+  if(!v.ok)return v.errors[0];
+  m.lancamentos.push(tx);
+  return "";
+}
+function milhasApagar(m,id){
+  var alvo=m.lancamentos.filter(function(l){return l.id===id})[0];
+  var grupo=alvo&&alvo.transferGroup;
+  m.lancamentos=m.lancamentos.filter(function(l){return l.id!==id&&!(grupo&&l.transferGroup===grupo)});
+}
+function milhasTem(c){return !!(c&&Array.isArray(c.sv)&&c.sv.indexOf("milhas")>=0);}
+function milhasServico(c){
+  var sv=c&&c.sv||[];
+  if(sv.indexOf("patrimonio")>=0&&sv.indexOf("planejamento")>=0)return "Híbrido";
+  if(sv.indexOf("patrimonio")>=0)return "GP";
+  if(sv.indexOf("planejamento")>=0)return "GF";
+  return "Outro";
+}
+function FichaMilhas({c,dp}){
+  var vis=milhasVisao(c);
+  var mob=typeof window!=="undefined"&&window.innerWidth<768;
+  var [erro,sErro]=useState("");
+  var [progCat,sProgCat]=useState("latam");
+  var [progLivre,sProgLivre]=useState("");
+  var [form,sForm]=useState({tipo:"compra",program:"",destino:"",miles:"",cost:"",bonus:"",desc:"",data:new Date().toISOString().slice(0,10)});
+  var setF=function(k,v){sForm(function(p){var n=Object.assign({},p);n[k]=v;return n})};
+  var base=function(){return JSON.parse(JSON.stringify(milhasNorm(c.milhas)))};
+  var salvar=function(m){milhasCommit(c,dp,m)};
+  var addProg=function(){
+    var m=base();
+    var e=milhasAddPrograma(m,progCat,progLivre);
+    if(e){sErro(e);return}
+    sErro("");sProgLivre("");salvar(m);
+  };
+  var lancar=function(){
+    var m=base();
+    var e=milhasLancar(m,{tipo:form.tipo,program:form.program,destino:form.destino,miles:form.miles,cost:String(form.cost||"").replace(",","."),bonus:form.bonus,desc:form.desc,data:form.data});
+    if(e){sErro(e);return}
+    sErro("");salvar(m);
+    sForm(function(p){return Object.assign({},p,{miles:"",cost:"",bonus:"",desc:""})});
+  };
+  var inp={width:"100%",padding:"8px 10px",borderRadius:8,border:"1px solid "+T.bdr,background:"var(--input-bg)",color:T.t1,fontSize:13};
+  return (
+    <div>
+      <div style={{fontSize:12,color:T.t3,marginBottom:12,lineHeight:1.5}}>Os números ficam salvos neste cliente. Não pedimos senha de programa e não há sincronização automática. O custo médio segue a regra do Couri Mile$: milha transferida não é contada duas vezes.</div>
+      <div style={{display:"grid",gridTemplateColumns:mob?"1fr 1fr":"repeat(4,1fr)",gap:8,marginBottom:14}}>
+        {[
+          {l:"Milhas",v:fPt(vis.totalMilhas),c:T.purple},
+          {l:"Valor pelo custo médio",v:fm(vis.totalValor),c:T.gold},
+          {l:"Custo médio / milheiro",v:"R$ "+vis.custoMilheiro.toFixed(2).replace(".",","),c:T.t1},
+          {l:"Resultado de caixa",v:fm(vis.resultado),c:vis.resultado>=0?T.green:T.red}
+        ].map(function(k){return (
+          <Cd key={k.l} style={{padding:"12px 14px"}} hov={false}>
+            <div style={{fontSize:10,color:T.t3,fontWeight:700,textTransform:"uppercase"}}>{k.l}</div>
+            <div style={{fontSize:mob?16:18,fontWeight:800,color:k.c,marginTop:4,fontFamily:"'JetBrains Mono'"}}>{k.v}</div>
+          </Cd>
+        );})}
+      </div>
+      <div style={{fontSize:11,color:T.t3,marginBottom:14}}>Resultado de caixa = vendas + economia do resgate − compras. Não é o lucro só das milhas que saíram.</div>
+      {erro&&<div style={{marginBottom:10,padding:"8px 12px",borderRadius:8,background:"rgba(185,28,28,0.08)",color:T.red,fontSize:12,fontWeight:700}}>{erro}</div>}
+      <Cd style={{padding:14,marginBottom:12}} hov={false}>
+        <div style={{fontSize:13,fontWeight:800,marginBottom:8}}>Programas</div>
+        {vis.linhas.length===0&&<div style={{fontSize:12,color:T.t3,marginBottom:8}}>Nenhum programa ainda. O cliente novo começa vazio.</div>}
+        {vis.m.programas.map(function(p){
+          var l=vis.linhas.filter(function(x){return x.id===p.id})[0]||{saldo:0,custoMilheiro:0,valor:0};
+          var dias=milhasDias(p.venc);
+          return (
+            <div key={p.id} style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",padding:"8px 0",borderTop:"1px solid "+T.bdrL}}>
+              <div style={{flex:"1 1 140px",fontWeight:800,color:T.purple}}>{p.prog}</div>
+              <label style={{fontSize:10,color:T.t3}}>Saldo
+                <input defaultValue={l.saldo} key={p.id+"-"+l.saldo} type="number" onBlur={function(e){var m=base();var err=milhasLancar(m,{tipo:"ajuste",program:p.id,miles:e.target.value});if(err){sErro(err);return}sErro("");salvar(m);}} style={Object.assign({},inp,{width:mob?"100%":110,marginTop:2})}/>
+              </label>
+              <div style={{fontSize:12,color:T.t2,minWidth:120}}>R$ {l.custoMilheiro.toFixed(2).replace(".",",")} / milheiro<br/>{fm(l.valor)}</div>
+              <label style={{fontSize:10,color:T.t3}}>Vencimento
+                <input type="date" value={p.venc||""} onChange={function(e){var m=base();m.programas=m.programas.map(function(x){return x.id===p.id?Object.assign({},x,{venc:e.target.value}):x});sErro("");salvar(m);}} style={Object.assign({},inp,{width:mob?"100%":150,marginTop:2})}/>
+              </label>
+              {dias!=null&&dias<=90&&dias>=0&&<span style={{fontSize:11,fontWeight:800,color:dias<=30?T.red:"#B45309"}}>{dias<=30?"Vence em "+dias+" dias":"Vence em "+dias+" dias"}</span>}
+            </div>
+          );
+        })}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
+          <select value={progCat} onChange={function(e){sProgCat(e.target.value)}} style={Object.assign({},inp,{width:mob?"100%":220})}>
+            {MILES_CATALOGO.map(function(p){return <option key={p.id} value={p.id}>{p.prog}</option>})}
+            <option value="outro">Outro programa</option>
+          </select>
+          {progCat==="outro"&&<input value={progLivre} onChange={function(e){sProgLivre(e.target.value)}} placeholder="Nome do programa" style={Object.assign({},inp,{width:mob?"100%":200})}/>}
+          <Bt v="secondary" onClick={addProg} style={{fontSize:12}}>Adicionar programa</Bt>
+        </div>
+      </Cd>
+      <Cd style={{padding:14,marginBottom:12}} hov={false}>
+        <div style={{fontSize:13,fontWeight:800,marginBottom:8}}>Novo lançamento</div>
+        <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"repeat(3,1fr)",gap:8}}>
+          <label style={{fontSize:10,color:T.t3}}>Tipo
+            <select value={form.tipo} onChange={function(e){setF("tipo",e.target.value)}} style={Object.assign({},inp,{marginTop:2})}>{MILES_TIPOS.map(function(t){return <option key={t.id} value={t.id}>{t.l}</option>})}</select>
+          </label>
+          <label style={{fontSize:10,color:T.t3}}>{form.tipo==="transferencia"?"Origem":"Programa"}
+            <select value={form.program} onChange={function(e){setF("program",e.target.value)}} style={Object.assign({},inp,{marginTop:2})}>
+              <option value="">Selecione</option>
+              {vis.m.programas.map(function(p){return <option key={p.id} value={p.id}>{p.prog}</option>})}
+            </select>
+          </label>
+          {form.tipo==="transferencia"&&<label style={{fontSize:10,color:T.t3}}>Destino
+            <select value={form.destino} onChange={function(e){setF("destino",e.target.value)}} style={Object.assign({},inp,{marginTop:2})}>
+              <option value="">Selecione</option>
+              {vis.m.programas.map(function(p){return <option key={p.id} value={p.id}>{p.prog}</option>})}
+            </select>
+          </label>}
+          <label style={{fontSize:10,color:T.t3}}>Data
+            <input type="date" value={form.data} onChange={function(e){setF("data",e.target.value)}} style={Object.assign({},inp,{marginTop:2})}/>
+          </label>
+          <label style={{fontSize:10,color:T.t3}}>Milhas
+            <input inputMode="numeric" value={form.miles} onChange={function(e){setF("miles",e.target.value)}} placeholder="100000" style={Object.assign({},inp,{marginTop:2})}/>
+          </label>
+          {form.tipo==="transferencia"&&<label style={{fontSize:10,color:T.t3}}>Bônus %
+            <input value={form.bonus} onChange={function(e){setF("bonus",e.target.value)}} placeholder="100 ou 0,8" style={Object.assign({},inp,{marginTop:2})}/>
+          </label>}
+          {(form.tipo==="compra"||form.tipo==="venda"||form.tipo==="resgate")&&<label style={{fontSize:10,color:T.t3}}>{form.tipo==="resgate"?"Preço da passagem (R$)":form.tipo==="venda"?"Valor recebido (R$)":"Custo (R$)"}
+            <input value={form.cost} onChange={function(e){setF("cost",e.target.value)}} placeholder="0,00" style={Object.assign({},inp,{marginTop:2})}/>
+          </label>}
+          <label style={{fontSize:10,color:T.t3,gridColumn:mob?"auto":"1 / -1"}}>Descrição
+            <input value={form.desc} onChange={function(e){setF("desc",e.target.value)}} placeholder="Opcional" style={Object.assign({},inp,{marginTop:2})}/>
+          </label>
+        </div>
+        <div style={{marginTop:10}}><Bt onClick={lancar} style={{fontSize:12,background:T.purple,color:"#fff"}}>Lançar</Bt></div>
+        {form.tipo==="transferencia"&&<div style={{fontSize:11,color:T.t3,marginTop:8}}>A saída leva o custo médio da origem. O bônus entra sem custo novo, então a mesma milha não é comprada duas vezes.</div>}
+      </Cd>
+      <Cd style={{padding:14}} hov={false}>
+        <div style={{fontSize:13,fontWeight:800,marginBottom:8}}>Lançamentos</div>
+        {vis.m.lancamentos.length===0&&<div style={{fontSize:12,color:T.t3}}>Nenhum lançamento.</div>}
+        {vis.m.lancamentos.slice().sort(function(a,b){return String(b.date).localeCompare(String(a.date))||b.id-a.id}).map(function(l){
+          var prog=vis.m.programas.filter(function(p){return p.id===l.program})[0];
+          var sinal=l.type==="venda"||l.type==="uso"||l.transferRole==="out"?-1:1;
+          return (
+            <div key={l.id} style={{display:"flex",gap:8,alignItems:"center",padding:"8px 0",borderTop:"1px solid "+T.bdrL,flexWrap:"wrap"}}>
+              <div style={{flex:"1 1 180px"}}>
+                <div style={{fontSize:12,fontWeight:700}}>{milhasRotuloTipo(l)} · {prog?prog.prog:l.program}</div>
+                <div style={{fontSize:11,color:T.t3}}>{String(l.date||"").split("-").reverse().join("/")}{l.description?" · "+l.description:""}</div>
+              </div>
+              <div style={{fontWeight:800,color:sinal<0?T.red:T.green,fontFamily:"'JetBrains Mono'"}}>{sinal<0?"−":"+"}{fPt(l.miles||0)}</div>
+              <button onClick={function(){if(!window.confirm("Apagar este lançamento? A transferência inteira sai junto."))return;var m=base();milhasApagar(m,l.id);salvar(m);}} style={{border:"none",background:"transparent",color:T.red,cursor:"pointer",fontSize:12}}>Apagar</button>
+            </div>
+          );
+        })}
+      </Cd>
+    </div>
+  );
+}
+function MilesHubView({data,dispatch,onGoClient}){
+  var mob=typeof window!=="undefined"&&window.innerWidth<768;
+  var [busca,sBusca]=useState("");
+  var [filtro,sFiltro]=useState("todos");
+  var [vinc,sVinc]=useState(false);
+  var [qVinc,sQVinc]=useState("");
+  var [calcT,sCalcT]=useState({pontos:"100000",bonus:"100",custo:"3000"});
+  var [calcR,sCalcR]=useState({preco:"1500",milhas:"50000",custo:"15"});
+  var clientes=(data.cl||[]).filter(function(c){return c.status!=="encerrado"&&c.status!=="inativo"&&milhasTem(c)});
+  var q=busca.trim().toLowerCase();
+  var lista=clientes.filter(function(c){
+    if(q&&String(c.nome||"").toLowerCase().indexOf(q)<0)return false;
+    var sv=milhasServico(c);
+    if(filtro==="GP")return sv==="GP"||sv==="Híbrido";
+    if(filtro==="GF")return sv==="GF"||sv==="Híbrido";
+    return true;
+  });
+  var totMilhas=0,totValor=0,v30=0,v90=0;
+  var linhas=lista.map(function(c){
+    var vis=milhasVisao(c);
+    totMilhas+=vis.totalMilhas;totValor+=vis.totalValor;
+    var prox=null;
+    vis.m.programas.forEach(function(p){
+      var d=milhasDias(p.venc);
+      var saldo=(vis.linhas.filter(function(l){return l.id===p.id})[0]||{}).saldo||0;
+      if(d!=null&&d>=0&&saldo>0&&(prox==null||d<prox))prox=d;
+    });
+    if(prox!=null&&prox<=30)v30++;
+    if(prox!=null&&prox<=90)v90++;
+    var diasAt=vis.m.atualizadoEm?Math.floor((Date.now()-new Date(vis.m.atualizadoEm).getTime())/86400000):null;
+    return {c:c,vis:vis,prox:prox,diasAt:diasAt,sv:milhasServico(c)};
+  });
+  var alertas=[];
+  linhas.forEach(function(r){
+    if(r.prox!=null&&r.prox<=90)alertas.push({cor:r.prox<=30?T.red:"#B45309",txt:r.c.nome+": milhas vencem em "+r.prox+" dias"});
+    if(r.diasAt!=null&&r.diasAt>60)alertas.push({cor:"#B45309",txt:r.c.nome+": sem atualização há "+r.diasAt+" dias"});
+  });
+  var ativos=(data.cl||[]).filter(function(c){return c.status!=="encerrado"&&c.status!=="inativo"&&!milhasTem(c)&&( (c.sv||[]).indexOf("patrimonio")>=0||(c.sv||[]).indexOf("planejamento")>=0 )});
+  var cand=ativos.filter(function(c){return !qVinc.trim()||String(c.nome||"").toLowerCase().indexOf(qVinc.trim().toLowerCase())>=0});
+  var vincular=function(c){var sv=(c.sv||[]).slice();if(sv.indexOf("milhas")<0)sv.push("milhas");dispatch({t:"UC",p:{id:c.id,sv:sv}});sVinc(false);sQVinc("");};
+  var desv=function(c){if(!window.confirm("Desvincular "+c.nome+" do Couri Mile$? Os lançamentos já salvos permanecem na ficha, mas o cliente sai desta lista."))return;dispatch({t:"UC",p:{id:c.id,sv:(c.sv||[]).filter(function(s){return s!=="milhas"})}})};
+  var pontos=parseFloat(String(calcT.pontos).replace(/\./g,"").replace(",",".")); if(!isFinite(pontos))pontos=0;
+  var bonus=typeof CouriCore!=="undefined"?CouriCore.parseBonus(calcT.bonus):0;
+  var custoT=parseFloat(String(calcT.custo).replace(/\./g,"").replace(",",".")); if(!isFinite(custoT))custoT=0;
+  var milhasChegam=Math.round(pontos*(1+bonus/100));
+  var custoMilheiroT=milhasChegam>0?(custoT/(milhasChegam/1000)):0;
+  var precoR=parseFloat(String(calcR.preco).replace(/\./g,"").replace(",",".")); if(!isFinite(precoR))precoR=0;
+  var milhasR=parseFloat(String(calcR.milhas).replace(/\./g,"").replace(",",".")); if(!isFinite(milhasR))milhasR=0;
+  var custoR=parseFloat(String(calcR.custo).replace(",",".")) ; if(!isFinite(custoR))custoR=0;
+  var valorMilheiro=milhasR>0?(precoR/(milhasR/1000)):0;
+  var custoResgate=milhasR/1000*custoR;
+  var inp={width:"100%",padding:"8px 10px",borderRadius:8,border:"1px solid "+T.bdr,background:"var(--input-bg)",color:T.t1,fontSize:13};
+  return (
+    <div style={{maxWidth:1100,margin:"0 auto"}}>
+      <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"flex-start",marginBottom:12}}>
+        <div>
+          <h2 style={{margin:0,fontSize:mob?20:24,fontWeight:800,color:T.purple}}>Couri Mile$</h2>
+          <div style={{fontSize:12,color:T.t3,marginTop:4,maxWidth:640,lineHeight:1.5}}>Bônus para clientes de Gestão de Patrimônio, Gestão Financeira ou híbridos. Não altera fee nem MRR. Não pedimos senha de programa.</div>
+        </div>
+        <Bt onClick={function(){sVinc(true)}} style={{background:T.purple,color:"#fff",fontSize:13}}>Vincular cliente</Bt>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:mob?"1fr 1fr":"repeat(4,1fr)",gap:8,marginBottom:14}}>
+        {[
+          {l:"Clientes vinculados",v:String(clientes.length)},
+          {l:"Total de milhas",v:fPt(totMilhas)},
+          {l:"Valor pelo custo médio",v:fm(totValor)},
+          {l:"Vencendo 30 / 90 dias",v:v30+" / "+v90}
+        ].map(function(k){return (
+          <Cd key={k.l} style={{padding:"12px 14px"}} hov={false}>
+            <div style={{fontSize:10,color:T.t3,fontWeight:700,textTransform:"uppercase"}}>{k.l}</div>
+            <div style={{fontSize:mob?16:20,fontWeight:800,color:T.purple,marginTop:4,fontFamily:"'JetBrains Mono'"}}>{k.v}</div>
+          </Cd>
+        );})}
+      </div>
+      {alertas.length>0&&<Cd style={{padding:12,marginBottom:12}} hov={false}>
+        <div style={{fontSize:13,fontWeight:800,marginBottom:6}}>Alertas</div>
+        {alertas.map(function(a,i){return <div key={i} style={{fontSize:12,color:a.cor,fontWeight:700,padding:"4px 0"}}>{a.txt}</div>})}
+      </Cd>}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+        <input value={busca} onChange={function(e){sBusca(e.target.value)}} placeholder="Buscar cliente" style={Object.assign({},inp,{flex:"1 1 180px"})}/>
+        {["todos","GP","GF"].map(function(f){return <button key={f} onClick={function(){sFiltro(f)}} style={{padding:"8px 12px",borderRadius:8,border:"1px solid "+(filtro===f?T.purple:T.bdr),background:filtro===f?"rgba(124,58,237,0.1)":"transparent",color:filtro===f?T.purple:T.t2,fontWeight:700,cursor:"pointer"}}>{f==="todos"?"Todos":f}</button>})}
+      </div>
+      {lista.length===0?<Cd style={{padding:28,textAlign:"center"}} hov={false}><div style={{fontSize:15,fontWeight:800}}>Nenhum cliente vinculado</div><div style={{fontSize:12,color:T.t3,marginTop:6}}>Vincule um cliente ativo de GP ou GF. A ficha de milhas começa vazia.</div></Cd>:mob?(
+        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+          {linhas.map(function(r){return (
+            <Cd key={r.c.id} style={{padding:12}} hov={false}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+                <div style={{fontWeight:800}}>{r.c.nome} <span style={{color:T.t3,fontWeight:600,fontSize:12}}>{r.sv}</span></div>
+                <button onClick={function(){window._cvAbrirMilhas=true;if(onGoClient)onGoClient(r.c)}} style={{border:"none",background:"transparent",color:T.purple,fontWeight:800,cursor:"pointer"}}>Abrir</button>
+              </div>
+              <div style={{fontSize:12,color:T.t2,marginTop:6,lineHeight:1.45}}>{r.vis.m.programas.length?r.vis.m.programas.map(function(p){return p.prog}).join(", "):"Sem programa"} · {fPt(r.vis.totalMilhas)} milhas · {fm(r.vis.totalValor)} · R$ {r.vis.custoMilheiro.toFixed(2).replace(".",",")} / milheiro</div>
+              <div style={{fontSize:11,color:T.t3,marginTop:4}}>Vencimento {r.prox==null?"—":r.prox+" dias"} · atualizado {r.vis.m.atualizadoEm?new Date(r.vis.m.atualizadoEm).toLocaleDateString("pt-BR"):"nunca"}</div>
+              <button onClick={function(){desv(r.c)}} style={{marginTop:6,border:"none",background:"transparent",color:T.t3,cursor:"pointer",padding:0,fontSize:12}}>Desvincular</button>
+            </Cd>
+          );})}
+        </div>
+      ):(
+        <div style={{overflowX:"auto",marginBottom:16}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:mob?640:0}}>
+            <thead><tr style={{textAlign:"left",color:T.t3,fontSize:10}}>
+              {["Cliente","Serviço","Programas","Saldo","Custo médio","Valor","Próximo venc.","Atualização",""].map(function(h){return <th key={h} style={{padding:"8px 6px"}}>{h}</th>})}
+            </tr></thead>
+            <tbody>
+              {linhas.map(function(r){return (
+                <tr key={r.c.id} style={{borderTop:"1px solid "+T.bdrL}}>
+                  <td style={{padding:"8px 6px",fontWeight:800}}>{r.c.nome}</td>
+                  <td>{r.sv}</td>
+                  <td>{r.vis.m.programas.length?r.vis.m.programas.map(function(p){return p.prog}).join(", "):"—"}</td>
+                  <td style={{fontFamily:"'JetBrains Mono'"}}>{fPt(r.vis.totalMilhas)}</td>
+                  <td>{"R$ "+r.vis.custoMilheiro.toFixed(2).replace(".",",")}</td>
+                  <td>{fm(r.vis.totalValor)}</td>
+                  <td>{r.prox==null?"—":r.prox+" dias"}</td>
+                  <td>{r.vis.m.atualizadoEm?new Date(r.vis.m.atualizadoEm).toLocaleDateString("pt-BR"):"nunca"}</td>
+                  <td style={{whiteSpace:"nowrap"}}>
+                    <button onClick={function(){window._cvAbrirMilhas=true;if(onGoClient)onGoClient(r.c)}} style={{border:"none",background:"transparent",color:T.purple,fontWeight:800,cursor:"pointer"}}>Abrir</button>
+                    <button onClick={function(){desv(r.c)}} style={{border:"none",background:"transparent",color:T.t3,cursor:"pointer",marginLeft:6}}>Desvincular</button>
+                  </td>
+                </tr>
+              );})}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12}}>
+        <Cd style={{padding:14}} hov={false}>
+          <div style={{fontSize:14,fontWeight:800,color:T.purple,marginBottom:8}}>Calculadora de transferência</div>
+          <div style={{fontSize:12,color:T.t3,marginBottom:8}}>Pontos do banco ou da loja, bônus da companhia e o que você pagou. O custo por milheiro usa as milhas que chegam, inclusive o bônus.</div>
+          <div style={{display:"grid",gap:8}}>
+            <label style={{fontSize:10,color:T.t3}}>Pontos<input value={calcT.pontos} onChange={function(e){sCalcT(Object.assign({},calcT,{pontos:e.target.value}))}} style={Object.assign({},inp,{marginTop:2})}/></label>
+            <label style={{fontSize:10,color:T.t3}}>Bônus %<input value={calcT.bonus} onChange={function(e){sCalcT(Object.assign({},calcT,{bonus:e.target.value}))}} style={Object.assign({},inp,{marginTop:2})}/></label>
+            <label style={{fontSize:10,color:T.t3}}>Custo pago (R$)<input value={calcT.custo} onChange={function(e){sCalcT(Object.assign({},calcT,{custo:e.target.value}))}} style={Object.assign({},inp,{marginTop:2})}/></label>
+          </div>
+          <div style={{marginTop:10,fontSize:13,lineHeight:1.5}}><b>{fPt(milhasChegam)}</b> milhas na companhia<br/>Custo resultante <b>R$ {custoMilheiroT.toFixed(2).replace(".",",")}</b> por milheiro</div>
+        </Cd>
+        <Cd style={{padding:14}} hov={false}>
+          <div style={{fontSize:14,fontWeight:800,color:T.purple,marginBottom:8}}>Calculadora de resgate</div>
+          <div style={{fontSize:12,color:T.t3,marginBottom:8}}>Preço da passagem em reais dividido pelas milhas, comparado com o seu custo médio.</div>
+          <div style={{display:"grid",gap:8}}>
+            <label style={{fontSize:10,color:T.t3}}>Preço da passagem (R$)<input value={calcR.preco} onChange={function(e){sCalcR(Object.assign({},calcR,{preco:e.target.value}))}} style={Object.assign({},inp,{marginTop:2})}/></label>
+            <label style={{fontSize:10,color:T.t3}}>Milhas usadas<input value={calcR.milhas} onChange={function(e){sCalcR(Object.assign({},calcR,{milhas:e.target.value}))}} style={Object.assign({},inp,{marginTop:2})}/></label>
+            <label style={{fontSize:10,color:T.t3}}>Custo médio (R$/milheiro)<input value={calcR.custo} onChange={function(e){sCalcR(Object.assign({},calcR,{custo:e.target.value}))}} style={Object.assign({},inp,{marginTop:2})}/></label>
+          </div>
+          <div style={{marginTop:10,fontSize:13,lineHeight:1.5}}>O resgate vale <b>R$ {valorMilheiro.toFixed(2).replace(".",",")}</b> por milheiro<br/>Custo das milhas usadas <b>{fm(custoResgate)}</b><br/>{valorMilheiro>=custoR?"Acima do seu custo médio.":"Abaixo do seu custo médio."}</div>
+        </Cd>
+      </div>
+      {vinc&&<Mo open={true} onClose={function(){sVinc(false)}} title="Vincular cliente ao Couri Mile$">
+        <input value={qVinc} onChange={function(e){sQVinc(e.target.value)}} placeholder="Buscar cliente ativo" style={Object.assign({},inp,{marginBottom:10})}/>
+        <div style={{maxHeight:320,overflow:"auto"}}>
+          {cand.slice(0,30).map(function(c){return (
+            <button key={c.id} onClick={function(){vincular(c)}} style={{display:"flex",justifyContent:"space-between",width:"100%",padding:"10px 8px",border:"none",borderBottom:"1px solid "+T.bdrL,background:"transparent",cursor:"pointer",color:T.t1,textAlign:"left"}}>
+              <span style={{fontWeight:700}}>{c.nome}</span><span style={{color:T.t3,fontSize:12}}>{milhasServico(c)}</span>
+            </button>
+          );})}
+          {cand.length===0&&<div style={{fontSize:12,color:T.t3}}>Nenhum cliente ativo de GP ou GF fora do Mile$.</div>}
+        </div>
+      </Mo>}
+    </div>
+  );
+}
+
 function cvMontarPreview(){
   var hoje=new Date();
   var iso=function(dias){var dt=new Date(hoje.getFullYear(),hoje.getMonth(),hoje.getDate()+dias);return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0");};
   var mes=cvUltMesFechadoYM();
   var dia=function(n){return mes+"-"+String(n).padStart(2,"0");};
+  var milesDemo=/[?&]milesdemo=1(?:&|$)/.test(typeof location!=="undefined"?location.search:"");
   var ana={
     id:"prev_ana",nome:"Ana Martins",status:"ativo",email:"ana.martins@example.com",cpf:"123.456.789-00",
-    sv:["patrimonio"],txGestao:0.5,pat:400000,patGorila:400000,
+    sv:milesDemo?["patrimonio","milhas"]:["patrimonio"],txGestao:0.5,pat:400000,patGorila:400000,
     _ativosTs:Date.now()-20*86400000,
     _ativosImport:[
       {tk:"CDB BTG 110% CDI",nm:"CDB BTG 110% CDI",tp:"cdb",inst:"BTG Pactual",posR:80000,qtd:1,pa:80000,pm:75000,venc:iso(-12)},
@@ -42069,7 +42302,21 @@ function cvMontarPreview(){
       "LCA INTER 96%|Banco Inter":{status:"destino",destino:"Tesouro Selic",vencIso:iso(-40),ativo:"LCA Inter 96% CDI",tipo:"lca",tipoLabel:"LCA",ic:"🌾",inst:"Banco Inter",valor:50000,emissor:"Inter",atualizadoEm:new Date().toISOString()}
     }
   };
-  var bruno={id:"prev_bruno",nome:"Bruno Lima",status:"ativo",email:"bruno.lima@example.com",sv:["planejamento"],feeFixo:900,pat:0,_ativosTs:0,_ativosImport:[]};
+  var bruno={id:"prev_bruno",nome:"Bruno Lima",status:"ativo",email:"bruno.lima@example.com",sv:milesDemo?["planejamento","milhas"]:["planejamento"],feeFixo:900,pat:0,_ativosTs:0,_ativosImport:[]};
+  if(milesDemo){
+    ana.milhas={
+      atualizadoEm:new Date().toISOString(),
+      ajustes:{},
+      programas:[{id:"livelo",prog:"Livelo",saldo:0,custo:0,venc:""},{id:"smiles",prog:"Smiles",saldo:200000,custo:15,venc:iso(20)}],
+      lancamentos:[
+        {id:1,date:"2026-01-10",program:"livelo",type:"compra",miles:100000,cost:3000,savedValue:0,description:"Compra de pontos"},
+        {id:2,date:"2026-02-01",program:"livelo",type:"transferencia",transferRole:"out",miles:100000,cost:0,savedValue:0,description:"Saída para Smiles",transferTo:"smiles",transferGroup:2},
+        {id:3,date:"2026-02-01",program:"smiles",type:"transferencia",transferRole:"in",miles:100000,cost:3000,savedValue:0,description:"Entrada da Livelo",transferFrom:"livelo",transferGroup:2},
+        {id:4,date:"2026-02-01",program:"smiles",type:"transferencia",transferRole:"boomerang",miles:100000,cost:0,savedValue:0,description:"Bônus 100%",transferFrom:"livelo",transferGroup:2,kind:"bonus"}
+      ]
+    };
+    bruno.milhas={programas:[],lancamentos:[],ajustes:{},atualizadoEm:new Date(Date.now()-90*86400000).toISOString()};
+  }
   var carla={
     id:"prev_carla",nome:"Carla Nunes",status:"ativo",email:"carla.nunes@example.com",
     sv:["patrimonio"],txGestao:0.4,pat:250000,patGorila:250000,_ativosTs:Date.now()-2*86400000,
@@ -42762,7 +43009,7 @@ function App({authUser,preview}){
     });
   },[notsReais,pushPerm,fcmEst.status]);
   const go=function(p){sPg(p);sSel(null);sShowMenu(false)};
-  const titles={dashboard:"Dashboard",clients:sel?sel.nome:"Clientes",rebal:"Rebalanceamento de Carteira",vencimentos:"Vencimentos de Renda Fixa",simuladores:"Simuladores — Carro e Imóvel",financeiro:"Financeiro da Empresa",comercial:"Comercial",metas:"Painel de Metas",agenda:"Agenda",news:"Notícias & Mercado",import:"Importar",irAnual:"Relatório Anual de IR"};
+  const titles={dashboard:"Dashboard",clients:sel?sel.nome:"Clientes",milhas:"Couri Mile$",rebal:"Rebalanceamento de Carteira",vencimentos:"Vencimentos de Renda Fixa",simuladores:"Simuladores — Carro e Imóvel",financeiro:"Financeiro da Empresa",comercial:"Comercial",metas:"Painel de Metas",agenda:"Agenda",news:"Notícias & Mercado",import:"Importar",irAnual:"Relatório Anual de IR"};
 
   
   const[isMobile,setMobile]=useState(window.innerWidth<768);
@@ -43075,6 +43322,7 @@ function App({authUser,preview}){
           {preview&&<div style={{marginBottom:12,padding:"8px 12px",borderRadius:10,background:"rgba(180,83,9,0.1)",color:"#B45309",fontSize:12,fontWeight:700}}>Pré-visualização local com dados fictícios. Nada disso é gravado no Firebase.</div>}
           {pg==="dashboard" && <Dash data={d} onSel={function(c){sPg("clients");sSel(c)}} goTo={function(p){sPg(p)}}/>}
           {pg==="clients" && !sel && <CL data={d} onSel={function(c){sSel(c)}} dispatch={dp} fi={clFi} sFi={sClFi}/>}
+          {pg==="milhas" && <MilesHubView data={d} dispatch={dp} onGoClient={function(c){sPg("clients");sSel(c)}}/>}
           {pg==="rebal" && <RebalanceamentoView data={d} dispatch={dp} onGoClient={function(c){sPg("clients");sSel(c)}}/>}
           {pg==="simuladores" && <SimuladoresView/>}
           {pg==="vencimentos" && <VencimentosView data={d} dispatch={dp} taxasBCB={taxasBCB} taxaBCBStatus={taxaBCBStatus} onGoClient={function(c){sPg("clients");sSel(c)}}/>}
@@ -43233,7 +43481,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '554';
+  var SW_VERSION = '555';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
