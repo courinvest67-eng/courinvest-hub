@@ -14,16 +14,16 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Courinvest">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=557">
 
 <!-- Ícones genéricos -->
-<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
-<link rel="icon" type="image/png" sizes="96x96" href="icon-96.png">
-<link rel="shortcut icon" href="icon-192.png" type="image/png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png?v=557">
+<link rel="icon" type="image/png" sizes="96x96" href="icon-96.png?v=557">
+<link rel="shortcut icon" href="icon-192.png?v=557" type="image/png">
 
 <!-- Microsoft Edge / Windows Tiles -->
 <meta name="msapplication-TileColor" content="#0F766E">
-<meta name="msapplication-TileImage" content="icon-192.png">
+<meta name="msapplication-TileImage" content="icon-192.png?v=557">
 <!-- ============ /PWA META TAGS ============ -->
 
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
@@ -42865,7 +42865,7 @@ function App({authUser,preview}){
         if("Notification" in window && Notification.permission === "granted"){
           new Notification("📊 Courinvest Hub — Atualização Gorila", {
             body: diasDesde+" dias sem importar o Gorila. "+((d.cl||[]).length)+" clientes podem estar desatualizados.",
-            icon: "./icon-192.png"
+            icon: "./icon-192.png?v=557"
           });
         }
       }
@@ -43027,7 +43027,7 @@ function App({authUser,preview}){
   /* Helper: mostra notificação via SW (Android-friendly) ou fallback Notification() */
   var _showPushNotif=function(title,body,tag){
     if(typeof Notification==="undefined"||Notification.permission!=="granted")return;
-    var icon="/icon-192.png";
+    var icon="/icon-192.png?v=557";
     if("serviceWorker" in navigator){
       navigator.serviceWorker.ready.then(function(sw){
         sw.showNotification(title,{body:body,icon:icon,badge:icon,tag:tag||"courinvest",vibrate:[200,100,200]});
@@ -43583,7 +43583,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '556';
+  var SW_VERSION = '557';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
