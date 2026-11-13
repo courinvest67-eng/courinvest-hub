@@ -1829,19 +1829,28 @@ const feeBaseDoCliente=function(c){
   var valorFixo=+(part.valorFixoDeduzir||0)||0;
   var base=Math.max(0,patTotal-exclReserva-exclHolding-exclPrev-exclRF-exclCaixa-exclCripto-exclInst-valorFixo);
   var taxa=0,fee=0,modoFee="fixo";
-  /* v526: HÍBRIDO (GF + Patrimônio). Abaixo do patrimônio mínimo (padrão R$ 200k, mesmo threshold da tabela regressiva) o cliente paga o FEE FIXO da GF;
-     a partir dele, vale a taxa sobre o patrimônio. c.servicoPrincipal ("planejamento"/"patrimonio") força o modo manualmente. */
-  var _hibFixo=false;
+  /* v556: HÍBRIDO automático = fee fixo (c.feeFixo) até o limite do cliente (c.txRegressivaThreshold, padrão R$ 200 mil);
+     ao atingir, SEMPRE a tabela txGestaoRegressiva (0,15% a.m. até R$ 1 mi, 0,10% acima), sem depender de c.txRegressiva nem de c.txGestao.
+     servicoPrincipal "planejamento" = sempre fee fixo; "patrimonio" = sempre % (caminho manual, abaixo). */
+  var _hibFixo=false, _hibAutoAcima=false;
   if(Array.isArray(c.sv)&&c.sv.includes("patrimonio")&&c.sv.includes("planejamento")){
     var _thHib=c.txRegressivaThreshold||200000;
     if(c.servicoPrincipal==="planejamento")_hibFixo=true;
     else if(c.servicoPrincipal==="patrimonio")_hibFixo=false;
-    else _hibFixo=(c.feeFixo||0)>0&&base<_thHib;
+    else {_hibFixo=base<_thHib;_hibAutoAcima=!_hibFixo;}
   }
   if(_hibFixo){
     fee=toBRL(c.feeFixo||0,c.feeMoeda||moedaCli(c).code);
     taxa=base>0?(fee/base*100):0;
     modoFee="fixo_hibrido";
+  } else if(_hibAutoAcima){
+    taxa=taxaTabelaCliente(c,base)||0;
+    fee=base*taxa/100;
+    modoFee="regressiva_hibrido";
+  } else if(ehHibrido(c)&&c.servicoPrincipal==="patrimonio"&&c.tabelaFee&&TABELAS_FEE[c.tabelaFee]){
+    taxa=taxaTabelaCliente(c,base)||0;
+    fee=base*taxa/100;
+    modoFee="regressiva";
   } else if(c.txRegressiva){
     /* Modelo híbrido: abaixo do threshold usa fee fixo, acima usa tabela regressiva */
     var threshold=c.txRegressivaThreshold||200000; /* padrão R$200k */
@@ -1851,7 +1860,7 @@ const feeBaseDoCliente=function(c){
       taxa=base>0?(feeFixoAbaixo/base*100):0;
       modoFee="fixo_abaixo_threshold";
     } else {
-      taxa=txGestaoRegressiva(base)||(c.txGestao||0);
+      taxa=taxaTabelaCliente(c,base)||(c.txGestao||0);
       fee=base*taxa/100;
       modoFee="regressiva";
     }
@@ -1901,6 +1910,22 @@ const noServicoLista=function(c,sv){
 };
 /* Receita mensal do cliente dentro da Gestão Financeira (híbrido em fee fixo usa o fee fixo calculado) */
 const feeGFBRL=function(c){return ehHibrido(c)?(servicoPrincipal(c)==="planejamento"?feeBaseDoCliente(c).fee:0):feeMensalBRL(c);};
+/* v556: frase única da cobrança do híbrido — modal de serviço e card de receita. */
+function textoCobrancaHibrido(c){
+  if(!ehHibrido(c))return "";
+  var b=feeBaseDoCliente(c);
+  var limite=+(c.txRegressivaThreshold)||200000;
+  var fixo=toBRL(c.feeFixo||0,c.feeMoeda||moedaCli(c).code);
+  var tx=(function(v){var m=Math.round((v||0)*1000);return (m/1000).toFixed(m%10?3:2).replace(".",",");})(b.taxa);
+  if(c.servicoPrincipal==="planejamento")return "Hoje: sempre fee fixo "+fm(b.fee)+" (escolha manual).";
+  if(c.servicoPrincipal==="patrimonio")return "Hoje: sempre "+tx+"% a.m. sobre "+fm(b.base)+" = "+fm(b.fee)+" (escolha manual).";
+  var tabela=nomeTabelaFee(c);
+  if(b.modoFee==="fixo_hibrido"){
+    var falta=Math.max(0,limite-b.base);
+    return "Hoje: fee fixo "+fm(fixo)+" · patrimônio "+fm(b.base)+" de "+fm(limite)+" (faltam "+fm(falta)+" para virar % do patrimônio) · depois: "+tabela;
+  }
+  return "Hoje: "+tx+"% a.m. sobre "+fm(b.base)+" = "+fm(b.fee)+" · "+tabela;
+}
 /* Selos de serviço: híbrido aparece como UM selo "🔀 Híbrido" em vez de dois */
 const svBadges=function(sv,curto){
   sv=Array.isArray(sv)?sv:[];
@@ -9990,7 +10015,7 @@ function CL({data:d,onSel:os,dispatch:dp,fi,sFi}){
                     </div>
                   </td>
                   <td style={{padding:"9px 12px",whiteSpace:"nowrap"}}>
-                    <div style={{display:"flex",gap:4,flexWrap:"wrap"}} title={ehHibrido(c)?("Híbrido — "+(servicoPrincipal(c)==="planejamento"?"cobra fee fixo "+fm(feeBaseDoCliente(c).fee):"cobra % do patrimônio")):undefined}>
+                    <div style={{display:"flex",gap:4,flexWrap:"wrap"}} title={ehHibrido(c)?textoCobrancaHibrido(c):undefined}>
                       {l.tipos.map(function(t){var cc=tipoCor[t];return <span key={t} style={{fontSize:11,fontWeight:800,padding:"2px 8px",borderRadius:6,color:cc,background:cc+"17",border:"1px solid "+cc+"40"}}>{t}</span>;})}
                       {Array.isArray(c.sv)&&c.sv.includes("milhas")&&<span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,color:T.t2,border:"1px solid "+T.bdr}}>Miles</span>}
                     </div>
@@ -17945,7 +17970,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       {}
       <Mo open={showSvcChange} onClose={()=>sShowSvcChange(false)} title="Alterar Serviço">
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <div style={{fontSize:12,color:T.t2,marginBottom:4}}>Selecione o serviço do cliente. Cliente que tem Gestão Financeira (Meu Vista) e também Gestão de Patrimônio é <strong style={{color:T.purple}}>Híbrido</strong>: enquanto o patrimônio estiver abaixo de R$ 200 mil cobra o <strong>fee fixo</strong>; a partir daí, só a taxa sobre o patrimônio. O cliente aparece em uma lista só (a do serviço cobrado).</div>
+          <div style={{fontSize:12,color:T.t2,marginBottom:4}}>Selecione o serviço do cliente. No <strong style={{color:T.purple}}>Híbrido</strong>, o padrão é fee fixo até o limite deste cliente (R$ 200 mil se não houver outro). Ao atingir, entra a tabela variável escolhida para ele, sobre o patrimônio total. Uma cobrança só.</div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             {[["patrimonio","Gestão de Patrimônio","💎",T.gold],["planejamento","Gestão Financeira","📊",T.cyan],["hibrido","Híbrido (GF + Patrimônio)","🔀",T.purple],["consultoria","Consultoria","🗂️",T.orange]].map(function(arr){
               var k=arr[0],label=arr[1],ic=arr[2],cor=arr[3];
@@ -17961,7 +17986,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                 }} style={{flex:1,padding:"16px",borderRadius:14,border:ativo?"2px solid "+cor:"1px solid "+T.bdrL,background:ativo?cor+"12":"transparent",cursor:"pointer",textAlign:"center"}}>
                   <div style={{fontSize:28,marginBottom:6}}>{ic}</div>
                   <div style={{fontSize:14,fontWeight:700,color:ativo?cor:T.t2}}>{label}</div>
-                  <div style={{fontSize:10,color:T.t3,marginTop:4}}>{k==="patrimonio"?"Taxa % a.m. sobre patrimônio":k==="planejamento"?"Valor fixo mensal + IPCA":k==="hibrido"?"Meu Vista + carteira · cobra só % do patrimônio":"Serviço pontual, não recorrente"}</div>
+                  <div style={{fontSize:10,color:T.t3,marginTop:4}}>{k==="patrimonio"?"Taxa % a.m. sobre patrimônio":k==="planejamento"?"Valor fixo mensal + IPCA":k==="hibrido"?"Fee fixo até o limite, depois % do patrimônio":"Serviço pontual, não recorrente"}</div>
                   {ativo && <div style={{marginTop:6,fontSize:10,fontWeight:700,color:cor}}>✓ Ativo</div>}
                 </button>
               );
@@ -17969,13 +17994,33 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           </div>
           {ehHibrido(c) && (
             <div style={{borderTop:"1px solid "+T.w3,paddingTop:12}}>
-              <div style={{fontSize:11,fontWeight:600,color:T.t2,marginBottom:6}}>Cobrança do híbrido <span style={{color:T.t3,fontWeight:500}}>(hoje: {servicoPrincipal(c)==="planejamento"?"fee fixo":"% do patrimônio"})</span></div>
-              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                {[[undefined,"Automático (pelo patrimônio)"],["planejamento","Sempre fee fixo"],["patrimonio","Sempre % do patrimônio"]].map(function(o){
-                  var ativoO=(c.servicoPrincipal||undefined)===o[0];
-                  return <button key={String(o[0])} onClick={function(){dp({t:"UC",p:{id:c.id,servicoPrincipal:o[0]||""}})}} style={{padding:"8px 12px",borderRadius:10,fontSize:11,fontWeight:600,cursor:"pointer",border:ativoO?"2px solid "+T.purple:"1px solid "+T.bdrL,background:ativoO?"rgba(167,139,250,0.12)":"transparent",color:ativoO?T.purple:T.t2}}>{o[1]}</button>;
+              <div style={{fontSize:12,fontWeight:800,color:T.t1,marginBottom:8}}>Cobrança do híbrido</div>
+              <div style={{fontSize:12,color:T.purple,fontWeight:700,lineHeight:1.45,marginBottom:10}}>{textoCobrancaHibrido(c)}</div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+                {[["","Fee fixo até o limite, depois % do patrimônio"],["planejamento","Sempre fee fixo"],["patrimonio","Sempre % do patrimônio"]].map(function(o){
+                  var ativoO=(c.servicoPrincipal||"")===o[0];
+                  return <button key={o[0]||"auto"} onClick={function(){dp({t:"UC",p:{id:c.id,servicoPrincipal:o[0]}})}} style={{padding:"8px 12px",borderRadius:10,fontSize:11,fontWeight:700,cursor:"pointer",border:ativoO?"2px solid "+T.purple:"1px solid "+T.bdrL,background:ativoO?"rgba(124,58,237,0.12)":"transparent",color:ativoO?T.purple:T.t2}}>{o[1]}</button>;
                 })}
               </div>
+              {(c.servicoPrincipal||"")==="" && (
+                <div>
+                  <div style={{display:"grid",gridTemplateColumns:window.innerWidth<768?"1fr":"1fr 1fr",gap:10}}>
+                    <label style={{fontSize:10,color:T.t3,fontWeight:700}}>Fee fixo mensal (R$)
+                      <input type="number" min="0" step="10" value={c.feeFixo||0} onChange={function(e){dp({t:"UC",p:{id:c.id,feeFixo:+e.target.value||0}})}} style={{display:"block",width:"100%",marginTop:4,padding:"8px 10px",borderRadius:8,border:"1px solid "+T.bdr,background:"var(--input-bg)",color:T.t1,fontSize:14,fontFamily:"'JetBrains Mono'"}}/>
+                    </label>
+                    <label style={{fontSize:10,color:T.t3,fontWeight:700}}>Limite de patrimônio (R$)
+                      <input type="number" min="0" step="1000" value={c.txRegressivaThreshold||200000} onChange={function(e){var n=+e.target.value;dp({t:"UC",p:{id:c.id,txRegressivaThreshold:n>0?n:200000}})}} style={{display:"block",width:"100%",marginTop:4,padding:"8px 10px",borderRadius:8,border:"1px solid "+T.bdr,background:"var(--input-bg)",color:T.t1,fontSize:14,fontFamily:"'JetBrains Mono'"}}/>
+                    </label>
+                  </div>
+                  <label style={{display:"block",fontSize:10,color:T.t3,fontWeight:700,marginTop:10}}>Tabela variável deste cliente
+                    <select value={c.tabelaFee==="gp4"?"gp4":"padrao2"} onChange={function(e){dp({t:"UC",p:{id:c.id,tabelaFee:e.target.value}})}} style={{display:"block",width:"100%",marginTop:4,padding:"8px 10px",borderRadius:8,border:"1px solid "+T.bdr,background:"var(--input-bg)",color:T.t1,fontSize:13}}>
+                      <option value="padrao2">Padrão 2 faixas (0,15% até R$ 1 mi / 0,10%)</option>
+                      <option value="gp4">Apresentação GP 4 faixas (0,175 / 0,15 / 0,125 / 0,10)</option>
+                    </select>
+                  </label>
+                  <div style={{fontSize:11,color:T.t2,marginTop:8,lineHeight:1.45}}>{resumoTabelaFee(c)} O limite é o mesmo campo de Particularidades. Sem tabela gravada, vale o padrão de 2 faixas.</div>
+                </div>
+              )}
             </div>
           )}
           <div style={{borderTop:"1px solid "+T.w3,paddingTop:12}}>
@@ -18347,11 +18392,10 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
               <Cd style={{padding:14,textAlign:"center"}} hov={false}>
                 <div style={{fontSize:9,color:T.t3,fontWeight:600,letterSpacing:.5}}>RECEITA DA CONSULTORIA</div>
                 <div style={{fontSize:(function(){var _rc=receitaCliente;return _rc>=1000000?14:_rc>=100000?15:_rc>=10000?17:20;})(),fontWeight:800,color:T.cyan,marginTop:4,fontFamily:"'JetBrains Mono'",lineHeight:1.2}}>{fmF(receitaCliente)}</div>
-                <div style={{fontSize:9,color:T.t3,marginTop:2}}>{(function(){
+                <div style={{fontSize:11,color:T.t2,marginTop:4,lineHeight:1.4,textAlign:"left"}}>{ehHibrido(c)?textoCobrancaHibrido(c):(function(){
                   var partes=[];
                   if(c.sv.includes("patrimonio") && (c.txGestao||0)>0) partes.push((c.txGestao||0).toFixed(3)+"% a.m.");
                   if(c.sv.includes("planejamento") && !c.sv.includes("patrimonio") && (c.feeFixo||0)>0) partes.push("fee fixo");
-                  if(c.sv.includes("milhas")) partes.push("milhas");
                   return partes.length>0?partes.join(" + "):"sem cobrança";
                 })()}</div>
                 {receitaExtras}
@@ -18492,11 +18536,10 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
               <Cd style={{padding:14,textAlign:"center"}} hov={false}>
                 <div style={{fontSize:9,color:T.t3,fontWeight:600,letterSpacing:.5}}>RECEITA DA CONSULTORIA</div>
                 <div style={{fontSize:(function(){var _rc=receitaCliente;return _rc>=1000000?14:_rc>=100000?15:_rc>=10000?17:20;})(),fontWeight:800,color:T.cyan,marginTop:4,fontFamily:"'JetBrains Mono'",lineHeight:1.2}}>{fmF(receitaCliente)}</div>
-                <div style={{fontSize:9,color:T.t3,marginTop:2}}>{(function(){
+                <div style={{fontSize:11,color:T.t2,marginTop:4,lineHeight:1.4,textAlign:"left"}}>{ehHibrido(c)?textoCobrancaHibrido(c):(function(){
                   var partes=[];
                   if(c.sv.includes("patrimonio") && (c.txGestao||0)>0) partes.push((c.txGestao||0).toFixed(3)+"% a.m.");
                   if(c.sv.includes("planejamento") && !c.sv.includes("patrimonio") && (c.feeFixo||0)>0) partes.push("fee fixo");
-                  if(c.sv.includes("milhas")) partes.push("milhas");
                   return partes.length>0?partes.join(" + "):"sem cobrança";
                 })()}</div>
                 {receitaExtras}
@@ -25111,7 +25154,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                   </div>
                   <div>
                     <div style={{fontSize:12,fontWeight:700,color:c.txRegressiva?T.gold:T.t2}}>📉 Taxa Regressiva por Faixa de Patrimônio</div>
-                    <div style={{fontSize:10,color:T.t3,marginTop:1}}>Ativa a tabela regressiva: 0,20% → 0,175% → 0,15% → 0,125% → 0,10%</div>
+                    <div style={{fontSize:10,color:T.t3,marginTop:1}}>A faixa sai da tabela deste cliente e incide sobre o patrimônio total. O limite é o mesmo do híbrido.</div>
                   </div>
                 </div>
                 {c.txRegressiva&&(
@@ -25125,6 +25168,14 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                       <div style={{fontSize:9,color:T.t3,fontWeight:700,marginBottom:4}}>FEE FIXO ABAIXO DO THRESHOLD (R$/mês)</div>
                       <input type="number" value={c.txRegressivaFeeFixo||0} onChange={function(e){dp({t:"UC",p:{id:c.id,txRegressivaFeeFixo:+e.target.value}})}} style={{width:"100%",padding:"8px 10px",background:T.w3,border:"1px solid "+T.bdrL,borderRadius:8,color:T.gold,fontSize:12,outline:"none",boxSizing:"border-box",fontFamily:"'JetBrains Mono'"}}/>
                       <div style={{fontSize:9,color:T.t3,marginTop:3}}>Ex: 350 = R$350/mês quando abaixo do threshold</div>
+                    </div>
+                    <div style={{gridColumn:"1 / -1"}}>
+                      <div style={{fontSize:9,color:T.t3,fontWeight:700,marginBottom:4}}>TABELA DESTE CLIENTE</div>
+                      <select value={c.tabelaFee==="gp4"?"gp4":"padrao2"} onChange={function(e){dp({t:"UC",p:{id:c.id,tabelaFee:e.target.value}})}} style={{width:"100%",padding:"8px 10px",background:T.w3,border:"1px solid "+T.bdrL,borderRadius:8,color:T.t1,fontSize:12,outline:"none"}}>
+                        <option value="padrao2">Padrão 2 faixas (0,15% até R$ 1 mi / 0,10%)</option>
+                        <option value="gp4">Apresentação GP 4 faixas (0,175 / 0,15 / 0,125 / 0,10)</option>
+                      </select>
+                      <div style={{fontSize:9,color:T.t3,marginTop:3}}>{resumoTabelaFee(c)}</div>
                     </div>
                   </div>
                 )}
@@ -31455,6 +31506,38 @@ function txGestaoRegressiva(patrimonio){
   if(!patrimonio||patrimonio<=0)return null;
   if(patrimonio<=1000000)return 0.15;
   return 0.10;
+}
+/* v556: tabela variável por cliente. Sem c.tabelaFee, o cálculo segue txGestaoRegressiva (padrão 2 faixas).
+   A faixa é a do patrimônio total e a taxa incide sobre o total, não só sobre o excedente. */
+var TABELAS_FEE={
+  padrao2:{
+    l:"Padrão 2 faixas (0,15% até R$ 1 mi / 0,10%)",
+    resumo:"Até R$ 1.000.000: 0,15% a.m. Acima de R$ 1.000.000: 0,10% a.m. A taxa incide sobre o patrimônio total.",
+    taxa:function(p){return p<=1000000?0.15:0.10;}
+  },
+  gp4:{
+    l:"Apresentação GP 4 faixas (0,175 / 0,15 / 0,125 / 0,10)",
+    resumo:"Até R$ 600 mil: 0,175% a.m. Até R$ 1,5 milhão: 0,15%. Até R$ 3 milhões: 0,125%. Acima: 0,10%. A faixa é a do patrimônio total e incide sobre o total.",
+    taxa:function(p){
+      if(p<=600000)return 0.175;
+      if(p<=1500000)return 0.15;
+      if(p<=3000000)return 0.125;
+      return 0.10;
+    }
+  }
+};
+function taxaTabelaCliente(c,patrimonio){
+  if(!patrimonio||patrimonio<=0)return 0;
+  var id=c&&c.tabelaFee;
+  if(id&&TABELAS_FEE[id])return TABELAS_FEE[id].taxa(patrimonio);
+  var legado=txGestaoRegressiva(patrimonio);
+  return legado==null?0:legado;
+}
+function nomeTabelaFee(c){
+  return c&&c.tabelaFee==="gp4"?"Apresentação GP (4 faixas)":"Padrão (2 faixas)";
+}
+function resumoTabelaFee(c){
+  return TABELAS_FEE[c&&c.tabelaFee==="gp4"?"gp4":"padrao2"].resumo;
 }
 /* Consultoria Financeira (trabalho pontual, 3 sessões) — vigente a partir de v439 (progressão corrigida na v440):
    - patrimônio <= R$ 150k: valor fixo de R$ 2.100 (R$ 1.995 com 5% de desconto à vista no PIX)
@@ -42327,6 +42410,18 @@ function cvMontarPreview(){
     particularidades:{relatorios:{}}
   };
   carla.particularidades.relatorios[mes]={publicado:true,aprovado:true,mes:mes,mesNome:mes};
+  if(/[?&]hibdemo=1(?:&|$)/.test(typeof location!=="undefined"?location.search:"")){
+    ana.sv=["patrimonio","planejamento"];
+    ana.feeFixo=430;
+    ana.txRegressivaThreshold=300000;
+    ana.servicoPrincipal="";
+    ana.tabelaFee="padrao2";
+    carla.sv=["patrimonio","planejamento"];
+    carla.feeFixo=350;
+    carla.txRegressivaThreshold=200000;
+    carla.servicoPrincipal="";
+    carla.tabelaFee="gp4";
+  }
   var elena={
     id:"prev_elena",nome:"Elena Prado",status:"ativo",email:"elena.prado@example.com",
     sv:["patrimonio"],txGestao:0.5,pat:180000,patGorila:180000,_ativosTs:Date.now()-40*86400000,
@@ -42338,6 +42433,13 @@ function cvMontarPreview(){
       "CDB MASTER 120%|Genial":{status:"liquidacao",destino:"Aguardando crédito na Genial",vencIso:iso(-25),ativo:"CDB Master 120% CDI",tipo:"cdb",tipoLabel:"CDB",ic:"🏦",inst:"Genial",valor:70000,emissor:"Master",atualizadoEm:new Date().toISOString()}
     }
   };
+  if(/[?&]hibdemo=1(?:&|$)/.test(typeof location!=="undefined"?location.search:"")){
+    elena.sv=["patrimonio","planejamento"];
+    elena.feeFixo=430;
+    elena.txRegressivaThreshold=300000;
+    elena.servicoPrincipal="";
+    elena.tabelaFee="padrao2";
+  }
   window._cvPreviewAvulsos=[{id:"av_joao",tipo:"avulso",nome:"João Avulso",email:"joao.avulso@example.com",valorRelatorio:650,faturamento:[{id:"av_joao_2025",anoBase:2025,geradoEm:dia(8)+"T12:00:00.000Z",valor:650}]}];
   window._cvPreviewRelatorios=[];
   window._cvDossieMem={
@@ -43481,7 +43583,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '555';
+  var SW_VERSION = '556';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
