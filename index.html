@@ -323,6 +323,56 @@ function cvTextoCasa(texto,q){
   var blob=cvFoldBusca(texto);
   return qq.split(/\s+/).every(function(t){return blob.indexOf(t)>=0;});
 }
+/* v559: nome curto da planilha vira o nome mais completo, se ele se repete na própria planilha ou no cadastro.
+   Mesmo primeiro nome, sobrenomes na mesma ordem. Sem acento, maiúsculas nem de/da/do/dos/das/e.
+   Se o curto cabe em mais de um nome completo que não se contêm, fica separado. */
+var FIN_CONECTIVOS={de:1,da:1,do:1,dos:1,das:1,e:1};
+function finTokensNome(s){
+  return cvFoldBusca(s).replace(/[^a-z0-9 ]/g," ").split(/\s+/).filter(function(w){return w&&!FIN_CONECTIVOS[w];});
+}
+function finTokensEmOrdem(curtos,longos){
+  var i=0;
+  for(var j=0;j<longos.length&&i<curtos.length;j++){if(longos[j]===curtos[i])i++;}
+  return curtos.length>0&&i===curtos.length;
+}
+function finResolverMapa(clientes,entradas){
+  var pool=[];
+  var porChave={};
+  function add(nome,fonte){
+    var bruto=String(nome||"").trim();
+    var tk=finTokensNome(bruto);
+    if(!bruto||!tk.length)return;
+    var k=tk.join(" ");
+    var ja=porChave[k];
+    if(ja){
+      if(fonte==="cadastro"){ja.fonte="cadastro";ja.nome=bruto;}
+      else if(ja.fonte!=="cadastro"&&bruto.length>ja.nome.length)ja.nome=bruto;
+      return;
+    }
+    var item={nome:bruto,tk:tk,fonte:fonte};
+    porChave[k]=item;
+    pool.push(item);
+  }
+  (entradas||[]).forEach(function(e){add(e&&e.cliente,"planilha");});
+  (clientes||[]).forEach(function(c){add(c&&c.nome,"cadastro");});
+  function maisCurto(a,b){return a.tk.length<b.tk.length&&a.tk[0]===b.tk[0]&&finTokensEmOrdem(a.tk,b.tk);}
+  var cache={};
+  return function(nomePlan){
+    var bruto=String(nomePlan||"").trim();
+    if(cache[bruto])return cache[bruto];
+    var tk=finTokensNome(bruto);
+    var nome=bruto||"Desconhecido";
+    if(tk.length){
+      var eu={tk:tk};
+      var hits=pool.filter(function(item){return maisCurto(eu,item);});
+      var maximos=hits.filter(function(h){return !hits.some(function(o){return maisCurto(h,o);});});
+      if(maximos.length===1)nome=maximos[0].nome;
+      else if(!maximos.length&&porChave[tk.join(" ")])nome=porChave[tk.join(" ")].nome;
+    }
+    cache[bruto]={nome:nome,planilha:bruto};
+    return cache[bruto];
+  };
+}
 const fPt=n=>{try{return n.toLocaleString("pt-BR")}catch(e){return String(n)}};
 
 /* === DETECTOR DE PERÍODO MENSAL DO GORILA ===
@@ -26467,6 +26517,9 @@ function FinanceiroView({data:d,dispatch:dp}){
      manualmente em CLIENTE_ALIAS_MANUAL (chave = como está lançado na planilha, valor = nome
      oficial a usar). */
   var canonCliente=buildCanonCliente(entradas);
+  var finResolver=finResolverMapa(d.cl||[],entradas);
+  var finInfoEntrada=function(e){return finResolver(e&&e.cliente);};
+  var finNomeExibido=function(e){return finInfoEntrada(e).nome;};
 
   /* ── Classificação de remuneração dos sócios ── */
   var CAT_REMUNERACAO=["Pró-Labore","Pró Labore","Pro-Labore","Pro Labore","Prolabore","Pró labore",
@@ -26553,7 +26606,7 @@ function FinanceiroView({data:d,dispatch:dp}){
 
   
   var byCliente={};
-  entradasFilt.forEach(function(e){var c=canonCliente(e.cliente);if(!byCliente[c])byCliente[c]={total:0,count:0,servico:"",meio:"",meses:{},entries:[]};byCliente[c].total+=e.valor;byCliente[c].count++;byCliente[c].servico=e.servico;byCliente[c].meio=e.meio;byCliente[c].entries.push(e);var mm=e.data?e.data.substring(0,7):"";if(mm){byCliente[c].meses[mm]=(byCliente[c].meses[mm]||0)+e.valor}});
+  entradasFilt.forEach(function(e){var c=finNomeExibido(e);if(!byCliente[c])byCliente[c]={total:0,count:0,servico:"",meio:"",meses:{},entries:[]};byCliente[c].total+=e.valor;byCliente[c].count++;byCliente[c].servico=e.servico;byCliente[c].meio=e.meio;byCliente[c].entries.push(e);var mm=e.data?e.data.substring(0,7):"";if(mm){byCliente[c].meses[mm]=(byCliente[c].meses[mm]||0)+e.valor}});
 
   
   var byDespCat={};
@@ -26688,22 +26741,15 @@ function FinanceiroView({data:d,dispatch:dp}){
   };
 
   var finQ=String(finBusca||"").trim();
+  var finBlobEntrada=function(e){
+    var r=finInfoEntrada(e);
+    var chave=finTokensNome(r.nome).join(" ");
+    var c=(d.cl||[]).filter(function(x){return finTokensNome(x.nome).join(" ")===chave;})[0];
+    return [r.nome,r.planilha,e&&e.cliente,c&&c.apelido,c&&c.nomeSocial,c&&c.conjuge&&(c.conjuge.nome||c.conjuge.nomeConjuge)].filter(Boolean).join(" ");
+  };
   var finCasaEntrada=function(e,q){
-    var qq=String(q||"").trim();
-    if(!qq)return true;
-    var nomePlan=canonCliente(e&&e.cliente)||(e&&e.cliente)||"";
-    if(cvTextoCasa(String(nomePlan)+" "+((e&&e.cliente)||""),qq))return true;
-    var clientes=(d&&d.cl)||[];
-    for(var i=0;i<clientes.length;i++){
-      var c=clientes[i];
-      if(!c)continue;
-      var blob=[c.nome,c.apelido,c.nomeSocial,c.conjuge&&(c.conjuge.nome||c.conjuge.nomeConjuge)].filter(Boolean).join(" ");
-      if(!cvTextoCasa(blob,qq))continue;
-      var alvo=cvFoldBusca(canonCliente(c.nome)||c.nome||"");
-      var lanc=cvFoldBusca(nomePlan);
-      if(alvo&&lanc&&(lanc.indexOf(alvo)>=0||alvo.indexOf(lanc)>=0))return true;
-    }
-    return false;
+    if(!String(q||"").trim())return true;
+    return cvTextoCasa(finBlobEntrada(e),q);
   };
   var finNoPeriodo=function(e){
     if(selMonth)return !!(e&&e.data&&e.data.substring(0,7)===selMonth);
@@ -26718,9 +26764,9 @@ function FinanceiroView({data:d,dispatch:dp}){
   var finSug=[];
   if(finQ){
     var finVisto={};
-    var finPush=function(n){n=String(n||"").trim();var k=cvFoldBusca(n);if(!n||!k||finVisto[k])return;finVisto[k]=true;finSug.push(n);};
-    finTodas.forEach(function(e){finPush(canonCliente(e.cliente)||e.cliente);});
-    ((d&&d.cl)||[]).forEach(function(c){if(c&&cvTextoCasa([c.nome,c.apelido,c.nomeSocial].filter(Boolean).join(" "),finQ))finPush(c.nome);});
+    var finPush=function(n,k){n=String(n||"").trim();if(!n||!k||finVisto[k])return;finVisto[k]=true;finSug.push(n);};
+    finTodas.forEach(function(e){var r=finInfoEntrada(e);finPush(r.nome,cvFoldBusca(r.nome));});
+    ((d&&d.cl)||[]).forEach(function(c){if(c&&cvTextoCasa([c.nome,c.apelido,c.nomeSocial].filter(Boolean).join(" "),finQ))finPush(c.nome,cvFoldBusca(c.nome));});
     finSug.sort(function(a,b){return a.localeCompare(b,"pt-BR");});
   }
   var finHiVis=finSug.length?Math.max(0,Math.min(finHi,finSug.length-1)):0;
@@ -26776,8 +26822,8 @@ function FinanceiroView({data:d,dispatch:dp}){
                 {finLista.slice(0,8).map(function(e,i){return (
                   <div key={e.id||i} style={{display:"flex",justifyContent:"space-between",gap:10,padding:"8px 0",borderBottom:"1px solid "+T.w3,fontSize:12}}>
                     <div style={{minWidth:0}}>
-                      <div style={{fontWeight:700,color:T.t1}}>{canonCliente(e.cliente)||e.cliente}</div>
-                      <div style={{color:T.t3,fontSize:11}}>{e.data?e.data.split("-").reverse().join("/"):"—"} · {e.servico||"—"}{e.meio?" · "+e.meio:""}</div>
+                      <div style={{fontWeight:700,color:T.t1}}>{finInfoEntrada(e).nome}</div>
+                      <div style={{color:T.t3,fontSize:11}}>{e.data?e.data.split("-").reverse().join("/"):"—"} · {e.servico||"—"}{e.meio?" · "+e.meio:""}{finInfoEntrada(e).planilha&&finInfoEntrada(e).planilha!==finInfoEntrada(e).nome?" · planilha: "+finInfoEntrada(e).planilha:""}</div>
                     </div>
                     <div style={{fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'",flexShrink:0}}>{fm(e.valor)}</div>
                   </div>
@@ -42554,6 +42600,7 @@ function cvMontarPreview(){
     elena.tabelaFee="padrao2";
   }
   var erika={id:"prev_erika",nome:"Érika Cristina Alves",apelido:"Kika",status:"ativo",email:"erika.alves@example.com",sv:["planejamento"],feeFixo:800,pat:0,_ativosImport:[]};
+  var marcos={id:"prev_marcos",nome:"Marcos Condé Goiatá Lopes",status:"ativo",email:"marcos.goiata@example.com",sv:["patrimonio"],txGestao:0.15,pat:0,_ativosImport:[]};
   window._cvPreviewAvulsos=[{id:"av_joao",tipo:"avulso",nome:"João Avulso",email:"joao.avulso@example.com",valorRelatorio:650,faturamento:[{id:"av_joao_2025",anoBase:2025,geradoEm:dia(8)+"T12:00:00.000Z",valor:650}]}];
   window._cvPreviewRelatorios=[];
   window._cvDossieMem={
@@ -42572,7 +42619,7 @@ function cvMontarPreview(){
     ]}
   };
   return {
-    cl:[ana,bruno,carla,elena,erika],
+    cl:[ana,bruno,carla,elena,erika,marcos],
     it:[
       {id:"i1",cid:"prev_ana",data:"2026-07-01",txt:"Revisão de carteira"},
       {id:"i2",cid:"prev_carla",data:iso(-5),txt:"Relatório de outubro"},
@@ -42587,7 +42634,9 @@ function cvMontarPreview(){
       {id:2,data:dia(6),servico:"Gestão Financeira",meio:"PIX",cliente:"Bruno Lima",valor:400,nf:""},
       {id:3,data:dia(7),servico:"Gestão de Patrimônio",meio:"PIX",cliente:"Elena Prado",valor:1800,nf:"OK"},
       {id:4,data:dia(8),servico:"Relatório de IR",meio:"PIX",cliente:"João Avulso",valor:650,nf:""},
-      {id:5,data:dia(9),servico:"Comissão parceiro",meio:"PIX",cliente:"Contábil Alfa",valor:200,nf:""}
+      {id:5,data:dia(9),servico:"Comissão parceiro",meio:"PIX",cliente:"Contábil Alfa",valor:200,nf:""},
+      {id:9,data:dia(2),servico:"Gestão de Patrimônio",meio:"PIX",cliente:"Marcos Goiatá",valor:1200,nf:"OK"},
+      {id:10,data:dia(3),servico:"Gestão de Patrimônio",meio:"PIX",cliente:"Marcos Condé Goiatá Lopes",valor:800,nf:"OK"}
     ],despesas:[
       {id:11,data:dia(3),cat:"Software",meio:"Cartão",desc:"Ferramentas",valor:350}
     ]},
@@ -43700,7 +43749,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '558';
+  var SW_VERSION = '559';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
