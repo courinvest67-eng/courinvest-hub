@@ -323,9 +323,9 @@ function cvTextoCasa(texto,q){
   var blob=cvFoldBusca(texto);
   return qq.split(/\s+/).every(function(t){return blob.indexOf(t)>=0;});
 }
-/* v559: nome da planilha → cliente do cadastro. Sem acento, minúsculas, sem de/da/do/dos/das/e.
-   O primeiro nome precisa coincidir e os tokens do nome curto entram, na mesma ordem, no nome do cadastro.
-   Mais de um cadastro possível = ambíguo, sem juntar sozinho. */
+/* v559: nome curto da planilha vira o nome mais completo, se ele se repete na própria planilha ou no cadastro.
+   Mesmo primeiro nome, sobrenomes na mesma ordem. Sem acento, maiúsculas nem de/da/do/dos/das/e.
+   Se o curto cabe em mais de um nome completo que não se contêm, fica separado. */
 var FIN_CONECTIVOS={de:1,da:1,do:1,dos:1,das:1,e:1};
 function finTokensNome(s){
   return cvFoldBusca(s).replace(/[^a-z0-9 ]/g," ").split(/\s+/).filter(function(w){return w&&!FIN_CONECTIVOS[w];});
@@ -335,33 +335,42 @@ function finTokensEmOrdem(curtos,longos){
   for(var j=0;j<longos.length&&i<curtos.length;j++){if(longos[j]===curtos[i])i++;}
   return curtos.length>0&&i===curtos.length;
 }
-function finResolverMapa(clientes,aliases){
-  var lista=(clientes||[]).map(function(c){return {c:c,tk:finTokensNome(c&&c.nome)};}).filter(function(x){return x.tk.length>0;});
+function finResolverMapa(clientes,entradas){
+  var pool=[];
+  var porChave={};
+  function add(nome,fonte){
+    var bruto=String(nome||"").trim();
+    var tk=finTokensNome(bruto);
+    if(!bruto||!tk.length)return;
+    var k=tk.join(" ");
+    var ja=porChave[k];
+    if(ja){
+      if(fonte==="cadastro"){ja.fonte="cadastro";ja.nome=bruto;}
+      else if(ja.fonte!=="cadastro"&&bruto.length>ja.nome.length)ja.nome=bruto;
+      return;
+    }
+    var item={nome:bruto,tk:tk,fonte:fonte};
+    porChave[k]=item;
+    pool.push(item);
+  }
+  (entradas||[]).forEach(function(e){add(e&&e.cliente,"planilha");});
+  (clientes||[]).forEach(function(c){add(c&&c.nome,"cadastro");});
+  function maisCurto(a,b){return a.tk.length<b.tk.length&&a.tk[0]===b.tk[0]&&finTokensEmOrdem(a.tk,b.tk);}
   var cache={};
   return function(nomePlan){
     var bruto=String(nomePlan||"").trim();
     if(cache[bruto])return cache[bruto];
-    var aliasId=aliases&&aliases[bruto];
-    if(aliasId){
-      var ac=null;
-      for(var i=0;i<lista.length;i++){if(lista[i].c.id===aliasId){ac=lista[i];break;}}
-      cache[bruto]={status:"manual",id:aliasId,nome:ac?ac.c.nome:bruto,planilha:bruto,candidatos:[]};
-      return cache[bruto];
-    }
     var tk=finTokensNome(bruto);
-    var hits=[];
+    var nome=bruto||"Desconhecido";
     if(tk.length){
-      lista.forEach(function(item){
-        if(item.tk[0]!==tk[0])return;
-        if(finTokensEmOrdem(tk,item.tk))hits.push(item.c);
-      });
+      var eu={tk:tk};
+      var hits=pool.filter(function(item){return maisCurto(eu,item);});
+      var maximos=hits.filter(function(h){return !hits.some(function(o){return maisCurto(h,o);});});
+      if(maximos.length===1)nome=maximos[0].nome;
+      else if(!maximos.length&&porChave[tk.join(" ")])nome=porChave[tk.join(" ")].nome;
     }
-    var res;
-    if(hits.length===1)res={status:"vinculado",id:hits[0].id,nome:hits[0].nome,planilha:bruto,candidatos:hits};
-    else if(hits.length>1)res={status:"ambiguo",id:null,nome:bruto,planilha:bruto,candidatos:hits};
-    else res={status:"livre",id:null,nome:bruto||"Desconhecido",planilha:bruto,candidatos:[]};
-    cache[bruto]=res;
-    return res;
+    cache[bruto]={nome:nome,planilha:bruto};
+    return cache[bruto];
   };
 }
 const fPt=n=>{try{return n.toLocaleString("pt-BR")}catch(e){return String(n)}};
@@ -3193,13 +3202,6 @@ function rd(st,ac){
   if(ac.t==="FIN_ADD_ENTRADAS") return {...st,fin:{...(st.fin||{}),entradas:[...((st.fin&&st.fin.entradas)||[]),...ac.p]}};
   if(ac.t==="FIN_REPLACE_ENTRADAS") return {...st,fin:{...(st.fin||{}),entradas:ac.p}};
   if(ac.t==="FIN_CLEAR_ENTRADAS") return {...st,fin:{...(st.fin||{}),entradas:[]}};
-  /* v559: apelido manual da planilha → id do cliente. Não mexe nas linhas de fin.entradas. */
-  if(ac.t==="FIN_SET_ALIAS"){
-    var _als=Object.assign({},(st.fin&&st.fin.aliases)||{});
-    if(ac.p&&ac.p.clienteId)_als[ac.p.nome]=ac.p.clienteId;
-    else if(ac.p&&ac.p.nome)delete _als[ac.p.nome];
-    return {...st,fin:{...(st.fin||{}),aliases:_als}};
-  }
   if(ac.t==="FIN_ADD_DESPESA") return {...st,fin:{...(st.fin||{}),despesas:[...((st.fin&&st.fin.despesas)||[]),ac.p]}};
   if(ac.t==="FIN_DEL_DESPESA") return {...st,fin:{...(st.fin||{}),despesas:((st.fin&&st.fin.despesas)||[]).filter(function(d){return d.id!==ac.p})}};
 
@@ -26515,13 +26517,9 @@ function FinanceiroView({data:d,dispatch:dp}){
      manualmente em CLIENTE_ALIAS_MANUAL (chave = como está lançado na planilha, valor = nome
      oficial a usar). */
   var canonCliente=buildCanonCliente(entradas);
-  var finAliases=(d.fin&&d.fin.aliases)||{};
-  var finResolver=finResolverMapa(d.cl||[],finAliases);
+  var finResolver=finResolverMapa(d.cl||[],entradas);
   var finInfoEntrada=function(e){return finResolver(e&&e.cliente);};
-  var finNomeExibido=function(e){
-    var r=finInfoEntrada(e);
-    return (r.status==="vinculado"||r.status==="manual")?r.nome:((e&&e.cliente)||"").trim()||"Desconhecido";
-  };
+  var finNomeExibido=function(e){return finInfoEntrada(e).nome;};
 
   /* ── Classificação de remuneração dos sócios ── */
   var CAT_REMUNERACAO=["Pró-Labore","Pró Labore","Pro-Labore","Pro Labore","Prolabore","Pró labore",
@@ -26745,7 +26743,8 @@ function FinanceiroView({data:d,dispatch:dp}){
   var finQ=String(finBusca||"").trim();
   var finBlobEntrada=function(e){
     var r=finInfoEntrada(e);
-    var c=r.id?(d.cl||[]).filter(function(x){return x.id===r.id;})[0]:null;
+    var chave=finTokensNome(r.nome).join(" ");
+    var c=(d.cl||[]).filter(function(x){return finTokensNome(x.nome).join(" ")===chave;})[0];
     return [r.nome,r.planilha,e&&e.cliente,c&&c.apelido,c&&c.nomeSocial,c&&c.conjuge&&(c.conjuge.nome||c.conjuge.nomeConjuge)].filter(Boolean).join(" ");
   };
   var finCasaEntrada=function(e,q){
@@ -26766,8 +26765,8 @@ function FinanceiroView({data:d,dispatch:dp}){
   if(finQ){
     var finVisto={};
     var finPush=function(n,k){n=String(n||"").trim();if(!n||!k||finVisto[k])return;finVisto[k]=true;finSug.push(n);};
-    finTodas.forEach(function(e){var r=finInfoEntrada(e);finPush(r.nome,r.id?("id:"+r.id):("nome:"+cvFoldBusca(r.planilha)));});
-    ((d&&d.cl)||[]).forEach(function(c){if(c&&cvTextoCasa([c.nome,c.apelido,c.nomeSocial].filter(Boolean).join(" "),finQ))finPush(c.nome,"id:"+c.id);});
+    finTodas.forEach(function(e){var r=finInfoEntrada(e);finPush(r.nome,cvFoldBusca(r.nome));});
+    ((d&&d.cl)||[]).forEach(function(c){if(c&&cvTextoCasa([c.nome,c.apelido,c.nomeSocial].filter(Boolean).join(" "),finQ))finPush(c.nome,cvFoldBusca(c.nome));});
     finSug.sort(function(a,b){return a.localeCompare(b,"pt-BR");});
   }
   var finHiVis=finSug.length?Math.max(0,Math.min(finHi,finSug.length-1)):0;
@@ -26775,25 +26774,6 @@ function FinanceiroView({data:d,dispatch:dp}){
   var escolherFin=function(nome){sFinBusca(nome);sFinOpen(false);};
   var limparFin=function(){sFinBusca("");sFinOpen(false);sFinHi(0);};
   var finLista=finPeriodo.slice().sort(function(a,b){return String(b.data||"").localeCompare(String(a.data||""));});
-  var finPendencias=(function(){
-    var acc={};
-    entradas.forEach(function(e){
-      var n=String(e&&e.cliente||"").trim();
-      if(!n)return;
-      if(!acc[n])acc[n]={qtd:0,total:0};
-      acc[n].qtd++;
-      acc[n].total+=(+e.valor||0);
-    });
-    return Object.keys(acc).map(function(n){
-      var r=finResolver(n);
-      return {nome:n,qtd:acc[n].qtd,total:acc[n].total,status:r.status,candidatos:r.candidatos||[]};
-    }).filter(function(x){return x.status==="ambiguo"||x.status==="livre";}).sort(function(a,b){return a.nome.localeCompare(b.nome,"pt-BR");});
-  })();
-  var finManuais=Object.keys(finAliases).map(function(n){
-    var r=finResolver(n);
-    return {nome:n,cliente:r.nome,id:r.id};
-  }).sort(function(a,b){return a.nome.localeCompare(b.nome,"pt-BR");});
-  var finClientesOrd=(d.cl||[]).slice().sort(function(a,b){return String(a.nome||"").localeCompare(String(b.nome||""),"pt-BR");});
 
   return (
     <div>
@@ -26852,37 +26832,6 @@ function FinanceiroView({data:d,dispatch:dp}){
               </div>
             )}
           </Cd>
-        )}
-        {(finPendencias.length>0||finManuais.length>0)&&(
-          <div id="cv-fin-aliases">
-          <Cd style={{padding:16,marginTop:10}} hov={false}>
-            <div style={{fontSize:14,fontWeight:800,color:T.t1}}>Nomes não vinculados / ambíguos</div>
-            <div style={{fontSize:12,color:T.t3,marginTop:4,lineHeight:1.45}}>A planilha não é reescrita. O vínculo fica em fin.aliases e só muda o nome exibido e a soma.</div>
-            {finPendencias.map(function(p){
-              return (
-                <div key={p.nome} style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",padding:"10px 0",borderTop:"1px solid "+T.bdrL,marginTop:8}}>
-                  <div style={{flex:"1 1 180px",minWidth:0}}>
-                    <div style={{fontSize:13,fontWeight:700,color:T.t1}}>{p.nome}</div>
-                    <div style={{fontSize:11,color:p.status==="ambiguo"?"#B45309":T.t3,marginTop:2}}>{p.status==="ambiguo"?"Ambíguo · "+p.candidatos.map(function(c){return c.nome;}).join(" ou "):"Sem cadastro correspondente"} · {p.qtd} pagamento{p.qtd===1?"":"s"} · {fm(p.total)}</div>
-                  </div>
-                  <select aria-label={"Vincular "+p.nome} defaultValue="" onChange={function(ev){var id=ev.target.value;if(!id)return;dp({t:"FIN_SET_ALIAS",p:{nome:p.nome,clienteId:id}});}} style={{flex:"1 1 200px",minHeight:44,padding:"8px 10px",borderRadius:10,border:"1px solid "+T.bdr,background:"#fff",color:T.t1,fontSize:13}}>
-                    <option value="">Vincular a um cliente…</option>
-                    {finClientesOrd.map(function(c){return <option key={c.id} value={c.id}>{c.nome}</option>;})}
-                  </select>
-                </div>
-              );
-            })}
-            {finManuais.length>0&&<div style={{marginTop:12,fontSize:12,fontWeight:800,color:T.t2}}>Vínculos manuais</div>}
-            {finManuais.map(function(m){
-              return (
-                <div key={m.nome} style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",padding:"8px 0",borderTop:"1px solid "+T.bdrL,fontSize:12}}>
-                  <span><strong>{m.nome}</strong> → {m.cliente}</span>
-                  <button type="button" onClick={function(){dp({t:"FIN_SET_ALIAS",p:{nome:m.nome,clienteId:""}});}} style={{minHeight:36,padding:"6px 10px",borderRadius:8,border:"1px solid "+T.bdr,background:"#fff",color:T.t2,cursor:"pointer"}}>Desfazer</button>
-                </div>
-              );
-            })}
-          </Cd>
-          </div>
         )}
       </div>
 
@@ -42652,8 +42601,6 @@ function cvMontarPreview(){
   }
   var erika={id:"prev_erika",nome:"Érika Cristina Alves",apelido:"Kika",status:"ativo",email:"erika.alves@example.com",sv:["planejamento"],feeFixo:800,pat:0,_ativosImport:[]};
   var marcos={id:"prev_marcos",nome:"Marcos Condé Goiatá Lopes",status:"ativo",email:"marcos.goiata@example.com",sv:["patrimonio"],txGestao:0.15,pat:0,_ativosImport:[]};
-  var anaSouzaLima={id:"prev_ana_souza_lima",nome:"Ana Souza Lima",status:"ativo",sv:["planejamento"],feeFixo:0,pat:0,_ativosImport:[]};
-  var anaPaulaSouza={id:"prev_ana_paula",nome:"Ana Paula Souza",status:"ativo",sv:["planejamento"],feeFixo:0,pat:0,_ativosImport:[]};
   window._cvPreviewAvulsos=[{id:"av_joao",tipo:"avulso",nome:"João Avulso",email:"joao.avulso@example.com",valorRelatorio:650,faturamento:[{id:"av_joao_2025",anoBase:2025,geradoEm:dia(8)+"T12:00:00.000Z",valor:650}]}];
   window._cvPreviewRelatorios=[];
   window._cvDossieMem={
@@ -42672,7 +42619,7 @@ function cvMontarPreview(){
     ]}
   };
   return {
-    cl:[ana,bruno,carla,elena,erika,marcos,anaSouzaLima,anaPaulaSouza],
+    cl:[ana,bruno,carla,elena,erika,marcos],
     it:[
       {id:"i1",cid:"prev_ana",data:"2026-07-01",txt:"Revisão de carteira"},
       {id:"i2",cid:"prev_carla",data:iso(-5),txt:"Relatório de outubro"},
@@ -42689,9 +42636,7 @@ function cvMontarPreview(){
       {id:4,data:dia(8),servico:"Relatório de IR",meio:"PIX",cliente:"João Avulso",valor:650,nf:""},
       {id:5,data:dia(9),servico:"Comissão parceiro",meio:"PIX",cliente:"Contábil Alfa",valor:200,nf:""},
       {id:9,data:dia(2),servico:"Gestão de Patrimônio",meio:"PIX",cliente:"Marcos Goiatá",valor:1200,nf:"OK"},
-      {id:10,data:dia(3),servico:"Gestão de Patrimônio",meio:"PIX",cliente:"Marcos Condé Goiatá Lopes",valor:800,nf:"OK"},
-      {id:11,data:dia(11),servico:"Gestão Financeira",meio:"PIX",cliente:"Ana Souza",valor:300,nf:""},
-      {id:12,data:dia(12),servico:"Consultoria",meio:"PIX",cliente:"Oficina do Bairro",valor:100,nf:""}
+      {id:10,data:dia(3),servico:"Gestão de Patrimônio",meio:"PIX",cliente:"Marcos Condé Goiatá Lopes",valor:800,nf:"OK"}
     ],despesas:[
       {id:11,data:dia(3),cat:"Software",meio:"Cartão",desc:"Ferramentas",valor:350}
     ]},
@@ -42903,8 +42848,7 @@ function App({authUser,preview}){
       arr.forEach(function(f){var cur=byMes[f.mesFatura];if(!cur||(f._ts||0)>(cur._ts||0))byMes[f.mesFatura]=f;});
     });
     var lista=Object.keys(byMes).map(function(k){return byMes[k]}).filter(function(f){return !(excl[f.mesFatura]&&excl[f.mesFatura]>=(f._ts||0));});
-    var aliases=Object.assign({},(finBase&&finBase.aliases)||{},(finRemoto&&finRemoto.aliases)||{},(finLocal&&finLocal.aliases)||{});
-    return Object.assign({},finBase||{entradas:[],despesas:[]},{faturasCartao:lista,faturasExcl:excl,aliases:aliases});
+    return Object.assign({},finBase||{entradas:[],despesas:[]},{faturasCartao:lista,faturasExcl:excl});
   };
   var assinaturaFaturas=function(fin){
     var a=((fin&&fin.faturasCartao)||[]).map(function(f){return f.mesFatura+":"+(f._ts||0)}).sort().join(",");
