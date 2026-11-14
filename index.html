@@ -315,6 +315,14 @@ const cvExportDarkHtml=function(html){
 const fm=v=>new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(v);
 const fmBRL=fm; 
 const fD=d=>d?d.split("-").reverse().join("/"):"";
+/* v558: busca no Financeiro. Ignora maiúscula e acento, trata C e K como a mesma letra, e casa em qualquer parte do texto. */
+function cvFoldBusca(s){return String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/k/g,"c");}
+function cvTextoCasa(texto,q){
+  var qq=cvFoldBusca(q).trim();
+  if(!qq)return true;
+  var blob=cvFoldBusca(texto);
+  return qq.split(/\s+/).every(function(t){return blob.indexOf(t)>=0;});
+}
 const fPt=n=>{try{return n.toLocaleString("pt-BR")}catch(e){return String(n)}};
 
 /* === DETECTOR DE PERÍODO MENSAL DO GORILA ===
@@ -26230,6 +26238,16 @@ function FinanceiroView({data:d,dispatch:dp}){
     window.addEventListener("resize",onResize);
     return function(){window.removeEventListener("resize",onResize)};
   },[]);
+  const[finBusca,sFinBusca]=useState("");
+  const[finOpen,sFinOpen]=useState(false);
+  const[finHi,sFinHi]=useState(0);
+  const finBoxRef=React.useRef(null);
+  React.useEffect(function(){
+    if(!finOpen)return;
+    var fn=function(e){if(finBoxRef.current&&!finBoxRef.current.contains(e.target))sFinOpen(false);};
+    document.addEventListener("pointerdown",fn);
+    return function(){document.removeEventListener("pointerdown",fn);};
+  },[finOpen]);
   const fileRef=useRef(null);
   const fileDespRef=useRef(null);
   
@@ -26622,7 +26640,8 @@ function FinanceiroView({data:d,dispatch:dp}){
     entradas.forEach(function(e){if(e.data){var m=e.data.substring(0,7);if(mesesOpts.indexOf(m)<0)mesesOpts.push(m);}});
     if(mes&&mesesOpts.indexOf(mes)<0)mesesOpts.push(mes);
     mesesOpts.sort().reverse();
-    var mostrar=compacto?linhas.slice(0,8):linhas;
+    var baseLinhas=String(finBusca||"").trim()?linhas.filter(function(l){return cvTextoCasa(l.nome||"",finBusca);}):linhas;
+    var mostrar=(!String(finBusca||"").trim()&&compacto)?baseLinhas.slice(0,8):baseLinhas;
     return (
       <Cd style={{padding:16,marginBottom:14}} hov={false}>
         <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"flex-start",marginBottom:10}}>
@@ -26658,15 +26677,57 @@ function FinanceiroView({data:d,dispatch:dp}){
           </table>
         </div>
         {compacto&&linhas.length>8&&<button onClick={function(){sFTab("conciliar")}} style={{marginTop:8,background:"none",border:"none",color:T.gold,fontWeight:700,cursor:"pointer",fontSize:12}}>Ver os {linhas.length} clientes na conciliação</button>}
-        {(!compacto||avulsoLinhas.length||comEsperado>0||comRecebido>0)&&<div style={{marginTop:12}}>
+        {((!String(finBusca||"").trim()&&(!compacto||avulsoLinhas.length||comEsperado>0||comRecebido>0))||(String(finBusca||"").trim()&&(avulsoLinhas.some(function(l){return cvTextoCasa(l.nome||"",finBusca);})||(cvTextoCasa("Comissões de parceiros",finBusca)&&(comEsperado>0||comRecebido>0)))))&&<div style={{marginTop:12}}>
           <div style={{fontSize:12,fontWeight:800,marginBottom:6}}>Fora do fee — não lançar de novo</div>
-          {avulsoLinhas.map(function(l,i){return <div key={i} style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:11,padding:"4px 0",borderTop:"1px solid "+T.bdrL}}><span>{l.nome} · {l.tipo}</span><span style={{color:corSt(l.status),fontWeight:700}}>{rotulo[l.status]} · previsto {fm(l.previsto)} · recebido {fm(l.recebido)}</span></div>;})}
-          {(comEsperado>0||comRecebido>0)&&<div style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:11,padding:"4px 0",borderTop:"1px solid "+T.bdrL}}><span>Comissões a receber de parceiros</span><span style={{color:corSt(comStatus),fontWeight:700}}>{rotulo[comStatus]} · previsto {fm(comEsperado)} · recebido {fm(comRecebido)}</span></div>}
+          {avulsoLinhas.filter(function(l){return !String(finBusca||"").trim()||cvTextoCasa(l.nome||"",finBusca);}).map(function(l,i){return <div key={i} style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:11,padding:"4px 0",borderTop:"1px solid "+T.bdrL}}><span>{l.nome} · {l.tipo}</span><span style={{color:corSt(l.status),fontWeight:700}}>{rotulo[l.status]} · previsto {fm(l.previsto)} · recebido {fm(l.recebido)}</span></div>;})}
+          {(comEsperado>0||comRecebido>0)&&(!String(finBusca||"").trim()||cvTextoCasa("Comissões de parceiros",finBusca))&&<div style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:11,padding:"4px 0",borderTop:"1px solid "+T.bdrL}}><span>Comissões a receber de parceiros</span><span style={{color:corSt(comStatus),fontWeight:700}}>{rotulo[comStatus]} · previsto {fm(comEsperado)} · recebido {fm(comRecebido)}</span></div>}
           {!avulsoLinhas.length&&comEsperado<=0&&comRecebido<=0&&<div style={{fontSize:11,color:T.t3}}>Nenhum avulso de IR nem comissão neste mês.</div>}
         </div>}
       </Cd>
     );
   };
+
+  var finQ=String(finBusca||"").trim();
+  var finCasaEntrada=function(e,q){
+    var qq=String(q||"").trim();
+    if(!qq)return true;
+    var nomePlan=canonCliente(e&&e.cliente)||(e&&e.cliente)||"";
+    if(cvTextoCasa(String(nomePlan)+" "+((e&&e.cliente)||""),qq))return true;
+    var clientes=(d&&d.cl)||[];
+    for(var i=0;i<clientes.length;i++){
+      var c=clientes[i];
+      if(!c)continue;
+      var blob=[c.nome,c.apelido,c.nomeSocial,c.conjuge&&(c.conjuge.nome||c.conjuge.nomeConjuge)].filter(Boolean).join(" ");
+      if(!cvTextoCasa(blob,qq))continue;
+      var alvo=cvFoldBusca(canonCliente(c.nome)||c.nome||"");
+      var lanc=cvFoldBusca(nomePlan);
+      if(alvo&&lanc&&(lanc.indexOf(alvo)>=0||alvo.indexOf(lanc)>=0))return true;
+    }
+    return false;
+  };
+  var finNoPeriodo=function(e){
+    if(selMonth)return !!(e&&e.data&&e.data.substring(0,7)===selMonth);
+    if(selYear!=="todos")return !!(e&&e.data&&e.data.substring(0,4)===selYear);
+    return true;
+  };
+  var finTodas=finQ?entradas.filter(function(e){return finCasaEntrada(e,finQ);}):[];
+  var finPeriodo=finTodas.filter(finNoPeriodo);
+  var finSoma=function(arr){return arr.reduce(function(s,e){return s+(+e.valor||0);},0);};
+  var finTotalPeriodo=finSoma(finPeriodo);
+  var finTotalInicio=finSoma(finTodas);
+  var finSug=[];
+  if(finQ){
+    var finVisto={};
+    var finPush=function(n){n=String(n||"").trim();var k=cvFoldBusca(n);if(!n||!k||finVisto[k])return;finVisto[k]=true;finSug.push(n);};
+    finTodas.forEach(function(e){finPush(canonCliente(e.cliente)||e.cliente);});
+    ((d&&d.cl)||[]).forEach(function(c){if(c&&cvTextoCasa([c.nome,c.apelido,c.nomeSocial].filter(Boolean).join(" "),finQ))finPush(c.nome);});
+    finSug.sort(function(a,b){return a.localeCompare(b,"pt-BR");});
+  }
+  var finHiVis=finSug.length?Math.max(0,Math.min(finHi,finSug.length-1)):0;
+  var finPeriodoLabel=selMonth?fmtMonth(selMonth):(selYear!=="todos"?String(selYear):"todos os anos");
+  var escolherFin=function(nome){sFinBusca(nome);sFinOpen(false);};
+  var limparFin=function(){sFinBusca("");sFinOpen(false);sFinHi(0);};
+  var finLista=finPeriodo.slice().sort(function(a,b){return String(b.data||"").localeCompare(String(a.data||""));});
 
   return (
     <div>
@@ -26674,6 +26735,58 @@ function FinanceiroView({data:d,dispatch:dp}){
         {[{id:"resumo",l:"📊 Resumo"},{id:"conciliar",l:"⚖️ Conciliação"},{id:"importar",l:"📥 Importar"},{id:"entradas",l:"💰 Entradas"},{id:"despesas",l:"💸 Despesas"},{id:"dre",l:"📋 DRE"},{id:"clientes",l:"👥 Por Cliente"},{id:"recorrentes",l:"🔄 Recorrentes"},{id:"cartao",l:"💳 Cartão"}].map(function(t){return (
           <button key={t.id} onClick={function(){sFTab(t.id)}} style={{padding:"8px 16px",borderRadius:12,fontSize:11,fontWeight:600,cursor:"pointer",border:fTab===t.id?"1.5px solid "+T.gold:"1px solid var(--wa04)",background:fTab===t.id?T.goldD:"transparent",color:fTab===t.id?T.gold:T.t3}}>{t.l}</button>
         )})}
+      </div>
+
+      <div ref={finBoxRef} id="cv-fin-busca-box" style={{marginBottom:14}}>
+        <label htmlFor="cv-fin-busca" style={{display:"block",fontSize:10,fontWeight:700,color:T.t3,letterSpacing:.4,marginBottom:6}}>BUSCAR RECEBIMENTO POR CLIENTE</label>
+        <div style={{position:"relative",maxWidth:520}}>
+          <input id="cv-fin-busca" role="combobox" aria-expanded={finOpen&&!!finQ} aria-controls="cv-fin-lista" aria-autocomplete="list" aria-activedescendant={finOpen&&finSug[finHiVis]?"cv-fin-opt-"+finHiVis:undefined}
+            value={finBusca} placeholder="Digite o nome, apelido ou sobrenome" autoComplete="off" autoCorrect="off" spellCheck={false}
+            onFocus={function(){if(finQ)sFinOpen(true);}}
+            onChange={function(e){sFinBusca(e.target.value);sFinOpen(true);sFinHi(0);}}
+            onKeyDown={function(e){
+              if(e.key==="ArrowDown"){e.preventDefault();if(!finOpen){sFinOpen(true);sFinHi(0);}else sFinHi(function(i){return Math.min(Math.max(finSug.length-1,0),i+1);});}
+              else if(e.key==="ArrowUp"){e.preventDefault();sFinOpen(true);sFinHi(function(i){return Math.max(0,i-1);});}
+              else if(e.key==="Enter"){e.preventDefault();if(finSug[finHiVis])escolherFin(finSug[finHiVis]);else sFinOpen(false);}
+              else if(e.key==="Escape"){e.preventDefault();if(finOpen)sFinOpen(false);else limparFin();}
+            }}
+            style={Object.assign({},inpS,{paddingRight:finBusca?42:14,background:"#fff"})}/>
+          {finBusca?<button type="button" aria-label="Limpar busca" onClick={limparFin} style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",width:32,height:32,borderRadius:8,border:"none",background:"transparent",color:T.t3,fontSize:16,cursor:"pointer",fontWeight:700}}>×</button>:null}
+        </div>
+        {finOpen&&finQ&&(
+          <div id="cv-fin-lista" role="listbox" style={{maxWidth:520,marginTop:6,background:"#fff",border:"1px solid "+T.bdr,borderRadius:12,boxShadow:"0 8px 24px rgba(15,23,42,0.08)",maxHeight:240,overflowY:"auto"}}>
+            {finSug.length===0&&<div style={{padding:"14px 12px",fontSize:13,color:T.t3}}>Nenhum cliente com esse nome</div>}
+            {finSug.map(function(nome,i){
+              var ativo=i===finHiVis;
+              return <button type="button" key={nome} id={"cv-fin-opt-"+i} role="option" aria-selected={ativo}
+                onMouseEnter={function(){sFinHi(i);}}
+                onMouseDown={function(ev){ev.preventDefault();escolherFin(nome);}}
+                style={{display:"block",width:"100%",textAlign:"left",minHeight:44,padding:"10px 12px",border:"none",borderBottom:i<finSug.length-1?"1px solid "+T.w3:"none",background:ativo?"rgba(212,163,40,0.12)":"#fff",color:T.t1,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{nome}</button>;
+            })}
+          </div>
+        )}
+        {finQ&&(
+          <Cd id="cv-fin-resultado" style={{padding:16,marginTop:10,border:"1.5px solid rgba(var(--gold-rgb),0.45)"}} hov={false}>
+            <div style={{fontSize:11,fontWeight:700,color:T.t3,letterSpacing:.4}}>RECEBIDO NO PERÍODO · {finPeriodoLabel}</div>
+            <div style={{fontSize:isMob?28:34,fontWeight:900,color:T.green,fontFamily:"'JetBrains Mono'",marginTop:4}}>{fm(finTotalPeriodo)}</div>
+            <div style={{fontSize:13,color:T.t2,marginTop:6}}>Desde o início: <strong style={{color:T.t1}}>{fm(finTotalInicio)}</strong> · {finTodas.length} pagamento{finTodas.length===1?"":"s"}{finPeriodo.length!==finTodas.length?" · "+finPeriodo.length+" neste período":""}</div>
+            <div style={{fontSize:11,color:T.t3,marginTop:4}}>O valor sai dos lançamentos importados em Financeiro (coluna Cliente e Valor da planilha de entradas), não do fee contratado no cadastro.</div>
+            {finLista.length===0?<div style={{padding:"14px 0",color:T.t3,fontSize:13}}>Nenhum recebimento com esse nome{selYear!=="todos"||selMonth?" neste período":""}.</div>:(
+              <div style={{marginTop:12,borderTop:"1px solid "+T.bdrL}}>
+                {finLista.slice(0,8).map(function(e,i){return (
+                  <div key={e.id||i} style={{display:"flex",justifyContent:"space-between",gap:10,padding:"8px 0",borderBottom:"1px solid "+T.w3,fontSize:12}}>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontWeight:700,color:T.t1}}>{canonCliente(e.cliente)||e.cliente}</div>
+                      <div style={{color:T.t3,fontSize:11}}>{e.data?e.data.split("-").reverse().join("/"):"—"} · {e.servico||"—"}{e.meio?" · "+e.meio:""}</div>
+                    </div>
+                    <div style={{fontWeight:800,color:T.gold,fontFamily:"'JetBrains Mono'",flexShrink:0}}>{fm(e.valor)}</div>
+                  </div>
+                );})}
+                {finLista.length>8&&<div style={{fontSize:11,color:T.t3,paddingTop:8}}>e mais {finLista.length-8} pagamento{finLista.length-8===1?"":"s"}</div>}
+              </div>
+            )}
+          </Cd>
+        )}
       </div>
 
       {}
@@ -27228,8 +27341,8 @@ function FinanceiroView({data:d,dispatch:dp}){
       {fTab==="entradas" && (
         <Cd style={{padding:18}} hov={false}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-            <h4 style={{margin:0,fontSize:14,fontWeight:700,color:T.green}}>Entradas ({entradas.length})</h4>
-            <span style={{fontSize:14,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(totalEntradas)}</span>
+            <h4 style={{margin:0,fontSize:14,fontWeight:700,color:T.green}}>Entradas ({finQ?finLista.length:entradas.length})</h4>
+            <span style={{fontSize:14,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(finQ?finTotalPeriodo:totalEntradas)}</span>
           </div>
           {entradas.length===0 ? <div style={{padding:20,textAlign:"center",color:T.t3}}>Importe sua planilha primeiro</div> : (
             <div style={{overflowX:"auto",borderRadius:12,border:"1px solid var(--wa04)"}}>
@@ -27237,7 +27350,7 @@ function FinanceiroView({data:d,dispatch:dp}){
                 <thead><tr style={{background:"var(--wa02)"}}>
                   {["Data","Serviço","Meio","Cliente","Valor","NF"].map(function(h,i){return <th key={i} style={{padding:"8px 10px",textAlign:i===4?"right":"left",fontWeight:700,color:T.gold,fontSize:9,borderBottom:"1px solid rgba(var(--gold-rgb),0.1)"}}>{h}</th>})}
                 </tr></thead>
-                <tbody>{entradas.map(function(e,i){return (
+                <tbody>{(finQ?finLista:entradas).map(function(e,i){return (
                   <tr key={e.id} style={{background:i%2===0?"transparent":"var(--wa015)"}}>
                     <td style={{padding:"6px 10px",borderBottom:"1px solid var(--wa02)",whiteSpace:"nowrap"}}>{e.data?e.data.split("-").reverse().join("/"):""}</td>
                     <td style={{padding:"6px 10px",borderBottom:"1px solid var(--wa02)"}}>{e.servico}</td>
@@ -27387,15 +27500,15 @@ function FinanceiroView({data:d,dispatch:dp}){
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
             <h4 style={{margin:0,fontSize:14,fontWeight:700,color:T.gold}}>Receita por Cliente {selYear!=="todos"?"— "+selYear:"— Todos os anos"}</h4>
             <div style={{textAlign:"right"}}>
-              <div style={{fontSize:16,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(totalEntradas)}</div>
-              <div style={{fontSize:9,color:T.t3}}>{Object.keys(byCliente).length} clientes • {entradasFilt.length} entradas</div>
+              <div style={{fontSize:16,fontWeight:800,color:T.green,fontFamily:"'JetBrains Mono'"}}>{fm(finQ?finTotalPeriodo:totalEntradas)}</div>
+              <div style={{fontSize:9,color:T.t3}}>{finQ?(finPeriodo.length+" pagamentos"):(Object.keys(byCliente).length+" clientes • "+entradasFilt.length+" entradas")}</div>
             </div>
           </div>
           {Object.keys(byCliente).length===0 ? <Cd style={{padding:20,textAlign:"center"}} hov={false}><div style={{color:T.t3}}>Importe dados primeiro</div></Cd> : (
             <div>
               {(function(){
                 var mxCli=Math.max.apply(null,Object.values(byCliente).map(function(c){return c.total}).concat([1]));
-                return Object.entries(byCliente).sort(function(a,b){return b[1].total-a[1].total}).map(function(e,i){
+                return Object.entries(byCliente).filter(function(pair){if(!finQ)return true;return cvTextoCasa(pair[0],finQ)||(pair[1].entries||[]).some(function(en){return finCasaEntrada(en,finQ);});}).sort(function(a,b){return b[1].total-a[1].total}).map(function(e,i){
                   var nome=e[0],d=e[1];
                   var pct=totalEntradas>0?(d.total/totalEntradas*100):0;
                   var ticketMedio=d.count>0?(d.total/d.count):0;
@@ -42440,6 +42553,7 @@ function cvMontarPreview(){
     elena.servicoPrincipal="";
     elena.tabelaFee="padrao2";
   }
+  var erika={id:"prev_erika",nome:"Érika Cristina Alves",apelido:"Kika",status:"ativo",email:"erika.alves@example.com",sv:["planejamento"],feeFixo:800,pat:0,_ativosImport:[]};
   window._cvPreviewAvulsos=[{id:"av_joao",tipo:"avulso",nome:"João Avulso",email:"joao.avulso@example.com",valorRelatorio:650,faturamento:[{id:"av_joao_2025",anoBase:2025,geradoEm:dia(8)+"T12:00:00.000Z",valor:650}]}];
   window._cvPreviewRelatorios=[];
   window._cvDossieMem={
@@ -42458,7 +42572,7 @@ function cvMontarPreview(){
     ]}
   };
   return {
-    cl:[ana,bruno,carla,elena],
+    cl:[ana,bruno,carla,elena,erika],
     it:[
       {id:"i1",cid:"prev_ana",data:"2026-07-01",txt:"Revisão de carteira"},
       {id:"i2",cid:"prev_carla",data:iso(-5),txt:"Relatório de outubro"},
@@ -42467,6 +42581,9 @@ function cvMontarPreview(){
     lds:[],
     fin:{entradas:[
       {id:1,data:dia(5),servico:"Gestão de Patrimônio",meio:"PIX",cliente:"Ana Martins",valor:2000,nf:"OK"},
+      {id:6,data:(Number(mes.slice(0,4))-1)+"-03-12",servico:"Gestão de Patrimônio",meio:"PIX",cliente:"Ana Martins",valor:1800,nf:"OK"},
+      {id:7,data:dia(4),servico:"Gestão de Patrimônio",meio:"PIX",cliente:"Érika Cristina Alves",valor:1500,nf:"OK"},
+      {id:8,data:(Number(mes.slice(0,4))-1)+"-11-02",servico:"Gestão de Patrimônio",meio:"PIX",cliente:"Érika Cristina Alves",valor:900,nf:""},
       {id:2,data:dia(6),servico:"Gestão Financeira",meio:"PIX",cliente:"Bruno Lima",valor:400,nf:""},
       {id:3,data:dia(7),servico:"Gestão de Patrimônio",meio:"PIX",cliente:"Elena Prado",valor:1800,nf:"OK"},
       {id:4,data:dia(8),servico:"Relatório de IR",meio:"PIX",cliente:"João Avulso",valor:650,nf:""},
@@ -43583,7 +43700,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '557';
+  var SW_VERSION = '558';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
