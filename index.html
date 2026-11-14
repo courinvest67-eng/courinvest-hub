@@ -315,6 +315,18 @@ const cvExportDarkHtml=function(html){
 const fm=v=>new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(v);
 const fmBRL=fm; 
 const fD=d=>d?d.split("-").reverse().join("/"):"";
+/* v558: busca de cliente sem diferenciar maiúsculas nem acentos; casa em qualquer parte do nome, apelido ou sobrenome. */
+function cvFoldBusca(s){return String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/k/g,"c");}
+function cvCasaCliente(c,q){
+  var qq=cvFoldBusca(q).trim();
+  if(!qq)return true;
+  if(!c)return false;
+  var partes=[c.nome,c.apelido,c.nomeSocial,c.conjuge&&(c.conjuge.nome||c.conjuge.nomeConjuge)];
+  var blob=cvFoldBusca(partes.filter(Boolean).join(" "));
+  var toks=qq.split(/\s+/);
+  for(var i=0;i<toks.length;i++){if(blob.indexOf(toks[i])<0)return false;}
+  return true;
+}
 const fPt=n=>{try{return n.toLocaleString("pt-BR")}catch(e){return String(n)}};
 
 /* === DETECTOR DE PERÍODO MENSAL DO GORILA ===
@@ -10441,7 +10453,7 @@ function CobrancasTab({c,d,dp}){
   );
 }
 
-function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onReportReady,headlessTipoRelatorio}){
+function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onReportReady,headlessTipoRelatorio,onIrCliente}){
   /* Salva d globalmente para acesso em closures como gerarRelatorio */
   window._courinvestData=d;
   /* === MODO HEADLESS (sem UI, usado pra gerar o relatório completo em segundo plano) ===
@@ -10457,6 +10469,18 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
   });
   var upFire=function(key,val){sFireParams(function(p){return Object.assign({},p,{[key]:val})});};
   const[showInt,sShowInt]=useState(false);
+  /* v558: busca digitável no histórico de interações */
+  const[histQ,sHistQ]=useState("");
+  const[histCommit,sHistCommit]=useState(null);
+  const[histOpen,sHistOpen]=useState(false);
+  const[histHi,sHistHi]=useState(0);
+  const histBoxRef=React.useRef(null);
+  React.useEffect(function(){
+    if(!histOpen)return;
+    var fn=function(e){if(histBoxRef.current&&!histBoxRef.current.contains(e.target))sHistOpen(false);};
+    document.addEventListener("pointerdown",fn);
+    return function(){document.removeEventListener("pointerdown",fn);};
+  },[histOpen]);
   const[viewCasal,setViewCasal]=useState("consolidado");
   const[periodoKPI,setPeriodoKPI]=useState("total"); 
   const[escopoRelatorio,setEscopoRelatorio]=useState("titular");
@@ -17886,6 +17910,24 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
     </div>;
   })();
 
+  var histSug=(d.cl||[]).filter(function(x){return x&&x.id&&cvCasaCliente(x,histQ);}).sort(function(a,b){return String(a.nome||"").localeCompare(String(b.nome||""),"pt-BR");});
+  var histHiVis=histSug.length?Math.max(0,Math.min(histHi,histSug.length-1)):0;
+  var histAlvoId=histCommit||(String(histQ||"").trim()?null:c.id);
+  var histLista=(d.it||[]).filter(function(i){
+    if(!i)return false;
+    if(histAlvoId)return i.cid===histAlvoId;
+    return histSug.some(function(x){return x.id===i.cid;});
+  }).sort(function(a,b){return String(b.data||"").localeCompare(String(a.data||""));});
+  var histNomeDe=function(id){var x=(d.cl||[]).filter(function(k){return k&&k.id===id;})[0];return x?x.nome:"";};
+  var escolherHist=function(cli){
+    if(!cli)return;
+    sHistQ(cli.nome||"");
+    sHistCommit(cli.id);
+    sHistOpen(false);
+    if(onIrCliente&&cli.id!==c.id)onIrCliente(cli);
+  };
+  var limparHist=function(){sHistQ("");sHistCommit(null);sHistOpen(false);sHistHi(0);};
+
   return (
     <div>
       <Bt v="ghost" onClick={ob} style={{padding:"4px 0",marginBottom:16,fontSize:13}}>← Voltar</Bt>
@@ -19199,17 +19241,61 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       {/* v551: Histórico deixou de ser aba — virou bloco no fim da Visão Geral */}
       {_tabEfetiva==="geral" && (
         <Cd style={{padding:22,marginTop:14}} hov={false}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-            <h4 id="cv-historico" style={{margin:0,fontSize:14,fontWeight:700,color:T.gold}}>🕘 Histórico de interações ({its.length})</h4>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,gap:10,flexWrap:"wrap"}}>
+            <h4 id="cv-historico" style={{margin:0,fontSize:14,fontWeight:700,color:T.gold}}>🕘 Histórico de interações ({histLista.length})</h4>
             <Bt onClick={()=>sShowInt(true)} style={{fontSize:12,padding:"8px 14px"}}>＋ Registrar contato</Bt>
           </div>
-          {its.map((it,i)=>(
-            <div key={it.id} style={{display:"flex",gap:12,padding:"12px 0",borderBottom:i<its.length-1?"1px solid "+T.w3:"none"}}>
-              <span style={{fontSize:22}}>{TI[it.tipo]}</span>
-              <div style={{flex:1}}><div style={{fontSize:14,fontWeight:600}}>{it.titulo} <span style={{color:T.t3,fontWeight:400}}>• {fD(it.data)}</span></div><div style={{fontSize:12,color:T.t2,marginTop:4}}>{it.notas}</div></div>
+          <div ref={histBoxRef} style={{position:"relative",marginBottom:14}}>
+            <label htmlFor="cv-hist-busca" style={{display:"block",fontSize:10,fontWeight:700,color:T.t3,letterSpacing:.4,marginBottom:6}}>BUSCAR CLIENTE</label>
+            <div style={{position:"relative"}}>
+              <input id="cv-hist-busca" role="combobox" aria-expanded={histOpen} aria-controls="cv-hist-lista" aria-autocomplete="list" aria-activedescendant={histOpen&&histSug[histHiVis]?"cv-hist-opt-"+histSug[histHiVis].id:undefined}
+                value={histQ} placeholder="Digite o nome, apelido ou sobrenome"
+                autoComplete="off" autoCorrect="off" spellCheck={false}
+                onFocus={function(){sHistOpen(true);}}
+                onChange={function(e){sHistQ(e.target.value);sHistCommit(null);sHistOpen(true);sHistHi(0);}}
+                onKeyDown={function(e){
+                  if(e.key==="ArrowDown"){e.preventDefault();if(!histOpen){sHistOpen(true);sHistHi(0);}else{sHistHi(function(i){return Math.min(histSug.length-1,i+1);});}}
+                  else if(e.key==="ArrowUp"){e.preventDefault();sHistOpen(true);sHistHi(function(i){return Math.max(0,i-1);});}
+                  else if(e.key==="Enter"){e.preventDefault();if(histSug[histHiVis])escolherHist(histSug[histHiVis]);}
+                  else if(e.key==="Escape"){e.preventDefault();if(histOpen)sHistOpen(false);else limparHist();}
+                }}
+                style={Object.assign({},inpS,{paddingRight:histQ?40:14,background:"#fff"})}/>
+              {histQ?<button type="button" aria-label="Limpar busca" onClick={limparHist} style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",width:32,height:32,borderRadius:8,border:"none",background:"transparent",color:T.t3,fontSize:16,cursor:"pointer",fontWeight:700}}>×</button>:null}
             </div>
-          ))}
-          {its.length===0 && <div style={{padding:24,textAlign:"center",color:T.t3}}>Nenhuma interação</div>}
+            {histOpen && (
+              <div id="cv-hist-lista" role="listbox" style={{marginTop:6,background:"#fff",border:"1px solid "+T.bdr,borderRadius:12,boxShadow:"0 8px 24px rgba(15,23,42,0.08)",maxHeight:240,overflowY:"auto"}}>
+                {histSug.length===0 && <div style={{padding:"14px 12px",fontSize:13,color:T.t3}}>Nenhum cliente com esse nome</div>}
+                {histSug.map(function(cli,i){
+                  var ativo=i===histHiVis;
+                  return <button type="button" key={cli.id} id={"cv-hist-opt-"+cli.id} role="option" aria-selected={ativo}
+                    onMouseEnter={function(){sHistHi(i);}}
+                    onMouseDown={function(ev){ev.preventDefault();escolherHist(cli);}}
+                    style={{display:"flex",alignItems:"center",gap:10,width:"100%",textAlign:"left",minHeight:44,padding:"8px 12px",border:"none",borderBottom:i<histSug.length-1?"1px solid "+T.w3:"none",background:ativo?"rgba(212,163,40,0.12)":"#fff",color:T.t1,cursor:"pointer",fontFamily:"inherit"}}>
+                    <Av name={cli.nome} sz={28}/>
+                    <span style={{flex:1,minWidth:0}}>
+                      <span style={{display:"block",fontSize:13,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cli.nome}</span>
+                      {cli.apelido?<span style={{display:"block",fontSize:11,color:T.t3}}>{cli.apelido}</span>:null}
+                    </span>
+                  </button>;
+                })}
+              </div>
+            )}
+          </div>
+          {histLista.map(function(it,i){
+            var titulo=it.titulo||it.txt||"Interação";
+            var mostrarNome=!histAlvoId||histAlvoId!==c.id||(String(histQ||"").trim()&&!histCommit);
+            return (
+            <div key={it.id} style={{display:"flex",gap:12,padding:"12px 0",borderBottom:i<histLista.length-1?"1px solid "+T.w3:"none"}}>
+              <span style={{fontSize:22}}>{TI[it.tipo]||"📝"}</span>
+              <div style={{flex:1,minWidth:0}}>
+                {mostrarNome&&histNomeDe(it.cid)&&<div style={{fontSize:11,fontWeight:700,color:T.gold,marginBottom:2}}>{histNomeDe(it.cid)}</div>}
+                <div style={{fontSize:14,fontWeight:600}}>{titulo} <span style={{color:T.t3,fontWeight:400}}>• {fD(it.data)}</span></div>
+                {it.notas?<div style={{fontSize:12,color:T.t2,marginTop:4}}>{it.notas}</div>:null}
+              </div>
+            </div>
+            );
+          })}
+          {histLista.length===0 && <div style={{padding:24,textAlign:"center",color:T.t3}}>{String(histQ||"").trim()?"Nenhuma interação para essa busca":"Nenhuma interação"}</div>}
         </Cd>
       )}
 
@@ -42440,6 +42526,7 @@ function cvMontarPreview(){
     elena.servicoPrincipal="";
     elena.tabelaFee="padrao2";
   }
+  var erika={id:"prev_erika",nome:"Érika Cristina Alves",apelido:"Kika",status:"ativo",email:"erika.alves@example.com",sv:["planejamento"],feeFixo:800,pat:0,_ativosImport:[]};
   window._cvPreviewAvulsos=[{id:"av_joao",tipo:"avulso",nome:"João Avulso",email:"joao.avulso@example.com",valorRelatorio:650,faturamento:[{id:"av_joao_2025",anoBase:2025,geradoEm:dia(8)+"T12:00:00.000Z",valor:650}]}];
   window._cvPreviewRelatorios=[];
   window._cvDossieMem={
@@ -42458,11 +42545,13 @@ function cvMontarPreview(){
     ]}
   };
   return {
-    cl:[ana,bruno,carla,elena],
+    cl:[ana,bruno,carla,elena,erika],
     it:[
-      {id:"i1",cid:"prev_ana",data:"2026-07-01",txt:"Revisão de carteira"},
-      {id:"i2",cid:"prev_carla",data:iso(-5),txt:"Relatório de outubro"},
-      {id:"i3",cid:"prev_elena",data:"2026-08-20",txt:"Aporte"}
+      {id:"i1",cid:"prev_ana",data:"2026-07-01",tipo:"reuniao",titulo:"Revisão de carteira",notas:"Conversa sobre a alocação do mês.",txt:"Revisão de carteira"},
+      {id:"i2",cid:"prev_carla",data:iso(-5),tipo:"email",titulo:"Relatório enviado",notas:"Relatório mensal encaminhado por e-mail.",txt:"Relatório de outubro"},
+      {id:"i3",cid:"prev_elena",data:"2026-08-20",tipo:"nota",titulo:"Aporte combinado",notas:"Elena vai aportar na Genial.",txt:"Aporte"},
+      {id:"i4",cid:"prev_erika",data:iso(-3),tipo:"telefone",titulo:"Ligação de acompanhamento",notas:"Érika pediu para revisar o orçamento."},
+      {id:"i5",cid:"prev_erika",data:iso(-40),tipo:"reuniao",titulo:"Reunião de planejamento",notas:"Primeira reunião do plano financeiro."}
     ],
     lds:[],
     fin:{entradas:[
@@ -43428,7 +43517,7 @@ function App({authUser,preview}){
           {pg==="rebal" && <RebalanceamentoView data={d} dispatch={dp} onGoClient={function(c){sPg("clients");sSel(c)}}/>}
           {pg==="simuladores" && <SimuladoresView/>}
           {pg==="vencimentos" && <VencimentosView data={d} dispatch={dp} taxasBCB={taxasBCB} taxaBCBStatus={taxaBCBStatus} onGoClient={function(c){sPg("clients");sSel(c)}}/>}
-          {pg==="clients" && sel && <CD client={sel} data={d} dispatch={dp} onBack={function(){sSel(null)}} taxasBCB={taxasBCB} taxaBCBStatus={taxaBCBStatus}/>}
+          {pg==="clients" && sel && <CD client={sel} data={d} dispatch={dp} onBack={function(){sSel(null)}} onIrCliente={function(c){sSel(c)}} taxasBCB={taxasBCB} taxaBCBStatus={taxaBCBStatus}/>}
           {pg==="financeiro" && <FinanceiroView data={d} dispatch={dp}/>}
           {pg==="parceiros" && <ParceirosView data={d} dispatch={dp}/>}
           {pg==="fiscal" && <FiscalView data={d} dispatch={dp}/>}
@@ -43583,7 +43672,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '557';
+  var SW_VERSION = '558';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
