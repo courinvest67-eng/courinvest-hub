@@ -1942,6 +1942,100 @@ const receitaTotalBRL=function(c){
   if(c.sv && c.sv.includes("planejamento") && !c.sv.includes("patrimonio")) total+=feeMensalBRL(c);
   return total;
 };
+/* v560: esperado da conferência = o mesmo número que entra no MRR (sem o override do relatório). */
+function feeBrutoConferencia(c){
+  if(!c||!Array.isArray(c.sv))return 0;
+  if(ehHibrido(c)||c.sv.indexOf("patrimonio")>=0)return feeBaseDoCliente(c).fee||0;
+  if(c.sv.indexOf("planejamento")>=0)return feeMensalBRL(c)||0;
+  return 0;
+}
+function taxasConferencia(config){
+  var t=(config&&config.feeTaxas)||{};
+  function n(v,d){var x=+v;return v==null||v===""||isNaN(x)?d:x;}
+  return {vindi:n(t.vindi,1.99),stripe:n(t.stripe,3.39),pix:n(t.pix,0),boleto:n(t.boleto,0),transferencia:n(t.transferencia,0),toleranciaPct:n(t.toleranciaPct,1),toleranciaReais:n(t.toleranciaReais,5)};
+}
+function meioCanonicoFee(s){
+  var t=cvFoldBusca(s||"");
+  if(!t)return "";
+  if(t.indexOf("vindi")>=0)return "vindi";
+  if(t.indexOf("stripe")>=0)return "stripe";
+  if(t.indexOf("boleto")>=0)return "boleto";
+  if(t.indexOf("pix")>=0)return "pix";
+  if(t.indexOf("transfer")>=0||t.indexOf("ted")>=0||/(^| )doc( |$)/.test(t))return "transferencia";
+  return "";
+}
+function meioClienteFee(c){
+  var k=meioCanonicoFee(c&&c.feeMetodo);
+  return k||"pix";
+}
+function conferenciaFees(d,ym){
+  ym=ym||(typeof cvUltMesFechadoYM==="function"?cvUltMesFechadoYM():"");
+  var taxas=taxasConferencia(d&&d.config);
+  var clientes=(d&&d.cl)||[];
+  var entradas=(d&&d.fin&&d.fin.entradas)||[];
+  var resolver=finResolverMapa(clientes,entradas);
+  function ehFee(e){
+    var blob=((e&&e.servico)||"")+" "+((e&&e.cliente)||"");
+    if(/\bir\b|imposto de renda|relat[oó]rio de ir/i.test(blob))return false;
+    if(/comiss/i.test(blob))return false;
+    return true;
+  }
+  function casa(c,e){
+    var b=finTokensNome(c.nome).join(" ");
+    if(!b)return false;
+    var a=finTokensNome(resolver(e.cliente).nome).join(" ");
+    var p=finTokensNome(e.cliente).join(" ");
+    return a===b||p===b;
+  }
+  var doMes=entradas.filter(function(e){return e&&e.data&&String(e.data).substring(0,7)===ym&&ehFee(e);});
+  var usados={};
+  var linhas=[];
+  clientes.forEach(function(c){
+    if(!c||c.status==="encerrado"||c.status==="inativo")return;
+    var sv=c.sv||[];
+    if(sv.indexOf("patrimonio")<0&&sv.indexOf("planejamento")<0)return;
+    var ini=c.dtCaptacao?String(c.dtCaptacao):"";
+    if(ini.length>=7&&ini.substring(0,7)>ym)return;
+    var bruto=Math.round(feeBrutoConferencia(c)*100)/100;
+    if(!(bruto>0))return;
+    var matches=doMes.filter(function(e){return !usados[e.id]&&casa(c,e);});
+    matches.forEach(function(e){usados[e.id]=true;});
+    var recebido=Math.round(matches.reduce(function(s,e){return s+(+e.valor||0);},0)*100)/100;
+    var por={};
+    matches.forEach(function(e){var m=meioCanonicoFee(e.meio);if(!m)return;por[m]=(por[m]||0)+(+e.valor||0);});
+    var meio=meioClienteFee(c),top=-1;
+    Object.keys(por).forEach(function(m){if(por[m]>top){top=por[m];meio=m;}});
+    var pct=taxas[meio]!=null?taxas[meio]:0;
+    var taxaValor=Math.round(bruto*pct)/100;
+    var liquido=Math.round((bruto-taxaValor)*100)/100;
+    var tol=Math.max(liquido*taxas.toleranciaPct/100,taxas.toleranciaReais);
+    var status="nao_pago";
+    if(recebido>0.004&&Math.abs(recebido-liquido)<=tol+0.001)status="pago";
+    else if(recebido>0.004&&recebido<liquido)status="menor";
+    else if(recebido>0.004)status="maior";
+    linhas.push({id:c.id,nome:c.nome,bruto:bruto,taxaPct:pct,taxaValor:taxaValor,liquido:liquido,recebido:recebido,diff:Math.round((recebido-liquido)*100)/100,status:status,meio:meio,qtd:matches.length});
+  });
+  linhas.sort(function(a,b){return String(a.nome).localeCompare(String(b.nome),"pt-BR");});
+  var semMap={};
+  doMes.forEach(function(e){
+    if(usados[e.id])return;
+    var nome=resolver(e.cliente).nome||e.cliente||"Sem nome";
+    if(!semMap[nome])semMap[nome]={nome:nome,valor:0,qtd:0,planilhas:{}};
+    semMap[nome].valor+=(+e.valor||0);
+    semMap[nome].qtd++;
+    if(e.cliente)semMap[nome].planilhas[e.cliente]=true;
+  });
+  var sem=Object.keys(semMap).map(function(k){var x=semMap[k];x.valor=Math.round(x.valor*100)/100;x.planilhas=Object.keys(x.planilhas);return x;}).sort(function(a,b){return b.valor-a.valor;});
+  var tot={bruto:0,liquido:0,recebido:0,taxas:0,pendentes:0};
+  linhas.forEach(function(l){
+    tot.bruto+=l.bruto;tot.liquido+=l.liquido;tot.recebido+=l.recebido;
+    if(l.meio==="vindi"||l.meio==="stripe")tot.taxas+=l.taxaValor;
+    if(l.status==="nao_pago"||l.status==="menor")tot.pendentes++;
+  });
+  ["bruto","liquido","recebido","taxas"].forEach(function(k){tot[k]=Math.round(tot[k]*100)/100;});
+  tot.diff=Math.round((tot.recebido-tot.liquido)*100)/100;
+  return {ym:ym,taxas:taxas,linhas:linhas,sem:sem,tot:tot};
+}
 
 const SL={patrimonio:"Gestão de Patrimônio",planejamento:"Gestão Financeira",milhas:"Couri Mile$",consultoria:"Consultoria"};
 const SC={patrimonio:"gold",planejamento:"cyan",milhas:"purple",consultoria:"orange"};
@@ -3091,6 +3185,13 @@ function gerarNotificacoesReais(d){
   });
 
   
+  var _feeConf=conferenciaFees(d,typeof cvUltMesFechadoYM==="function"?cvUltMesFechadoYM():"");
+  if(_feeConf.tot.pendentes>0){
+    var _pMes=_feeConf.ym?_feeConf.ym.split("-"):[];
+    var _pLbl=_pMes.length===2?(["","jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"][+_pMes[1]]+"/"+_pMes[0].slice(2)):_feeConf.ym;
+    nots.push({id:"fee_conf",msg:_feeConf.tot.pendentes+" cliente"+(_feeConf.tot.pendentes>1?"s":"")+" com fee em aberto em "+_pLbl,ic:"💸",lido:false,tp:"mês fechado",ordem:-1,tipo:"fee_conferencia"});
+  }
+
   if(nots.length===0){
     if(d.cl.length===0){
       return[{id:"empty",msg:"Cadastre seus primeiros clientes para ver notificações de vencimentos, contratos e aniversários.",ic:"✨",lido:true,tp:"",tipo:"placeholder"}];
@@ -4233,6 +4334,13 @@ function Dash({data:d,onSel:os,goTo}){
 
       {dt==="geral" && (
         <div>
+          {(function(){
+            var conf=conferenciaFees(d,typeof cvUltMesFechadoYM==="function"?cvUltMesFechadoYM():"");
+            if(!conf.tot.pendentes)return null;
+            var pp=conf.ym.split("-");
+            var lb=(["","jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"][+pp[1]]||"")+"/"+pp[0].slice(2);
+            return <div onClick={function(){if(goTo)goTo("financeiro");}} style={{marginBottom:12,padding:"8px 12px",borderRadius:10,background:"#fff",border:"1px solid rgba(180,83,9,0.35)",color:"#9A3412",fontSize:12,fontWeight:600,cursor:goTo?"pointer":"default"}}>Fees de {lb}: {conf.tot.pendentes} cliente{conf.tot.pendentes>1?"s":""} não pago{conf.tot.pendentes>1?"s":""} ou pago{conf.tot.pendentes>1?"s":""} a menor.</div>;
+          })()}
           <div style={{display:"grid",gridTemplateColumns:isMob?"1fr":"1.5fr 1fr 1fr",gap:10,marginBottom:16}}>
             <Cd style={{padding:isMob?"14px 16px":"18px 22px",cursor:"pointer"}} hov={true} glow onClick={function(){sDashDetalhes(true);sSubTab("patrimonio");sShowAum(!showAum);}}>
               <div style={{fontSize:isMob?9:10,color:T.t3,fontWeight:700,letterSpacing:.6,textTransform:"uppercase"}}>Patrimônio total sob gestão</div>
@@ -26289,6 +26397,8 @@ function FinanceiroView({data:d,dispatch:dp}){
     return function(){window.removeEventListener("resize",onResize)};
   },[]);
   const[finBusca,sFinBusca]=useState("");
+  const[feeMes,sFeeMes]=useState(typeof cvUltMesFechadoYM==="function"?cvUltMesFechadoYM():"");
+  const[feeSt,sFeeSt]=useState("todos");
   const[finOpen,sFinOpen]=useState(false);
   const[finHi,sFinHi]=useState(0);
   const finBoxRef=React.useRef(null);
@@ -26934,6 +27044,98 @@ function FinanceiroView({data:d,dispatch:dp}){
       {/* RESUMO */}
       {fTab==="resumo" && (
         <div>
+          {(function(){
+            var conf=conferenciaFees(d,feeMes||cvUltMesFechadoYM());
+            var meses={};
+            entradas.forEach(function(e){if(e&&e.data)meses[String(e.data).substring(0,7)]=true;});
+            meses[conf.ym]=true;
+            var mesesOrd=Object.keys(meses).sort().reverse();
+            var MEIO={vindi:"Vindi",stripe:"Stripe",pix:"PIX",boleto:"Boleto",transferencia:"Transferência"};
+            var ST={pago:"Pago",menor:"Pago a menor",maior:"Pago a maior",nao_pago:"Não pago"};
+            var cor={pago:T.green,menor:"#B45309",maior:T.cyan,nao_pago:T.red};
+            var linhas=conf.linhas.filter(function(l){
+              if(feeSt!=="todos"&&l.status!==feeSt)return false;
+              if(finQ&&!cvTextoCasa(l.nome,finQ))return false;
+              return true;
+            });
+            var sem=conf.sem.filter(function(s){return !finQ||cvTextoCasa(s.nome+" "+(s.planilhas||[]).join(" "),finQ);});
+            function salvarTaxa(k,v){
+              var cur=Object.assign({},taxasConferencia(d.config));
+              cur[k]=v;
+              dp({t:"CONFIG_SET",p:{key:"feeTaxas",value:cur}});
+            }
+            var tx=conf.taxas;
+            return (
+              <Cd id="cv-fee-conf" style={{padding:16,marginBottom:14}} hov={false}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"flex-start",marginBottom:10}}>
+                  <div>
+                    <div style={{fontSize:14,fontWeight:800,color:T.t1}}>Conferência de fees</div>
+                    <div style={{fontSize:12,color:T.t3,lineHeight:1.45,maxWidth:680}}>Esperado bruto é o mesmo cálculo do MRR. No cartão, o líquido desconta a taxa do meio. O status compara o que entrou com o líquido.</div>
+                  </div>
+                  <select aria-label="Mês da conferência" value={conf.ym} onChange={function(e){sFeeMes(e.target.value)}} style={{padding:"8px 10px",fontSize:12,borderRadius:8,border:"1px solid "+T.bdr,background:"#fff"}}>
+                    {mesesOrd.map(function(m){return <option key={m} value={m}>{fmtMonth(m)}</option>;})}
+                  </select>
+                </div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10,alignItems:"center"}}>
+                  {[["vindi","Vindi"],["stripe","Stripe"],["pix","PIX"],["boleto","Boleto"],["transferencia","Transferência"]].map(function(par){
+                    return <label key={par[0]} style={{fontSize:11,color:T.t2,display:"flex",alignItems:"center",gap:4}}>{par[1]}<input aria-label={"Taxa "+par[1]} type="number" step="0.01" defaultValue={tx[par[0]]} key={par[0]+":"+tx[par[0]]} onBlur={function(e){salvarTaxa(par[0],+e.target.value||0)}} style={{width:64,padding:"4px 6px",borderRadius:6,border:"1px solid "+T.bdr,background:"#fff"}}/>%</label>;
+                  })}
+                  <label style={{fontSize:11,color:T.t2}}>Tolerância <input aria-label="Tolerância percentual" type="number" step="0.1" defaultValue={tx.toleranciaPct} key={"tp"+tx.toleranciaPct} onBlur={function(e){salvarTaxa("toleranciaPct",+e.target.value||0)}} style={{width:52,padding:"4px 6px",borderRadius:6,border:"1px solid "+T.bdr,background:"#fff"}}/>% ou R$ <input aria-label="Tolerância em reais" type="number" step="1" defaultValue={tx.toleranciaReais} key={"tr"+tx.toleranciaReais} onBlur={function(e){salvarTaxa("toleranciaReais",+e.target.value||0)}} style={{width:52,padding:"4px 6px",borderRadius:6,border:"1px solid "+T.bdr,background:"#fff"}}/></label>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:isMob?"1fr 1fr":"repeat(5,1fr)",gap:8,marginBottom:10}}>
+                  <div style={{padding:"10px 12px",background:T.w3,borderRadius:10}}><div style={{fontSize:9,color:T.t3,fontWeight:700}}>ESPERADO BRUTO</div><div style={{fontSize:16,fontWeight:800,color:T.gold}}>{fm(conf.tot.bruto)}</div></div>
+                  <div style={{padding:"10px 12px",background:T.w3,borderRadius:10}}><div style={{fontSize:9,color:T.t3,fontWeight:700}}>TAXAS DE CARTÃO</div><div style={{fontSize:16,fontWeight:800,color:"#B45309"}}>{fm(conf.tot.taxas)}</div></div>
+                  <div style={{padding:"10px 12px",background:T.w3,borderRadius:10}}><div style={{fontSize:9,color:T.t3,fontWeight:700}}>ESPERADO LÍQUIDO</div><div style={{fontSize:16,fontWeight:800,color:T.t1}}>{fm(conf.tot.liquido)}</div></div>
+                  <div style={{padding:"10px 12px",background:T.w3,borderRadius:10}}><div style={{fontSize:9,color:T.t3,fontWeight:700}}>RECEBIDO</div><div style={{fontSize:16,fontWeight:800,color:T.green}}>{fm(conf.tot.recebido)}</div></div>
+                  <div style={{padding:"10px 12px",background:T.w3,borderRadius:10}}><div style={{fontSize:9,color:T.t3,fontWeight:700}}>PENDENTES</div><div style={{fontSize:16,fontWeight:800,color:conf.tot.pendentes?T.red:T.green}}>{conf.tot.pendentes}</div><div style={{fontSize:9,color:T.t3}}>diferença {fm(conf.tot.diff)}</div></div>
+                </div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+                  {[["todos","Todos"],["pago","Pago"],["menor","Pago a menor"],["maior","Pago a maior"],["nao_pago","Não pago"]].map(function(s){
+                    var on=feeSt===s[0];
+                    return <button key={s[0]} type="button" onClick={function(){sFeeSt(s[0])}} style={{padding:"6px 10px",borderRadius:999,border:on?"1.5px solid "+T.gold:"1px solid "+T.bdr,background:on?T.goldD:"#fff",color:on?T.gold:T.t2,fontSize:11,fontWeight:700,cursor:"pointer"}}>{s[1]}</button>;
+                  })}
+                </div>
+                {isMob?(
+                  <div>
+                    {linhas.map(function(l){return (
+                      <div key={l.id} style={{padding:"10px 0",borderTop:"1px solid "+T.bdrL}}>
+                        <div style={{display:"flex",justifyContent:"space-between",gap:8}}><strong>{l.nome}</strong><span style={{color:cor[l.status],fontWeight:800,fontSize:12}}>{ST[l.status]}</span></div>
+                        <div style={{fontSize:11,color:T.t3,marginTop:4}}>Bruto {fm(l.bruto)} · taxa {fm(l.taxaValor)} · líquido {fm(l.liquido)} · recebido {fm(l.recebido)}</div>
+                        <select aria-label={"Meio de "+l.nome} value={meioClienteFee({feeMetodo:l.meio})} onChange={function(e){dp({t:"UC",p:{id:l.id,feeMetodo:e.target.value}})}} style={{marginTop:6,padding:"8px",borderRadius:8,border:"1px solid "+T.bdr,background:"#fff",fontSize:12}}>
+                          {Object.keys(MEIO).map(function(k){return <option key={k} value={k}>{MEIO[k]}</option>;})}
+                        </select>
+                      </div>
+                    );})}
+                  </div>
+                ):(
+                  <div style={{overflowX:"auto"}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                      <thead><tr style={{color:T.t3,fontSize:10,textAlign:"left"}}><th style={{padding:"6px 4px"}}>Cliente</th><th>Meio</th><th style={{textAlign:"right"}}>Bruto</th><th style={{textAlign:"right"}}>Taxa</th><th style={{textAlign:"right"}}>Líquido</th><th style={{textAlign:"right"}}>Recebido</th><th style={{textAlign:"right"}}>Diferença</th><th>Status</th></tr></thead>
+                      <tbody>
+                        {linhas.map(function(l){return (
+                          <tr key={l.id} style={{borderTop:"1px solid "+T.bdrL}}>
+                            <td style={{padding:"7px 4px",fontWeight:700}}>{l.nome}</td>
+                            <td><select aria-label={"Meio de "+l.nome} value={meioClienteFee({feeMetodo:l.meio})} onChange={function(e){dp({t:"UC",p:{id:l.id,feeMetodo:e.target.value}})}} style={{padding:"4px 6px",borderRadius:6,border:"1px solid "+T.bdr,background:"#fff",fontSize:11}}>{Object.keys(MEIO).map(function(k){return <option key={k} value={k}>{MEIO[k]}</option>;})}</select></td>
+                            <td style={{textAlign:"right",fontFamily:"'JetBrains Mono'"}}>{fm(l.bruto)}</td>
+                            <td style={{textAlign:"right",fontFamily:"'JetBrains Mono'",color:"#B45309"}}>{fm(l.taxaValor)}</td>
+                            <td style={{textAlign:"right",fontFamily:"'JetBrains Mono'"}}>{fm(l.liquido)}</td>
+                            <td style={{textAlign:"right",fontFamily:"'JetBrains Mono'"}}>{fm(l.recebido)}</td>
+                            <td style={{textAlign:"right",fontFamily:"'JetBrains Mono'"}}>{fm(l.diff)}</td>
+                            <td style={{fontWeight:800,color:cor[l.status]}}>{ST[l.status]}</td>
+                          </tr>
+                        );})}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {!linhas.length&&<div style={{padding:12,color:T.t3,fontSize:12}}>Nenhum cliente neste filtro.</div>}
+                {sem.length>0&&<div style={{marginTop:12}}>
+                  <div style={{fontSize:12,fontWeight:800,marginBottom:6}}>Recebido sem fee cadastrado</div>
+                  {sem.map(function(s){return <div key={s.nome} style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:12,padding:"6px 0",borderTop:"1px solid "+T.bdrL}}><span>{s.nome}{s.planilhas&&s.planilhas.join(" ")!==s.nome?<span style={{color:T.t3}}> · planilha: {s.planilhas.join(", ")}</span>:null}</span><strong>{fm(s.valor)}</strong></div>;})}
+                </div>}
+              </Cd>
+            );
+          })()}
           {painelConciliacao(true)}
           {entradas.length===0 ? <Cd style={{padding:30,textAlign:"center"}} hov={false}><div style={{fontSize:28,marginBottom:10}}>📊</div><div style={{fontSize:14,color:T.t3}}>O restante do resumo usa a planilha importada. Comece por 📥 Importar quando quiser ver o caixa lançado.</div></Cd> : (
             <div>
@@ -42601,6 +42803,9 @@ function cvMontarPreview(){
   }
   var erika={id:"prev_erika",nome:"Érika Cristina Alves",apelido:"Kika",status:"ativo",email:"erika.alves@example.com",sv:["planejamento"],feeFixo:800,pat:0,_ativosImport:[]};
   var marcos={id:"prev_marcos",nome:"Marcos Condé Goiatá Lopes",status:"ativo",email:"marcos.goiata@example.com",sv:["patrimonio"],txGestao:0.15,pat:0,_ativosImport:[]};
+  var paula={id:"prev_paula",nome:"Paula Pinho",status:"ativo",sv:["patrimonio","planejamento"],feeFixo:430,txRegressivaThreshold:300000,tabelaFee:"padrao2",pat:250000,patGorila:250000,feeMetodo:"vindi",txGestao:0.15,_ativosImport:[]};
+  var allan={id:"prev_allan",nome:"Allan Irwin",status:"ativo",sv:["patrimonio","planejamento"],feeFixo:350,txRegressivaThreshold:200000,tabelaFee:"gp4",pat:450000,patGorila:450000,feeMetodo:"stripe",txGestao:0.15,_ativosImport:[]};
+  var erikaL={id:"prev_erika_leandro",nome:"Erika & Leandro",status:"ativo",sv:["planejamento"],feeFixo:1200,dtCaptacao:"2026-12-01",feeMetodo:"pix",_ativosImport:[]};
   window._cvPreviewAvulsos=[{id:"av_joao",tipo:"avulso",nome:"João Avulso",email:"joao.avulso@example.com",valorRelatorio:650,faturamento:[{id:"av_joao_2025",anoBase:2025,geradoEm:dia(8)+"T12:00:00.000Z",valor:650}]}];
   window._cvPreviewRelatorios=[];
   window._cvDossieMem={
@@ -42619,7 +42824,7 @@ function cvMontarPreview(){
     ]}
   };
   return {
-    cl:[ana,bruno,carla,elena,erika,marcos],
+    cl:[ana,bruno,carla,elena,erika,marcos,paula,allan,erikaL],
     it:[
       {id:"i1",cid:"prev_ana",data:"2026-07-01",txt:"Revisão de carteira"},
       {id:"i2",cid:"prev_carla",data:iso(-5),txt:"Relatório de outubro"},
@@ -42636,7 +42841,10 @@ function cvMontarPreview(){
       {id:4,data:dia(8),servico:"Relatório de IR",meio:"PIX",cliente:"João Avulso",valor:650,nf:""},
       {id:5,data:dia(9),servico:"Comissão parceiro",meio:"PIX",cliente:"Contábil Alfa",valor:200,nf:""},
       {id:9,data:dia(2),servico:"Gestão de Patrimônio",meio:"PIX",cliente:"Marcos Goiatá",valor:1200,nf:"OK"},
-      {id:10,data:dia(3),servico:"Gestão de Patrimônio",meio:"PIX",cliente:"Marcos Condé Goiatá Lopes",valor:800,nf:"OK"}
+      {id:10,data:dia(3),servico:"Gestão de Patrimônio",meio:"PIX",cliente:"Marcos Condé Goiatá Lopes",valor:800,nf:"OK"},
+      {id:20,data:dia(8),servico:"Gestão de Patrimônio",meio:"Vindi",cliente:"Paula",valor:421.44,nf:"OK"},
+      {id:21,data:dia(9),servico:"Gestão de Patrimônio",meio:"Stripe",cliente:"Allan Irwin",valor:760.80,nf:"OK"},
+      {id:22,data:dia(15),servico:"Consultoria",meio:"PIX",cliente:"Visita Avulsa",valor:150,nf:""}
     ],despesas:[
       {id:11,data:dia(3),cat:"Software",meio:"Cartão",desc:"Ferramentas",valor:350}
     ]},
@@ -43171,7 +43379,7 @@ function App({authUser,preview}){
   const[showMenu,sShowMenu]=useState(false);
   /* Notificações DINÂMICAS — geradas a partir dos clientes reais (vencimentos RF, aniversários, contratos).
      useMemo recalcula só quando d.cl muda, evitando recomputar a cada render. */
-  const notsReais=React.useMemo(function(){return gerarNotificacoesReais(d)},[d.cl]);
+  const notsReais=React.useMemo(function(){return gerarNotificacoesReais(d)},[d.cl,d.fin,d.config]);
   const nL=notsReais.filter(function(n){return !n.lido && n.tipo!=="placeholder"}).length;
 
   /* ===== PUSH NOTIFICATIONS NATIVAS =====
@@ -43495,7 +43703,7 @@ function App({authUser,preview}){
                       {notsReais.map(function(n){
                         var clicavel=n.cliId&&d.cl.find(function(c){return c.id===n.cliId});
                         return (
-                        <div key={n.id} onClick={clicavel?function(){var cli=d.cl.find(function(c){return c.id===n.cliId});if(cli){sPg("clients");sSel(cli);sShowN(false)}}:undefined} style={{display:"flex",gap:10,padding:"10px 12px",background:n.lido?"transparent":T.goldD,borderRadius:10,margin:3,cursor:clicavel?"pointer":"default",transition:"background 0.15s"}}>
+                        <div key={n.id} onClick={function(){if(n.tipo==="fee_conferencia"){sPg("financeiro");sShowN(false);return;}if(!clicavel)return;var cli=d.cl.find(function(c){return c.id===n.cliId});if(cli){sPg("clients");sSel(cli);sShowN(false)}}} style={{display:"flex",gap:10,padding:"10px 12px",background:n.lido?"transparent":T.goldD,borderRadius:10,margin:3,cursor:(clicavel||n.tipo==="fee_conferencia")?"pointer":"default",transition:"background 0.15s"}}>
                           <span style={{fontSize:18,flexShrink:0}}>{n.ic}</span>
                           <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:n.lido?400:600,lineHeight:1.4,wordBreak:"break-word"}}>{n.msg}</div>{n.tp && <div style={{fontSize:10,color:T.t3,marginTop:2}}>{n.tp}</div>}</div>
                           {!n.lido && n.tipo!=="placeholder" && <div style={{width:8,height:8,borderRadius:"50%",background:T.gold,marginTop:6,flexShrink:0}}/>}
@@ -43529,10 +43737,10 @@ function App({authUser,preview}){
                 var reajCli=n.tipo==="reajuste_ipca"&&n.cliId?(d.cl||[]).find(function(x){return x.id===n.cliId}):null;
                 var reajStatus=reajCli&&reajCli.particularidades&&reajCli.particularidades.reajusteStatus||"pendente";
                 return (
-                <div key={n.id} onClick={clicavel?function(){var cli=d.cl.find(function(c){return c.id===n.cliId});if(cli){sPg("clients");sSel(cli);sShowN(false)}}:undefined}
+                <div key={n.id} onClick={function(){if(n.tipo==="fee_conferencia"){sPg("financeiro");sShowN(false);return;}if(!clicavel)return;var cli=d.cl.find(function(c){return c.id===n.cliId});if(cli){sPg("clients");sSel(cli);sShowN(false)}}}
                   style={{display:"flex",gap:10,padding:"10px 12px",
                     background:n.tipo==="reajuste_ipca"?"rgba(var(--gold-rgb),0.08)":n.lido?"transparent":T.goldD,
-                    borderRadius:10,margin:3,cursor:clicavel?"pointer":"default",
+                    borderRadius:10,margin:3,cursor:(clicavel||n.tipo==="fee_conferencia")?"pointer":"default",
                     borderLeft:n.tipo==="reajuste_ipca"?"3px solid "+T.gold:"3px solid transparent"
                   }}>
                   <span style={{fontSize:18,flexShrink:0}}>{n.ic}</span>
@@ -43749,7 +43957,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '559';
+  var SW_VERSION = '560';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
