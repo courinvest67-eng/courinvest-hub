@@ -1,0 +1,63 @@
+rules_version = '2';
+// Espelho das regras que já estão no ar, mais o bloco portalClientes.
+// Coleções sem regra aqui (ir_dossies, ir_relatorios_versoes, diagnosticos_convites,
+// push_tokens, push_fila) continuam negadas. Storage não entra neste arquivo.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /workspaces/{docId} {
+      allow read, write: if request.auth != null && request.auth.token.email == "courinvest.67@gmail.com";
+    }
+
+    match /presence/{id} {
+      allow read, write: if request.auth != null && request.auth.token.email == "courinvest.67@gmail.com";
+    }
+
+    match /portalClientes/{emailId} {
+      allow get: if request.auth != null
+        && (request.auth.token.email == "courinvest.67@gmail.com"
+            || (request.auth.token.email is string
+                && request.auth.token.email.lower() == emailId
+                && resource.data.acessoAtivo == true));
+      allow list, create, update, delete: if request.auth != null
+        && request.auth.token.email == "courinvest.67@gmail.com";
+    }
+
+    match /leads_publicos/{leadId} {
+      allow create: if request.resource.data.keys().hasOnly(['nome','telefone','email','refCode','origem','referrer','quemIndicou','criadoEm','status']) && request.resource.data.nome is string && request.resource.data.nome.size() > 0 && request.resource.data.status == 'novo';
+      allow read, update: if request.auth != null && request.auth.token.email == "courinvest.67@gmail.com";
+      allow delete: if false;
+    }
+
+    match /parceiros_pendentes/{pendId} {
+      allow create: if request.resource.data.keys().hasOnly(['nome','tipo','telefone','email','cidade','comoIndica','criadoEm','status']) && request.resource.data.nome is string && request.resource.data.nome.size() > 0 && request.resource.data.status == 'pendente';
+      allow read, update: if request.auth != null && request.auth.token.email == "courinvest.67@gmail.com";
+      allow delete: if false;
+    }
+
+    match /diagnosticos_publicos/{docId} {
+      allow create: if request.resource.data.keys().hasOnly(['nome','email','renda','despesas','saldoMes','taxaPoupanca','valorSugeridoMin','valorSugeridoMax','justificativaPreco','origem','referrer','criadoEm']) && request.resource.data.renda is number && request.resource.data.renda > 0;
+      allow read, update: if request.auth != null && request.auth.token.email == "courinvest.67@gmail.com";
+      allow delete: if false;
+    }
+
+    match /diagnosticos_pj_publicos/{docId} {
+      allow create: if request.resource.data.keys().hasOnly(['empresa','nome','email','faturamento','despesas','resultadoMes','margem','valorSugeridoMin','valorSugeridoMax','justificativaPreco','precoEstimativa','origem','referrer','criadoEm']) && request.resource.data.faturamento is number && request.resource.data.faturamento > 0;
+      allow read, update: if request.auth != null && request.auth.token.email == "courinvest.67@gmail.com";
+      allow delete: if false;
+    }
+
+    match /diagnosticos_consultoria_pj_publicos/{docId} {
+      allow create: if request.resource.data.keys().hasOnly(['empresa','nome','email','whatsapp','faturamentoAnual','tempoAtividade','numSocios','respostas','desafios','indiceOrganizacao','valorSugeridoMin','valorSugeridoMax','justificativaPreco','precoEstimativa','origem','referrer','criadoEm']) && request.resource.data.faturamentoAnual is number && request.resource.data.faturamentoAnual > 0;
+      allow read, update: if request.auth != null && request.auth.token.email == "courinvest.67@gmail.com";
+      allow delete: if false;
+    }
+
+    match /ir_relatorios/{id} {
+      allow read, write: if request.auth != null && request.auth.token.email == "courinvest.67@gmail.com";
+    }
+
+    match /ir_avulsos/{id} {
+      allow read, write: if request.auth != null && request.auth.token.email == "courinvest.67@gmail.com";
+    }
+  }
+}
