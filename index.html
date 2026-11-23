@@ -11056,18 +11056,19 @@ function PainelCliente(props){
       return;
     }
     var email=String((user&&user.email)||"").trim().toLowerCase();
-    if(!window._fbDB||!email){sErro("Não foi possível abrir o painel.");sCarregando(false);return;}
+    if(!window._fbDB||!email){sErro("Acesso não liberado.");sCarregando(false);return;}
+    /* Única leitura do cliente: o próprio documento. Sem workspaces nem outras coleções. */
     window._fbDB.collection("portalClientes").doc(email).get().then(function(snap){
-      if(!snap.exists){sErro("Seu acesso ainda não foi liberado. Peça à Courinvest para cadastrar "+email+".");sCarregando(false);return;}
+      if(!snap.exists){sErro("Acesso não liberado.");sCarregando(false);return;}
       var data=snap.data()||{};
-      if(!data.acessoAtivo){sErro("O acesso deste e-mail está desligado. Fale com a Courinvest.");sCarregando(false);return;}
+      if(!data.acessoAtivo){sErro("Acesso não liberado.");sCarregando(false);return;}
       sDoc(data);
       var ks=Object.keys(data.meses||{}).sort();
       sYm(ks.length?ks[ks.length-1]:"");
       sCarregando(false);
     }).catch(function(e){
-      var cod=String((e&&e.code)||(e&&e.message)||"");
-      sErro(cod.indexOf("permission")>=0?"Seu acesso ainda não foi liberado para este e-mail.":"Não consegui carregar o painel. Tente de novo em instantes.");
+      var cod=String((e&&e.code)||"")+" "+String((e&&e.message)||"");
+      sErro(/permission|insufficient/i.test(cod)?"Acesso não liberado.":"Não consegui carregar o painel. Tente de novo em instantes.");
       sCarregando(false);
     });
   },[]);

@@ -41,4 +41,4 @@ Sugestão = saldo realizado do mês − despesas do orçamento que ainda não fo
 
 ## Segurança
 
-`workspaces/main` continua com todos os clientes num documento só, então a regra do Firestore não consegue liberar um cliente só. O admin passa a gravar `portalClientes/{e-mail}` só com o resumo. A pessoa só consegue ler esse documento, e só com o acesso ligado. As regras estão em `firestore.rules` e `storage.rules`. O GitHub Pages não publica regra no Firebase: o Igor cola no console ou faz o deploy. O passo a passo está no relatório do pull request.
+`workspaces/main` continua com todos os clientes num documento só. O admin grava o resumo em `portalClientes/{e-mail}`. A pessoa só lê o próprio documento, e só com o acesso ligado. O arquivo `firestore.rules` repete as regras que já estão no ar (formulários públicos com validação de campos, workspaces, presence, IR) e acrescenta só o bloco `portalClientes`. Storage não muda. Coleções sem regra no arquivo continuam negadas.
