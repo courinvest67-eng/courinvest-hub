@@ -131,6 +131,8 @@ html[data-theme="light"] table th{color:var(--t2)}
 .cv-theme-toggle:hover{box-shadow:var(--shadow-lg)}
 .cv-theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media print{.cv-theme-toggle{display:none!important}}
+/* v561: o Painel do Cliente não mostra o botão de tema do Hub */
+body.cv-painel-cliente .cv-theme-toggle{display:none!important}
 /* v551 — tabela de clientes / ações / checklist */
 .cv-cl-table tbody tr{transition:background .15s}
 .cv-cl-table tbody tr:hover,.cv-cl-table tbody tr:focus-visible{background:var(--w3);outline:none}
@@ -240,11 +242,17 @@ table{border-spacing:0}
       window._fbAuth = firebase.auth();
       window._fbDB = firebase.firestore();
       try { window._fbStorage = firebase.storage(); } catch(e) { console.warn("[Firebase] Storage indisponível:", e); }
-      try {
-        window._fbDB.enablePersistence({synchronizeTabs:true}).catch(function(err){
-          console.warn("Firestore persistence not available:", err.code);
-        });
-      } catch(e) { console.warn("Persistence setup failed:", e); }
+      /* v561: persistência local só na conta admin. No celular do cliente o cache
+         do Firestore não chega a ser ligado, então não guarda a base do Hub. */
+      window._fbEnsurePersistence=function(){
+        if(window._fbPersistStarted||!window._fbDB)return;
+        window._fbPersistStarted=true;
+        try{
+          window._fbDB.enablePersistence({synchronizeTabs:true}).catch(function(err){
+            console.warn("Firestore persistence not available:", err&&err.code);
+          });
+        }catch(e){console.warn("Persistence setup failed:", e);}
+      };
       window._fbWhitelist = ["courinvest.67@gmail.com"];
       console.log("[Firebase] ✅ Inicializado com sucesso");
     } catch(err) {
@@ -271,6 +279,7 @@ document.addEventListener("DOMContentLoaded", function() {
 });
 </script>
 <script src="couri-core.js"></script>
+<script src="portal-core.js"></script>
 <script type="text/babel" data-presets="react">
 const {useState, useReducer, useEffect, useRef} = React;
 
@@ -2134,6 +2143,18 @@ const cvDadosAte=function(c){
 };
 const cvFmtDM=function(iso){if(!iso)return "";var p=String(iso).slice(0,10).split("-");return p.length===3?p[2]+"/"+p[1]:iso;};
 const cvFmtDMA=function(iso){if(!iso)return "";var p=String(iso).slice(0,10).split("-");return p.length===3?p[2]+"/"+p[1]+"/"+p[0].slice(2):iso;};
+/* v561: documento que o cliente pode ler. Só totais, alocação e a sugestão.
+   Sem descrição de extrato, sem CPF, sem fee e sem dados de outro cliente. */
+function cvProjetarPortal(c){
+  if(!window.PortalCore||!c)return null;
+  return window.PortalCore.projetarPortal(c,{
+    patrimonioTotal:cvPatCli(c),
+    rent:cvRendMesCli(c),
+    dadosAte:cvDadosAte(c),
+    atualizadoEm:new Date().toISOString()
+  });
+}
+window.cvProjetarPortal=cvProjetarPortal;
 /* Checklist "Próximas Ações": concluído persiste em localStorage por cliente+item. A chave ignora números
    (ex.: "sem contato há 95 dias" e "há 96 dias" = mesmo item), pra não "desconcluir" sozinho a cada dia. */
 const cvAcaoKey=function(cid,ti){return "cv_acao_done:"+cid+":"+String(ti||"").replace(/[0-9][0-9.,]*/g,"#").replace(/\s+/g," ").trim().slice(0,90);};
@@ -10607,6 +10628,353 @@ function CobrancasTab({c,d,dp}){
   );
 }
 
+function BlocoAporte(props){
+  var calc=props.calc;
+  var claro=props.claro;
+  var PC=window.PortalCore;
+  if(!calc||!PC)return null;
+  var cor=claro?"#374151":T.t2;
+  var forte=claro?"#111827":T.t1;
+  var linha=function(rotulo,valor,sinal){
+    return <div key={rotulo} style={{display:"flex",justifyContent:"space-between",gap:12,padding:"7px 0",fontSize:13,color:cor,borderBottom:claro?"1px solid #F3F4F6":"1px solid "+T.bdrL}}>
+      <span style={{lineHeight:1.35}}>{sinal?sinal+" ":""}{rotulo}</span>
+      <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:forte,whiteSpace:"nowrap"}}>{fm(valor||0)}</span>
+    </div>;
+  };
+  var ja=calc.aportesDespesa>0||calc.aportesNeutro>0||calc.aportesHub>0;
+  return (
+    <div>
+      {linha("Saldo realizado do mês (receitas − despesas já lançadas)",calc.saldoRealizado)}
+      {calc.despesasAinda==null
+        ? <div style={{fontSize:12,color:claro?"#B45309":T.orange,padding:"8px 0"}}>O orçamento deste mês ainda não foi importado, então a sugestão não desconta o que falta pagar.</div>
+        : linha("Despesas do orçamento que ainda não foram lançadas",calc.despesasAinda,"−")}
+      {linha("Contas previstas até o fim do mês",calc.contasPrevistas,"−")}
+      {linha("Reserva mínima",calc.reservaMinima,"−")}
+      {calc.aportesNeutro>0&&linha("Transferências neutras para investimento",calc.aportesNeutro,"−")}
+      <div style={{marginTop:10,paddingTop:10,display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8}}>
+        <span style={{fontSize:12,fontWeight:800,color:claro?"#0F766E":T.gold,letterSpacing:.2}}>Sugestão para aportar</span>
+        <span style={{fontSize:claro?28:22,fontWeight:800,color:claro?"#0F766E":T.gold,fontFamily:"'JetBrains Mono',monospace"}}>{fm(calc.sugerido)}</span>
+      </div>
+      {calc.bruto<0&&<div style={{fontSize:12,color:claro?"#B45309":T.orange,marginTop:4}}>A conta deu negativa ({fm(calc.bruto)}). Mostramos zero para não sugerir resgate.</div>}
+      <div style={{fontSize:12,color:claro?"#6B7280":T.t3,lineHeight:1.5,marginTop:8}}>{PC.FORMULA}</div>
+      <div style={{fontSize:12,fontWeight:700,color:claro?"#B45309":T.orange,lineHeight:1.45,marginTop:6}}>Isto não é garantia nem recomendação de investimento. Confira o saldo na conta antes de aportar.</div>
+      <div style={{marginTop:10,fontSize:12,color:cor,lineHeight:1.5}}>
+        {ja
+          ? <span>Aportes já identificados neste mês: {calc.aportesDespesa>0?fm(calc.aportesDespesa)+" em despesa de investimento (já entrou no saldo, não descontamos de novo). ":""}{calc.aportesNeutro>0?fm(calc.aportesNeutro)+" em lançamento neutro (descontado acima, porque o saldo do orçamento não tinha visto essa saída). ":""}{calc.aportesHub>0?fm(calc.aportesHub)+" registrados na carteira do Hub.":""}</span>
+          : <span>Nenhum aporte identificado neste mês.</span>}
+      </div>
+    </div>
+  );
+}
+
+function ControleFinanceiroView(props){
+  var c=props.c, dp=props.dp;
+  var PC=window.PortalCore;
+  var cf=c.controleFinanceiro||{};
+  var cfRef=useRef(cf);
+  cfRef.current=cf;
+  var hoje=new Date();
+  var ymHoje=hoje.getFullYear()+"-"+String(hoje.getMonth()+1).padStart(2,"0");
+  var chaves=Object.keys(cf.meses||{}).sort();
+  const[ym,sYm]=useState(chaves.length?chaves[chaves.length-1]:ymHoje);
+  const[email,sEmail]=useState(c.emailAcesso||"");
+  const[ativo,sAtivo]=useState(!!c.acessoClienteAtivo);
+  const[reservaTxt,sReservaTxt]=useState(function(){var n=cf.reservaMinima;return n?String(n).replace(".",","):"";});
+  const[contaRot,sContaRot]=useState("");
+  const[contaVal,sContaVal]=useState("");
+  const[msg,sMsg]=useState("");
+  useEffect(function(){sEmail(c.emailAcesso||"");sAtivo(!!c.acessoClienteAtivo);},[c.emailAcesso,c.acessoClienteAtivo]);
+  var mes=(cf.meses||{})[ym]||null;
+  var campo={width:"100%",padding:"10px 12px",borderRadius:10,border:"1px solid "+T.bdr,background:T.card,color:T.t1,fontSize:14,outline:"none",boxSizing:"border-box"};
+  var lab={fontSize:10,fontWeight:700,color:T.t3,letterSpacing:.4,marginBottom:4};
+  function gravarCf(novo){dp({t:"UC",p:{id:c.id,controleFinanceiro:novo}});}
+  function lerArquivo(file,qual){
+    if(!PC){sMsg("O núcleo de cálculo não carregou. Recarregue a página.");return;}
+    var rd=new FileReader();
+    rd.onload=function(){
+      var atual=(cfRef.current.meses||{})[ym]||PC.mesVazio(ym);
+      var res=qual==="extrato"?PC.aplicarExtrato(atual,String(rd.result||""),ym):PC.aplicarOrcamento(atual,String(rd.result||""),ym);
+      var meses=Object.assign({},cfRef.current.meses||{});
+      var alvo=res.ym||ym;
+      meses[alvo]=res.mes;
+      var novo=Object.assign({},cfRef.current,{meses:meses});
+      cfRef.current=novo;
+      gravarCf(novo);
+      if(alvo!==ym)sYm(alvo);
+      var aviso=(res.avisos||[]).filter(Boolean).join(" ");
+      sMsg((qual==="extrato"?"Extrato":"Orçamento")+" de "+PC.rotuloMes(alvo)+" gravado na ficha."+(aviso?" "+aviso:""));
+    };
+    rd.readAsText(file,"UTF-8");
+  }
+  function salvarAcesso(){
+    var novo=String(email||"").trim().toLowerCase();
+    if(ativo&&(!novo||novo.indexOf("@")<1)){sMsg("Informe o e-mail Google do cliente para liberar o acesso.");return;}
+    if(novo&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(novo)){sMsg("E-mail inválido.");return;}
+    var ant=String(c.emailAcesso||"").trim().toLowerCase();
+    dp({t:"UC",p:{id:c.id,emailAcesso:novo,acessoClienteAtivo:!!(ativo&&novo),emailAcessoAnterior:ant&&ant!==novo?ant:(c.emailAcessoAnterior||"")}});
+    sMsg(novo?(ativo?"Acesso ligado para "+novo+".":"E-mail salvo e acesso desligado."):"Acesso removido.");
+  }
+  function salvarReserva(){
+    var n=PC?PC.numPt(reservaTxt):0;
+    if(n==null||n<0)n=0;
+    gravarCf(Object.assign({},cfRef.current,{reservaMinima:n}));
+    sMsg("Reserva mínima atualizada.");
+  }
+  function addConta(){
+    if(!PC)return;
+    var valor=PC.numPt(contaVal);
+    var rot=PC.redigir(contaRot);
+    if(!rot||!(valor>0)){sMsg("Informe um nome curto (sem CPF) e o valor da conta prevista.");return;}
+    var base=Object.assign({},(cfRef.current.meses||{})[ym]||PC.mesVazio(ym));
+    base.ym=ym;
+    base.contasPrevistas=(base.contasPrevistas||[]).concat([{rotulo:rot.slice(0,80),valor:valor}]);
+    var meses=Object.assign({},cfRef.current.meses||{});
+    meses[ym]=base;
+    gravarCf(Object.assign({},cfRef.current,{meses:meses}));
+    sContaRot("");sContaVal("");
+    sMsg("Conta prevista adicionada. Ela entra na sugestão de aporte.");
+  }
+  function delConta(i){
+    var base=Object.assign({},(cf.meses||{})[ym]||{});
+    base.contasPrevistas=(base.contasPrevistas||[]).filter(function(_,j){return j!==i;});
+    var meses=Object.assign({},cf.meses||{});
+    meses[ym]=base;
+    gravarCf(Object.assign({},cf,{meses:meses}));
+  }
+  var calc=PC&&mes?PC.calcularAporte(mes,cf.reservaMinima||0):null;
+  var kpi=function(rotulo,real,est){
+    return <div style={{flex:"1 1 140px",background:T.w3,borderRadius:12,padding:"10px 12px"}}>
+      <div style={lab}>{rotulo}</div>
+      <div style={{fontSize:16,fontWeight:800,color:T.t1,fontFamily:"'JetBrains Mono',monospace"}}>{real==null?"—":fm(real)}</div>
+      <div style={{fontSize:11,color:T.t3,marginTop:2}}>estimado {est==null?"—":fm(est)}</div>
+    </div>;
+  };
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      <Cd style={{padding:16}} hov={false}>
+        <div id="cv-controle-acesso">
+          <div style={{fontSize:15,fontWeight:800,color:T.t1}}>Acesso do cliente</div>
+          <div style={{fontSize:12,color:T.t3,lineHeight:1.5,margin:"4px 0 12px"}}>E-mail de acesso do cliente. Com o acesso ligado, essa conta Google entra no Hub e vê somente o Painel do Cliente: patrimônio, controle do mês e a sugestão de aporte. Não vê outros clientes, menus internos nem o financeiro da empresa.</div>
+          <div style={lab}>E-MAIL DE ACESSO DO CLIENTE</div>
+          <input id="cv-email-acesso" value={email} onChange={function(e){sEmail(e.target.value)}} placeholder="nome@gmail.com" inputMode="email" autoComplete="off" style={campo}/>
+          <label style={{display:"flex",alignItems:"center",gap:8,marginTop:12,fontSize:13,color:T.t1,fontWeight:700,cursor:"pointer"}}>
+            <input id="cv-acesso-ativo" type="checkbox" checked={!!ativo} onChange={function(e){sAtivo(e.target.checked)}}/>
+            Liberar o Painel do Cliente
+          </label>
+          <div style={{fontSize:11,color:T.t3,marginTop:6}}>{c.acessoClienteAtivo&&c.emailAcesso?"Status atual: ligado para "+c.emailAcesso:"Status atual: desligado"}</div>
+          <div style={{marginTop:12}}><Bt onClick={salvarAcesso}>Salvar acesso</Bt></div>
+        </div>
+      </Cd>
+
+      <Cd style={{padding:16}} hov={false}>
+        <div style={{fontSize:15,fontWeight:800,color:T.t1}}>Controle financeiro</div>
+        <div style={{fontSize:12,color:T.t3,lineHeight:1.5,margin:"4px 0 12px"}}>Importe o CSV do Meuvista deste mês. O extrato e o orçamento podem vir em qualquer ordem. Guardamos só os totais e as categorias. Descrição de lançamento (onde aparece CPF e nome de terceiro) não é gravada.</div>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <div style={{flex:"1 1 160px"}}>
+            <div style={lab}>MÊS</div>
+            <input id="cv-mes-controle" type="month" value={ym} onChange={function(e){sYm(e.target.value||ymHoje)}} style={campo}/>
+          </div>
+          <div style={{flex:"1 1 160px"}}>
+            <div style={lab}>RESERVA MÍNIMA (R$)</div>
+            <input id="cv-reserva" value={reservaTxt} onChange={function(e){sReservaTxt(e.target.value)}} onBlur={salvarReserva} placeholder="0,00" inputMode="decimal" style={campo}/>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:12}}>
+          <input id="cv-imp-extrato" type="file" accept=".csv,text/csv" style={{display:"none"}} onChange={function(e){var f=e.target.files&&e.target.files[0];e.target.value="";if(f)lerArquivo(f,"extrato");}}/>
+          <input id="cv-imp-orcamento" type="file" accept=".csv,text/csv" style={{display:"none"}} onChange={function(e){var f=e.target.files&&e.target.files[0];e.target.value="";if(f)lerArquivo(f,"orcamento");}}/>
+          <Bt v="secondary" onClick={function(){document.getElementById("cv-imp-extrato").click()}}>Importar extrato CSV</Bt>
+          <Bt v="secondary" onClick={function(){document.getElementById("cv-imp-orcamento").click()}}>Importar orçamento CSV</Bt>
+        </div>
+        {msg&&<div style={{marginTop:12,padding:"10px 12px",borderRadius:10,background:T.w3,fontSize:12,color:T.t1,lineHeight:1.45}}>{msg}</div>}
+      </Cd>
+
+      <div id="cv-controle-resumo">
+      {!mes&&<Cd style={{padding:18}} hov={false}><div style={{fontSize:13,color:T.t3}}>Nenhum mês gravado ainda. Escolha o mês e importe os dois CSVs do Meuvista.</div></Cd>}
+      {mes&&<Cd style={{padding:16}} hov={false}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap",marginBottom:10}}>
+          <div style={{fontSize:14,fontWeight:800}}>{PC?PC.rotuloMes(ym):ym}</div>
+          <div style={{fontSize:11,color:T.t3}}>{mes.fonte||"Meuvista"}{mes.atualizadoEm?" · atualizado "+new Date(mes.atualizadoEm).toLocaleString("pt-BR"):""}</div>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {kpi("RECEITAS",mes.receitas&&mes.receitas.realizado,mes.receitas&&mes.receitas.estimado)}
+          {kpi("DESPESAS",mes.despesas&&mes.despesas.realizado,mes.despesas&&mes.despesas.estimado)}
+          {kpi("SALDO DO MÊS",mes.saldoRealizado,mes.saldoEstimado)}
+        </div>
+        {mes.saldoEstimado!=null&&<div style={{fontSize:11,color:T.t3,marginTop:8}}>Saldo estimado do orçamento (receita orçada − despesa orçada): {fm(mes.saldoEstimado)}. A sugestão de aporte usa o saldo realizado, não este número.</div>}
+        {mes.divergencia&&<div style={{marginTop:8,fontSize:12,color:T.orange,lineHeight:1.45}}>O extrato e o orçamento não fecharam. Extrato {fm(mes.divergencia.receitasExtrato)} / {fm(mes.divergencia.despesasExtrato)}. Orçamento {fm(mes.divergencia.receitasOrcamento)} / {fm(mes.divergencia.despesasOrcamento)}. Os totais da tela seguem o orçamento.</div>}
+        {(mes.categorias||[]).length>0&&<div style={{marginTop:14,overflowX:"auto"}}>
+          <div style={{fontSize:12,fontWeight:800,marginBottom:6}}>Categorias · estimado x realizado</div>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+            <thead><tr style={{textAlign:"left",color:T.t3,fontSize:10}}>
+              <th style={{padding:"6px 4px"}}>Categoria</th><th style={{padding:"6px 4px",textAlign:"right"}}>Estimado</th><th style={{padding:"6px 4px",textAlign:"right"}}>Realizado</th>
+            </tr></thead>
+            <tbody>
+              {(mes.categorias||[]).map(function(cat,i){return <tr key={cat.nome+i} style={{borderTop:"1px solid "+T.bdrL}}>
+                <td style={{padding:"6px 4px"}}>{cat.nome}</td>
+                <td style={{padding:"6px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace"}}>{cat.estimado==null?"—":fm(cat.estimado)}</td>
+                <td style={{padding:"6px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace"}}>{fm(cat.realizado||0)}</td>
+              </tr>;})}
+            </tbody>
+          </table>
+        </div>}
+      </Cd>}
+      </div>
+
+      <Cd style={{padding:16}} hov={false}>
+        <div style={{fontSize:14,fontWeight:800,marginBottom:4}}>Contas previstas até o fim do mês</div>
+        <div style={{fontSize:12,color:T.t3,lineHeight:1.45,marginBottom:10}}>Contas que o time já sabe que vão sair e que não estão no orçamento importado. Use um nome curto. Não cole CPF nem descrição bancária.</div>
+        {(mes&&mes.contasPrevistas||[]).map(function(ct,i){return <div key={i} style={{display:"flex",justifyContent:"space-between",gap:8,padding:"6px 0",borderBottom:"1px solid "+T.bdrL,fontSize:13}}>
+          <span>{ct.rotulo}</span>
+          <span style={{display:"flex",gap:8,alignItems:"center"}}><b style={{fontFamily:"'JetBrains Mono',monospace"}}>{fm(ct.valor||0)}</b><button onClick={function(){delConta(i)}} style={{border:"none",background:"transparent",color:T.t3,cursor:"pointer"}}>✕</button></span>
+        </div>;})}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
+          <input value={contaRot} onChange={function(e){sContaRot(e.target.value)}} placeholder="Ex.: IPVA" style={Object.assign({},campo,{flex:"1 1 140px"})}/>
+          <input value={contaVal} onChange={function(e){sContaVal(e.target.value)}} placeholder="Valor" inputMode="decimal" style={Object.assign({},campo,{flex:"0 1 120px"})}/>
+          <Bt v="secondary" onClick={addConta}>Adicionar</Bt>
+        </div>
+      </Cd>
+
+      <Cd style={{padding:16}} hov={false}>
+        <div style={{fontSize:14,fontWeight:800,marginBottom:4}}>Quanto posso aportar</div>
+        <div style={{fontSize:12,color:T.t3,marginBottom:8}}>A mesma conta que o cliente vê no painel. Serve para aportar com o caixa do mês, sem resgatar investimento.</div>
+        {calc? <BlocoAporte calc={calc}/> : <div style={{fontSize:13,color:T.t3}}>Importe o mês para calcular.</div>}
+      </Cd>
+    </div>
+  );
+}
+
+function PainelCliente(props){
+  var user=props.user;
+  var preview=!!props.preview;
+  var PC=window.PortalCore;
+  const[doc,sDoc]=useState(null);
+  const[erro,sErro]=useState("");
+  const[carregando,sCarregando]=useState(true);
+  const[ym,sYm]=useState("");
+  useEffect(function(){
+    document.body.classList.add("cv-painel-cliente");
+    try{localStorage.removeItem("courinvest_data_v1");localStorage.removeItem("courinvest_pending_v1");}catch(e){}
+    return function(){document.body.classList.remove("cv-painel-cliente");};
+  },[]);
+  useEffect(function(){
+    if(preview){
+      var raw=null;
+      try{raw=JSON.parse(sessionStorage.getItem("cv_portal_demo")||"null");}catch(e){}
+      sDoc(raw);
+      sCarregando(false);
+      if(!raw)sErro("Não há dados de demonstração neste navegador.");
+      else{
+        var ks=Object.keys((raw.meses)||{}).sort();
+        sYm(ks.length?ks[ks.length-1]:"");
+      }
+      return;
+    }
+    var email=String((user&&user.email)||"").trim().toLowerCase();
+    if(!window._fbDB||!email){sErro("Não foi possível abrir o painel.");sCarregando(false);return;}
+    window._fbDB.collection("portalClientes").doc(email).get().then(function(snap){
+      if(!snap.exists){sErro("Seu acesso ainda não foi liberado. Peça à Courinvest para cadastrar "+email+".");sCarregando(false);return;}
+      var data=snap.data()||{};
+      if(!data.acessoAtivo){sErro("O acesso deste e-mail está desligado. Fale com a Courinvest.");sCarregando(false);return;}
+      sDoc(data);
+      var ks=Object.keys(data.meses||{}).sort();
+      sYm(ks.length?ks[ks.length-1]:"");
+      sCarregando(false);
+    }).catch(function(e){
+      var cod=String((e&&e.code)||(e&&e.message)||"");
+      sErro(cod.indexOf("permission")>=0?"Seu acesso ainda não foi liberado para este e-mail.":"Não consegui carregar o painel. Tente de novo em instantes.");
+      sCarregando(false);
+    });
+  },[]);
+  function sair(){
+    try{sessionStorage.removeItem("cv_portal_demo");}catch(e){}
+    if(window._fbAuth)window._fbAuth.signOut();
+    if(preview)window.location.href="./";
+  }
+  var fundo={minHeight:"100vh",background:"#E5E7EB",color:"#111827",fontFamily:"Outfit,system-ui,sans-serif"};
+  var card={background:"#fff",borderRadius:16,padding:16,marginBottom:12,boxShadow:"0 1px 2px rgba(17,24,39,.06)"};
+  if(carregando)return <div style={Object.assign({},fundo,{display:"flex",alignItems:"center",justifyContent:"center"})}><div style={{fontWeight:700,letterSpacing:1,color:"#0F766E"}}>Courinvest · carregando…</div></div>;
+  if(erro||!doc)return <div style={Object.assign({},fundo,{display:"flex",alignItems:"center",justifyContent:"center",padding:24})}>
+    <div style={Object.assign({},card,{maxWidth:420,width:"100%"})}>
+      <div style={{fontSize:12,fontWeight:800,letterSpacing:1.5,color:"#0F766E"}}>COURINVEST</div>
+      <div style={{fontSize:20,fontWeight:800,margin:"8px 0"}}>Painel do Cliente</div>
+      <div style={{fontSize:14,lineHeight:1.5,color:"#374151"}}>{erro||"Sem dados."}</div>
+      <button onClick={sair} style={{marginTop:16,width:"100%",padding:"12px",borderRadius:12,border:"none",background:"#111827",color:"#fff",fontWeight:800,cursor:"pointer"}}>Sair</button>
+    </div>
+  </div>;
+  var pat=doc.patrimonio||{};
+  var mes=ym&&doc.meses?doc.meses[ym]:null;
+  var calc=PC&&mes?PC.calcularAporte(mes,doc.reservaMinima||0):null;
+  var tops=PC&&mes?PC.topCategorias(mes.categorias||[],6):{top:[],outras:null};
+  var mesesKeys=Object.keys(doc.meses||{}).sort();
+  var primeiro=String(doc.nome||"Cliente").split(" ")[0];
+  return (
+    <div style={fundo}>
+      <div style={{maxWidth:480,margin:"0 auto",padding:"18px 16px 36px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div>
+            <div style={{fontSize:11,fontWeight:800,letterSpacing:1.4,color:"#0F766E"}}>COURINVEST · PAINEL</div>
+            <div style={{fontSize:22,fontWeight:800,lineHeight:1.2}}>Olá, {primeiro}</div>
+          </div>
+          <button onClick={sair} style={{padding:"8px 12px",borderRadius:999,border:"1px solid #D1D5DB",background:"#fff",color:"#374151",fontWeight:700,cursor:"pointer"}}>Sair</button>
+        </div>
+        <div style={{fontSize:12,color:"#6B7280",margin:"-6px 0 14px"}}>Somente leitura. Os números são os que a Courinvest publicou para você.</div>
+
+        <div style={card}>
+          <div style={{fontSize:11,fontWeight:700,color:"#6B7280",letterSpacing:.4}}>PATRIMÔNIO</div>
+          <div style={{fontSize:28,fontWeight:800,fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>{fm(pat.total||0)}</div>
+          <div style={{fontSize:12,color:"#6B7280",marginTop:4}}>{pat.dadosAte?("Dados até "+pat.dadosAte.split("-").reverse().join("/")+(pat.fonte?" · "+pat.fonte:"")):"Carteira ainda sem data de referência"}</div>
+          {pat.rentMesPct!=null
+            ? <div style={{marginTop:8,fontSize:14,fontWeight:700,color:pat.rentMesPct>=0?"#15803D":"#B91C1C"}}>Rentabilidade no mês {pat.rentMesPct>=0?"+":""}{String(pat.rentMesPct).replace(".",",")}%{pat.rentEstimado?" (estimada)":""}</div>
+            : <div style={{marginTop:8,fontSize:12,color:"#6B7280"}}>Rentabilidade do mês ainda não publicada.</div>}
+          {(pat.alocacao||[]).length>0&&<div style={{marginTop:12}}>
+            <div style={{display:"flex",height:10,borderRadius:999,overflow:"hidden",background:"#F3F4F6"}}>
+              {(pat.alocacao||[]).map(function(a,i){var cores=["#0F766E","#0369A1","#7C3AED","#B45309","#CA8A04","#BE123C","#4B5563"];return <div key={a.nome} style={{width:a.pct+"%",background:cores[i%cores.length]}}/>;})}
+            </div>
+            {(pat.alocacao||[]).map(function(a){return <div key={a.nome} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"6px 0",borderBottom:"1px solid #F3F4F6"}}>
+              <span>{a.nome}</span><span style={{fontFamily:"'JetBrains Mono',monospace"}}>{String(a.pct).replace(".",",")}% · {fm(a.valor)}</span>
+            </div>;})}
+          </div>}
+        </div>
+
+        <div style={card}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8}}>
+            <div style={{fontSize:15,fontWeight:800}}>Controle do mês</div>
+            {mesesKeys.length>1&&<select value={ym} onChange={function(e){sYm(e.target.value)}} style={{padding:"6px 8px",borderRadius:8,border:"1px solid #E5E7EB"}}>
+              {mesesKeys.map(function(k){return <option key={k} value={k}>{PC?PC.rotuloMes(k):k}</option>;})}
+            </select>}
+          </div>
+          {!mes&&<div style={{fontSize:13,color:"#6B7280"}}>O controle financeiro deste mês ainda não foi publicado.</div>}
+          {mes&&<div>
+            <div style={{fontSize:12,color:"#6B7280",marginBottom:8}}>{PC?PC.rotuloMes(mes.ym):mes.ym} · {mes.fonte||"Meuvista"}</div>
+            <div style={{display:"flex",gap:8}}>
+              {[{l:"Receitas",v:mes.receitas&&mes.receitas.realizado,c:"#15803D"},{l:"Despesas",v:mes.despesas&&mes.despesas.realizado,c:"#B91C1C"},{l:"Saldo",v:mes.saldoRealizado,c:"#0F766E"}].map(function(k){return <div key={k.l} style={{flex:1,background:"#F9FAFB",borderRadius:12,padding:"8px 8px"}}>
+                <div style={{fontSize:10,color:"#6B7280",fontWeight:700}}>{k.l.toUpperCase()}</div>
+                <div style={{fontSize:13,fontWeight:800,color:k.c,fontFamily:"'JetBrains Mono',monospace",marginTop:2}}>{fm(k.v||0)}</div>
+              </div>;})}
+            </div>
+            <div style={{fontSize:11,color:"#6B7280",marginTop:8}}>Estimado: receitas {mes.receitas&&mes.receitas.estimado!=null?fm(mes.receitas.estimado):"—"} · despesas {mes.despesas&&mes.despesas.estimado!=null?fm(mes.despesas.estimado):"—"}{mes.saldoEstimado!=null?" · saldo estimado "+fm(mes.saldoEstimado):""}</div>
+            {tops.top.length>0&&<div style={{marginTop:12}}>
+              <div style={{fontSize:12,fontWeight:800,marginBottom:4}}>Maiores categorias</div>
+              {tops.top.map(function(cat){var base=Math.max(cat.estimado||0,cat.realizado||0,1);var pct=Math.min(100,Math.round((cat.realizado||0)/base*100));return <div key={cat.nome} style={{marginBottom:8}}>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:12,gap:8}}><span>{cat.nome}</span><span style={{fontFamily:"'JetBrains Mono',monospace",whiteSpace:"nowrap"}}>{fm(cat.realizado||0)} <span style={{color:"#6B7280"}}>/ {cat.estimado==null?"—":fm(cat.estimado)}</span></span></div>
+                <div style={{height:6,background:"#F3F4F6",borderRadius:99,marginTop:3}}><div style={{height:"100%",width:pct+"%",background:"#0F766E",borderRadius:99}}/></div>
+              </div>;})}
+              {tops.outras&&<div style={{fontSize:12,color:"#6B7280"}}>Outras {tops.outras.qtd} categorias: {fm(tops.outras.realizado)} realizados</div>}
+            </div>}
+          </div>}
+        </div>
+
+        <div style={Object.assign({},card,{border:"1px solid #99F6E4"})}>
+          <div style={{fontSize:15,fontWeight:800,marginBottom:2}}>Quanto posso aportar</div>
+          <div style={{fontSize:12,color:"#6B7280",marginBottom:8}}>Estimativa para usar o caixa do mês sem precisar resgatar o que já está investido.</div>
+          {calc? <BlocoAporte calc={calc} claro={true}/> : <div style={{fontSize:13,color:"#6B7280"}}>Ainda não há mês publicado para calcular.</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onReportReady,headlessTipoRelatorio}){
   /* Salva d globalmente para acesso em closures como gerarRelatorio */
   window._courinvestData=d;
@@ -10614,7 +10982,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
      Quando headlessTipoRelatorio vem preenchido, essa instância do CD nasce direto na aba
      "relatorio" com autoRelatorio já setado — dispensa esperar o listener de evento
      (courinvest:abrirRelatorio) e evita qualquer corrida de timing no primeiro render. */
-  const[tab,sTab]=useState(function(){if(headlessTipoRelatorio)return "relatorio";if(window._cvAbrirMilhas){window._cvAbrirMilhas=false;return "milhas";}return "geral";});
+  const[tab,sTab]=useState(function(){if(headlessTipoRelatorio)return "relatorio";if(window._cvAbrirMilhas){window._cvAbrirMilhas=false;return "milhas";}if(window._cvFichaDemo==="controle"){window._cvFichaDemo="";return "controle";}return "geral";});
   /* === FIRE: único estado objeto para evitar problemas de inicialização === */
   const[fireParams,sFireParams]=useState({
     idadeAlvo:60,rendaMensal:15000,aporteMensal:5000,
@@ -17987,6 +18355,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
   ];
   /* Planejamento — só pra cliente de Gestão Financeira (vem ANTES de Carteira) */
   if(isFin) tabs.push({id:"plan",l:"📋 Planejamento"});
+  /* v561: controle Meuvista e acesso ao Painel — vale para GP e GF */
+  tabs.push({id:"controle",l:"💰 Controle"});
 
   /* Carteira/Movimentações: sempre visíveis pra cliente de Patrimônio (é o produto dele).
      Cliente só-Financeira (sem Patrimônio) não tem carteira de investimentos pra gerenciar —
@@ -18033,7 +18403,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
     {id:"g_geral",l:"Visão Geral",subs:[_sub("geral","Visão Geral")]},
     {id:"g_carteira",l:"Carteira",subs:[_sub("carteira","📊 Carteira"),_sub("milhas")]},
     {id:"g_mov",l:"Movimentações",subs:[_sub("aportes","💱 Movimentações")]},
-    {id:"g_plan",l:"Planejamento",subs:[_sub("suc"),_sub("fire"),_sub("plan","📋 Plano financeiro"),_sub("familiar","👨‍👩‍👧 Família")]},
+    {id:"g_plan",l:"Planejamento",subs:[_sub("suc"),_sub("fire"),_sub("plan","📋 Plano financeiro"),_sub("familiar","👨‍👩‍👧 Família"),_sub("controle","💰 Controle financeiro")]},
     {id:"g_docs",l:"Documentos",subs:[_sub("contratos"),_sub("relatorio"),_sub("particular"),_sub("cobrancas")]}
   ].map(function(g){return Object.assign({},g,{subs:g.subs.filter(Boolean)})}).filter(function(g){return g.subs.length>0});
   /* ids sem aba própria: "hist" virou bloco da Visão Geral; "rendafixa" é aberto de dentro da Carteira */
@@ -25276,6 +25646,8 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
           })}
         </div>;
       })()}
+
+      {tab==="controle" && <ControleFinanceiroView c={c} dp={dp}/>}
 
       {tab==="particular" && (function(){
         var part=c.particularidades||{fee:{},relatorio:{}};
@@ -38475,14 +38847,7 @@ function LoginScreen(){
     sLoading(true);sError(null);
     var provider=new firebase.auth.GoogleAuthProvider();
     provider.setCustomParameters({prompt:"select_account"});
-    window._fbAuth.signInWithPopup(provider).then(function(result){
-      var email=result.user.email;
-      if(window._fbWhitelist.indexOf(email.toLowerCase())<0){
-        window._fbAuth.signOut();
-        sError("Email "+email+" não autorizado. Use a conta cadastrada.");
-        sLoading(false);
-      }
-    }).catch(function(err){
+    window._fbAuth.signInWithPopup(provider).catch(function(err){
       console.error("Login error:",err);
       sError("Erro ao logar: "+(err.message||err.code||"tente novamente"));
       sLoading(false);
@@ -38493,7 +38858,7 @@ function LoginScreen(){
       <div style={{maxWidth:420,width:"100%",background:T.card,border:"1px solid "+T.bdr,borderRadius:24,padding:"40px 32px",boxShadow:"var(--modal-shadow)",textAlign:"center"}}>
         <div style={{fontSize:36,fontWeight:900,background:T.grd,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",marginBottom:8,letterSpacing:-1}}>Courinvest</div>
         <div style={{fontSize:12,color:T.t3,fontWeight:600,letterSpacing:2,marginBottom:32}}>HUB · CONSULTORIA</div>
-        <div style={{fontSize:14,color:T.t2,marginBottom:24,lineHeight:1.6}}>Faça login com a conta Google autorizada para acessar sua base de clientes.</div>
+        <div style={{fontSize:14,color:T.t2,marginBottom:24,lineHeight:1.6}}>Entre com o Google da consultoria ou com o e-mail liberado no seu Painel do Cliente.</div>
         <button onClick={doLogin} disabled={loading} style={{width:"100%",padding:"14px 20px",borderRadius:14,border:"1px solid "+T.bdr,background:"#fff",color:"#1f1f1f",fontSize:14,fontWeight:700,cursor:loading?"wait":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:10,opacity:loading?.6:1}}>
           <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
           {loading?"Entrando...":"Entrar com Google"}
@@ -41898,24 +42263,32 @@ function VencimentosView({data:d,dispatch:dp,taxasBCB,taxaBCBStatus,onGoClient})
 /* ════════════ FIM VENCIMENTOS DE RENDA FIXA ════════════ */
 
 function AppWithAuth(){
-  var cvPreview=/[?&]preview=553(?:&|$)/.test(typeof location!=="undefined"?location.search:"");
+  var search=typeof location!=="undefined"?location.search:"";
+  if(/[?&]preview=painel(?:&|$)/.test(search)){
+    window._cvPreview=true;
+    return <PainelCliente preview/>;
+  }
+  var cvPreview=/[?&]preview=553(?:&|$)/.test(search);
   if(cvPreview){
     window._cvPreview=true;
-    var abaPrev=(location.search.match(/[?&]aba=([a-zA-Z]+)/)||[])[1];
+    var abaPrev=(search.match(/[?&]aba=([a-zA-Z]+)/)||[])[1];
     if(abaPrev)window._cvPreviewAba=abaPrev;
+    if(/[?&]ficha=controle(?:&|$)/.test(search))window._cvFichaDemo="controle";
     return <App authUser={{email:"preview@courinvest.local",displayName:"Pré-visualização"}} preview={true}/>;
   }
-  const[authUser,sAuthUser]=useState(null);
+  const[sessao,sSessao]=useState(null);
   const[authChecked,sAuthChecked]=useState(false);
   var fbError=window._fbLoadError||!window._fbAuth;
   useEffect(function(){
     if(fbError)return;
     var unsub=window._fbAuth.onAuthStateChanged(function(user){
-      if(user&&window._fbWhitelist.indexOf((user.email||"").toLowerCase())>=0){
-        sAuthUser(user);
+      if(!user){sSessao(null);sAuthChecked(true);return;}
+      var email=(user.email||"").toLowerCase();
+      if(window._fbWhitelist.indexOf(email)>=0){
+        if(window._fbEnsurePersistence)window._fbEnsurePersistence();
+        sSessao({user:user,papel:"admin"});
       }else{
-        sAuthUser(null);
-        if(user)window._fbAuth.signOut();
+        sSessao({user:user,papel:"cliente"});
       }
       sAuthChecked(true);
     });
@@ -41947,8 +42320,9 @@ function AppWithAuth(){
       </div>
     );
   }
-  if(!authUser)return <LoginScreen/>;
-  return <App authUser={authUser}/>;
+  if(!sessao)return <LoginScreen/>;
+  if(sessao.papel==="cliente")return <PainelCliente user={sessao.user}/>;
+  return <App authUser={sessao.user}/>;
 }
 
 /* ============================================================
@@ -42853,6 +43227,7 @@ function cvMontarPreview(){
   };
 }
 function App({authUser,preview}){
+  if(!preview&&window._fbEnsurePersistence)window._fbEnsurePersistence();
   /* === PWA: state pra botão Instalar App ===
      pwaInstallable: true quando o navegador suporta instalação (Chrome/Edge/Android).
      pwaInstalled: true após o usuário instalar — esconde o botão.
@@ -43104,7 +43479,29 @@ function App({authUser,preview}){
     var mainPayload=Object.assign({cl:split.clLight,updated:Date.now()},extras);
     var ops=[mainRef.set(mainPayload)];
     if(Object.keys(split.ativosMap).length>0)ops.push(ativosRef.set(split.ativosMap));
-    return Promise.all(ops);
+    return Promise.all(ops).then(function(res){_publicarPortais(clientes);return res;});
+  };
+  /* v561: grava o resumo de quem tem e-mail de acesso. Falha aqui não desfaz o save do Hub. */
+  var _publicarPortais=function(clientes){
+    if(preview||!window._fbDB||typeof cvProjetarPortal!=="function")return;
+    var col=window._fbDB.collection("portalClientes");
+    (clientes||[]).forEach(function(c){
+      if(!c)return;
+      var email=String(c.emailAcesso||"").trim().toLowerCase();
+      var anterior=String(c.emailAcessoAnterior||"").trim().toLowerCase();
+      if(anterior&&anterior!==email){
+        col.doc(anterior).delete().catch(function(e){console.warn("[Portal] apagar e-mail antigo",e);});
+      }
+      if(!email||email.indexOf("/")>=0)return;
+      var doc=null;
+      try{doc=cvProjetarPortal(c);}catch(e){console.warn("[Portal]",e);return;}
+      if(!doc)return;
+      col.doc(email).set(doc).catch(function(e){
+        var m=String((e&&e.message)||e||"");
+        if(/permission|insufficient|Missing or insufficient/i.test(m))console.warn("[Portal] O Firestore recusou portalClientes. Publique firestore.rules no console Firebase.");
+        else console.warn("[Portal] publicação",c&&c.nome,e);
+      });
+    });
   };
 
   useEffect(function(){
@@ -43374,6 +43771,11 @@ function App({authUser,preview}){
   const[pg,sPg]=useState((preview&&window._cvPreviewAba)||"dashboard");
   const[clFi,sClFi]=useState("patrimonio");
   const[sel,sSel]=useState(null);
+  useEffect(function(){
+    if(!preview||window._cvFichaDemo!=="controle")return;
+    var alvo=(d.cl||[]).find(function(c){return c&&Array.isArray(c.sv)&&c.sv.indexOf("patrimonio")>=0;})||(d.cl||[])[0];
+    if(alvo){sPg("clients");sSel(alvo);}
+  },[]);
   const[col,sCol]=useState(false);
   const[showN,sShowN]=useState(false);
   const[showMenu,sShowMenu]=useState(false);
@@ -43615,7 +44017,7 @@ function App({authUser,preview}){
               </React.Fragment>
             )})}
           </div>
-          {!col && <div style={{padding:14,borderTop:"1px solid var(--wa03)"}}><div style={{padding:16,background:"rgba(var(--gold-rgb),0.04)",borderRadius:14,textAlign:"center",border:"1px solid rgba(var(--gold-rgb),0.06)"}}><div style={{fontSize:9,fontWeight:800,color:T.gold,letterSpacing:3,opacity:.8}}>COURINVEST HUB</div><div style={{fontSize:9,color:T.t3,marginTop:4,letterSpacing:1}}>Premium v3.0</div></div></div>}
+          {!col && <div style={{padding:14,borderTop:"1px solid var(--wa03)"}}><div style={{padding:16,background:"rgba(var(--gold-rgb),0.04)",borderRadius:14,textAlign:"center",border:"1px solid rgba(var(--gold-rgb),0.06)"}}><div style={{fontSize:9,fontWeight:800,color:T.gold,letterSpacing:3,opacity:.8}}>COURINVEST HUB</div><div style={{fontSize:9,color:T.t3,marginTop:4,letterSpacing:.2,lineHeight:1.45}}>v561</div><details style={{marginTop:6,textAlign:"left"}}><summary style={{fontSize:10,color:T.gold,cursor:"pointer",fontWeight:700}}>Novidades</summary><div style={{fontSize:10,color:T.t2,lineHeight:1.45,marginTop:6}}>Controle financeiro na ficha, com os CSVs do Meuvista. Sugestão de aporte a partir do caixa do mês. Painel do Cliente: a pessoa entra com Google e vê só o próprio patrimônio, o mês e a sugestão.</div></details></div></div>}
         </div>
       )}
 
@@ -43957,7 +44359,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '560';
+  var SW_VERSION = '561';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [

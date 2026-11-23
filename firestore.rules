@@ -1,0 +1,93 @@
+rules_version = '2';
+// Courinvest Hub v561
+// O app NÃO publica estas regras sozinho. Igor cola este arquivo no Firebase console
+// (Firestore → Regras) ou roda: firebase deploy --only firestore:rules
+//
+// Por que existe portalClientes: workspaces/main junta todos os clientes, fees e o
+// financeiro da empresa num documento só. Regra de Firestore não consegue liberar
+// "só o meu cliente" dentro de um array. O painel lê exclusivamente
+// portalClientes/{e-mail em minúsculas}, escrito pelo admin.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+    function email() {
+      return request.auth.token.email;
+    }
+    function isAdmin() {
+      return signedIn()
+        && email() is string
+        && email().lower() == "courinvest.67@gmail.com";
+    }
+
+    // Hub inteiro (clientes, fees, financeiro da empresa, ativos). Só o admin.
+    match /workspaces/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Painel do cliente. O id do documento É o e-mail (minúsculas).
+    // get (não list): a pessoa só abre o próprio documento, e só se o acesso estiver ligado.
+    match /portalClientes/{emailId} {
+      allow get: if isAdmin()
+        || (signedIn()
+            && email() is string
+            && email().lower() == emailId
+            && resource.data.acessoAtivo == true);
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /ir_dossies/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /ir_avulsos/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /ir_relatorios/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /ir_relatorios_versoes/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /diagnosticos_convites/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /presence/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /push_tokens/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /push_fila/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    // Formulários públicos: qualquer um CRIA, ninguém lê. O admin lê e atualiza no Hub.
+    match /diagnosticos_publicos/{id} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+    match /diagnosticos_pj_publicos/{id} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+    match /diagnosticos_consultoria_pj_publicos/{id} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+    match /leads_publicos/{id} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+    match /parceiros_pendentes/{id} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Qualquer coleção nova fica fechada até entrar numa regra acima.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
