@@ -133,6 +133,9 @@ html[data-theme="light"] table th{color:var(--t2)}
 @media print{.cv-theme-toggle{display:none!important}}
 /* v561: o Painel do Cliente não mostra o botão de tema do Hub */
 body.cv-painel-cliente .cv-theme-toggle{display:none!important}
+@keyframes cvSubir{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.cv-sobe{animation:cvSubir .5s ease both}
+.cv-barra{height:8px;border-radius:99px;background:#0F766E;transition:width .8s ease}
 /* v551 — tabela de clientes / ações / checklist */
 .cv-cl-table tbody tr{transition:background .15s}
 .cv-cl-table tbody tr:hover,.cv-cl-table tbody tr:focus-visible{background:var(--w3);outline:none}
@@ -10655,7 +10658,7 @@ function BlocoDivisao(props){
       </div>}
       {d.sobra>0&&<div style={{fontSize:12,color:claro?"#6B7280":T.t3,marginTop:4}}>Sobra {fm(d.sobra)} neste mês depois de cobrir o que os objetivos com prazo pedem.</div>}
       {!d.cobre&&d.precisa>0&&<div style={{fontSize:12,color:claro?"#B45309":T.orange,marginTop:4}}>O caixa sugerido não cobre a soma dos aportes mensais. A divisão enche a prioridade 1 primeiro.</div>}
-      <div style={{fontSize:12,color:claro?"#6B7280":T.t3,lineHeight:1.45,marginTop:8}}>A divisão usa a sugestão do mês e o aporte sem rendimento de cada objetivo, na ordem de prioridade. Objetivo sem prazo fica de fora desta conta. Não é garantia.</div>
+      {!props.compacto&&<div style={{fontSize:12,color:claro?"#6B7280":T.t3,lineHeight:1.45,marginTop:8}}>A divisão usa a sugestão do mês e o aporte sem rendimento de cada objetivo, na ordem de prioridade. Objetivo sem prazo fica de fora desta conta.</div>}
     </div>
   );
 }
@@ -10834,13 +10837,13 @@ function BlocoAporte(props){
       {linha("Contas previstas até o fim do mês",calc.contasPrevistas,"−")}
       {linha("Reserva mínima",calc.reservaMinima,"−")}
       {calc.aportesNeutro>0&&linha("Transferências neutras para investimento",calc.aportesNeutro,"−")}
-      <div style={{marginTop:10,paddingTop:10,display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8}}>
+      {!props.compacto&&<div style={{marginTop:10,paddingTop:10,display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8}}>
         <span style={{fontSize:12,fontWeight:800,color:claro?"#0F766E":T.gold,letterSpacing:.2}}>Sugestão para aportar</span>
         <span style={{fontSize:claro?28:22,fontWeight:800,color:claro?"#0F766E":T.gold,fontFamily:"'JetBrains Mono',monospace"}}>{fm(calc.sugerido)}</span>
-      </div>
+      </div>}
       {calc.bruto<0&&<div style={{fontSize:12,color:claro?"#B45309":T.orange,marginTop:4}}>A conta deu negativa ({fm(calc.bruto)}). Mostramos zero para não sugerir resgate.</div>}
       <div style={{fontSize:12,color:claro?"#6B7280":T.t3,lineHeight:1.5,marginTop:8}}>{PC.FORMULA}</div>
-      <div style={{fontSize:12,fontWeight:700,color:claro?"#B45309":T.orange,lineHeight:1.45,marginTop:6}}>Isto não é garantia nem recomendação de investimento. Confira o saldo na conta antes de aportar.</div>
+      {!props.compacto&&<div style={{fontSize:12,fontWeight:700,color:claro?"#B45309":T.orange,lineHeight:1.45,marginTop:6}}>Isto não é garantia nem recomendação de investimento. Confira o saldo na conta antes de aportar.</div>}
       <div style={{marginTop:10,fontSize:12,color:cor,lineHeight:1.5}}>
         {ja
           ? <span>Aportes já identificados neste mês: {calc.aportesDespesa>0?fm(calc.aportesDespesa)+" em despesa de investimento (já entrou no saldo, não descontamos de novo). ":""}{calc.aportesNeutro>0?fm(calc.aportesNeutro)+" em lançamento neutro (descontado acima, porque o saldo do orçamento não tinha visto essa saída). ":""}{calc.aportesHub>0?fm(calc.aportesHub)+" registrados na carteira do Hub.":""}</span>
@@ -10866,6 +10869,7 @@ function ControleFinanceiroView(props){
   const[contaRot,sContaRot]=useState("");
   const[contaVal,sContaVal]=useState("");
   const[msg,sMsg]=useState("");
+  const[previa,sPrevia]=useState(false);
   useEffect(function(){sEmail(c.emailAcesso||"");sAtivo(!!c.acessoClienteAtivo);},[c.emailAcesso,c.acessoClienteAtivo]);
   var mes=(cf.meses||{})[ym]||null;
   var campo={width:"100%",padding:"10px 12px",borderRadius:10,border:"1px solid "+T.bdr,background:T.card,color:T.t1,fontSize:14,outline:"none",boxSizing:"border-box"};
@@ -10937,7 +10941,7 @@ function ControleFinanceiroView(props){
       <Cd style={{padding:16}} hov={false}>
         <div id="cv-controle-acesso">
           <div style={{fontSize:15,fontWeight:800,color:T.t1}}>Acesso do cliente</div>
-          <div style={{fontSize:12,color:T.t3,lineHeight:1.5,margin:"4px 0 12px"}}>E-mail de acesso do cliente. Com o acesso ligado, essa conta Google entra no Hub e vê somente o Painel do Cliente: patrimônio, controle do mês e a sugestão de aporte. Não vê outros clientes, menus internos nem o financeiro da empresa.</div>
+          <div style={{fontSize:12,color:T.t3,lineHeight:1.5,margin:"4px 0 12px"}}>O cliente entra com Google ou recebendo um link no e-mail cadastrado. Com o acesso ligado, essa pessoa vê somente o Painel do Cliente.</div>
           <div style={lab}>E-MAIL DE ACESSO DO CLIENTE</div>
           <input id="cv-email-acesso" value={email} onChange={function(e){sEmail(e.target.value)}} placeholder="nome@gmail.com" inputMode="email" autoComplete="off" style={campo}/>
           <label style={{display:"flex",alignItems:"center",gap:8,marginTop:12,fontSize:13,color:T.t1,fontWeight:700,cursor:"pointer"}}>
@@ -10945,9 +10949,28 @@ function ControleFinanceiroView(props){
             Liberar o Painel do Cliente
           </label>
           <div style={{fontSize:11,color:T.t3,marginTop:6}}>{c.acessoClienteAtivo&&c.emailAcesso?"Status atual: ligado para "+c.emailAcesso:"Status atual: desligado"}</div>
-          <div style={{marginTop:12}}><Bt onClick={salvarAcesso}>Salvar acesso</Bt></div>
+          <div style={{marginTop:12,display:"flex",gap:8,flexWrap:"wrap"}}>
+            <Bt onClick={salvarAcesso}>Salvar acesso</Bt>
+            <Bt v="secondary" id="cv-ver-como-cliente" onClick={function(){sPrevia(true);}}>Ver como o cliente</Bt>
+            <Bt v="secondary" id="cv-copiar-portal" onClick={function(){
+              var path=window.location.pathname||"/";
+              if(/index\.html$/i.test(path))path=path.replace(/index\.html$/i,"");
+              if(path.slice(-1)!=="/")path+="/";
+              var url=window.location.origin+path;
+              var ok=function(){sMsg("Link do painel copiado.");};
+              if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(url).then(ok).catch(function(){sMsg(url);});
+              else sMsg(url);
+            }}>Copiar link do painel</Bt>
+          </div>
         </div>
       </Cd>
+      {previa&&<div style={{position:"fixed",inset:0,zIndex:100000,background:"#E5E7EB",display:"flex",flexDirection:"column"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,padding:"10px 16px",background:"#fff",borderBottom:"1px solid #E5E7EB",fontSize:13,color:"#6B7280"}}>
+          <span>Pré-visualização — assim o cliente vê</span>
+          <button id="cv-fechar-previa" onClick={function(){sPrevia(false);}} style={{padding:"8px 14px",borderRadius:10,border:"1px solid #E5E7EB",background:"#fff",fontWeight:700,cursor:"pointer"}}>Fechar</button>
+        </div>
+        <div style={{flex:1,overflow:"auto"}}><PainelCliente docFixo={cvProjetarPortal(c)} semSair/></div>
+      </div>}
 
       <Cd style={{padding:16}} hov={false}>
         <div style={{fontSize:15,fontWeight:800,color:T.t1}}>Controle financeiro</div>
@@ -11029,6 +11052,142 @@ function ControleFinanceiroView(props){
   );
 }
 
+var CV_EMAIL_LINK_KEY="cv_email_link";
+var CV_WA_COURINVEST="5532988414085";
+function cvUrlPortal(){
+  var path=window.location.pathname||"/";
+  if(/index\.html$/i.test(path))path=path.replace(/index\.html$/i,"");
+  if(path.slice(-1)!=="/")path+="/";
+  return window.location.origin+path;
+}
+function cvMsgLink(err){
+  var cod=String((err&&err.code)||"");
+  if(cod==="auth/expired-action-code")return "Este link expirou. Peça um novo no botão abaixo.";
+  if(cod==="auth/invalid-action-code")return "Este link já foi usado ou não é válido. Peça um novo.";
+  if(cod==="auth/invalid-email")return "Esse e-mail não parece válido.";
+  if(cod==="auth/operation-not-allowed")return "O acesso por link ainda não foi ligado no Firebase. Avise a Courinvest.";
+  if(cod==="auth/missing-email")return "Informe o mesmo e-mail que recebeu o link.";
+  return "Não consegui entrar com este link. Peça um novo e abra neste aparelho.";
+}
+function cvEmailValido(v){
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v||"").trim());
+}
+function CvSplash(){
+  useEffect(function(){
+    document.body.classList.add("cv-painel-cliente");
+    return function(){document.body.classList.remove("cv-painel-cliente");};
+  },[]);
+  return (
+    <div id="cv-splash" style={{minHeight:"100vh",background:"#E5E7EB",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <img src={COURINVEST_ICON_URI} alt="Courinvest" style={{width:96,height:96,objectFit:"contain"}}/>
+    </div>
+  );
+}
+function cvPortalDemoAna(){
+  return {
+    acessoAtivo:true,
+    email:"ana@exemplo.com",
+    nome:"Ana Martins",
+    atualizadoEm:"2026-11-23T15:00:00.000Z",
+    patrimonio:{
+      total:400000,
+      dadosAte:"2026-10-31",
+      fonte:"Demonstração",
+      rentMesPct:1.2,
+      rentEstimado:false,
+      alocacao:[
+        {nome:"Renda Fixa",valor:230000,pct:57.5},
+        {nome:"Renda Variável",valor:45000,pct:11.3},
+        {nome:"Exterior",valor:90000,pct:22.5},
+        {nome:"Caixa",valor:35000,pct:8.8}
+      ]
+    },
+    reservaMinima:0,
+    taxaMensalEstimada:0.9,
+    meses:{"2026-11":{
+      ym:"2026-11",fonte:"Demonstração",atualizadoEm:"2026-11-23T15:00:00.000Z",
+      receitas:{estimado:11000,realizado:12500},
+      despesas:{estimado:9000,realizado:7200},
+      saldoRealizado:5300,saldoEstimado:2000,
+      categorias:[
+        {nome:"Moradia",estimado:3500,realizado:3200},
+        {nome:"Alimentação",estimado:1800,realizado:1400},
+        {nome:"Lazer",estimado:900,realizado:800},
+        {nome:"Transporte",estimado:700,realizado:700},
+        {nome:"Educação",estimado:1600,realizado:600},
+        {nome:"Saúde",estimado:500,realizado:500}
+      ],
+      contasPrevistas:[],aportesDespesa:0,aportesNeutro:0,aportesHub:0
+    }},
+    objetivos:[
+      {id:"demo-res",nome:"Reserva de emergência",icone:"🛟",cor:"#0F766E",prioridade:1,alvo:120000,atual:80000,falta:40000,progresso:66.7,semPrazo:true,mesesRestantes:null,aporteMensal:0,aporteComTaxa:null,vinculos:[{nome:"CDB exemplo",pct:100,valor:80000,ausente:false}]},
+      {id:"demo-via",nome:"Viagem",icone:"✈️",cor:"#0369A1",prioridade:2,alvo:120000,atual:75000,falta:45000,progresso:62.5,semPrazo:false,mesesRestantes:24,aporteMensal:1875,aporteComTaxa:1013.18,vinculos:[{nome:"Tesouro exemplo",pct:50,valor:75000,ausente:false}]}
+    ],
+    formulaAporteObjetivo:"aporte mensal sem rendimento = (valor-alvo − valor atual) ÷ meses restantes"
+  };
+}
+
+function LoginScreen(props){
+  props=props||{};
+  const[loading,sLoading]=useState(false);
+  const[error,sError]=useState(props.erroExterno||null);
+  const[email,sEmail]=useState("");
+  const[enviado,sEnviado]=useState(!!props.enviadoInicial);
+  useEffect(function(){document.body.classList.add("cv-painel-cliente");return function(){document.body.classList.remove("cv-painel-cliente");};},[]);
+  useEffect(function(){if(props.erroExterno)sError(props.erroExterno);},[props.erroExterno]);
+  var campo={width:"100%",padding:"14px 16px",borderRadius:14,border:"1px solid #E5E7EB",background:"#F9FAFB",color:"#111827",fontSize:15,outline:"none",boxSizing:"border-box"};
+  var doGoogle=function(){
+    if(props.preview)return;
+    sLoading(true);sError(null);
+    var provider=new firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({prompt:"select_account"});
+    window._fbAuth.signInWithPopup(provider).catch(function(err){
+      sError("Não consegui entrar com o Google. Tente de novo.");
+      sLoading(false);
+      console.error("Login error:",err);
+    });
+  };
+  var doLink=function(){
+    var em=String(email||"").trim().toLowerCase();
+    if(!cvEmailValido(em)){sError("Digite o e-mail completo, como nome@provedor.com.");return;}
+    if(props.preview){sEnviado(true);sError(null);return;}
+    if(!window._fbAuth||!window._fbAuth.sendSignInLinkToEmail){sError("O acesso por link não está disponível neste navegador.");return;}
+    sLoading(true);sError(null);
+    window._fbAuth.sendSignInLinkToEmail(em,{url:cvUrlPortal(),handleCodeInApp:true}).then(function(){
+      try{localStorage.setItem(CV_EMAIL_LINK_KEY,em);}catch(e){}
+      sEnviado(true);sLoading(false);
+    }).catch(function(err){
+      sError(cvMsgLink(err));sLoading(false);
+    });
+  };
+  var doCompletar=function(){
+    var em=String(email||"").trim().toLowerCase();
+    if(!cvEmailValido(em)){sError("Informe o mesmo e-mail que recebeu o link.");return;}
+    if(props.onCompletar){sLoading(true);sError(null);props.onCompletar(em);}
+  };
+  return (
+    <div style={{minHeight:"100vh",background:"#E5E7EB",display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"Outfit,system-ui,sans-serif"}}>
+      <div className="cv-sobe" style={{width:"100%",maxWidth:420,background:"#fff",borderRadius:28,padding:"36px 28px",boxShadow:"0 16px 40px rgba(17,24,39,.08)"}}>
+        <img src={COURINVEST_ICON_URI} alt="Courinvest" style={{width:72,height:72,objectFit:"contain",display:"block"}}/>
+        <div style={{fontSize:28,fontWeight:800,color:"#111827",marginTop:10,lineHeight:1.15}}>{props.completar?"Quase lá.":"Olá. Que bom ver você."}</div>
+        <div style={{fontSize:14,color:"#6B7280",lineHeight:1.55,margin:"10px 0 22px"}}>{props.completar?"Este aparelho ainda não guardou o seu e-mail. Digite o mesmo endereço que recebeu o link.":"Seu painel está pronto. Entre com o Google ou receba um link de acesso no seu e-mail."}</div>
+        {!props.completar&&<button id="cv-login-google" onClick={doGoogle} disabled={loading} style={{width:"100%",padding:"14px 16px",borderRadius:14,border:"1px solid #E5E7EB",background:"#fff",color:"#111827",fontSize:15,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
+          <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+          Entrar com Google
+        </button>}
+        {!props.completar&&<div style={{display:"flex",alignItems:"center",gap:10,margin:"18px 0",color:"#9CA3AF",fontSize:12}}><span style={{flex:1,height:1,background:"#E5E7EB"}}/><span>ou pelo e-mail</span><span style={{flex:1,height:1,background:"#E5E7EB"}}/></div>}
+        {!enviado&&<div>
+          <label htmlFor="cv-login-email" style={{display:"block",fontSize:11,fontWeight:700,color:"#6B7280",letterSpacing:.4,marginBottom:6}}>SEU E-MAIL</label>
+          <input id="cv-login-email" value={email} onChange={function(e){sEmail(e.target.value);}} placeholder="ana@exemplo.com" inputMode="email" autoComplete="email" style={campo}/>
+          <button id="cv-login-link" onClick={props.completar?doCompletar:doLink} disabled={loading} style={{width:"100%",marginTop:12,padding:"14px 16px",borderRadius:14,border:"none",background:"#0F766E",color:"#fff",fontSize:15,fontWeight:800,cursor:"pointer"}}>{loading?"Enviando…":(props.completar?"Continuar":"Receber link de acesso")}</button>
+        </div>}
+        {enviado&&<div id="cv-login-enviado" style={{padding:"14px 16px",borderRadius:16,background:"#F0FDFA",color:"#115E59",fontSize:14,lineHeight:1.5}}>Enviamos um link para seu e-mail. Abra-o neste aparelho. Confira o spam/lixo eletrônico.</div>}
+        {error&&<div style={{marginTop:14,padding:"12px 14px",borderRadius:12,background:"#FEF2F2",color:"#B91C1C",fontSize:13,lineHeight:1.45}}>{error}</div>}
+      </div>
+    </div>
+  );
+}
+
 function PainelCliente(props){
   var user=props.user;
   var preview=!!props.preview;
@@ -11037,34 +11196,42 @@ function PainelCliente(props){
   const[erro,sErro]=useState("");
   const[carregando,sCarregando]=useState(true);
   const[ym,sYm]=useState("");
+  const[oculto,sOculto]=useState(false);
+  const[pronto,sPronto]=useState(false);
+  const[largo,sLargo]=useState(typeof window!=="undefined"&&window.innerWidth>=860);
   useEffect(function(){
     document.body.classList.add("cv-painel-cliente");
-    try{localStorage.removeItem("courinvest_data_v1");localStorage.removeItem("courinvest_pending_v1");}catch(e){}
-    return function(){document.body.classList.remove("cv-painel-cliente");};
+    if(!props.docFixo){try{localStorage.removeItem("courinvest_data_v1");localStorage.removeItem("courinvest_pending_v1");}catch(e){}}
+    var t=setTimeout(function(){sPronto(true);},60);
+    var onR=function(){sLargo(window.innerWidth>=860);};
+    window.addEventListener("resize",onR);
+    return function(){clearTimeout(t);window.removeEventListener("resize",onR);document.body.classList.remove("cv-painel-cliente");};
   },[]);
   useEffect(function(){
+    if(props.docFixo){
+      sDoc(props.docFixo);sCarregando(false);
+      var ks0=Object.keys((props.docFixo.meses)||{}).sort();
+      sYm(ks0.length?ks0[ks0.length-1]:"");
+      return;
+    }
     if(preview){
       var raw=null;
       try{raw=JSON.parse(sessionStorage.getItem("cv_portal_demo")||"null");}catch(e){}
-      sDoc(raw);
-      sCarregando(false);
-      if(!raw)sErro("Não há dados de demonstração neste navegador.");
-      else{
-        var ks=Object.keys((raw.meses)||{}).sort();
-        sYm(ks.length?ks[ks.length-1]:"");
-      }
+      if(!raw)raw=cvPortalDemoAna();
+      sDoc(raw);sCarregando(false);
+      var ks=Object.keys((raw.meses)||{}).sort();
+      sYm(ks.length?ks[ks.length-1]:"");
       return;
     }
     var email=String((user&&user.email)||"").trim().toLowerCase();
     if(!window._fbDB||!email){sErro("Acesso não liberado.");sCarregando(false);return;}
-    /* Única leitura do cliente: o próprio documento. Sem workspaces nem outras coleções. */
     window._fbDB.collection("portalClientes").doc(email).get().then(function(snap){
       if(!snap.exists){sErro("Acesso não liberado.");sCarregando(false);return;}
       var data=snap.data()||{};
       if(!data.acessoAtivo){sErro("Acesso não liberado.");sCarregando(false);return;}
       sDoc(data);
-      var ks=Object.keys(data.meses||{}).sort();
-      sYm(ks.length?ks[ks.length-1]:"");
+      var ks2=Object.keys(data.meses||{}).sort();
+      sYm(ks2.length?ks2[ks2.length-1]:"");
       sCarregando(false);
     }).catch(function(e){
       var cod=String((e&&e.code)||"")+" "+String((e&&e.message)||"");
@@ -11077,108 +11244,152 @@ function PainelCliente(props){
     if(window._fbAuth)window._fbAuth.signOut();
     if(preview)window.location.href="./";
   }
+  function money(v){return oculto?"R$ ••••":fm(v||0);}
   var fundo={minHeight:"100vh",background:"#E5E7EB",color:"#111827",fontFamily:"Outfit,system-ui,sans-serif"};
-  var card={background:"#fff",borderRadius:16,padding:16,marginBottom:12,boxShadow:"0 1px 2px rgba(17,24,39,.06)"};
-  if(carregando)return <div style={Object.assign({},fundo,{display:"flex",alignItems:"center",justifyContent:"center"})}><div style={{fontWeight:700,letterSpacing:1,color:"#0F766E"}}>Courinvest · carregando…</div></div>;
+  var card={background:"#fff",borderRadius:22,padding:18,boxShadow:"0 8px 24px rgba(17,24,39,.05)"};
+  if(carregando)return <CvSplash/>;
   if(erro||!doc)return <div style={Object.assign({},fundo,{display:"flex",alignItems:"center",justifyContent:"center",padding:24})}>
-    <div style={Object.assign({},card,{maxWidth:420,width:"100%"})}>
-      <div style={{fontSize:12,fontWeight:800,letterSpacing:1.5,color:"#0F766E"}}>COURINVEST</div>
-      <div style={{fontSize:20,fontWeight:800,margin:"8px 0"}}>Painel do Cliente</div>
-      <div style={{fontSize:14,lineHeight:1.5,color:"#374151"}}>{erro||"Sem dados."}</div>
-      <button onClick={sair} style={{marginTop:16,width:"100%",padding:"12px",borderRadius:12,border:"none",background:"#111827",color:"#fff",fontWeight:800,cursor:"pointer"}}>Sair</button>
+    <div className="cv-sobe" style={Object.assign({},card,{maxWidth:420,width:"100%"})}>
+      <div style={{fontSize:12,fontWeight:800,letterSpacing:2,color:"#0F766E"}}>COURINVEST</div>
+      <div style={{fontSize:24,fontWeight:800,margin:"10px 0 8px"}}>Acesso não liberado</div>
+      <div style={{fontSize:14,lineHeight:1.5,color:"#6B7280"}}>Se você acabou de receber o convite, peça à Courinvest para conferir o e-mail cadastrado.</div>
+      <button onClick={sair} style={{marginTop:18,width:"100%",padding:"12px",borderRadius:14,border:"none",background:"#111827",color:"#fff",fontWeight:800,cursor:"pointer"}}>Sair</button>
     </div>
   </div>;
   var pat=doc.patrimonio||{};
   var mes=ym&&doc.meses?doc.meses[ym]:null;
   var calc=PC&&mes?PC.calcularAporte(mes,doc.reservaMinima||0):null;
-  var tops=PC&&mes?PC.topCategorias(mes.categorias||[],6):{top:[],outras:null};
+  var tops=PC&&mes?PC.topCategorias(mes.categorias||[],5):{top:[],outras:null};
   var mesesKeys=Object.keys(doc.meses||{}).sort();
   var primeiro=String(doc.nome||"Cliente").split(" ")[0];
+  var quando=doc.atualizadoEm?new Date(doc.atualizadoEm):null;
+  var quandoTxt=quando&&!isNaN(quando.getTime())?quando.toLocaleDateString("pt-BR"):"";
+  var coresCat=["#0F766E","#0369A1","#B45309","#7C3AED","#BE123C","#4B5563"];
+  var rosca="conic-gradient(#F3F4F6 0 100%)";
+  if(tops.top.length){
+    var soma=tops.top.reduce(function(s,c){return s+(c.realizado||0);},0)+(tops.outras?tops.outras.realizado:0);
+    var acc=0;var stops=[];
+    tops.top.forEach(function(c,i){var p=soma?(c.realizado||0)/soma*100:0;var a=acc;acc+=p;stops.push(coresCat[i%coresCat.length]+" "+a+"% "+acc+"%");});
+    if(acc<100)stops.push("#E5E7EB "+acc+"% 100%");
+    if(stops.length)rosca="conic-gradient("+stops.join(",")+")";
+  }
+  function anel(pct,cor){
+    var p=Math.max(0,Math.min(100,pct||0));
+    var r=26,c=2*Math.PI*r,off=c*(1-(pronto?p:0)/100);
+    return <svg width="72" height="72" viewBox="0 0 72 72" aria-hidden="true">
+      <circle cx="36" cy="36" r={r} fill="none" stroke="#F3F4F6" strokeWidth="7"/>
+      <circle cx="36" cy="36" r={r} fill="none" stroke={cor||"#0F766E"} strokeWidth="7" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={off} transform="rotate(-90 36 36)" style={{transition:"stroke-dashoffset .9s ease"}}/>
+      <text x="36" y="40" textAnchor="middle" fontSize="11" fontWeight="800" fill="#111827">{String(p).replace(".",",")}%</text>
+    </svg>;
+  }
   return (
-    <div style={fundo}>
-      <div style={{maxWidth:480,margin:"0 auto",padding:"18px 16px 36px"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+    <div id="cv-portal" style={fundo}>
+      <div style={{maxWidth:largo?960:480,margin:"0 auto",padding:"22px 16px 28px"}}>
+        <div className="cv-sobe" style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,marginBottom:16}}>
           <div>
-            <div style={{fontSize:11,fontWeight:800,letterSpacing:1.4,color:"#0F766E"}}>COURINVEST · PAINEL</div>
-            <div style={{fontSize:22,fontWeight:800,lineHeight:1.2}}>Olá, {primeiro}</div>
+            <img src={COURINVEST_ICON_URI} alt="Courinvest" style={{width:36,height:36,objectFit:"contain",display:"block"}}/>
+            <div style={{fontSize:largo?34:28,fontWeight:800,lineHeight:1.1,marginTop:4}}>Olá, {primeiro}</div>
+            <div style={{fontSize:13,color:"#6B7280",marginTop:4}}>{quandoTxt?"Atualizado em "+quandoTxt:"Seus números, no seu ritmo."}</div>
           </div>
-          <button onClick={sair} style={{padding:"8px 12px",borderRadius:999,border:"1px solid #D1D5DB",background:"#fff",color:"#374151",fontWeight:700,cursor:"pointer"}}>Sair</button>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={function(){sOculto(!oculto);}} aria-label={oculto?"Mostrar valores":"Ocultar valores"} style={{height:42,padding:"0 12px",borderRadius:14,border:"1px solid #E5E7EB",background:"#fff",cursor:"pointer",fontWeight:700,color:"#374151"}}>{oculto?"👁 Ver":"👁 Ocultar"}</button>
+            {!props.semSair&&<button onClick={sair} style={{height:42,padding:"0 14px",borderRadius:14,border:"1px solid #E5E7EB",background:"#fff",color:"#374151",fontWeight:700,cursor:"pointer"}}>Sair</button>}
+          </div>
         </div>
-        <div style={{fontSize:12,color:"#6B7280",margin:"-6px 0 14px"}}>Somente leitura. Os números são os que a Courinvest publicou para você.</div>
 
-        <div style={card}>
-          <div style={{fontSize:11,fontWeight:700,color:"#6B7280",letterSpacing:.4}}>PATRIMÔNIO</div>
-          <div style={{fontSize:28,fontWeight:800,fontFamily:"'JetBrains Mono',monospace",marginTop:4}}>{fm(pat.total||0)}</div>
-          <div style={{fontSize:12,color:"#6B7280",marginTop:4}}>{pat.dadosAte?("Dados até "+pat.dadosAte.split("-").reverse().join("/")+(pat.fonte?" · "+pat.fonte:"")):"Carteira ainda sem data de referência"}</div>
-          {pat.rentMesPct!=null
-            ? <div style={{marginTop:8,fontSize:14,fontWeight:700,color:pat.rentMesPct>=0?"#15803D":"#B91C1C"}}>Rentabilidade no mês {pat.rentMesPct>=0?"+":""}{String(pat.rentMesPct).replace(".",",")}%{pat.rentEstimado?" (estimada)":""}</div>
-            : <div style={{marginTop:8,fontSize:12,color:"#6B7280"}}>Rentabilidade do mês ainda não publicada.</div>}
-          {(pat.alocacao||[]).length>0&&<div style={{marginTop:12}}>
-            <div style={{display:"flex",height:10,borderRadius:999,overflow:"hidden",background:"#F3F4F6"}}>
-              {(pat.alocacao||[]).map(function(a,i){var cores=["#0F766E","#0369A1","#7C3AED","#B45309","#CA8A04","#BE123C","#4B5563"];return <div key={a.nome} style={{width:a.pct+"%",background:cores[i%cores.length]}}/>;})}
+        <div className="cv-sobe" style={Object.assign({},card,{marginBottom:12,background:"linear-gradient(160deg,#fff,#F0FDFA)"})}>
+          <div style={{fontSize:12,fontWeight:700,color:"#0F766E",letterSpacing:.3}}>Patrimônio</div>
+          <div style={{fontSize:largo?42:34,fontWeight:800,letterSpacing:-.5,marginTop:4,fontFamily:"'JetBrains Mono',monospace"}}>{money(pat.total||0)}</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginTop:8}}>
+            {pat.rentMesPct!=null?<span style={{padding:"4px 10px",borderRadius:999,background:pat.rentMesPct>=0?"#ECFDF5":"#FEF2F2",color:pat.rentMesPct>=0?"#15803D":"#B91C1C",fontWeight:800,fontSize:13}}>{pat.rentMesPct>=0?"+":""}{String(pat.rentMesPct).replace(".",",")}% no mês</span>:<span style={{fontSize:13,color:"#6B7280"}}>Variação do mês ainda não publicada.</span>}
+            <span style={{fontSize:12,color:"#6B7280"}}>{pat.dadosAte?"Carteira até "+pat.dadosAte.split("-").reverse().join("/"):""}</span>
+          </div>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:largo?"1.15fr .85fr":"1fr",gap:12}}>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div id="cv-painel-aporte" className="cv-sobe" style={Object.assign({},card,{border:"1px solid #99F6E4"})}>
+              <div style={{fontSize:13,fontWeight:800,color:"#0F766E"}}>Quanto você pode investir este mês</div>
+              <div style={{fontSize:32,fontWeight:800,margin:"6px 0",fontFamily:"'JetBrains Mono',monospace",color:"#0F766E"}}>{calc?money(calc.sugerido):"—"}</div>
+              <div style={{fontSize:14,color:"#374151",lineHeight:1.5}}>É o que sobra do caixa deste mês, sem resgatar o que já está investido.</div>
+              <div style={{marginTop:8,fontSize:13,fontWeight:700,color:"#B45309"}}>Isto não é garantia nem recomendação de investimento.</div>
+              {calc&&<details style={{marginTop:10}}>
+                <summary style={{cursor:"pointer",fontSize:13,fontWeight:700,color:"#0F766E"}}>Ver como calculamos</summary>
+                <BlocoAporte calc={calc} claro={true} compacto={true}/>
+                {PC&&<BlocoDivisao claro={true} compacto={true} divisao={PC.dividirAporte(calc.sugerido, doc.objetivos||[])}/>}
+              </details>}
+              {!calc&&<div style={{marginTop:12,padding:16,borderRadius:16,background:"#F9FAFB",color:"#6B7280",fontSize:14}}>Quando a Courinvest publicar o mês, a sugestão aparece aqui.</div>}
             </div>
-            {(pat.alocacao||[]).map(function(a){return <div key={a.nome} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"6px 0",borderBottom:"1px solid #F3F4F6"}}>
-              <span>{a.nome}</span><span style={{fontFamily:"'JetBrains Mono',monospace"}}>{String(a.pct).replace(".",",")}% · {fm(a.valor)}</span>
-            </div>;})}
-          </div>}
-        </div>
 
-        <div style={card}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8}}>
-            <div style={{fontSize:15,fontWeight:800}}>Controle do mês</div>
-            {mesesKeys.length>1&&<select value={ym} onChange={function(e){sYm(e.target.value)}} style={{padding:"6px 8px",borderRadius:8,border:"1px solid #E5E7EB"}}>
-              {mesesKeys.map(function(k){return <option key={k} value={k}>{PC?PC.rotuloMes(k):k}</option>;})}
-            </select>}
+            <div className="cv-sobe" style={card}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                <div style={{fontSize:16,fontWeight:800}}>Seu mês</div>
+                {mesesKeys.length>1&&<select value={ym} onChange={function(e){sYm(e.target.value);}} style={{padding:"6px 8px",borderRadius:10,border:"1px solid #E5E7EB"}}>{mesesKeys.map(function(k){return <option key={k} value={k}>{PC?PC.rotuloMes(k):k}</option>;})}</select>}
+              </div>
+              {!mes&&<div style={{marginTop:12,padding:18,borderRadius:16,background:"#F9FAFB",color:"#6B7280",textAlign:"center"}}>O mês ainda não foi publicado. Quando chegar, receitas e despesas aparecem aqui.</div>}
+              {mes&&<div>
+                <div style={{fontSize:12,color:"#6B7280",margin:"6px 0 10px"}}>{PC?PC.rotuloMes(mes.ym):mes.ym}</div>
+                <div style={{display:"flex",gap:8}}>
+                  {[{l:"Receitas",v:mes.receitas&&mes.receitas.realizado,c:"#15803D"},{l:"Despesas",v:mes.despesas&&mes.despesas.realizado,c:"#B91C1C"},{l:"Saldo",v:mes.saldoRealizado,c:"#0F766E"}].map(function(k){return <div key={k.l} style={{flex:1,background:"#F9FAFB",borderRadius:14,padding:"10px 8px"}}>
+                    <div style={{fontSize:10,color:"#6B7280",fontWeight:700}}>{k.l.toUpperCase()}</div>
+                    <div style={{fontSize:13,fontWeight:800,color:k.c,marginTop:3}}>{money(k.v)}</div>
+                  </div>;})}
+                </div>
+                <div style={{display:"flex",gap:16,alignItems:"center",marginTop:16}}>
+                  <div style={{width:92,height:92,borderRadius:"50%",background:rosca,flexShrink:0,boxShadow:"inset 0 0 0 18px #fff"}}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    {tops.top.map(function(cat,i){var base=Math.max(cat.estimado||0,cat.realizado||0,1);var pct=Math.min(100,Math.round((cat.realizado||0)/base*100));return <div key={cat.nome} style={{marginBottom:8}}>
+                      <div style={{display:"flex",justifyContent:"space-between",fontSize:12,gap:8}}><span><span style={{display:"inline-block",width:8,height:8,borderRadius:99,background:coresCat[i%coresCat.length],marginRight:6}}/>{cat.nome}</span><span style={{whiteSpace:"nowrap",color:"#6B7280"}}>{money(cat.realizado)} / {cat.estimado==null?"—":money(cat.estimado)}</span></div>
+                      <div style={{height:6,background:"#F3F4F6",borderRadius:99,marginTop:3}}><div className="cv-barra" style={{width:(pronto?pct:0)+"%",background:coresCat[i%coresCat.length]}}/></div>
+                    </div>;})}
+                    {tops.outras&&<div style={{fontSize:12,color:"#6B7280"}}>Outras {tops.outras.qtd}: {money(tops.outras.realizado)}</div>}
+                    {!tops.top.length&&<div style={{fontSize:13,color:"#6B7280"}}>As categorias do mês aparecem aqui.</div>}
+                  </div>
+                </div>
+              </div>}
+            </div>
           </div>
-          {!mes&&<div style={{fontSize:13,color:"#6B7280"}}>O controle financeiro deste mês ainda não foi publicado.</div>}
-          {mes&&<div>
-            <div style={{fontSize:12,color:"#6B7280",marginBottom:8}}>{PC?PC.rotuloMes(mes.ym):mes.ym} · {mes.fonte||"Meuvista"}</div>
-            <div style={{display:"flex",gap:8}}>
-              {[{l:"Receitas",v:mes.receitas&&mes.receitas.realizado,c:"#15803D"},{l:"Despesas",v:mes.despesas&&mes.despesas.realizado,c:"#B91C1C"},{l:"Saldo",v:mes.saldoRealizado,c:"#0F766E"}].map(function(k){return <div key={k.l} style={{flex:1,background:"#F9FAFB",borderRadius:12,padding:"8px 8px"}}>
-                <div style={{fontSize:10,color:"#6B7280",fontWeight:700}}>{k.l.toUpperCase()}</div>
-                <div style={{fontSize:13,fontWeight:800,color:k.c,fontFamily:"'JetBrains Mono',monospace",marginTop:2}}>{fm(k.v||0)}</div>
+
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div id="cv-meus-objetivos" className="cv-sobe" style={card}>
+              <div style={{fontSize:16,fontWeight:800}}>Caixinhas</div>
+              <div style={{fontSize:13,color:"#6B7280",margin:"2px 0 8px"}}>Cada objetivo no seu ritmo.</div>
+              {(doc.objetivos||[]).length===0&&<div style={{padding:18,borderRadius:16,background:"#F9FAFB",color:"#6B7280",textAlign:"center"}}>Suas caixinhas aparecem aqui quando a Courinvest publicar os objetivos.</div>}
+              {(doc.objetivos||[]).map(function(g){return <div key={g.id||g.nome} style={{display:"flex",gap:12,padding:"12px 0",borderTop:"1px solid #F3F4F6",alignItems:"center"}}>
+                {anel(g.progresso,g.cor)}
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontWeight:800}}>{g.icone||"🎯"} {g.nome}</div>
+                  <div style={{fontSize:13,color:"#374151",marginTop:2}}>{money(g.atual)} de {money(g.alvo)}</div>
+                  <div style={{fontSize:12,color:"#6B7280",marginTop:2}}>Falta {money(g.falta)} · {g.semPrazo?"sem prazo":g.mesesRestantes+" meses"}</div>
+                  {!g.semPrazo&&<div style={{fontSize:12,color:"#0F766E",fontWeight:700,marginTop:2}}>Sugerido {money(g.aporteMensal)}/mês, sem rendimento</div>}
+                </div>
               </div>;})}
             </div>
-            <div style={{fontSize:11,color:"#6B7280",marginTop:8}}>Estimado: receitas {mes.receitas&&mes.receitas.estimado!=null?fm(mes.receitas.estimado):"—"} · despesas {mes.despesas&&mes.despesas.estimado!=null?fm(mes.despesas.estimado):"—"}{mes.saldoEstimado!=null?" · saldo estimado "+fm(mes.saldoEstimado):""}</div>
-            {tops.top.length>0&&<div style={{marginTop:12}}>
-              <div style={{fontSize:12,fontWeight:800,marginBottom:4}}>Maiores categorias</div>
-              {tops.top.map(function(cat){var base=Math.max(cat.estimado||0,cat.realizado||0,1);var pct=Math.min(100,Math.round((cat.realizado||0)/base*100));return <div key={cat.nome} style={{marginBottom:8}}>
-                <div style={{display:"flex",justifyContent:"space-between",fontSize:12,gap:8}}><span>{cat.nome}</span><span style={{fontFamily:"'JetBrains Mono',monospace",whiteSpace:"nowrap"}}>{fm(cat.realizado||0)} <span style={{color:"#6B7280"}}>/ {cat.estimado==null?"—":fm(cat.estimado)}</span></span></div>
-                <div style={{height:6,background:"#F3F4F6",borderRadius:99,marginTop:3}}><div style={{height:"100%",width:pct+"%",background:"#0F766E",borderRadius:99}}/></div>
-              </div>;})}
-              {tops.outras&&<div style={{fontSize:12,color:"#6B7280"}}>Outras {tops.outras.qtd} categorias: {fm(tops.outras.realizado)} realizados</div>}
-            </div>}
-          </div>}
+
+            <div className="cv-sobe" style={card}>
+              <div style={{fontSize:16,fontWeight:800,marginBottom:10}}>Onde está investido</div>
+              {(pat.alocacao||[]).length===0&&<div style={{padding:16,borderRadius:16,background:"#F9FAFB",color:"#6B7280",textAlign:"center"}}>A alocação aparece quando a carteira for publicada.</div>}
+              {(pat.alocacao||[]).length>0&&<div>
+                <div style={{display:"flex",height:14,borderRadius:99,overflow:"hidden",background:"#F3F4F6"}}>
+                  {(pat.alocacao||[]).map(function(a,i){return <div key={a.nome} className="cv-barra" style={{width:(pronto?a.pct:0)+"%",background:coresCat[i%coresCat.length],height:14,borderRadius:0}}/>;})}
+                </div>
+                {(pat.alocacao||[]).map(function(a,i){return <div key={a.nome} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"8px 0",borderBottom:"1px solid #F3F4F6"}}>
+                  <span><span style={{display:"inline-block",width:8,height:8,borderRadius:99,background:coresCat[i%coresCat.length],marginRight:8}}/>{a.nome}</span>
+                  <span>{String(a.pct).replace(".",",")}% · {money(a.valor)}</span>
+                </div>;})}
+              </div>}
+            </div>
+          </div>
         </div>
 
-        <div id="cv-meus-objetivos" style={card}>
-          <div style={{fontSize:15,fontWeight:800,marginBottom:4}}>Meus objetivos</div>
-          <div style={{fontSize:12,color:"#6B7280",marginBottom:10}}>Caixinhas acompanhadas pela Courinvest. Somente leitura.</div>
-          {(doc.objetivos||[]).length===0&&<div style={{fontSize:13,color:"#6B7280"}}>Nenhum objetivo publicado ainda.</div>}
-          {(doc.objetivos||[]).map(function(g){return <div key={g.id||g.nome} style={{padding:"12px 0",borderTop:"1px solid #F3F4F6"}}>
-            <div style={{display:"flex",gap:8,alignItems:"center"}}><span style={{fontSize:20}}>{g.icone||"🎯"}</span><div style={{fontWeight:800}}>{g.nome}</div></div>
-            <div style={{height:8,borderRadius:99,background:"#F3F4F6",marginTop:8,overflow:"hidden"}}><div style={{height:"100%",width:Math.min(100,g.progresso||0)+"%",background:g.cor||"#0F766E"}}/></div>
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginTop:6,color:"#374151"}}><span>{fm(g.atual||0)} de {fm(g.alvo||0)}</span><b>{String(g.progresso||0).replace(".",",")}%</b></div>
-            <div style={{fontSize:12,color:"#6B7280",marginTop:4}}>Falta {fm(g.falta||0)} · {g.semPrazo?"sem prazo":(g.mesesRestantes+" meses restantes")}</div>
-            {!g.semPrazo&&<div style={{fontSize:12,color:"#111827",marginTop:4}}>Aporte mensal sem rendimento: <b>{fm(g.aporteMensal||0)}</b> = (alvo − atual) ÷ meses.</div>}
-            {!g.semPrazo&&g.aporteComTaxa!=null&&doc.taxaMensalEstimada>0&&<div style={{fontSize:12,color:"#6B7280",marginTop:2}}>Estimativa com {String(doc.taxaMensalEstimada).replace(".",",")}% a.m.: {fm(g.aporteComTaxa)}. Não é promessa de rendimento.</div>}
-            {(g.vinculos||[]).map(function(v,i){return <div key={i} style={{fontSize:12,marginTop:4,color:v.ausente?"#B45309":"#374151"}}>{v.ausente?v.nome+" · ativo não encontrado na última importação":v.nome+" · "+String(v.pct).replace(".",",")+"% · "+fm(v.valor||0)}</div>;})}
-          </div>;})}
-          {doc.formulaAporteObjetivo&&<div style={{fontSize:11,color:"#6B7280",lineHeight:1.4,marginTop:8}}>{doc.formulaAporteObjetivo}</div>}
-        </div>
-
-        <div id="cv-painel-aporte" style={Object.assign({},card,{border:"1px solid #99F6E4"})}>
-          <div style={{fontSize:15,fontWeight:800,marginBottom:2}}>Quanto posso aportar</div>
-          <div style={{fontSize:12,color:"#6B7280",marginBottom:8}}>Estimativa para usar o caixa do mês sem precisar resgatar o que já está investido.</div>
-          {calc? <BlocoAporte calc={calc} claro={true}/> : <div style={{fontSize:13,color:"#6B7280"}}>Ainda não há mês publicado para calcular.</div>}
-          {PC&&<BlocoDivisao claro={true} divisao={PC.dividirAporte(calc?calc.sugerido:0, doc.objetivos||[])}/>}
+        <div style={{marginTop:18,textAlign:"center",fontSize:13,color:"#6B7280"}}>
+          <div>Dúvida sobre os números? Fale com a Courinvest.</div>
+          <a href={"https://wa.me/"+CV_WA_COURINVEST+"?text="+encodeURIComponent("Olá! Estou no meu painel e gostaria de conversar.")} style={{display:"inline-block",marginTop:8,padding:"10px 16px",borderRadius:999,background:"#25D366",color:"#fff",fontWeight:800,textDecoration:"none"}}>WhatsApp</a>
         </div>
       </div>
     </div>
   );
 }
-
-
 function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onReportReady,headlessTipoRelatorio}){
   /* Salva d globalmente para acesso em closures como gerarRelatorio */
   window._courinvestData=d;
@@ -39045,36 +39256,6 @@ const navItems=[{id:"dashboard",l:"Dashboard",i:"◇"},{id:"clients",l:"Clientes
 
 /* ============ AUTH + FIRESTORE SYNC ============ */
 
-function LoginScreen(){
-  const[loading,sLoading]=useState(false);
-  const[error,sError]=useState(null);
-  const doLogin=function(){
-    sLoading(true);sError(null);
-    var provider=new firebase.auth.GoogleAuthProvider();
-    provider.setCustomParameters({prompt:"select_account"});
-    window._fbAuth.signInWithPopup(provider).catch(function(err){
-      console.error("Login error:",err);
-      sError("Erro ao logar: "+(err.message||err.code||"tente novamente"));
-      sLoading(false);
-    });
-  };
-  return (
-    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"radial-gradient(ellipse at top,rgba(var(--gold-rgb),0.08),transparent 60%),"+T.bg,padding:20}}>
-      <div style={{maxWidth:420,width:"100%",background:T.card,border:"1px solid "+T.bdr,borderRadius:24,padding:"40px 32px",boxShadow:"var(--modal-shadow)",textAlign:"center"}}>
-        <div style={{fontSize:36,fontWeight:900,background:T.grd,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",marginBottom:8,letterSpacing:-1}}>Courinvest</div>
-        <div style={{fontSize:12,color:T.t3,fontWeight:600,letterSpacing:2,marginBottom:32}}>HUB · CONSULTORIA</div>
-        <div style={{fontSize:14,color:T.t2,marginBottom:24,lineHeight:1.6}}>Entre com o Google da consultoria ou com o e-mail liberado no seu Painel do Cliente.</div>
-        <button onClick={doLogin} disabled={loading} style={{width:"100%",padding:"14px 20px",borderRadius:14,border:"1px solid "+T.bdr,background:"#fff",color:"#1f1f1f",fontSize:14,fontWeight:700,cursor:loading?"wait":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:10,opacity:loading?.6:1}}>
-          <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
-          {loading?"Entrando...":"Entrar com Google"}
-        </button>
-        {error && <div style={{marginTop:16,padding:"10px 14px",background:T.redD,border:"1px solid "+T.red+"33",borderRadius:10,color:T.red,fontSize:12,fontWeight:600}}>{error}</div>}
-        <div style={{marginTop:24,fontSize:10,color:T.t3}}>🔒 Conexão segura via Google · Dados criptografados</div>
-      </div>
-    </div>
-  );
-}
-
 /* ================================================================
    FISCAL VIEW — Gestão de Notas Fiscais de Serviços
    ================================================================ */
@@ -42469,6 +42650,10 @@ function VencimentosView({data:d,dispatch:dp,taxasBCB,taxaBCBStatus,onGoClient})
 
 function AppWithAuth(){
   var search=typeof location!=="undefined"?location.search:"";
+  if(/[?&]preview=splash(?:&|$)/.test(search))return <CvSplash/>;
+  if(/[?&]preview=login(?:&|$)/.test(search)){
+    return <LoginScreen preview enviadoInicial={/[?&]enviado=1(?:&|$)/.test(search)}/>;
+  }
   if(/[?&]preview=painel(?:&|$)/.test(search)){
     window._cvPreview=true;
     return <PainelCliente preview/>;
@@ -42483,10 +42668,42 @@ function AppWithAuth(){
   }
   const[sessao,sSessao]=useState(null);
   const[authChecked,sAuthChecked]=useState(false);
+  const[linkPedir,sLinkPedir]=useState(false);
+  const[linkErro,sLinkErro]=useState("");
+  const[linkHref,sLinkHref]=useState("");
   var fbError=window._fbLoadError||!window._fbAuth;
+  function concluirLink(email){
+    if(!window._fbAuth||!linkHref)return;
+    window._fbAuth.signInWithEmailLink(String(email||"").trim().toLowerCase(), linkHref).then(function(){
+      try{localStorage.removeItem(CV_EMAIL_LINK_KEY);}catch(e){}
+      sLinkPedir(false);sLinkErro("");
+      history.replaceState({}, document.title, window.location.pathname);
+    }).catch(function(err){
+      sLinkErro(cvMsgLink(err));
+      history.replaceState({}, document.title, window.location.pathname);
+    });
+  }
   useEffect(function(){
     if(fbError)return;
-    var unsub=window._fbAuth.onAuthStateChanged(function(user){
+    var auth=window._fbAuth;
+    var href=window.location.href;
+    var pendente=false;
+    try{pendente=!!(auth.isSignInWithEmailLink&&auth.isSignInWithEmailLink(href));}catch(e){}
+    if(pendente){
+      sLinkHref(href);
+      var salvo="";
+      try{salvo=(localStorage.getItem(CV_EMAIL_LINK_KEY)||"").trim();}catch(e){}
+      if(!salvo)sLinkPedir(true);
+      else auth.signInWithEmailLink(salvo, href).then(function(){
+        try{localStorage.removeItem(CV_EMAIL_LINK_KEY);}catch(e){}
+        history.replaceState({}, document.title, window.location.pathname);
+      }).catch(function(err){
+        sLinkErro(cvMsgLink(err));
+        sLinkPedir(true);
+        history.replaceState({}, document.title, window.location.pathname);
+      });
+    }
+    var unsub=auth.onAuthStateChanged(function(user){
       if(!user){sSessao(null);sAuthChecked(true);return;}
       var email=(user.email||"").toLowerCase();
       if(window._fbWhitelist.indexOf(email)>=0){
@@ -42521,11 +42738,11 @@ function AppWithAuth(){
   if(!authChecked){
     return (
       <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:T.bg}}>
-        <div style={{color:T.gold,fontSize:14,fontWeight:600,letterSpacing:2}}>Courinvest · carregando…</div>
+        <CvSplash/>
       </div>
     );
   }
-  if(!sessao)return <LoginScreen/>;
+  if(!sessao)return <LoginScreen completar={linkPedir} erroExterno={linkErro} onCompletar={concluirLink}/>;
   if(sessao.papel==="cliente")return <PainelCliente user={sessao.user}/>;
   return <App authUser={sessao.user}/>;
 }
@@ -44236,7 +44453,7 @@ function App({authUser,preview}){
               </React.Fragment>
             )})}
           </div>
-          {!col && <div style={{padding:14,borderTop:"1px solid var(--wa03)"}}><div style={{padding:16,background:"rgba(var(--gold-rgb),0.04)",borderRadius:14,textAlign:"center",border:"1px solid rgba(var(--gold-rgb),0.06)"}}><div style={{fontSize:9,fontWeight:800,color:T.gold,letterSpacing:3,opacity:.8}}>COURINVEST HUB</div><div style={{fontSize:9,color:T.t3,marginTop:4,letterSpacing:.2,lineHeight:1.45}}>v561</div><details style={{marginTop:6,textAlign:"left"}}><summary style={{fontSize:10,color:T.gold,cursor:"pointer",fontWeight:700}}>Novidades</summary><div style={{fontSize:10,color:T.t2,lineHeight:1.45,marginTop:6}}>Controle financeiro (Meuvista), sugestão de aporte e objetivos com ativos da carteira. O Painel do Cliente mostra o mês, as caixinhas e a divisão do aporte. Somente leitura.</div></details></div></div>}
+          {!col && <div style={{padding:14,borderTop:"1px solid var(--wa03)"}}><div style={{padding:16,background:"rgba(var(--gold-rgb),0.04)",borderRadius:14,textAlign:"center",border:"1px solid rgba(var(--gold-rgb),0.06)"}}><div style={{fontSize:9,fontWeight:800,color:T.gold,letterSpacing:3,opacity:.8}}>COURINVEST HUB</div><div style={{fontSize:9,color:T.t3,marginTop:4,letterSpacing:.2,lineHeight:1.45}}>v562</div><details style={{marginTop:6,textAlign:"left"}}><summary style={{fontSize:10,color:T.gold,cursor:"pointer",fontWeight:700}}>Novidades</summary><div style={{fontSize:10,color:T.t2,lineHeight:1.45,marginTop:6}}>O cliente também entra por um link no e-mail, sem conta Google. O painel ganhou um visual próprio, feito para o celular.</div></details></div></div>}
         </div>
       )}
 
@@ -44578,7 +44795,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '561';
+  var SW_VERSION = '562';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
