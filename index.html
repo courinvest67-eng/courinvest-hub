@@ -10658,7 +10658,7 @@ function BlocoDivisao(props){
       </div>}
       {d.sobra>0&&<div style={{fontSize:12,color:claro?"#6B7280":T.t3,marginTop:4}}>Sobra {fm(d.sobra)} neste mês depois de cobrir o que os objetivos com prazo pedem.</div>}
       {!d.cobre&&d.precisa>0&&<div style={{fontSize:12,color:claro?"#B45309":T.orange,marginTop:4}}>O caixa sugerido não cobre a soma dos aportes mensais. A divisão enche a prioridade 1 primeiro.</div>}
-      <div style={{fontSize:12,color:claro?"#6B7280":T.t3,lineHeight:1.45,marginTop:8}}>A divisão usa a sugestão do mês e o aporte sem rendimento de cada objetivo, na ordem de prioridade. Objetivo sem prazo fica de fora desta conta. Não é garantia.</div>
+      {!props.compacto&&<div style={{fontSize:12,color:claro?"#6B7280":T.t3,lineHeight:1.45,marginTop:8}}>A divisão usa a sugestão do mês e o aporte sem rendimento de cada objetivo, na ordem de prioridade. Objetivo sem prazo fica de fora desta conta.</div>}
     </div>
   );
 }
@@ -10837,13 +10837,13 @@ function BlocoAporte(props){
       {linha("Contas previstas até o fim do mês",calc.contasPrevistas,"−")}
       {linha("Reserva mínima",calc.reservaMinima,"−")}
       {calc.aportesNeutro>0&&linha("Transferências neutras para investimento",calc.aportesNeutro,"−")}
-      <div style={{marginTop:10,paddingTop:10,display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8}}>
+      {!props.compacto&&<div style={{marginTop:10,paddingTop:10,display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8}}>
         <span style={{fontSize:12,fontWeight:800,color:claro?"#0F766E":T.gold,letterSpacing:.2}}>Sugestão para aportar</span>
         <span style={{fontSize:claro?28:22,fontWeight:800,color:claro?"#0F766E":T.gold,fontFamily:"'JetBrains Mono',monospace"}}>{fm(calc.sugerido)}</span>
-      </div>
+      </div>}
       {calc.bruto<0&&<div style={{fontSize:12,color:claro?"#B45309":T.orange,marginTop:4}}>A conta deu negativa ({fm(calc.bruto)}). Mostramos zero para não sugerir resgate.</div>}
       <div style={{fontSize:12,color:claro?"#6B7280":T.t3,lineHeight:1.5,marginTop:8}}>{PC.FORMULA}</div>
-      <div style={{fontSize:12,fontWeight:700,color:claro?"#B45309":T.orange,lineHeight:1.45,marginTop:6}}>Isto não é garantia nem recomendação de investimento. Confira o saldo na conta antes de aportar.</div>
+      {!props.compacto&&<div style={{fontSize:12,fontWeight:700,color:claro?"#B45309":T.orange,lineHeight:1.45,marginTop:6}}>Isto não é garantia nem recomendação de investimento. Confira o saldo na conta antes de aportar.</div>}
       <div style={{marginTop:10,fontSize:12,color:cor,lineHeight:1.5}}>
         {ja
           ? <span>Aportes já identificados neste mês: {calc.aportesDespesa>0?fm(calc.aportesDespesa)+" em despesa de investimento (já entrou no saldo, não descontamos de novo). ":""}{calc.aportesNeutro>0?fm(calc.aportesNeutro)+" em lançamento neutro (descontado acima, porque o saldo do orçamento não tinha visto essa saída). ":""}{calc.aportesHub>0?fm(calc.aportesHub)+" registrados na carteira do Hub.":""}</span>
@@ -10869,6 +10869,7 @@ function ControleFinanceiroView(props){
   const[contaRot,sContaRot]=useState("");
   const[contaVal,sContaVal]=useState("");
   const[msg,sMsg]=useState("");
+  const[previa,sPrevia]=useState(false);
   useEffect(function(){sEmail(c.emailAcesso||"");sAtivo(!!c.acessoClienteAtivo);},[c.emailAcesso,c.acessoClienteAtivo]);
   var mes=(cf.meses||{})[ym]||null;
   var campo={width:"100%",padding:"10px 12px",borderRadius:10,border:"1px solid "+T.bdr,background:T.card,color:T.t1,fontSize:14,outline:"none",boxSizing:"border-box"};
@@ -10950,6 +10951,7 @@ function ControleFinanceiroView(props){
           <div style={{fontSize:11,color:T.t3,marginTop:6}}>{c.acessoClienteAtivo&&c.emailAcesso?"Status atual: ligado para "+c.emailAcesso:"Status atual: desligado"}</div>
           <div style={{marginTop:12,display:"flex",gap:8,flexWrap:"wrap"}}>
             <Bt onClick={salvarAcesso}>Salvar acesso</Bt>
+            <Bt v="secondary" id="cv-ver-como-cliente" onClick={function(){sPrevia(true);}}>Ver como o cliente</Bt>
             <Bt v="secondary" id="cv-copiar-portal" onClick={function(){
               var path=window.location.pathname||"/";
               if(/index\.html$/i.test(path))path=path.replace(/index\.html$/i,"");
@@ -10962,6 +10964,13 @@ function ControleFinanceiroView(props){
           </div>
         </div>
       </Cd>
+      {previa&&<div style={{position:"fixed",inset:0,zIndex:100000,background:"#E5E7EB",display:"flex",flexDirection:"column"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,padding:"10px 16px",background:"#fff",borderBottom:"1px solid #E5E7EB",fontSize:13,color:"#6B7280"}}>
+          <span>Pré-visualização — assim o cliente vê</span>
+          <button id="cv-fechar-previa" onClick={function(){sPrevia(false);}} style={{padding:"8px 14px",borderRadius:10,border:"1px solid #E5E7EB",background:"#fff",fontWeight:700,cursor:"pointer"}}>Fechar</button>
+        </div>
+        <div style={{flex:1,overflow:"auto"}}><PainelCliente docFixo={cvProjetarPortal(c)} semSair/></div>
+      </div>}
 
       <Cd style={{padding:16}} hov={false}>
         <div style={{fontSize:15,fontWeight:800,color:T.t1}}>Controle financeiro</div>
@@ -11063,6 +11072,17 @@ function cvMsgLink(err){
 function cvEmailValido(v){
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v||"").trim());
 }
+function CvSplash(){
+  useEffect(function(){
+    document.body.classList.add("cv-painel-cliente");
+    return function(){document.body.classList.remove("cv-painel-cliente");};
+  },[]);
+  return (
+    <div id="cv-splash" style={{minHeight:"100vh",background:"#E5E7EB",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <img src={COURINVEST_ICON_URI} alt="Courinvest" style={{width:96,height:96,objectFit:"contain"}}/>
+    </div>
+  );
+}
 function cvPortalDemoAna(){
   return {
     acessoAtivo:true,
@@ -11148,9 +11168,9 @@ function LoginScreen(props){
   return (
     <div style={{minHeight:"100vh",background:"#E5E7EB",display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"Outfit,system-ui,sans-serif"}}>
       <div className="cv-sobe" style={{width:"100%",maxWidth:420,background:"#fff",borderRadius:28,padding:"36px 28px",boxShadow:"0 16px 40px rgba(17,24,39,.08)"}}>
-        <div style={{fontSize:12,fontWeight:800,letterSpacing:2,color:"#0F766E"}}>COURINVEST</div>
+        <img src={COURINVEST_ICON_URI} alt="Courinvest" style={{width:72,height:72,objectFit:"contain",display:"block"}}/>
         <div style={{fontSize:28,fontWeight:800,color:"#111827",marginTop:10,lineHeight:1.15}}>{props.completar?"Quase lá.":"Olá. Que bom ver você."}</div>
-        <div style={{fontSize:14,color:"#6B7280",lineHeight:1.55,margin:"10px 0 22px"}}>{props.completar?"Este aparelho ainda não guardou o seu e-mail. Digite o mesmo endereço que recebeu o link.":"Seu painel está pronto. Entre com o Google ou peça um link no e-mail — o da consultoria e o de quem não tem conta Google."}</div>
+        <div style={{fontSize:14,color:"#6B7280",lineHeight:1.55,margin:"10px 0 22px"}}>{props.completar?"Este aparelho ainda não guardou o seu e-mail. Digite o mesmo endereço que recebeu o link.":"Seu painel está pronto. Entre com o Google ou receba um link de acesso no seu e-mail."}</div>
         {!props.completar&&<button id="cv-login-google" onClick={doGoogle} disabled={loading} style={{width:"100%",padding:"14px 16px",borderRadius:14,border:"1px solid #E5E7EB",background:"#fff",color:"#111827",fontSize:15,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
           <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
           Entrar com Google
@@ -11181,13 +11201,19 @@ function PainelCliente(props){
   const[largo,sLargo]=useState(typeof window!=="undefined"&&window.innerWidth>=860);
   useEffect(function(){
     document.body.classList.add("cv-painel-cliente");
-    try{localStorage.removeItem("courinvest_data_v1");localStorage.removeItem("courinvest_pending_v1");}catch(e){}
+    if(!props.docFixo){try{localStorage.removeItem("courinvest_data_v1");localStorage.removeItem("courinvest_pending_v1");}catch(e){}}
     var t=setTimeout(function(){sPronto(true);},60);
     var onR=function(){sLargo(window.innerWidth>=860);};
     window.addEventListener("resize",onR);
     return function(){clearTimeout(t);window.removeEventListener("resize",onR);document.body.classList.remove("cv-painel-cliente");};
   },[]);
   useEffect(function(){
+    if(props.docFixo){
+      sDoc(props.docFixo);sCarregando(false);
+      var ks0=Object.keys((props.docFixo.meses)||{}).sort();
+      sYm(ks0.length?ks0[ks0.length-1]:"");
+      return;
+    }
     if(preview){
       var raw=null;
       try{raw=JSON.parse(sessionStorage.getItem("cv_portal_demo")||"null");}catch(e){}
@@ -11221,7 +11247,7 @@ function PainelCliente(props){
   function money(v){return oculto?"R$ ••••":fm(v||0);}
   var fundo={minHeight:"100vh",background:"#E5E7EB",color:"#111827",fontFamily:"Outfit,system-ui,sans-serif"};
   var card={background:"#fff",borderRadius:22,padding:18,boxShadow:"0 8px 24px rgba(17,24,39,.05)"};
-  if(carregando)return <div style={Object.assign({},fundo,{display:"flex",alignItems:"center",justifyContent:"center"})}><div style={{fontWeight:800,letterSpacing:1.5,color:"#0F766E"}}>COURINVEST</div></div>;
+  if(carregando)return <CvSplash/>;
   if(erro||!doc)return <div style={Object.assign({},fundo,{display:"flex",alignItems:"center",justifyContent:"center",padding:24})}>
     <div className="cv-sobe" style={Object.assign({},card,{maxWidth:420,width:"100%"})}>
       <div style={{fontSize:12,fontWeight:800,letterSpacing:2,color:"#0F766E"}}>COURINVEST</div>
@@ -11261,13 +11287,13 @@ function PainelCliente(props){
       <div style={{maxWidth:largo?960:480,margin:"0 auto",padding:"22px 16px 28px"}}>
         <div className="cv-sobe" style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,marginBottom:16}}>
           <div>
-            <div style={{fontSize:11,fontWeight:800,letterSpacing:1.6,color:"#0F766E"}}>COURINVEST</div>
+            <img src={COURINVEST_ICON_URI} alt="Courinvest" style={{width:36,height:36,objectFit:"contain",display:"block"}}/>
             <div style={{fontSize:largo?34:28,fontWeight:800,lineHeight:1.1,marginTop:4}}>Olá, {primeiro}</div>
             <div style={{fontSize:13,color:"#6B7280",marginTop:4}}>{quandoTxt?"Atualizado em "+quandoTxt:"Seus números, no seu ritmo."}</div>
           </div>
           <div style={{display:"flex",gap:8}}>
             <button onClick={function(){sOculto(!oculto);}} aria-label={oculto?"Mostrar valores":"Ocultar valores"} style={{height:42,padding:"0 12px",borderRadius:14,border:"1px solid #E5E7EB",background:"#fff",cursor:"pointer",fontWeight:700,color:"#374151"}}>{oculto?"👁 Ver":"👁 Ocultar"}</button>
-            <button onClick={sair} style={{height:42,padding:"0 14px",borderRadius:14,border:"1px solid #E5E7EB",background:"#fff",color:"#374151",fontWeight:700,cursor:"pointer"}}>Sair</button>
+            {!props.semSair&&<button onClick={sair} style={{height:42,padding:"0 14px",borderRadius:14,border:"1px solid #E5E7EB",background:"#fff",color:"#374151",fontWeight:700,cursor:"pointer"}}>Sair</button>}
           </div>
         </div>
 
@@ -11285,11 +11311,14 @@ function PainelCliente(props){
             <div id="cv-painel-aporte" className="cv-sobe" style={Object.assign({},card,{border:"1px solid #99F6E4"})}>
               <div style={{fontSize:13,fontWeight:800,color:"#0F766E"}}>Quanto você pode investir este mês</div>
               <div style={{fontSize:32,fontWeight:800,margin:"6px 0",fontFamily:"'JetBrains Mono',monospace",color:"#0F766E"}}>{calc?money(calc.sugerido):"—"}</div>
-              <div style={{fontSize:14,color:"#374151",lineHeight:1.5}}>É o que sobra do caixa do mês depois das contas que ainda vão sair e da reserva mínima. A ideia é investir sem precisar resgatar o que já está aplicado.</div>
+              <div style={{fontSize:14,color:"#374151",lineHeight:1.5}}>É o que sobra do caixa deste mês, sem resgatar o que já está investido.</div>
               <div style={{marginTop:8,fontSize:13,fontWeight:700,color:"#B45309"}}>Isto não é garantia nem recomendação de investimento.</div>
-              {calc&&<div style={{marginTop:10}}><BlocoAporte calc={calc} claro={true}/></div>}
+              {calc&&<details style={{marginTop:10}}>
+                <summary style={{cursor:"pointer",fontSize:13,fontWeight:700,color:"#0F766E"}}>Ver como calculamos</summary>
+                <BlocoAporte calc={calc} claro={true} compacto={true}/>
+                {PC&&<BlocoDivisao claro={true} compacto={true} divisao={PC.dividirAporte(calc.sugerido, doc.objetivos||[])}/>}
+              </details>}
               {!calc&&<div style={{marginTop:12,padding:16,borderRadius:16,background:"#F9FAFB",color:"#6B7280",fontSize:14}}>Quando a Courinvest publicar o mês, a sugestão aparece aqui.</div>}
-              {PC&&calc&&<BlocoDivisao claro={true} divisao={PC.dividirAporte(calc.sugerido, doc.objetivos||[])}/>}
             </div>
 
             <div className="cv-sobe" style={card}>
@@ -42621,6 +42650,7 @@ function VencimentosView({data:d,dispatch:dp,taxasBCB,taxaBCBStatus,onGoClient})
 
 function AppWithAuth(){
   var search=typeof location!=="undefined"?location.search:"";
+  if(/[?&]preview=splash(?:&|$)/.test(search))return <CvSplash/>;
   if(/[?&]preview=login(?:&|$)/.test(search)){
     return <LoginScreen preview enviadoInicial={/[?&]enviado=1(?:&|$)/.test(search)}/>;
   }
@@ -42708,7 +42738,7 @@ function AppWithAuth(){
   if(!authChecked){
     return (
       <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:T.bg}}>
-        <div style={{color:T.gold,fontSize:14,fontWeight:600,letterSpacing:2}}>Courinvest · carregando…</div>
+        <CvSplash/>
       </div>
     );
   }

@@ -10,4 +10,6 @@ Na ficha, o card de acesso explica as duas formas de entrar e copia o link do pa
 
 ## Painel
 
-O painel do cliente ganhou um visual próprio, no fundo claro da Courinvest: saudação, patrimônio com a variação do mês e um botão para ocultar os valores, a sugestão do mês em destaque, as caixinhas com anel de progresso, o mês com receitas e despesas e um gráfico das categorias, a alocação e o WhatsApp da Courinvest. Continua só leitura, sem fee e sem documento.
+O painel do cliente ganhou um visual próprio, no fundo claro da Courinvest, com a logo original: saudação, patrimônio com a variação do mês e um botão para ocultar os valores, a sugestão do mês em destaque (o cálculo fica em "Ver como calculamos"), as caixinhas com anel de progresso, o mês com receitas e despesas e um gráfico das categorias, a alocação e o WhatsApp da Courinvest. Continua só leitura, sem fee e sem documento.
+
+Na ficha, "Ver como o cliente" abre esse mesmo painel com os dados que iriam para `portalClientes`, mesmo com o acesso desligado e sem e-mail. Nada é gravado. A abertura do app mostra a logo.
