@@ -27,6 +27,8 @@ service cloud.firestore {
     }
 
     // Painel do cliente. O id do documento É o e-mail (minúsculas).
+    // O documento leva patrimônio, resumo do mês e objetivos (nome, alvo, valor
+    // atual, progresso e nome/valor dos ativos vinculados). Sem extrato e sem fee.
     // get (não list): a pessoa só abre o próprio documento, e só se o acesso estiver ligado.
     match /portalClientes/{emailId} {
       allow get: if isAdmin()

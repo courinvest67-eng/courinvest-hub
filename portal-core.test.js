@@ -66,6 +66,59 @@ truth("portal sem financeiro da empresa", JSON.stringify(portal).indexOf("entrad
 eq("alocacao rf", portal.patrimonio.alocacao[0].pct, 60);
 truth("acesso ativo", portal.acessoAtivo === true);
 
+var ativosDemo = [
+  { tk: "CDB BTG 110% CDI", nm: "CDB BTG 110% CDI", posR: 80000 },
+  { tk: "TESOURO SELIC 2029", nm: "Tesouro Selic 2029", posR: 150000 },
+  { tk: "HGLG11", nm: "CSHG Logística", posR: 45000 }
+];
+var reserva = {
+  id: "r1", nome: "Reserva de emergência", alvo: 120000, semPrazo: true, prioridade: 1, modo: "ativos",
+  alocacoes: [
+    { chave: "cdb btg 110% cdi", tk: "CDB BTG 110% CDI", nome: "CDB BTG 110% CDI", pct: 100 },
+    { chave: "lci antiga", tk: "LCI ANTIGA", nome: "LCI Antiga", pct: 100 }
+  ]
+};
+var viagem = {
+  id: "v1", nome: "Viagem", alvo: 120000, prioridade: 2, modo: "ativos", dataAlvo: "2028-11-23",
+  alocacoes: [{ chave: "tesouro selic 2029", tk: "TESOURO SELIC 2029", nome: "Tesouro Selic 2029", pct: 50 }]
+};
+var avR = PC.avaliarObjetivo(reserva, ativosDemo, { hoje: new Date("2026-11-23T12:00:00") });
+eq("reserva progresso", avR.progresso, 66.7);
+eq("reserva atual", avR.atual, 80000);
+eq("reserva falta", avR.falta, 40000);
+truth("reserva sem prazo", avR.semPrazo && avR.aporteMensal === 0);
+truth("lci ausente", avR.vinculos.some(function (v) { return v.ausente && v.nome.indexOf("LCI") >= 0; }));
+var avV = PC.avaliarObjetivo(viagem, ativosDemo, { hoje: new Date("2026-11-23T12:00:00"), taxaMensal: 0.9 });
+eq("viagem atual 50%", avV.atual, 75000);
+eq("viagem meses", avV.mesesRestantes, 24);
+eq("viagem aporte simples", avV.aporteMensal, 1875);
+truth("viagem com taxa menor que o simples", avV.aporteComTaxa > 0 && avV.aporteComTaxa < avV.aporteMensal);
+eq("pct usado no tesouro", PC.pctComprometido([reserva, viagem], "tesouro selic 2029", "v1"), 0);
+eq("pct usado ignorando a viagem", PC.pctComprometido([reserva, viagem], "tesouro selic 2029", "r1"), 50);
+var antigo = { id: "old", modo: "ativos", nome: "Caixa", alvo: 10000, dataAlvo: "2027-11-23", ativosVinculados: ["HGLG11"] };
+eq("legado 100%", PC.avaliarObjetivo(antigo, ativosDemo, { hoje: new Date("2026-11-23T12:00:00") }).atual, 45000);
+eq("media despesas", PC.mediaDespesas({ a: { despesas: { realizado: 1000 } }, b: { despesas: { realizado: 3000 } } }), 2000);
+eq("reserva 6 meses", PC.sugerirAlvoReserva(2000, 6), 12000);
+eq("reserva default 6", PC.sugerirAlvoReserva(2000, 0), 12000);
+var div = PC.dividirAporte(1500, [
+  { nome: "A", prioridade: 1, semPrazo: false, aporteMensal: 1000 },
+  { nome: "B", prioridade: 2, semPrazo: false, aporteMensal: 2000 },
+  { nome: "C", prioridade: 3, semPrazo: true, aporteMensal: 0 }
+]);
+eq("divisao A", div.partes[0].nesteMes, 1000);
+eq("divisao B", div.partes[1].nesteMes, 500);
+eq("divisao precisa", div.precisa, 3000);
+truth("divisao nao cobre", div.cobre === false);
+var comMeta = PC.projetarPortal({
+  id: "c1", nome: "Pessoa Teste", cpf: "123.456.789-00",
+  emailAcesso: "pessoa@example.com", acessoClienteAtivo: true,
+  _ativosImport: ativosDemo, objetivos: [reserva, viagem],
+  controleFinanceiro: { taxaMensalEstimada: 0.9, reservaMinima: 0, meses: {} }
+});
+truth("portal tem objetivo", comMeta.objetivos.length === 2 && comMeta.objetivos[0].nome.indexOf("Reserva") >= 0);
+truth("portal sem cpf no objetivo", !PC.contemDocumento(comMeta.objetivos));
+truth("portal sem instituicao", JSON.stringify(comMeta.objetivos).indexOf("BTG Pactual") < 0);
+
 if (falhas) {
   console.error(falhas + " falha(s)");
   process.exit(1);

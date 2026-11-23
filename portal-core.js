@@ -405,6 +405,184 @@
     return s;
   }
 
+  function chaveAtivo(a) {
+    if (!a) return "";
+    var tk = fold(a.tk || "");
+    var nm = fold(a.nm || a.nome || "");
+    if (tk && tk.length <= 12 && tk.indexOf(" ") < 0) return tk;
+    return nm || tk;
+  }
+
+  function linksDoObjetivo(obj) {
+    obj = obj || {};
+    if (Array.isArray(obj.alocacoes) && obj.alocacoes.length) {
+      return obj.alocacoes.map(function (l) {
+        var pct = +l.pct;
+        if (!isFinite(pct)) pct = 0;
+        pct = Math.max(0, Math.min(100, pct));
+        return {
+          chave: fold(l.chave || l.tk || l.nome),
+          tk: String(l.tk || ""),
+          nome: String(l.nome || l.tk || "Ativo"),
+          pct: round2(pct)
+        };
+      }).filter(function (l) { return l.chave && l.pct > 0; });
+    }
+    return (obj.ativosVinculados || []).map(function (tk) {
+      return { chave: fold(tk), tk: String(tk), nome: String(tk), pct: 100 };
+    }).filter(function (l) { return l.chave; });
+  }
+
+  function valorPosicao(a) {
+    if (!a) return 0;
+    var v = +a.posR;
+    if (!(v > 0)) v = +a.valor;
+    if (!(v > 0)) v = +a.vA;
+    if (!(v > 0)) v = (+a.qtd || 0) * (+a.pa || 0);
+    return round2(v > 0 ? v : 0);
+  }
+
+  function acharAtivo(ativos, link) {
+    var chaves = {};
+    [link.chave, link.tk, link.nome].forEach(function (x) { var f = fold(x); if (f) chaves[f] = 1; });
+    var lista = ativos || [];
+    for (var i = 0; i < lista.length; i++) {
+      var a = lista[i];
+      var candidatos = [chaveAtivo(a), fold(a.tk), fold(a.nm || a.nome)];
+      for (var j = 0; j < candidatos.length; j++) {
+        if (candidatos[j] && chaves[candidatos[j]]) return a;
+      }
+    }
+    return null;
+  }
+
+  function mesesDoObjetivo(obj, hoje) {
+    if (!obj || obj.semPrazo) return null;
+    if (!(obj.dataAlvo) && !(+obj.prazoMeses > 0)) return null;
+    if (obj.dataAlvo) {
+      var bruto = String(obj.dataAlvo).slice(0, 10);
+      var d = new Date(bruto + "T12:00:00");
+      if (isNaN(d.getTime())) return null;
+      var m = (d.getFullYear() - hoje.getFullYear()) * 12 + (d.getMonth() - hoje.getMonth());
+      return Math.max(1, m);
+    }
+    return Math.max(1, Math.round(+obj.prazoMeses));
+  }
+
+  function aporteComTaxa(falta, atual, alvo, meses, taxaPct) {
+    var r = (+taxaPct || 0) / 100;
+    if (!(r > 0) || !(meses > 0) || !(falta > 0)) return null;
+    var cresce = round2((+atual || 0) * Math.pow(1 + r, meses));
+    var buraco = round2((+alvo || 0) - cresce);
+    if (buraco <= 0) return 0;
+    var fator = (Math.pow(1 + r, meses) - 1) / r;
+    if (!(fator > 0)) return null;
+    return round2(buraco / fator);
+  }
+
+  function avaliarObjetivo(obj, ativos, opts) {
+    opts = opts || {};
+    obj = obj || {};
+    var hoje = opts.hoje ? new Date(opts.hoje) : new Date();
+    var links = obj.modo === "manual" ? [] : linksDoObjetivo(obj);
+    var atual = 0;
+    var vinculos = [];
+    if (obj.modo === "manual") atual = round2(+obj.acumuladoManual || 0);
+    else links.forEach(function (l) {
+      var a = acharAtivo(ativos, l);
+      var cheio = a ? valorPosicao(a) : 0;
+      var parte = round2(cheio * l.pct / 100);
+      atual = round2(atual + parte);
+      vinculos.push({
+        nome: (redigir(a ? (a.nm || a.nome || a.tk) : l.nome).slice(0, 80) || "Ativo"),
+        pct: l.pct,
+        valor: parte,
+        ausente: !a
+      });
+    });
+    var alvo = round2(+obj.alvo || 0);
+    var falta = round2(Math.max(0, alvo - atual));
+    var progresso = alvo > 0 ? Math.round(Math.min(100, atual / alvo * 100) * 10) / 10 : 0;
+    var meses = mesesDoObjetivo(obj, hoje);
+    var semPrazo = meses == null;
+    var aporte = !semPrazo && falta > 0 ? round2(falta / meses) : 0;
+    var taxa = opts.taxaMensal != null ? +opts.taxaMensal : 0;
+    var cor = /^#[0-9A-Fa-f]{6}$/.test(obj.cor || "") ? obj.cor : "#0F766E";
+    return {
+      id: String(obj.id || ""),
+      nome: (redigir(obj.nome || "Objetivo").slice(0, 80) || "Objetivo"),
+      icone: String(obj.icone || "🎯").slice(0, 4),
+      cor: cor,
+      prioridade: +obj.prioridade > 0 ? Math.round(+obj.prioridade) : 99,
+      alvo: alvo,
+      atual: atual,
+      falta: falta,
+      progresso: progresso,
+      semPrazo: semPrazo,
+      mesesRestantes: meses,
+      aporteMensal: aporte,
+      aporteComTaxa: aporteComTaxa(falta, atual, alvo, meses, taxa),
+      taxaMensal: taxa > 0 ? round2(taxa) : null,
+      vinculos: vinculos,
+      reserva: fold(obj.nome || "").indexOf("reserva de emerg") >= 0
+    };
+  }
+
+  function pctComprometido(objetivos, chave, ignorarId) {
+    var alvo = fold(chave);
+    if (!alvo) return 0;
+    var s = 0;
+    (objetivos || []).forEach(function (o) {
+      if (ignorarId && o && o.id === ignorarId) return;
+      linksDoObjetivo(o).forEach(function (l) {
+        if (l.chave === alvo || fold(l.tk) === alvo || fold(l.nome) === alvo) s += l.pct;
+      });
+    });
+    return round2(s);
+  }
+
+  function mediaDespesas(meses) {
+    var vals = [];
+    Object.keys(meses || {}).forEach(function (ym) {
+      var d = meses[ym] && meses[ym].despesas && meses[ym].despesas.realizado;
+      if (d > 0) vals.push(d);
+    });
+    if (!vals.length) return null;
+    return round2(vals.reduce(function (a, b) { return a + b; }, 0) / vals.length);
+  }
+
+  function sugerirAlvoReserva(media, nMeses) {
+    var n = +nMeses > 0 ? +nMeses : 6;
+    if (media == null) return null;
+    return round2(media * n);
+  }
+
+  function dividirAporte(sugerido, avaliados) {
+    var caixa = round2(Math.max(0, +sugerido || 0));
+    var lista = (avaliados || []).slice().sort(function (a, b) {
+      return (a.prioridade || 99) - (b.prioridade || 99) || String(a.nome).localeCompare(String(b.nome), "pt-BR");
+    });
+    var precisa = 0;
+    lista.forEach(function (g) { if (!g.semPrazo && g.aporteMensal > 0) precisa = round2(precisa + g.aporteMensal); });
+    var restante = caixa;
+    var partes = lista.map(function (g) {
+      var quer = !g.semPrazo && g.aporteMensal > 0 ? g.aporteMensal : 0;
+      var vai = round2(Math.min(quer, restante));
+      restante = round2(Math.max(0, restante - vai));
+      return { nome: g.nome, prioridade: g.prioridade, precisa: quer, nesteMes: vai, semPrazo: !!g.semPrazo };
+    });
+    return { sugerido: caixa, precisa: precisa, sobra: restante, partes: partes, cobre: caixa + 0.009 >= precisa };
+  }
+
+  function avaliarObjetivos(cliente, opts) {
+    opts = opts || {};
+    var c = cliente || {};
+    var taxa = opts.taxaMensal != null ? opts.taxaMensal : ((c.controleFinanceiro && c.controleFinanceiro.taxaMensalEstimada) || 0);
+    var ativos = opts.ativos || c._ativosImport || [];
+    return (c.objetivos || []).map(function (o) { return avaliarObjetivo(o, ativos, { taxaMensal: taxa, hoje: opts.hoje }); })
+      .sort(function (a, b) { return a.prioridade - b.prioridade || a.nome.localeCompare(b.nome, "pt-BR"); });
+  }
+
   function projetarPortal(cliente, extra) {
     extra = extra || {};
     var c = cliente || {};
@@ -433,7 +611,10 @@
         alocacao: extra.alocacao || alocacaoDeAtivos(c._ativosImport)
       },
       reservaMinima: round2(Math.max(0, +cf.reservaMinima || 0)),
-      meses: meses
+      taxaMensalEstimada: round2(Math.max(0, +cf.taxaMensalEstimada || 0)),
+      meses: meses,
+      objetivos: avaliarObjetivos(c),
+      formulaAporteObjetivo: "aporte mensal sem rendimento = (valor-alvo − valor atual) ÷ meses restantes"
     };
   }
 
@@ -466,6 +647,14 @@
     alocacaoDeAtivos: alocacaoDeAtivos,
     aportesHubNoMes: aportesHubNoMes,
     projetarPortal: projetarPortal,
+    chaveAtivo: chaveAtivo,
+    linksDoObjetivo: linksDoObjetivo,
+    avaliarObjetivo: avaliarObjetivo,
+    avaliarObjetivos: avaliarObjetivos,
+    pctComprometido: pctComprometido,
+    mediaDespesas: mediaDespesas,
+    sugerirAlvoReserva: sugerirAlvoReserva,
+    dividirAporte: dividirAporte,
     rotuloMes: rotuloMes,
     contemDocumento: contemDocumento,
     FORMULA: "saldo realizado do mês − despesas do orçamento que ainda não foram lançadas − contas previstas até o fim do mês − reserva mínima − transferências neutras para investimento. O resultado negativo vira zero. Receita que ainda não entrou não entra na conta."

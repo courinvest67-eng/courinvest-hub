@@ -1704,6 +1704,7 @@ const valorAtivosReserva=function(c){
   if(!c||!c._ativosImport)return 0;
   var objRes=objetivoReservaEmerg(c);
   if(objRes){
+    if(window.PortalCore)return window.PortalCore.avaliarObjetivo(objRes,c._ativosImport).atual||0;
     var tks=objRes.ativosVinculados||[];
     return c._ativosImport.filter(function(a){return tks.indexOf(a.tk)>=0})
       .reduce(function(s,a){return s+(+a.posR||+a.qtd*+a.pa||0)},0);
@@ -10628,6 +10629,188 @@ function CobrancasTab({c,d,dp}){
   );
 }
 
+function BlocoDivisao(props){
+  var d=props.divisao;
+  var claro=!!props.claro;
+  if(!d)return null;
+  var cor=claro?"#374151":T.t2;
+  var forte=claro?"#111827":T.t1;
+  var pedem=d.partes.filter(function(p){return p.precisa>0;});
+  return (
+    <div id={claro?"cv-aporte-objetivos-painel":"cv-aporte-objetivos"} style={{marginTop:14,paddingTop:12,borderTop:claro?"1px solid #E5E7EB":"1px solid "+T.bdrL}}>
+      <div style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:13,color:cor,padding:"4px 0"}}>
+        <span>Sugestão deste mês</span>
+        <b style={{fontFamily:"'JetBrains Mono',monospace",color:forte}}>{fm(d.sugerido||0)}</b>
+      </div>
+      <div style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:13,color:cor,padding:"4px 0"}}>
+        <span>Objetivos pedem por mês, sem rendimento</span>
+        <b style={{fontFamily:"'JetBrains Mono',monospace",color:forte}}>{fm(d.precisa||0)}</b>
+      </div>
+      {pedem.length>0&&<div style={{marginTop:8}}>
+        <div style={{fontSize:12,fontWeight:800,color:claro?"#0F766E":T.gold,marginBottom:4}}>Divisão pela prioridade</div>
+        {pedem.map(function(p){return <div key={p.nome} style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:13,padding:"5px 0",color:cor}}>
+          <span>{p.prioridade+". "+p.nome}</span>
+          <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:forte}}>{fm(p.nesteMes)} <span style={{fontWeight:500,color:claro?"#6B7280":T.t3}}>de {fm(p.precisa)}</span></span>
+        </div>;})}
+      </div>}
+      {d.sobra>0&&<div style={{fontSize:12,color:claro?"#6B7280":T.t3,marginTop:4}}>Sobra {fm(d.sobra)} neste mês depois de cobrir o que os objetivos com prazo pedem.</div>}
+      {!d.cobre&&d.precisa>0&&<div style={{fontSize:12,color:claro?"#B45309":T.orange,marginTop:4}}>O caixa sugerido não cobre a soma dos aportes mensais. A divisão enche a prioridade 1 primeiro.</div>}
+      <div style={{fontSize:12,color:claro?"#6B7280":T.t3,lineHeight:1.45,marginTop:8}}>A divisão usa a sugestão do mês e o aporte sem rendimento de cada objetivo, na ordem de prioridade. Objetivo sem prazo fica de fora desta conta. Não é garantia.</div>
+    </div>
+  );
+}
+
+function ObjetivosAdmin(props){
+  var c=props.c, dp=props.dp;
+  var PC=window.PortalCore;
+  var ativos=c._ativosImport||[];
+  var objetivos=c.objetivos||[];
+  var cf=c.controleFinanceiro||{};
+  var taxa=cf.taxaMensalEstimada||0;
+  const[aberto,sAberto]=useState(function(){var pref=objetivos.filter(function(o){return o.id==="obj_viagem_demo";})[0];return (pref&&pref.id)||(objetivos[0]&&objetivos[0].id)||"";});
+  const[taxaTxt,sTaxaTxt]=useState(taxa?String(taxa).replace(".",","):"");
+  if(!PC)return null;
+  var avaliados=PC.avaliarObjetivos(c);
+  var porId={};
+  avaliados.forEach(function(g){porId[g.id]=g;});
+  var media=PC.mediaDespesas(cf.meses);
+  var campo={width:"100%",padding:"8px 10px",borderRadius:8,border:"1px solid "+T.bdr,background:T.card,color:T.t1,fontSize:13,outline:"none",boxSizing:"border-box"};
+  function gravar(lista){
+    var norm=lista.map(function(o){
+      var links=(o.alocacoes||[]).filter(function(l){return l&&l.pct>0;});
+      return Object.assign({},o,{modo:links.length?"ativos":(o.modo||"ativos"),alocacoes:links,ativosVinculados:links.map(function(l){return l.tk||l.nome;})});
+    });
+    dp({t:"UC",p:{id:c.id,objetivos:norm}});
+  }
+  function patch(id,p){gravar(objetivos.map(function(o){return o.id===id?Object.assign({},o,p):o;}));}
+  function novo(){
+    var id="obj_"+Date.now();
+    var o={id:id,nome:"Novo objetivo",icone:"🎯",cor:"#0F766E",alvo:0,semPrazo:true,prioridade:objetivos.length+1,modo:"ativos",alocacoes:[],mesesCobertura:6};
+    gravar(objetivos.concat([o]));
+    sAberto(id);
+  }
+  function remover(id){if(window.confirm("Excluir este objetivo?"))gravar(objetivos.filter(function(o){return o.id!==id;}));}
+  function mover(id,dir){
+    var ord=objetivos.slice().sort(function(a,b){return (a.prioridade||99)-(b.prioridade||99);});
+    var i=ord.findIndex(function(o){return o.id===id;});
+    var j=i+dir;
+    if(i<0||j<0||j>=ord.length)return;
+    var pa=ord[i].prioridade||i+1, pb=ord[j].prioridade||j+1;
+    gravar(objetivos.map(function(o){
+      if(o.id===ord[i].id)return Object.assign({},o,{prioridade:pb});
+      if(o.id===ord[j].id)return Object.assign({},o,{prioridade:pa});
+      return o;
+    }));
+  }
+  function setLink(obj,ativo,pct){
+    var chave=PC.chaveAtivo(ativo);
+    var livre=Math.max(0,PC.round2(100-PC.pctComprometido(objetivos,chave,obj.id)));
+    var p=Math.max(0,Math.min(livre,+pct||0));
+    var links=(obj.alocacoes||[]).filter(function(l){return PC.fold(l.chave)!==chave&&PC.fold(l.tk)!==chave;});
+    if(p>0)links.push({chave:chave,tk:ativo.tk||"",nome:ativo.nm||ativo.nome||ativo.tk||"Ativo",pct:PC.round2(p)});
+    patch(obj.id,{alocacoes:links,modo:"ativos"});
+  }
+  function tirarLink(obj,chave){
+    patch(obj.id,{alocacoes:(obj.alocacoes||[]).filter(function(l){return PC.fold(l.chave)!==PC.fold(chave)&&PC.fold(l.tk)!==PC.fold(chave);})});
+  }
+  var icones=["🛟","✈️","🏠","🚗","🎓","🎯"];
+  var cores=["#0F766E","#0369A1","#B45309","#7C3AED","#B91C1C","#374151"];
+  return (
+    <Cd style={{padding:16}} hov={false}>
+      <div id="cv-objetivos">
+        <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontSize:15,fontWeight:800}}>Objetivos</div>
+            <div style={{fontSize:12,color:T.t3,lineHeight:1.45,marginTop:2}}>Caixinhas do cliente. O valor atual é a soma dos ativos vinculados vezes o percentual. A soma dos percentuais de um mesmo ativo não passa de 100%.</div>
+          </div>
+          <Bt onClick={novo}>+ Objetivo</Bt>
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"flex-end",marginTop:12,flexWrap:"wrap"}}>
+          <div style={{flex:"1 1 180px"}}>
+            <div style={{fontSize:10,fontWeight:700,color:T.t3,marginBottom:4}}>TAXA MENSAL ESTIMADA (%)</div>
+            <input value={taxaTxt} onChange={function(e){sTaxaTxt(e.target.value);}} onBlur={function(){var n=PC.numPt(taxaTxt);dp({t:"UC",p:{id:c.id,controleFinanceiro:Object.assign({},cf,{taxaMensalEstimada:n>0?n:0})}});}} placeholder="ex.: 0,90" inputMode="decimal" style={campo}/>
+          </div>
+          <div style={{flex:"2 1 220px",fontSize:11,color:T.t3,lineHeight:1.4}}>Usada só na estimativa com rendimento. A divisão do aporte do mês usa a conta sem rendimento: (alvo − atual) ÷ meses.</div>
+        </div>
+        {objetivos.length===0&&<div style={{marginTop:14,fontSize:13,color:T.t3}}>Nenhum objetivo ainda.</div>}
+        {objetivos.slice().sort(function(a,b){return (a.prioridade||99)-(b.prioridade||99);}).map(function(obj){
+          var g=porId[obj.id]||PC.avaliarObjetivo(obj,ativos,{taxaMensal:taxa});
+          var open=aberto===obj.id;
+          var ehReserva=PC.fold(obj.nome||"").indexOf("reserva de emerg")>=0;
+          return (
+            <div key={obj.id} style={{marginTop:12,border:"1px solid "+T.bdrL,borderRadius:12,padding:12}}>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <span style={{fontSize:20}}>{obj.icone||"🎯"}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontWeight:800}}>{obj.prioridade||"—"}. {obj.nome||"Sem nome"}</div>
+                  <div style={{height:8,borderRadius:99,background:T.w3,marginTop:6,overflow:"hidden"}}><div style={{height:"100%",width:Math.min(100,g.progresso)+"%",background:obj.cor||T.gold}}/></div>
+                  <div style={{fontSize:12,color:T.t2,marginTop:4}}>{fm(g.atual)} de {fm(g.alvo)} · {String(g.progresso).replace(".",",")}% · falta {fm(g.falta)}</div>
+                  {g.vinculos.some(function(v){return v.ausente;})&&<div style={{fontSize:12,color:T.orange,marginTop:2}}>Ativo não encontrado na última importação.</div>}
+                </div>
+                <button onClick={function(){mover(obj.id,-1);}} style={{border:"1px solid "+T.bdrL,background:"transparent",borderRadius:8,cursor:"pointer",color:T.t2}}>↑</button>
+                <button onClick={function(){mover(obj.id,1);}} style={{border:"1px solid "+T.bdrL,background:"transparent",borderRadius:8,cursor:"pointer",color:T.t2}}>↓</button>
+                <button onClick={function(){sAberto(open?"":obj.id);}} style={{border:"1px solid "+T.bdrL,background:"transparent",borderRadius:8,cursor:"pointer",color:T.t2,fontWeight:700}}>{open?"Fechar":"Editar"}</button>
+              </div>
+              {open&&<div style={{marginTop:12}}>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
+                  {icones.map(function(ic){return <button key={ic} onClick={function(){patch(obj.id,{icone:ic});}} style={{border:obj.icone===ic?"1.5px solid "+T.gold:"1px solid "+T.bdrL,background:"transparent",borderRadius:8,cursor:"pointer",fontSize:16}}>{ic}</button>;})}
+                  {cores.map(function(cor){return <button key={cor} onClick={function(){patch(obj.id,{cor:cor});}} style={{width:22,height:22,borderRadius:99,background:cor,border:obj.cor===cor?"2px solid "+T.t1:"2px solid transparent",cursor:"pointer"}}/>;})}
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1.4fr .6fr .6fr",gap:8}}>
+                  <input value={obj.nome||""} onChange={function(e){patch(obj.id,{nome:e.target.value});}} placeholder="Nome" style={campo}/>
+                  <input value={obj.alvo||""} onChange={function(e){patch(obj.id,{alvo:+e.target.value||0});}} placeholder="Alvo" inputMode="decimal" style={campo}/>
+                  <input value={obj.prioridade||""} onChange={function(e){patch(obj.id,{prioridade:+e.target.value||1});}} placeholder="Ordem" inputMode="numeric" style={campo}/>
+                </div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8,fontSize:12,color:T.t2}}>
+                  <label><input type="radio" checked={!!obj.semPrazo} onChange={function(){patch(obj.id,{semPrazo:true,dataAlvo:"",prazoMeses:0});}}/> Sem prazo</label>
+                  <label><input type="radio" checked={!obj.semPrazo&&!!obj.dataAlvo} onChange={function(){patch(obj.id,{semPrazo:false,prazoMeses:0,dataAlvo:obj.dataAlvo||new Date().toISOString().slice(0,10)});}}/> Data</label>
+                  <label><input type="radio" checked={!obj.semPrazo&&!obj.dataAlvo&&obj.prazoMeses>0} onChange={function(){patch(obj.id,{semPrazo:false,dataAlvo:"",prazoMeses:obj.prazoMeses||12});}}/> Meses</label>
+                </div>
+                {!obj.semPrazo&&obj.dataAlvo!==undefined&&obj.dataAlvo!==""&&<input type="date" value={String(obj.dataAlvo||"").slice(0,10)} onChange={function(e){patch(obj.id,{dataAlvo:e.target.value,semPrazo:false,prazoMeses:0});}} style={Object.assign({},campo,{marginTop:8})}/>}
+                {!obj.semPrazo&&!(obj.dataAlvo)&&<input value={obj.prazoMeses||""} onChange={function(e){patch(obj.id,{prazoMeses:+e.target.value||0,semPrazo:false,dataAlvo:""});}} placeholder="Meses restantes" inputMode="numeric" style={Object.assign({},campo,{marginTop:8})}/>}
+                {ehReserva&&<div style={{marginTop:10,padding:10,borderRadius:10,background:T.w3}}>
+                  <div style={{fontSize:12,fontWeight:700}}>Sugestão da reserva</div>
+                  <div style={{fontSize:12,color:T.t3,margin:"4px 0 8px"}}>{media!=null?"Média das despesas realizadas importadas: "+fm(media)+".":"Importe o controle financeiro para calcular a média de despesas."} O alvo sugerido é N vezes essa média. Dá para editar depois.</div>
+                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    <input value={obj.mesesCobertura||6} onChange={function(e){patch(obj.id,{mesesCobertura:+e.target.value||6});}} style={Object.assign({},campo,{width:70})}/>
+                    <span style={{fontSize:12,color:T.t2}}>meses</span>
+                    <Bt v="secondary" onClick={function(){var s=PC.sugerirAlvoReserva(media,obj.mesesCobertura||6);if(s==null)return;patch(obj.id,{alvo:s,mesesCobertura:obj.mesesCobertura||6});}}>Usar {obj.mesesCobertura||6} × média</Bt>
+                  </div>
+                </div>}
+                <div style={{marginTop:10,fontSize:12,color:T.t2,lineHeight:1.45}}>
+                  {g.semPrazo?"Sem prazo: o aporte mensal não é calculado.":("Sem rendimento: "+fm(g.aporteMensal)+"/mês = "+fm(g.falta)+" ÷ "+g.mesesRestantes+" meses.")}
+                  {!g.semPrazo&&g.aporteComTaxa!=null&&taxa>0?" Estimativa com "+String(taxa).replace(".",",")+"% a.m.: "+fm(g.aporteComTaxa)+"/mês. O saldo atual e os aportes renderiam essa taxa. É estimativa.":""}
+                </div>
+                <div style={{fontSize:12,fontWeight:800,marginTop:12}}>Vínculo com a carteira</div>
+                {g.vinculos.filter(function(v){return v.ausente;}).map(function(v){return <div key={v.nome} style={{display:"flex",justifyContent:"space-between",gap:8,padding:"6px 0",fontSize:12,color:T.orange}}>
+                  <span>{v.nome} · ativo não encontrado na última importação</span>
+                  <button onClick={function(){var l=(obj.alocacoes||[]).filter(function(x){return x.nome===v.nome;})[0];if(l)tirarLink(obj,l.chave);}} style={{border:"none",background:"transparent",color:T.t3,cursor:"pointer"}}>tirar</button>
+                </div>;})}
+                <div style={{maxHeight:240,overflow:"auto",marginTop:4}}>
+                  {ativos.map(function(a){
+                    var chave=PC.chaveAtivo(a);
+                    var livre=Math.max(0,PC.round2(100-PC.pctComprometido(objetivos,chave,obj.id)));
+                    var atual=(obj.alocacoes||[]).filter(function(l){return PC.fold(l.chave)===chave||PC.fold(l.tk)===chave;})[0];
+                    var valor=PC.round2((a.posR||a.vA||0)*(atual?atual.pct:0)/100);
+                    return <div key={chave} style={{display:"flex",gap:8,alignItems:"center",padding:"6px 0",borderTop:"1px solid "+T.bdrL,fontSize:12}}>
+                      <div style={{flex:1,minWidth:0}}><div style={{fontWeight:700,color:T.t1}}>{a.nm||a.tk}</div><div style={{color:T.t3}}>{fm(a.posR||a.vA||0)} · livre {String(livre).replace(".",",")}%</div></div>
+                      {atual?<input value={atual.pct} onChange={function(e){setLink(obj,a,+e.target.value||0);}} style={Object.assign({},campo,{width:70})}/>:<button disabled={livre<=0} onClick={function(){setLink(obj,a,Math.min(100,livre));}} style={{border:"1px solid "+T.bdrL,background:"transparent",borderRadius:8,padding:"6px 8px",cursor:livre>0?"pointer":"not-allowed",color:T.t2}}>{livre>0?"Vincular":"100% usado"}</button>}
+                      <span style={{width:90,textAlign:"right",fontFamily:"'JetBrains Mono',monospace"}}>{atual?fm(valor):""}</span>
+                    </div>;
+                  })}
+                  {ativos.length===0&&<div style={{fontSize:12,color:T.t3}}>Este cliente ainda não tem carteira importada.</div>}
+                </div>
+                <button onClick={function(){remover(obj.id);}} style={{marginTop:8,border:"none",background:"transparent",color:T.red,cursor:"pointer",fontSize:12}}>Excluir objetivo</button>
+              </div>}
+            </div>
+          );
+        })}
+      </div>
+    </Cd>
+  );
+}
+
+
 function BlocoAporte(props){
   var calc=props.calc;
   var claro=props.claro;
@@ -10834,10 +11017,13 @@ function ControleFinanceiroView(props){
         </div>
       </Cd>
 
+      <ObjetivosAdmin c={c} dp={dp}/>
+
       <Cd style={{padding:16}} hov={false}>
         <div style={{fontSize:14,fontWeight:800,marginBottom:4}}>Quanto posso aportar</div>
         <div style={{fontSize:12,color:T.t3,marginBottom:8}}>A mesma conta que o cliente vê no painel. Serve para aportar com o caixa do mês, sem resgatar investimento.</div>
         {calc? <BlocoAporte calc={calc}/> : <div style={{fontSize:13,color:T.t3}}>Importe o mês para calcular.</div>}
+        {window.PortalCore&&<BlocoDivisao divisao={window.PortalCore.dividirAporte(calc?calc.sugerido:0, window.PortalCore.avaliarObjetivos(c))}/>}
       </Cd>
     </div>
   );
@@ -10964,10 +11150,27 @@ function PainelCliente(props){
           </div>}
         </div>
 
-        <div style={Object.assign({},card,{border:"1px solid #99F6E4"})}>
+        <div id="cv-meus-objetivos" style={card}>
+          <div style={{fontSize:15,fontWeight:800,marginBottom:4}}>Meus objetivos</div>
+          <div style={{fontSize:12,color:"#6B7280",marginBottom:10}}>Caixinhas acompanhadas pela Courinvest. Somente leitura.</div>
+          {(doc.objetivos||[]).length===0&&<div style={{fontSize:13,color:"#6B7280"}}>Nenhum objetivo publicado ainda.</div>}
+          {(doc.objetivos||[]).map(function(g){return <div key={g.id||g.nome} style={{padding:"12px 0",borderTop:"1px solid #F3F4F6"}}>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}><span style={{fontSize:20}}>{g.icone||"🎯"}</span><div style={{fontWeight:800}}>{g.nome}</div></div>
+            <div style={{height:8,borderRadius:99,background:"#F3F4F6",marginTop:8,overflow:"hidden"}}><div style={{height:"100%",width:Math.min(100,g.progresso||0)+"%",background:g.cor||"#0F766E"}}/></div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginTop:6,color:"#374151"}}><span>{fm(g.atual||0)} de {fm(g.alvo||0)}</span><b>{String(g.progresso||0).replace(".",",")}%</b></div>
+            <div style={{fontSize:12,color:"#6B7280",marginTop:4}}>Falta {fm(g.falta||0)} · {g.semPrazo?"sem prazo":(g.mesesRestantes+" meses restantes")}</div>
+            {!g.semPrazo&&<div style={{fontSize:12,color:"#111827",marginTop:4}}>Aporte mensal sem rendimento: <b>{fm(g.aporteMensal||0)}</b> = (alvo − atual) ÷ meses.</div>}
+            {!g.semPrazo&&g.aporteComTaxa!=null&&doc.taxaMensalEstimada>0&&<div style={{fontSize:12,color:"#6B7280",marginTop:2}}>Estimativa com {String(doc.taxaMensalEstimada).replace(".",",")}% a.m.: {fm(g.aporteComTaxa)}. Não é promessa de rendimento.</div>}
+            {(g.vinculos||[]).map(function(v,i){return <div key={i} style={{fontSize:12,marginTop:4,color:v.ausente?"#B45309":"#374151"}}>{v.ausente?v.nome+" · ativo não encontrado na última importação":v.nome+" · "+String(v.pct).replace(".",",")+"% · "+fm(v.valor||0)}</div>;})}
+          </div>;})}
+          {doc.formulaAporteObjetivo&&<div style={{fontSize:11,color:"#6B7280",lineHeight:1.4,marginTop:8}}>{doc.formulaAporteObjetivo}</div>}
+        </div>
+
+        <div id="cv-painel-aporte" style={Object.assign({},card,{border:"1px solid #99F6E4"})}>
           <div style={{fontSize:15,fontWeight:800,marginBottom:2}}>Quanto posso aportar</div>
           <div style={{fontSize:12,color:"#6B7280",marginBottom:8}}>Estimativa para usar o caixa do mês sem precisar resgatar o que já está investido.</div>
           {calc? <BlocoAporte calc={calc} claro={true}/> : <div style={{fontSize:13,color:"#6B7280"}}>Ainda não há mês publicado para calcular.</div>}
+          {PC&&<BlocoDivisao claro={true} divisao={PC.dividirAporte(calc?calc.sugerido:0, doc.objetivos||[])}/>}
         </div>
       </div>
     </div>
@@ -22041,6 +22244,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
             var hojeObj=new Date();
             
             var calcAcumulado=function(obj){
+              if(obj.alocacoes&&obj.alocacoes.length&&window.PortalCore)return window.PortalCore.avaliarObjetivo(obj,enr).atual||0;
               if(obj.modo==="manual")return obj.acumuladoManual||0;
               
               if(!obj.ativosVinculados||obj.ativosVinculados.length===0)return 0;
@@ -43197,6 +43401,20 @@ function cvMontarPreview(){
       {id:"c2",instituicao:"Clear",tipo:"informe",rotulo:"Informe de rendimentos — Clear",origem:"carteira",status:"conferido",nota:""}
     ]}
   };
+  if(/[?&]ficha=controle(?:&|$)/.test(typeof location!=="undefined"?location.search:"")){
+    var dv=new Date(hoje.getFullYear()+2,hoje.getMonth(),hoje.getDate());
+    var isoViagem=dv.getFullYear()+"-"+String(dv.getMonth()+1).padStart(2,"0")+"-"+String(dv.getDate()).padStart(2,"0");
+    ana.objetivos=[
+      {id:"obj_reserva_demo",nome:"Reserva de emergência",icone:"🛟",cor:"#0F766E",alvo:120000,semPrazo:true,prioridade:1,modo:"ativos",mesesCobertura:6,alocacoes:[
+        {chave:"cdb btg 110% cdi",tk:"CDB BTG 110% CDI",nome:"CDB BTG 110% CDI",pct:100},
+        {chave:"lci antiga",tk:"LCI ANTIGA",nome:"LCI Antiga",pct:100}
+      ],ativosVinculados:["CDB BTG 110% CDI","LCI ANTIGA"]},
+      {id:"obj_viagem_demo",nome:"Viagem",icone:"✈️",cor:"#0369A1",alvo:120000,semPrazo:false,prioridade:2,modo:"ativos",dataAlvo:isoViagem,alocacoes:[
+        {chave:"tesouro selic 2029",tk:"TESOURO SELIC 2029",nome:"Tesouro Selic 2029",pct:50}
+      ],ativosVinculados:["TESOURO SELIC 2029"]}
+    ];
+    ana.controleFinanceiro={taxaMensalEstimada:0.9,reservaMinima:0,meses:{}};
+  }
   return {
     cl:[ana,bruno,carla,elena,erika,marcos,paula,allan,erikaL],
     it:[
@@ -44017,7 +44235,7 @@ function App({authUser,preview}){
               </React.Fragment>
             )})}
           </div>
-          {!col && <div style={{padding:14,borderTop:"1px solid var(--wa03)"}}><div style={{padding:16,background:"rgba(var(--gold-rgb),0.04)",borderRadius:14,textAlign:"center",border:"1px solid rgba(var(--gold-rgb),0.06)"}}><div style={{fontSize:9,fontWeight:800,color:T.gold,letterSpacing:3,opacity:.8}}>COURINVEST HUB</div><div style={{fontSize:9,color:T.t3,marginTop:4,letterSpacing:.2,lineHeight:1.45}}>v561</div><details style={{marginTop:6,textAlign:"left"}}><summary style={{fontSize:10,color:T.gold,cursor:"pointer",fontWeight:700}}>Novidades</summary><div style={{fontSize:10,color:T.t2,lineHeight:1.45,marginTop:6}}>Controle financeiro na ficha, com os CSVs do Meuvista. Sugestão de aporte a partir do caixa do mês. Painel do Cliente: a pessoa entra com Google e vê só o próprio patrimônio, o mês e a sugestão.</div></details></div></div>}
+          {!col && <div style={{padding:14,borderTop:"1px solid var(--wa03)"}}><div style={{padding:16,background:"rgba(var(--gold-rgb),0.04)",borderRadius:14,textAlign:"center",border:"1px solid rgba(var(--gold-rgb),0.06)"}}><div style={{fontSize:9,fontWeight:800,color:T.gold,letterSpacing:3,opacity:.8}}>COURINVEST HUB</div><div style={{fontSize:9,color:T.t3,marginTop:4,letterSpacing:.2,lineHeight:1.45}}>v561</div><details style={{marginTop:6,textAlign:"left"}}><summary style={{fontSize:10,color:T.gold,cursor:"pointer",fontWeight:700}}>Novidades</summary><div style={{fontSize:10,color:T.t2,lineHeight:1.45,marginTop:6}}>Controle financeiro (Meuvista), sugestão de aporte e objetivos com ativos da carteira. O Painel do Cliente mostra o mês, as caixinhas e a divisão do aporte. Somente leitura.</div></details></div></div>}
         </div>
       )}
 
