@@ -1,6 +1,7 @@
 /* Teste do importador Meuvista (v561). Só dados sintéticos. */
 var PC = require("./portal-core.js");
 var falhas = 0;
+function round2t(n) { return Math.round(n * 100) / 100; }
 function eq(nome, a, b) {
   if (Math.abs(a - b) > 0.001) {
     falhas++;
@@ -175,12 +176,35 @@ var pTaxa = PC.mesParaPortal(mTaxa, 0);
 var jTaxa = JSON.stringify(pTaxa);
 truth("taxa nao aparece no painel", !/couri?\s*-?\s*invest/i.test(jTaxa) && !/couriinvest|courinvest/.test(PC.fold(jTaxa).replace(/[^a-z]/g, "")));
 truth("taxa nao aparece pelo valor nas categorias", JSON.stringify(pTaxa.categorias).indexOf("522.1") < 0);
-truth("conta prevista da taxa sem nome", pTaxa.contasPrevistas[0].rotulo === "Conta prevista" && pTaxa.contasPrevistas[0].valor === 522.1);
+truth("conta prevista da taxa some", pTaxa.contasPrevistas.length === 0);
 var sf = pTaxa.categorias.filter(function (c) { return c.nome === "Serviços Financeiros"; })[0];
 eq("servicos financeiros sem a taxa", sf.realizado, 100);
 eq("orcado sem a taxa", sf.estimado, 77.9);
 truth("categoria so com a taxa some", pTaxa.categorias.every(function (c) { return c.nome !== "Consultoria"; }));
-eq("totais do mes intactos", pTaxa.despesas.realizado, 800);
+/* t115u: a taxa sai também dos totais do painel. Tirado: 522,10 + 300 + 100 do realizado; 522,10 + 300 + 100 do orçado. */
+eq("despesas do painel sem a taxa", pTaxa.despesas.realizado, 0);
+truth("taxa nao aparece em lugar nenhum pelo valor", jTaxa.indexOf("522.1") < 0);
+var mTaxa2 = {
+  ym: "2026-11",
+  receitas: { estimado: 10000, realizado: 11100 }, despesas: { estimado: 9000, realizado: 8000 },
+  saldoRealizado: 3000,
+  categorias: [
+    { nome: "Serviços Financeiros", estimado: 480, realizado: 522.1, subcategorias: [ { nome: "CourInvest", estimado: null, realizado: 522.1 } ] },
+    { nome: "Moradia", estimado: 8520, realizado: 7477.9 }
+  ],
+  contasPrevistas: [ { rotulo: "Taxa Courinvest", valor: 522.1 }, { rotulo: "IPTU", valor: 100 } ]
+};
+var p2 = PC.mesParaPortal(mTaxa2, 0);
+eq("despesas realizadas sem a taxa", p2.despesas.realizado, 7477.9);
+eq("despesas orcadas sem a taxa", p2.despesas.estimado, 8520);
+eq("saldo sobe pela taxa", p2.saldoRealizado, 3622.1);
+eq("saldo estimado coerente", p2.saldoEstimado, 1480);
+truth("so a conta da taxa sai", p2.contasPrevistas.length === 1 && p2.contasPrevistas[0].rotulo === "IPTU");
+var c2 = PC.calcularAporte(p2, 0);
+eq("aporte coerente com o painel", c2.sugerido, round2t(3622.1 - (8520 - 7477.9) - 100));
+truth("painel inteiro sem a taxa", JSON.stringify(p2).indexOf("522.1") < 0 && !/couri?\s*invest/i.test(JSON.stringify(p2)));
+var hubIntacto = PC.calcularAporte(mTaxa2, 0);
+eq("hub segue com a taxa", hubIntacto.contasPrevistas, 622.1);
 
 if (falhas) {
   console.error(falhas + " falha(s)");

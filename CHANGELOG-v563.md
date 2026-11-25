@@ -10,7 +10,11 @@ O realizado por subcategoria vem do extrato CSV do Meuvista (colunas Orçamento 
 
 **Patrimônio.** "Onde está investido" ganhou a visão por instituição (padrão) ao lado da visão por classe. Cada instituição mostra valor e % do total e, ao tocar, os investimentos dentro dela com valor e %. A instituição vem da coluna Corretora da importação do Gorila. Posição no exterior aparece separada (ex.: "Inter · exterior").
 
-**Taxa da Courinvest fora do painel.** O cliente nunca vê a taxa da Courinvest. A subcategoria "CourInvest" (qualquer grafia: Courinvest, Couri Invest, Cour-invest) some de Serviços Financeiros, e o valor dela sai do realizado e do orçado dessa categoria. Categoria que só tinha a taxa sai da lista. Conta prevista com esse nome aparece como "Conta prevista". Os totais do mês (receitas, despesas, saldo) e a sugestão de aporte não mudam e continuam batendo com o Meuvista. A ficha no Hub continua mostrando tudo.
+**Taxa da Courinvest fora do painel.** O cliente não vê a taxa da Courinvest em lugar nenhum. A subcategoria "CourInvest" (qualquer grafia: Courinvest, Couri Invest, Cour-invest) some de Serviços Financeiros, e o valor dela sai do realizado e do orçado da categoria. Categoria que só tinha a taxa sai da lista.
+
+A taxa também sai dos totais do painel: despesas realizadas, despesas orçadas e o "gastos de … orçados". O saldo do painel sobe na mesma quantia (receitas − despesas sem a taxa). Conta prevista com o nome da Courinvest sai da lista e da conta. A sugestão de aporte do painel usa esses números, para que "Ver como calculamos" feche sem mostrar a taxa. Por isso a sugestão do painel fica maior que a da ficha pelo valor da taxa.
+
+A ficha no Hub não muda: continua com os números do Meuvista, taxa incluída.
 
 ## Ficha do cliente
 

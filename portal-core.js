@@ -418,42 +418,65 @@
     return /couri?invest/.test(fold(nome).replace(/[^a-z]/g, ""));
   }
 
-  function semTaxaCourinvest(cats) {
-    return (cats || []).filter(function (c) { return !ehTaxaCourinvest(c.nome); }).map(function (c) {
+  /* Devolve as categorias sem a taxa e quanto saiu do realizado e do orçado. */
+  function tirarTaxa(cats) {
+    var taxaReal = 0, taxaEst = 0;
+    var lista = [];
+    (cats || []).forEach(function (c) {
+      if (ehTaxaCourinvest(c.nome)) {
+        taxaReal = round2(taxaReal + (c.realizado || 0));
+        taxaEst = round2(taxaEst + (c.estimado || 0));
+        return;
+      }
       var taxa = 0;
       var subs = (c.subcategorias || []).filter(function (s) {
         if (!ehTaxaCourinvest(s.nome)) return true;
         taxa = round2(taxa + (s.realizado || 0));
         return false;
       });
-      if (!taxa && subs.length === (c.subcategorias || []).length) return c;
-      var rea = round2(Math.max(0, (c.realizado || 0) - taxa));
+      if (!taxa && subs.length === (c.subcategorias || []).length) { lista.push(c); return; }
+      var tiradoReal = round2(Math.min(c.realizado || 0, taxa));
+      var rea = round2((c.realizado || 0) - tiradoReal);
       var est = c.estimado == null ? null : round2(Math.max(0, c.estimado - taxa));
-      return { nome: c.nome, estimado: est, realizado: rea, estourou: estouro(est, rea), subcategorias: subs, _semTaxa: true };
-    }).filter(function (c) {
-      if (!c._semTaxa) return true;
-      return (c.realizado || 0) > 0.009 || c.subcategorias.length > 0;
-    }).map(function (c) { delete c._semTaxa; return c; });
+      taxaReal = round2(taxaReal + tiradoReal);
+      if (c.estimado != null) taxaEst = round2(taxaEst + (c.estimado - est));
+      if (rea > 0.009 || subs.length) lista.push({ nome: c.nome, estimado: est, realizado: rea, estourou: estouro(est, rea), subcategorias: subs });
+    });
+    return { cats: lista, taxaReal: taxaReal, taxaEst: taxaEst };
   }
 
+  function semTaxaCourinvest(cats) {
+    return tirarTaxa(cats).cats;
+  }
+
+  /* v563 (t115u): o painel do cliente não mostra a taxa em lugar nenhum, nem nos totais.
+     O valor sai das despesas realizadas e orçadas, o saldo sobe na mesma quantia e a conta
+     prevista com o nome da Courinvest sai da lista (e da conta da sugestão). A sugestão de
+     aporte do painel é calculada com esses números, para "Ver como calculamos" fechar.
+     A ficha no Hub continua com os números do Meuvista, taxa incluída. */
   function mesParaPortal(m, aportesHub) {
     m = m || {};
-    var cats = semTaxaCourinvest(detalharCategorias(m));
-    var contas = (m.contasPrevistas || []).map(function (x) {
-      var rot = redigir(x.rotulo) || "Conta prevista";
-      if (ehTaxaCourinvest(rot)) rot = "Conta prevista";
-      return { rotulo: rot.slice(0, 80), valor: round2(x.valor || 0) };
+    var semTaxa = tirarTaxa(detalharCategorias(m));
+    var cats = semTaxa.cats;
+    var contas = (m.contasPrevistas || []).filter(function (x) {
+      return !ehTaxaCourinvest(x && x.rotulo);
+    }).map(function (x) {
+      return { rotulo: (redigir(x.rotulo) || "Conta prevista").slice(0, 80), valor: round2(x.valor || 0) };
     }).filter(function (x) { return x.valor > 0; });
     var receitas = m.receitas || {};
     var despesas = m.despesas || {};
+    var desR = round2(Math.max(0, (despesas.realizado || 0) - semTaxa.taxaReal));
+    var desE = despesas.estimado == null ? null : round2(Math.max(0, despesas.estimado - semTaxa.taxaEst));
+    var recR = round2(receitas.realizado || 0);
+    var recE = receitas.estimado == null ? null : round2(receitas.estimado);
     return {
       ym: m.ym || "",
       fonte: "Meuvista",
       atualizadoEm: m.atualizadoEm || null,
-      receitas: { estimado: receitas.estimado == null ? null : round2(receitas.estimado), realizado: round2(receitas.realizado || 0) },
-      despesas: { estimado: despesas.estimado == null ? null : round2(despesas.estimado), realizado: round2(despesas.realizado || 0) },
-      saldoRealizado: round2(m.saldoRealizado || 0),
-      saldoEstimado: m.saldoEstimado == null ? null : round2(m.saldoEstimado),
+      receitas: { estimado: recE, realizado: recR },
+      despesas: { estimado: desE, realizado: desR },
+      saldoRealizado: round2(recR - desR),
+      saldoEstimado: recE != null && desE != null ? round2(recE - desE) : null,
       categorias: cats,
       contasPrevistas: contas,
       aportesDespesa: round2(m.aportesDespesa || 0),
@@ -461,6 +484,7 @@
       aportesHub: round2(aportesHub != null ? aportesHub : m.aportesHub || 0)
     };
   }
+
 
   var TP_MACRO = { cdb: "rf", lci: "rf", lca: "rf", lc: "rf", cri: "rf", cra: "rf", tesouro: "rf", deb: "rf", debi: "rf", fundo_rf: "rf", fundo_mm: "rf", fundo_camb: "rf", coe: "rf", poupanca: "rf", acao: "rv", fii: "rv", fiagro: "rv", fip: "rv", etf_br: "rv", bdr: "rv", fundo_acoes: "rv", ouro: "rv", fundo_infra: "rv", stock_us: "ext", etf_int: "ext", etf_eu: "ext", reit: "ext", bond_intl: "ext", fundo_mm_intl: "ext", caixa: "caixa", cripto: "cripto", prev: "prev" };
   var MACRO_LBL = { rf: "Renda Fixa", rv: "Renda Variável", ext: "Exterior", prev: "Previdência", caixa: "Caixa", cripto: "Cripto", outros: "Outros" };
