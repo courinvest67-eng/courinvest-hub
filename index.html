@@ -10964,13 +10964,7 @@ function ControleFinanceiroView(props){
           </div>
         </div>
       </Cd>
-      {previa&&<div style={{position:"fixed",inset:0,zIndex:100000,background:"#E5E7EB",display:"flex",flexDirection:"column"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,padding:"10px 16px",background:"#fff",borderBottom:"1px solid #E5E7EB",fontSize:13,color:"#6B7280"}}>
-          <span>Pré-visualização — assim o cliente vê</span>
-          <button id="cv-fechar-previa" onClick={function(){sPrevia(false);}} style={{padding:"8px 14px",borderRadius:10,border:"1px solid #E5E7EB",background:"#fff",fontWeight:700,cursor:"pointer"}}>Fechar</button>
-        </div>
-        <div style={{flex:1,overflow:"auto"}}><PainelCliente docFixo={cvProjetarPortal(c)} semSair/></div>
-      </div>}
+      {previa&&<PreviaPainelCliente c={c} onClose={function(){sPrevia(false);}}/>}
 
       <Cd style={{padding:16}} hov={false}>
         <div style={{fontSize:15,fontWeight:800,color:T.t1}}>Controle financeiro</div>
@@ -11188,6 +11182,20 @@ function LoginScreen(props){
   );
 }
 
+/* v563: a mesma pré-visualização abre pelo card de acesso e pelo menu Ações da ficha. Só leitura, nada é gravado. */
+/* v563: no celular o menu Ações abre como folha no rodapé, fora do card (o card corta o que passa da borda). */
+function cvTalvezPortal(el){return window.innerWidth<600&&typeof ReactDOM!=="undefined"&&ReactDOM.createPortal?ReactDOM.createPortal(el,document.body):el;}
+function PreviaPainelCliente(props){
+  var c=props.c;
+  var doc=React.useMemo(function(){return cvProjetarPortal(c);},[c]);
+  return <div id="cv-previa-painel" style={{position:"fixed",inset:0,zIndex:100000,background:"#E5E7EB",display:"flex",flexDirection:"column"}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,padding:"10px 16px",background:"#fff",borderBottom:"1px solid #E5E7EB",fontSize:13,color:"#6B7280"}}>
+      <span>Pré-visualização — assim o cliente vê</span>
+      <button id="cv-fechar-previa" onClick={props.onClose} style={{padding:"8px 14px",borderRadius:10,border:"1px solid #E5E7EB",background:"#fff",fontWeight:700,cursor:"pointer"}}>Fechar</button>
+    </div>
+    <div style={{flex:1,overflow:"auto"}}><PainelCliente docFixo={doc} semSair/></div>
+  </div>;
+}
 function PainelCliente(props){
   var user=props.user;
   var preview=!!props.preview;
@@ -11199,6 +11207,10 @@ function PainelCliente(props){
   const[oculto,sOculto]=useState(false);
   const[pronto,sPronto]=useState(false);
   const[largo,sLargo]=useState(typeof window!=="undefined"&&window.innerWidth>=860);
+  /* v563: categoria aberta (subcategorias), visão do patrimônio (classe | instituição) e instituição aberta */
+  const[catAberta,sCatAberta]=useState("");
+  const[vistaInv,sVistaInv]=useState("instituicao");
+  const[instAberta,sInstAberta]=useState("");
   useEffect(function(){
     document.body.classList.add("cv-painel-cliente");
     if(!props.docFixo){try{localStorage.removeItem("courinvest_data_v1");localStorage.removeItem("courinvest_pending_v1");}catch(e){}}
@@ -11265,6 +11277,18 @@ function PainelCliente(props){
   var quando=doc.atualizadoEm?new Date(doc.atualizadoEm):null;
   var quandoTxt=quando&&!isNaN(quando.getTime())?quando.toLocaleDateString("pt-BR"):"";
   var coresCat=["#0F766E","#0369A1","#B45309","#7C3AED","#BE123C","#4B5563"];
+  /* v563: lista completa das categorias (com subcategorias e estouro). Documento antigo sem detalhe ainda funciona. */
+  var catsLista=(mes&&mes.categorias||[]).map(function(c){
+    var est=c.estimado==null?null:+c.estimado;var rea=+c.realizado||0;
+    var e=c.estourou!=null?+c.estourou:(est>0&&rea>est?Math.round((rea-est)*100)/100:0);
+    return Object.assign({},c,{estourou:e,subcategorias:c.subcategorias||[]});
+  }).filter(function(c){return (c.realizado||0)>0||(c.estimado||0)>0;})
+    .sort(function(a,b){return (b.realizado||0)-(a.realizado||0);});
+  var corDaCat=function(nome){for(var k=0;k<tops.top.length;k++){if(tops.top[k].nome===nome)return coresCat[k%coresCat.length];}return "#9CA3AF";};
+  var insts=(pat.porInstituicao||[]).filter(function(g){return g&&g.valor>0;});
+  var coresInst=["#0F766E","#0369A1","#7C3AED","#B45309","#BE123C","#4B5563","#0891B2","#65A30D"];
+  var somaInst=insts.reduce(function(s2,g){return s2+(+g.valor||0);},0);
+  var difInst=somaInst>0&&(pat.total||0)-somaInst>Math.max(100,(pat.total||0)*0.01)?Math.round(((pat.total||0)-somaInst)*100)/100:0;
   var rosca="conic-gradient(#F3F4F6 0 100%)";
   if(tops.top.length){
     var soma=tops.top.reduce(function(s,c){return s+(c.realizado||0);},0)+(tops.outras?tops.outras.realizado:0);
@@ -11337,14 +11361,57 @@ function PainelCliente(props){
                 </div>
                 <div style={{display:"flex",gap:16,alignItems:"center",marginTop:16}}>
                   <div style={{width:92,height:92,borderRadius:"50%",background:rosca,flexShrink:0,boxShadow:"inset 0 0 0 18px #fff"}}/>
-                  <div style={{flex:1,minWidth:0}}>
-                    {tops.top.map(function(cat,i){var base=Math.max(cat.estimado||0,cat.realizado||0,1);var pct=Math.min(100,Math.round((cat.realizado||0)/base*100));return <div key={cat.nome} style={{marginBottom:8}}>
-                      <div style={{display:"flex",justifyContent:"space-between",fontSize:12,gap:8}}><span><span style={{display:"inline-block",width:8,height:8,borderRadius:99,background:coresCat[i%coresCat.length],marginRight:6}}/>{cat.nome}</span><span style={{whiteSpace:"nowrap",color:"#6B7280"}}>{money(cat.realizado)} / {cat.estimado==null?"—":money(cat.estimado)}</span></div>
-                      <div style={{height:6,background:"#F3F4F6",borderRadius:99,marginTop:3}}><div className="cv-barra" style={{width:(pronto?pct:0)+"%",background:coresCat[i%coresCat.length]}}/></div>
-                    </div>;})}
-                    {tops.outras&&<div style={{fontSize:12,color:"#6B7280"}}>Outras {tops.outras.qtd}: {money(tops.outras.realizado)}</div>}
-                    {!tops.top.length&&<div style={{fontSize:13,color:"#6B7280"}}>As categorias do mês aparecem aqui.</div>}
+                  <div style={{flex:1,minWidth:0,fontSize:13,color:"#374151",lineHeight:1.5}}>
+                    <div><b>{money(mes.despesas&&mes.despesas.realizado)}</b> gastos{mes.despesas&&mes.despesas.estimado!=null?<span> de {money(mes.despesas.estimado)} orçados</span>:null}</div>
+                    {catsLista.filter(function(c){return c.estourou>0;}).length>0?<div style={{color:"#B91C1C",fontWeight:700,marginTop:2}}>{catsLista.filter(function(c){return c.estourou>0;}).length} categoria{catsLista.filter(function(c){return c.estourou>0;}).length>1?"s":""} acima do orçamento</div>:<div style={{color:"#15803D",fontWeight:700,marginTop:2}}>Tudo dentro do orçamento</div>}
+                    <div style={{fontSize:12,color:"#6B7280",marginTop:2}}>Toque numa categoria para ver o detalhe.</div>
                   </div>
+                </div>
+                <div id="cv-painel-categorias" style={{marginTop:14,display:"flex",flexDirection:"column",gap:8}}>
+                  {catsLista.map(function(cat,i){
+                    var aberta=catAberta===cat.nome;
+                    var cor=corDaCat(cat.nome);
+                    var base=Math.max(cat.estimado||0,cat.realizado||0,1);
+                    var pct=Math.min(100,Math.round((cat.realizado||0)/base*100));
+                    var subs=cat.subcategorias||[];
+                    var temSubOrc=subs.some(function(sb){return sb.estimado!=null;});
+                    var temSubs=subs.length>0;
+                    return <div key={cat.nome} className="cv-cat" style={{border:"1px solid "+(cat.estourou>0?"#FECACA":"#F3F4F6"),background:cat.estourou>0?"#FFFBFB":"#fff",borderRadius:16,overflow:"hidden"}}>
+                      <button type="button" aria-expanded={aberta} onClick={function(){if(temSubs)sCatAberta(aberta?"":cat.nome);}} style={{display:"block",width:"100%",textAlign:"left",background:"transparent",border:"none",padding:"12px 12px 10px",cursor:temSubs?"pointer":"default",font:"inherit",color:"inherit"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                          <span style={{fontSize:14,fontWeight:800,minWidth:0}}><span style={{display:"inline-block",width:9,height:9,borderRadius:99,background:cor,marginRight:7}}/>{cat.nome}</span>
+                          <span style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                            <span style={{fontSize:14,fontWeight:800,fontFamily:"'JetBrains Mono',monospace"}}>{money(cat.realizado)}</span>
+                            {temSubs&&<span aria-hidden="true" style={{fontSize:12,color:"#9CA3AF",transform:aberta?"rotate(180deg)":"none",transition:"transform .2s"}}>▼</span>}
+                          </span>
+                        </div>
+                        <div style={{height:7,background:"#F3F4F6",borderRadius:99,marginTop:7}}><div className="cv-barra" style={{width:(pronto?pct:0)+"%",background:cat.estourou>0?"#DC2626":cor,height:7,borderRadius:99}}/></div>
+                        <div style={{display:"flex",justifyContent:"space-between",gap:8,marginTop:6,fontSize:12,color:"#6B7280"}}>
+                          <span>{cat.estimado==null?"Sem orçamento":"Orçado "+money(cat.estimado)}</span>
+                          {cat.estourou>0?<span style={{color:"#B91C1C",fontWeight:800}}>Estourou {money(cat.estourou)}</span>:(cat.estimado!=null?<span style={{color:"#15803D",fontWeight:700}}>Resta {money(Math.max(0,(cat.estimado||0)-(cat.realizado||0)))}</span>:null)}
+                        </div>
+                      </button>
+                      {aberta&&<div className="cv-sobe" style={{borderTop:"1px solid #F3F4F6",padding:"6px 12px 12px",background:"#FAFAFA"}}>
+                        {subs.map(function(sb){
+                          var b2=Math.max(sb.estimado||0,sb.realizado||0,1);
+                          var p2=sb.estimado!=null?Math.min(100,Math.round((sb.realizado||0)/b2*100)):(cat.realizado?Math.min(100,Math.round((sb.realizado||0)/cat.realizado*100)):0);
+                          return <div key={sb.nome} style={{padding:"9px 0",borderBottom:"1px solid #F3F4F6"}}>
+                            <div style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:13}}>
+                              <span style={{fontWeight:700,color:sb.estourou>0?"#B91C1C":"#111827",minWidth:0}}>{sb.estourou>0?"⚠️ ":""}{sb.nome}</span>
+                              <span style={{fontWeight:800,fontFamily:"'JetBrains Mono',monospace",whiteSpace:"nowrap"}}>{money(sb.realizado)}</span>
+                            </div>
+                            <div style={{height:5,background:"#EEF0F2",borderRadius:99,marginTop:5}}><div className="cv-barra" style={{width:(pronto?p2:0)+"%",background:sb.estourou>0?"#DC2626":cor,height:5,borderRadius:99,opacity:.85}}/></div>
+                            <div style={{display:"flex",justifyContent:"space-between",gap:8,marginTop:4,fontSize:11,color:"#6B7280"}}>
+                              <span>{sb.estimado!=null?"Orçado "+money(sb.estimado):(cat.realizado?Math.round((sb.realizado||0)/cat.realizado*100)+"% da categoria":"")}</span>
+                              {sb.estourou>0&&<span style={{padding:"1px 8px",borderRadius:999,background:"#FEE2E2",color:"#B91C1C",fontWeight:800}}>+{money(sb.estourou)} acima</span>}
+                            </div>
+                          </div>;
+                        })}
+                        {!temSubOrc&&<div style={{fontSize:11,color:"#6B7280",marginTop:8,lineHeight:1.45}}>O orçamento desta categoria é definido pelo total. As subcategorias mostram para onde foi o dinheiro.</div>}
+                      </div>}
+                    </div>;
+                  })}
+                  {!catsLista.length&&<div style={{fontSize:13,color:"#6B7280"}}>As categorias do mês aparecem aqui.</div>}
                 </div>
               </div>}
             </div>
@@ -11367,7 +11434,13 @@ function PainelCliente(props){
             </div>
 
             <div className="cv-sobe" style={card}>
-              <div style={{fontSize:16,fontWeight:800,marginBottom:10}}>Onde está investido</div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:10}}>
+                <div style={{fontSize:16,fontWeight:800}}>Onde está investido</div>
+                <div role="tablist" style={{display:"flex",background:"#F3F4F6",borderRadius:999,padding:3}}>
+                  {[{k:"instituicao",l:"Instituição"},{k:"classe",l:"Classe"}].map(function(o){var on=vistaInv===o.k;return <button key={o.k} id={"cv-vista-"+o.k} role="tab" aria-selected={on} type="button" onClick={function(){sVistaInv(o.k);}} style={{border:"none",borderRadius:999,padding:"6px 12px",fontSize:12,fontWeight:800,cursor:"pointer",background:on?"#fff":"transparent",color:on?"#0F766E":"#6B7280",boxShadow:on?"0 1px 3px rgba(0,0,0,.08)":"none"}}>{o.l}</button>;})}
+                </div>
+              </div>
+              {vistaInv==="classe"&&<div>
               {(pat.alocacao||[]).length===0&&<div style={{padding:16,borderRadius:16,background:"#F9FAFB",color:"#6B7280",textAlign:"center"}}>A alocação aparece quando a carteira for publicada.</div>}
               {(pat.alocacao||[]).length>0&&<div>
                 <div style={{display:"flex",height:14,borderRadius:99,overflow:"hidden",background:"#F3F4F6"}}>
@@ -11378,6 +11451,45 @@ function PainelCliente(props){
                   <span>{String(a.pct).replace(".",",")}% · {money(a.valor)}</span>
                 </div>;})}
               </div>}
+              </div>}
+              {vistaInv==="instituicao"&&<div id="cv-painel-instituicoes">
+                {insts.length===0&&<div style={{padding:16,borderRadius:16,background:"#F9FAFB",color:"#6B7280",textAlign:"center"}}>A divisão por instituição aparece quando a carteira for publicada.</div>}
+                {insts.length>0&&<div>
+                  <div style={{display:"flex",height:14,borderRadius:99,overflow:"hidden",background:"#F3F4F6"}}>
+                    {insts.map(function(g,i){return <div key={g.nome} className="cv-barra" style={{width:(pronto?g.pct:0)+"%",background:coresInst[i%coresInst.length],height:14,borderRadius:0}}/>;})}
+                  </div>
+                  <div style={{fontSize:12,color:"#6B7280",margin:"8px 0 2px"}}>Toque numa instituição para ver os investimentos.</div>
+                  {insts.map(function(g,i){
+                    var aberta=instAberta===g.nome;
+                    return <div key={g.nome} style={{borderBottom:"1px solid #F3F4F6"}}>
+                      <button type="button" aria-expanded={aberta} onClick={function(){sInstAberta(aberta?"":g.nome);}} style={{display:"flex",width:"100%",justifyContent:"space-between",alignItems:"center",gap:8,background:"transparent",border:"none",padding:"12px 0",cursor:"pointer",font:"inherit",color:"inherit",textAlign:"left"}}>
+                        <span style={{minWidth:0}}>
+                          <span style={{display:"block",fontSize:14,fontWeight:800}}><span style={{display:"inline-block",width:9,height:9,borderRadius:99,background:coresInst[i%coresInst.length],marginRight:7}}/>{g.nome}</span>
+                          <span style={{display:"block",fontSize:12,color:"#6B7280",marginTop:2,marginLeft:16}}>{g.qtd} investimento{g.qtd>1?"s":""} · {String(g.pct).replace(".",",")}% do total</span>
+                        </span>
+                        <span style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                          <span style={{fontSize:14,fontWeight:800,fontFamily:"'JetBrains Mono',monospace"}}>{money(g.valor)}</span>
+                          <span aria-hidden="true" style={{fontSize:12,color:"#9CA3AF",transform:aberta?"rotate(180deg)":"none",transition:"transform .2s"}}>▼</span>
+                        </span>
+                      </button>
+                      {aberta&&<div className="cv-sobe" style={{padding:"2px 10px 10px",margin:"0 0 10px",background:"#FAFAFA",borderRadius:14}}>
+                        {(g.ativos||[]).map(function(a,j){return <div key={a.nome+j} style={{display:"flex",justifyContent:"space-between",gap:10,padding:"9px 0",borderBottom:j<(g.ativos.length-1)?"1px solid #F0F0F0":"none",fontSize:13}}>
+                          <span style={{minWidth:0}}>
+                            <span style={{display:"block",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:largo?380:190}}>{a.nome}</span>
+                            <span style={{display:"block",fontSize:11,color:"#6B7280",marginTop:1}}>{a.classe}</span>
+                          </span>
+                          <span style={{textAlign:"right",flexShrink:0}}>
+                            <span style={{display:"block",fontWeight:800,fontFamily:"'JetBrains Mono',monospace"}}>{money(a.valor)}</span>
+                            <span style={{display:"block",fontSize:11,color:"#6B7280",marginTop:1}}>{String(a.pct).replace(".",",")}%</span>
+                          </span>
+                        </div>;})}
+                      </div>}
+                    </div>;
+                  })}
+                  {difInst>0&&<div style={{fontSize:11,color:"#6B7280",marginTop:8,lineHeight:1.45}}>Outros {money(difInst)} do patrimônio vêm de bens fora desta carteira detalhada.</div>}
+                </div>}
+              </div>}
+
             </div>
           </div>
         </div>
@@ -18808,6 +18920,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
        Planejamento (Sucessório · Aposentadoria · Plano financeiro GF · Família) ·
        Documentos (Contratos · Relatório · Particularidades · Cobranças) */
   const[showAcoes,sShowAcoes]=useState(false);
+  const[previaCli,sPreviaCli]=useState(false);
   const[acaoTick,sAcaoTick]=useState(0); /* v551: re-render ao concluir/reabrir item do checklist (estado real fica no localStorage) */
   const[verConcl,sVerConcl]=useState(false);
   const acoesGorilaRef=React.useRef(null);
@@ -18842,7 +18955,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
       <Bt v="ghost" onClick={ob} style={{padding:"4px 0",marginBottom:16,fontSize:13}}>← Voltar</Bt>
 
       {}
-      <Cd style={{padding:24,marginBottom:18}} hov={false} glow>
+      <Cd style={{padding:24,marginBottom:18,overflow:"visible",zIndex:5}} hov={false} glow>
         <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
           <Av name={c.nome} sz={56}/>
           <div style={{flex:1,minWidth:150}}>
@@ -18895,12 +19008,13 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
                 <input ref={acoesGorilaRef} type="file" accept=".xlsx,.xls" onChange={function(e){if(e.target.files[0])importarGorilaRelatorio(e.target.files[0]);e.target.value=""}} style={{display:"none"}}/>
                 <input ref={acoesRelRef} type="file" accept=".pdf,application/pdf" onChange={function(e){var f=e.target.files[0];e.target.value="";if(!f)return;window._cvPendingRelImport={file:f,clienteId:c.id};ob();}} style={{display:"none"}}/>
                 <Bt onClick={function(){sShowAcoes(!showAcoes)}} aria-haspopup="menu" aria-expanded={showAcoes} style={{fontSize:13,padding:"9px 16px"}}>Ações ▾</Bt>
-                {showAcoes && <div onClick={function(){sShowAcoes(false)}} style={{position:"fixed",inset:0,zIndex:90}}/>}
-                {showAcoes && (
-                  <div role="menu" style={{position:"absolute",right:0,top:"calc(100% + 6px)",zIndex:91,minWidth:290,background:"var(--surface-overlay)",border:"1px solid "+T.bdr,borderRadius:12,boxShadow:"var(--shadow-lg)",padding:6}}>
+                {showAcoes && cvTalvezPortal(<div onClick={function(){sShowAcoes(false)}} style={{position:"fixed",inset:0,zIndex:window.innerWidth<600?999:90,background:window.innerWidth<600?"rgba(17,24,39,.25)":"transparent"}}/>)}
+                {showAcoes && cvTalvezPortal(
+                  <div role="menu" style={Object.assign({position:"absolute",right:0,top:"calc(100% + 6px)",zIndex:91,minWidth:290,background:"var(--surface-overlay)",border:"1px solid "+T.bdr,borderRadius:12,boxShadow:"var(--shadow-lg)",padding:6},window.innerWidth<600?{position:"fixed",left:10,right:10,top:"auto",bottom:10,minWidth:0,maxHeight:"75vh",overflowY:"auto",borderRadius:16,zIndex:1000}:{})}>
                     {[
                       {ic:"📥",l:"Importar Gorila",s:"Planilha XLSX do Gorila deste cliente",on:function(){acoesGorilaRef.current&&acoesGorilaRef.current.click()}},
                       {ic:"📑",l:"Importar Relatório (Consolidado / Mensal)",s:"PDF Courinvest — abre a revisão na lista de clientes",on:function(){acoesRelRef.current&&acoesRelRef.current.click()}},
+                      {ic:"👁",l:"Ver como o cliente",s:"Painel do Cliente com os dados desta ficha — só visualização",on:function(){sPreviaCli(true)}},
                       {ic:"📄",l:"Gerar relatório",s:"Aba Documentos › Relatório",on:function(){sTab("relatorio")}},
                       {ic:"📞",l:"Registrar contato",s:"Nova interação no histórico",on:function(){sShowInt(true)}},
                       c.sv.includes("planejamento")?{ic:"💰",l:"Editar fee mensal",s:"Valor e base de reajuste IPCA",on:function(){sFeeTmp(c.feeFixo||0);sFeeBaseTmp(c.feeBase||"");sShowFeeEdit(true)}}:null,
@@ -18918,7 +19032,7 @@ function CD({client:cl,data:d,dispatch:dp,onBack:ob,taxasBCB,taxaBCBStatus,onRep
         </div>
       </Cd>
 
-      {}
+      {previaCli&&<PreviaPainelCliente c={c} onClose={function(){sPreviaCli(false);}}/>}
       <Mo open={showSvcChange} onClose={()=>sShowSvcChange(false)} title="Alterar Serviço">
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
           <div style={{fontSize:12,color:T.t2,marginBottom:4}}>Selecione o serviço do cliente. No <strong style={{color:T.purple}}>Híbrido</strong>, o padrão é fee fixo até o limite deste cliente (R$ 200 mil se não houver outro). Ao atingir, entra a tabela variável escolhida para ele, sobre o patrimônio total. Uma cobrança só.</div>
@@ -44453,7 +44567,7 @@ function App({authUser,preview}){
               </React.Fragment>
             )})}
           </div>
-          {!col && <div style={{padding:14,borderTop:"1px solid var(--wa03)"}}><div style={{padding:16,background:"rgba(var(--gold-rgb),0.04)",borderRadius:14,textAlign:"center",border:"1px solid rgba(var(--gold-rgb),0.06)"}}><div style={{fontSize:9,fontWeight:800,color:T.gold,letterSpacing:3,opacity:.8}}>COURINVEST HUB</div><div style={{fontSize:9,color:T.t3,marginTop:4,letterSpacing:.2,lineHeight:1.45}}>v562</div><details style={{marginTop:6,textAlign:"left"}}><summary style={{fontSize:10,color:T.gold,cursor:"pointer",fontWeight:700}}>Novidades</summary><div style={{fontSize:10,color:T.t2,lineHeight:1.45,marginTop:6}}>O cliente também entra por um link no e-mail, sem conta Google. O painel ganhou um visual próprio, feito para o celular.</div></details></div></div>}
+          {!col && <div style={{padding:14,borderTop:"1px solid var(--wa03)"}}><div style={{padding:16,background:"rgba(var(--gold-rgb),0.04)",borderRadius:14,textAlign:"center",border:"1px solid rgba(var(--gold-rgb),0.06)"}}><div style={{fontSize:9,fontWeight:800,color:T.gold,letterSpacing:3,opacity:.8}}>COURINVEST HUB</div><div style={{fontSize:9,color:T.t3,marginTop:4,letterSpacing:.2,lineHeight:1.45}}>v563</div><details style={{marginTop:6,textAlign:"left"}}><summary style={{fontSize:10,color:T.gold,cursor:"pointer",fontWeight:700}}>Novidades</summary><div style={{fontSize:10,color:T.t2,lineHeight:1.45,marginTop:6}}>No Painel do Cliente, cada categoria de despesa abre as subcategorias com o que estourou, e o patrimônio aparece por instituição. "Ver como o cliente" também está no menu Ações da ficha.</div></details></div></div>}
         </div>
       )}
 
@@ -44795,7 +44909,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 (function(){
   if(!('serviceWorker' in navigator)) return;
 
-  var SW_VERSION = '562';
+  var SW_VERSION = '563';
   var CACHE_NAME = 'courinvest-v' + SW_VERSION;
 
   var swCode = [
