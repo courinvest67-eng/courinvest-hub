@@ -1,6 +1,7 @@
 /* Teste do importador Meuvista (v561). Só dados sintéticos. */
 var PC = require("./portal-core.js");
 var falhas = 0;
+function round2t(n) { return Math.round(n * 100) / 100; }
 function eq(nome, a, b) {
   if (Math.abs(a - b) > 0.001) {
     falhas++;
@@ -118,6 +119,92 @@ var comMeta = PC.projetarPortal({
 truth("portal tem objetivo", comMeta.objetivos.length === 2 && comMeta.objetivos[0].nome.indexOf("Reserva") >= 0);
 truth("portal sem cpf no objetivo", !PC.contemDocumento(comMeta.objetivos));
 truth("portal sem instituicao", JSON.stringify(comMeta.objetivos).indexOf("BTG Pactual") < 0);
+
+/* v563: subcategorias e estouro, patrimônio por instituição. */
+var ext563 = [
+  "Data;Descrição;Parcela;Valor;Meio de Pagamento;Orçamento;Categoria;Vencimento;Parcelado;Tipo;Origem;Neutro;duplicate-action;delete-action",
+  "02/11/2026;Aluguel de 111.222.333-44;;2.000,00;Banco;Moradia;Aluguel;-;Não;Despesa;Manual;Não;-;-",
+  "03/11/2026;Luz;;300,00;Banco;Moradia;Energia;-;Não;Despesa;Manual;Não;-;-",
+  "04/11/2026;Luz 2;;50,00;Banco;Moradia;Energia;-;Não;Despesa;Manual;Não;-;-",
+  "05/11/2026;Mercado;;400,00;Cartão;Alimentação;Supermercado;-;Não;Despesa;Manual;Não;-;-"
+].join("\n");
+var orc563 = [
+  "\"Nível\";\"Orçamento\";\"Estimado\";\"Realizado Mensal\"",
+  "\"Orçamento\";\"Moradia\";\"2.200,00\";\"2.350,00\"",
+  "\"Categoria\";\"Aluguel\";\"2.000,00\";\"2.000,00\"",
+  "\"Categoria\";\"Energia\";\"200,00\";\"350,00\"",
+  "\"Orçamento\";\"Alimentação\";\"500,00\";\"400,00\""
+].join("\n");
+var m563 = PC.aplicarExtrato(null, ext563, "2026-11").mes;
+eq("sub extrato energia", m563.extrato.subcategorias.Moradia.Energia, 350);
+truth("sub extrato sem descricao", JSON.stringify(m563.extrato).indexOf("Luz") < 0 && !PC.contemDocumento(m563.extrato));
+m563 = PC.aplicarOrcamento(m563, orc563, "2026-11").mes;
+var det = PC.detalharCategorias(m563);
+var mor = det.filter(function (c) { return c.nome === "Moradia"; })[0];
+eq("moradia estourou", mor.estourou, 150);
+eq("energia estourou", mor.subcategorias[0].estourou, 150);
+truth("energia primeiro", mor.subcategorias[0].nome === "Energia");
+eq("aluguel nao estourou", mor.subcategorias[1].estourou, 0);
+var soEx = PC.detalharCategorias(PC.aplicarOrcamento(PC.aplicarExtrato(null, ext563, "2026-11").mes, "\"Nível\";\"Orçamento\";\"Estimado\";\"Realizado Mensal\"\n\"Orçamento\";\"Moradia\";\"2.200,00\";\"2.350,00\"", "2026-11").mes);
+truth("sub do extrato sem orcado", soEx[0].subcategorias.length === 2 && soEx[0].subcategorias[0].estimado === null && soEx[0].subcategorias[0].realizado === 2000);
+var porInst = PC.instituicoesDeAtivos([
+  { tk: "CDB X", nm: "CDB X", tp: "cdb", inst: "Genial", posR: 100000 },
+  { tk: "IAU", nm: "IAU", tp: "etf_int", inst: "Inter", posR: 50000, _gClasse: "Investimento No Exterior" },
+  { tk: "CDB Y", nm: "CDB Y", tp: "cdb", inst: "Inter", posR: 25000 },
+  { tk: "Fundo", nm: "FUNDO RF - 11.222.333/0001-00", tp: "fundo_rf", inst: "Genial", posR: 25000 },
+  { tk: "ZERO", nm: "ZERO", tp: "acao", inst: "Genial", posR: 0 }
+]);
+truth("instituicao genial primeiro", porInst[0].nome === "Genial" && porInst[0].valor === 125000 && porInst[0].qtd === 2);
+truth("inter exterior separado", porInst[1].nome === "Inter · exterior" && porInst[2].nome === "Inter");
+eq("pct genial", porInst[0].pct, 62.5);
+truth("instituicao sem cnpj", !PC.contemDocumento(porInst));
+
+/* v563: taxa da Courinvest fora do painel do cliente. */
+var mTaxa = {
+  ym: "2026-11",
+  receitas: { estimado: 1000, realizado: 1000 }, despesas: { estimado: 900, realizado: 800 },
+  categorias: [
+    { nome: "Serviços Financeiros", estimado: 600, realizado: 580, subcategorias: [
+      { nome: "CourInvest", estimado: null, realizado: 480 }, { nome: "Tarifa bancária", estimado: null, realizado: 100 } ] },
+    { nome: "Consultoria", estimado: 300, realizado: 300, subcategorias: [ { nome: "Couri Invest", estimado: null, realizado: 300 } ] },
+    { nome: "Courinvest", estimado: 100, realizado: 100 },
+    { nome: "Moradia", estimado: 100, realizado: 50 }
+  ],
+  contasPrevistas: [ { rotulo: "Fee Courinvest dezembro", valor: 480 } ]
+};
+var pTaxa = PC.mesParaPortal(mTaxa, 0);
+var jTaxa = JSON.stringify(pTaxa);
+truth("taxa nao aparece no painel", !/couri?\s*-?\s*invest/i.test(jTaxa) && !/couriinvest|courinvest/.test(PC.fold(jTaxa).replace(/[^a-z]/g, "")));
+truth("taxa nao aparece pelo valor nas categorias", JSON.stringify(pTaxa.categorias).indexOf("480") < 0);
+truth("conta prevista da taxa some", pTaxa.contasPrevistas.length === 0);
+var sf = pTaxa.categorias.filter(function (c) { return c.nome === "Serviços Financeiros"; })[0];
+eq("servicos financeiros sem a taxa", sf.realizado, 100);
+eq("orcado sem a taxa", sf.estimado, 120);
+truth("categoria so com a taxa some", pTaxa.categorias.every(function (c) { return c.nome !== "Consultoria"; }));
+/* t115u: a taxa sai também dos totais do painel. Tirado: 480 + 300 + 100 do realizado; 480 + 300 + 100 do orçado. */
+eq("despesas do painel sem a taxa", pTaxa.despesas.realizado, 0);
+truth("taxa nao aparece em lugar nenhum pelo valor", jTaxa.indexOf("480") < 0);
+var mTaxa2 = {
+  ym: "2026-11",
+  receitas: { estimado: 10000, realizado: 11100 }, despesas: { estimado: 9000, realizado: 8000 },
+  saldoRealizado: 3000,
+  categorias: [
+    { nome: "Serviços Financeiros", estimado: 400, realizado: 480, subcategorias: [ { nome: "CourInvest", estimado: null, realizado: 480 } ] },
+    { nome: "Moradia", estimado: 8600, realizado: 7520 }
+  ],
+  contasPrevistas: [ { rotulo: "Taxa Courinvest", valor: 480 }, { rotulo: "IPTU", valor: 100 } ]
+};
+var p2 = PC.mesParaPortal(mTaxa2, 0);
+eq("despesas realizadas sem a taxa", p2.despesas.realizado, 7520);
+eq("despesas orcadas sem a taxa", p2.despesas.estimado, 8600);
+eq("saldo sobe pela taxa", p2.saldoRealizado, 3580);
+eq("saldo estimado coerente", p2.saldoEstimado, 1400);
+truth("so a conta da taxa sai", p2.contasPrevistas.length === 1 && p2.contasPrevistas[0].rotulo === "IPTU");
+var c2 = PC.calcularAporte(p2, 0);
+eq("aporte coerente com o painel", c2.sugerido, round2t(3580 - (8600 - 7520) - 100));
+truth("painel inteiro sem a taxa", JSON.stringify(p2).indexOf("480") < 0 && !/couri?\s*invest/i.test(JSON.stringify(p2)));
+var hubIntacto = PC.calcularAporte(mTaxa2, 0);
+eq("hub segue com a taxa", hubIntacto.contasPrevistas, 580);
 
 if (falhas) {
   console.error(falhas + " falha(s)");
