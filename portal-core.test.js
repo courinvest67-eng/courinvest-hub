@@ -151,7 +151,7 @@ var porInst = PC.instituicoesDeAtivos([
   { tk: "CDB X", nm: "CDB X", tp: "cdb", inst: "Genial", posR: 100000 },
   { tk: "IAU", nm: "IAU", tp: "etf_int", inst: "Inter", posR: 50000, _gClasse: "Investimento No Exterior" },
   { tk: "CDB Y", nm: "CDB Y", tp: "cdb", inst: "Inter", posR: 25000 },
-  { tk: "Fundo", nm: "FUNDO RF - 51.253.495/0001-00", tp: "fundo_rf", inst: "Genial", posR: 25000 },
+  { tk: "Fundo", nm: "FUNDO RF - 11.222.333/0001-00", tp: "fundo_rf", inst: "Genial", posR: 25000 },
   { tk: "ZERO", nm: "ZERO", tp: "acao", inst: "Genial", posR: 0 }
 ]);
 truth("instituicao genial primeiro", porInst[0].nome === "Genial" && porInst[0].valor === 125000 && porInst[0].qtd === 2);
@@ -164,47 +164,47 @@ var mTaxa = {
   ym: "2026-11",
   receitas: { estimado: 1000, realizado: 1000 }, despesas: { estimado: 900, realizado: 800 },
   categorias: [
-    { nome: "Serviços Financeiros", estimado: 600, realizado: 622.1, subcategorias: [
-      { nome: "CourInvest", estimado: null, realizado: 522.1 }, { nome: "Tarifa bancária", estimado: null, realizado: 100 } ] },
+    { nome: "Serviços Financeiros", estimado: 600, realizado: 580, subcategorias: [
+      { nome: "CourInvest", estimado: null, realizado: 480 }, { nome: "Tarifa bancária", estimado: null, realizado: 100 } ] },
     { nome: "Consultoria", estimado: 300, realizado: 300, subcategorias: [ { nome: "Couri Invest", estimado: null, realizado: 300 } ] },
     { nome: "Courinvest", estimado: 100, realizado: 100 },
     { nome: "Moradia", estimado: 100, realizado: 50 }
   ],
-  contasPrevistas: [ { rotulo: "Fee Courinvest dezembro", valor: 522.1 } ]
+  contasPrevistas: [ { rotulo: "Fee Courinvest dezembro", valor: 480 } ]
 };
 var pTaxa = PC.mesParaPortal(mTaxa, 0);
 var jTaxa = JSON.stringify(pTaxa);
 truth("taxa nao aparece no painel", !/couri?\s*-?\s*invest/i.test(jTaxa) && !/couriinvest|courinvest/.test(PC.fold(jTaxa).replace(/[^a-z]/g, "")));
-truth("taxa nao aparece pelo valor nas categorias", JSON.stringify(pTaxa.categorias).indexOf("522.1") < 0);
+truth("taxa nao aparece pelo valor nas categorias", JSON.stringify(pTaxa.categorias).indexOf("480") < 0);
 truth("conta prevista da taxa some", pTaxa.contasPrevistas.length === 0);
 var sf = pTaxa.categorias.filter(function (c) { return c.nome === "Serviços Financeiros"; })[0];
 eq("servicos financeiros sem a taxa", sf.realizado, 100);
-eq("orcado sem a taxa", sf.estimado, 77.9);
+eq("orcado sem a taxa", sf.estimado, 120);
 truth("categoria so com a taxa some", pTaxa.categorias.every(function (c) { return c.nome !== "Consultoria"; }));
-/* t115u: a taxa sai também dos totais do painel. Tirado: 522,10 + 300 + 100 do realizado; 522,10 + 300 + 100 do orçado. */
+/* t115u: a taxa sai também dos totais do painel. Tirado: 480 + 300 + 100 do realizado; 480 + 300 + 100 do orçado. */
 eq("despesas do painel sem a taxa", pTaxa.despesas.realizado, 0);
-truth("taxa nao aparece em lugar nenhum pelo valor", jTaxa.indexOf("522.1") < 0);
+truth("taxa nao aparece em lugar nenhum pelo valor", jTaxa.indexOf("480") < 0);
 var mTaxa2 = {
   ym: "2026-11",
   receitas: { estimado: 10000, realizado: 11100 }, despesas: { estimado: 9000, realizado: 8000 },
   saldoRealizado: 3000,
   categorias: [
-    { nome: "Serviços Financeiros", estimado: 480, realizado: 522.1, subcategorias: [ { nome: "CourInvest", estimado: null, realizado: 522.1 } ] },
-    { nome: "Moradia", estimado: 8520, realizado: 7477.9 }
+    { nome: "Serviços Financeiros", estimado: 400, realizado: 480, subcategorias: [ { nome: "CourInvest", estimado: null, realizado: 480 } ] },
+    { nome: "Moradia", estimado: 8600, realizado: 7520 }
   ],
-  contasPrevistas: [ { rotulo: "Taxa Courinvest", valor: 522.1 }, { rotulo: "IPTU", valor: 100 } ]
+  contasPrevistas: [ { rotulo: "Taxa Courinvest", valor: 480 }, { rotulo: "IPTU", valor: 100 } ]
 };
 var p2 = PC.mesParaPortal(mTaxa2, 0);
-eq("despesas realizadas sem a taxa", p2.despesas.realizado, 7477.9);
-eq("despesas orcadas sem a taxa", p2.despesas.estimado, 8520);
-eq("saldo sobe pela taxa", p2.saldoRealizado, 3622.1);
-eq("saldo estimado coerente", p2.saldoEstimado, 1480);
+eq("despesas realizadas sem a taxa", p2.despesas.realizado, 7520);
+eq("despesas orcadas sem a taxa", p2.despesas.estimado, 8600);
+eq("saldo sobe pela taxa", p2.saldoRealizado, 3580);
+eq("saldo estimado coerente", p2.saldoEstimado, 1400);
 truth("so a conta da taxa sai", p2.contasPrevistas.length === 1 && p2.contasPrevistas[0].rotulo === "IPTU");
 var c2 = PC.calcularAporte(p2, 0);
-eq("aporte coerente com o painel", c2.sugerido, round2t(3622.1 - (8520 - 7477.9) - 100));
-truth("painel inteiro sem a taxa", JSON.stringify(p2).indexOf("522.1") < 0 && !/couri?\s*invest/i.test(JSON.stringify(p2)));
+eq("aporte coerente com o painel", c2.sugerido, round2t(3580 - (8600 - 7520) - 100));
+truth("painel inteiro sem a taxa", JSON.stringify(p2).indexOf("480") < 0 && !/couri?\s*invest/i.test(JSON.stringify(p2)));
 var hubIntacto = PC.calcularAporte(mTaxa2, 0);
-eq("hub segue com a taxa", hubIntacto.contasPrevistas, 622.1);
+eq("hub segue com a taxa", hubIntacto.contasPrevistas, 580);
 
 if (falhas) {
   console.error(falhas + " falha(s)");
