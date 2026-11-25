@@ -158,6 +158,30 @@ truth("inter exterior separado", porInst[1].nome === "Inter · exterior" && porI
 eq("pct genial", porInst[0].pct, 62.5);
 truth("instituicao sem cnpj", !PC.contemDocumento(porInst));
 
+/* v563: taxa da Courinvest fora do painel do cliente. */
+var mTaxa = {
+  ym: "2026-11",
+  receitas: { estimado: 1000, realizado: 1000 }, despesas: { estimado: 900, realizado: 800 },
+  categorias: [
+    { nome: "Serviços Financeiros", estimado: 600, realizado: 622.1, subcategorias: [
+      { nome: "CourInvest", estimado: null, realizado: 522.1 }, { nome: "Tarifa bancária", estimado: null, realizado: 100 } ] },
+    { nome: "Consultoria", estimado: 300, realizado: 300, subcategorias: [ { nome: "Couri Invest", estimado: null, realizado: 300 } ] },
+    { nome: "Courinvest", estimado: 100, realizado: 100 },
+    { nome: "Moradia", estimado: 100, realizado: 50 }
+  ],
+  contasPrevistas: [ { rotulo: "Fee Courinvest dezembro", valor: 522.1 } ]
+};
+var pTaxa = PC.mesParaPortal(mTaxa, 0);
+var jTaxa = JSON.stringify(pTaxa);
+truth("taxa nao aparece no painel", !/couri?\s*-?\s*invest/i.test(jTaxa) && !/couriinvest|courinvest/.test(PC.fold(jTaxa).replace(/[^a-z]/g, "")));
+truth("taxa nao aparece pelo valor nas categorias", JSON.stringify(pTaxa.categorias).indexOf("522.1") < 0);
+truth("conta prevista da taxa sem nome", pTaxa.contasPrevistas[0].rotulo === "Conta prevista" && pTaxa.contasPrevistas[0].valor === 522.1);
+var sf = pTaxa.categorias.filter(function (c) { return c.nome === "Serviços Financeiros"; })[0];
+eq("servicos financeiros sem a taxa", sf.realizado, 100);
+eq("orcado sem a taxa", sf.estimado, 77.9);
+truth("categoria so com a taxa some", pTaxa.categorias.every(function (c) { return c.nome !== "Consultoria"; }));
+eq("totais do mes intactos", pTaxa.despesas.realizado, 800);
+
 if (falhas) {
   console.error(falhas + " falha(s)");
   process.exit(1);

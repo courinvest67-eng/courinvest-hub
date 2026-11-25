@@ -409,11 +409,40 @@
     return lista;
   }
 
+  /* v563: a taxa da Courinvest nunca aparece no painel do cliente (pedido do Igor).
+     A subcategoria some e o valor dela sai do realizado da categoria. O orçado da categoria
+     perde a mesma quantia (até zero), para não sobrar um "Resta" que é a própria taxa.
+     Categoria que fica sem nada (só tinha a taxa) sai da lista. Os totais do mês não mudam,
+     então receitas, despesas, saldo e a sugestão de aporte continuam batendo com o Meuvista. */
+  function ehTaxaCourinvest(nome) {
+    return /couri?invest/.test(fold(nome).replace(/[^a-z]/g, ""));
+  }
+
+  function semTaxaCourinvest(cats) {
+    return (cats || []).filter(function (c) { return !ehTaxaCourinvest(c.nome); }).map(function (c) {
+      var taxa = 0;
+      var subs = (c.subcategorias || []).filter(function (s) {
+        if (!ehTaxaCourinvest(s.nome)) return true;
+        taxa = round2(taxa + (s.realizado || 0));
+        return false;
+      });
+      if (!taxa && subs.length === (c.subcategorias || []).length) return c;
+      var rea = round2(Math.max(0, (c.realizado || 0) - taxa));
+      var est = c.estimado == null ? null : round2(Math.max(0, c.estimado - taxa));
+      return { nome: c.nome, estimado: est, realizado: rea, estourou: estouro(est, rea), subcategorias: subs, _semTaxa: true };
+    }).filter(function (c) {
+      if (!c._semTaxa) return true;
+      return (c.realizado || 0) > 0.009 || c.subcategorias.length > 0;
+    }).map(function (c) { delete c._semTaxa; return c; });
+  }
+
   function mesParaPortal(m, aportesHub) {
     m = m || {};
-    var cats = detalharCategorias(m);
+    var cats = semTaxaCourinvest(detalharCategorias(m));
     var contas = (m.contasPrevistas || []).map(function (x) {
-      return { rotulo: (redigir(x.rotulo) || "Conta prevista").slice(0, 80), valor: round2(x.valor || 0) };
+      var rot = redigir(x.rotulo) || "Conta prevista";
+      if (ehTaxaCourinvest(rot)) rot = "Conta prevista";
+      return { rotulo: rot.slice(0, 80), valor: round2(x.valor || 0) };
     }).filter(function (x) { return x.valor > 0; });
     var receitas = m.receitas || {};
     var despesas = m.despesas || {};
@@ -747,6 +776,7 @@
     alocacaoDeAtivos: alocacaoDeAtivos,
     instituicoesDeAtivos: instituicoesDeAtivos,
     detalharCategorias: detalharCategorias,
+    semTaxaCourinvest: semTaxaCourinvest,
     aportesHubNoMes: aportesHubNoMes,
     projetarPortal: projetarPortal,
     chaveAtivo: chaveAtivo,
